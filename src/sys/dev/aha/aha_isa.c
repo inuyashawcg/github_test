@@ -118,7 +118,18 @@ aha_isa_probe(device_t dev)
 
 	aha->dev = dev;
 	/* Check isapnp ids */
-	/* 检测设备是否存在，如果不存在的话，返回ENXIO */
+	/* 检测设备是否存在，如果不存在的话，返回ENXIO 
+		一般非PnP设备都是sensitive的，会被优先检测。对于每一个PnP设备，系统都会调用所有
+		的ISA驱动中的例程去检测它，第一个响应的会拿到这个设备。但是有可能会多个驱动都产生了
+		响应，这种情况下就要去比较他们的相应级别，高级别的拿到这个设备。
+		响应级别可以通过ISA_PNP_PROBE()的返回值确定。ISA_PNP_PROBE()返回值大于0，表示
+		出错，返回值小于等于0，表示正确。比如一个新的多功能接口程序和老的单一功能的接口程序
+		都可以检测到这个设备，那么一般新接口会返回一个0，表示其有最高的优先级；而旧的接口一般
+		返回的值会比较小，可能是-1，或者-2等等，所以新接口会拿到这个设备。
+		每个驱动必须通过调用 ISA_PNP_PROBE()比较实际的PnP ID和驱动支持的PnP ID列表中的
+		元素是否匹配的上，如果匹配不上，返回失败。即使驱动不支持任何一个PnP设备，也是需要调用
+		这个函数的
+	*/
 	if (ISA_PNP_PROBE(device_get_parent(dev), dev, aha_ids) == ENXIO)
 		return (ENXIO);
 
@@ -133,10 +144,14 @@ aha_isa_probe(device_t dev)
 	if (aha->port == NULL)
 		return (ENXIO);
 
+	/* 获取alloc资源的起始地址*/
 	port_start = rman_get_start(aha->port);
-	aha_alloc(aha);
+
+	/* 资源分配或者初始化一类的操作？ */
+	aha_alloc(aha);		
 
 	/* See if there is really a card present */
+	/* 检测适配器的相关操作 */
 	if (aha_probe(aha) || aha_fetch_adapter_info(aha)) {
 		aha_free(aha);
 		bus_release_resource(dev, SYS_RES_IOPORT, port_rid, aha->port);
@@ -147,6 +162,12 @@ aha_isa_probe(device_t dev)
 	 * Determine our IRQ, and DMA settings and
 	 * export them to the configuration system.
 	 */
+
+	/*
+		该函数主要是向适配器发送命令。I/O设备都是通过控制器或者适配器跟I/O总线相连，
+		只不过两种方式的封装形式不太一样，控制器的话大部分情况是芯片组，适配器的话可能
+		是板卡一类的设备。但是无论采用那种方式，主要还是为了在总线和设备之间传递数据
+	*/
 	error = aha_cmd(aha, AOP_INQUIRE_CONFIG, NULL, /*parmlen*/0,
 	    (uint8_t*)&config_data, sizeof(config_data), DEFAULT_CMD_TIMEOUT);
 
@@ -160,6 +181,7 @@ aha_isa_probe(device_t dev)
 		return (ENXIO);
 	}
 
+	/* 配置信息发送完毕后，释放其所占用的资源*/
 	bus_release_resource(dev, SYS_RES_IOPORT, port_rid, aha->port);
 	aha->port = NULL;
 
@@ -178,10 +200,20 @@ aha_isa_probe(device_t dev)
 		    (uintmax_t)port_start);
 		return (ENXIO);
 	}
+
+	/* 
+		SYS_RES_DRQ: ISA DMA channel number 
+		SYS_RES_DRQ： interrupt number
+		bus_set_resource() 主要是bus driver调用，一般设备驱动是不会调用这个的，
+		主要还是根据设备的一些配置信息来设置用于该设备的一些资源
+	*/
 	error = bus_set_resource(dev, SYS_RES_DRQ, 0, drq, 1);
 	if (error)
 		return error;
-
+	/*
+		The ffs(),	ffsl() and ffsll() functions find the first (least signifi-
+     	cant) bit set in value and	return the index of that bit.
+	*/
 	irq = ffs(config_data.irq) + 8;
 	error = bus_set_resource(dev, SYS_RES_IRQ, 0, irq, 1);
 	return (error);
