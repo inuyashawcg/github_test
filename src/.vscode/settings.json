@@ -19,6 +19,8 @@
         "ostream": "cpp",
         "*.inc": "c",
         "memory_resource": "c",
-        "locale": "cpp"
+        "locale": "cpp",
+        "*.c0": "cpp",
+        "typeinfo": "c"
     }
 }

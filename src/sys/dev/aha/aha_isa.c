@@ -230,6 +230,8 @@ aha_isa_attach(device_t dev)
 
 	aha->dev = dev;
 	aha->portrid = 0;
+
+	// 从parent bus中分配资源
 	aha->port = bus_alloc_resource_anywhere(dev, SYS_RES_IOPORT,
 	    &aha->portrid, AHA_NREGS, RF_ACTIVE);
 	if (!aha->port) {
@@ -237,6 +239,7 @@ aha_isa_attach(device_t dev)
 		goto fail;
 	}
 
+	// 获取interrupt lines所需要的资源
 	aha->irqrid = 0;
 	aha->irq = bus_alloc_resource_any(dev, SYS_RES_IRQ, &aha->irqrid,
 	    RF_ACTIVE);
@@ -245,6 +248,7 @@ aha_isa_attach(device_t dev)
 		goto fail;
 	}
 
+	// 获取ISA DMA Lines所需要的资源
 	aha->drqrid = 0;
 	aha->drq = bus_alloc_resource_any(dev, SYS_RES_DRQ, &aha->drqrid,
 	    RF_ACTIVE);
@@ -257,8 +261,10 @@ aha_isa_attach(device_t dev)
 	if (dev->id_drq != -1)
 		isa_dmacascade(dev->id_drq);
 #endif
+	// DMA 级联控制，外部板卡相关
 	isa_dmacascade(rman_get_start(aha->drq));
 
+	// DMA tag主要跟DMA Memory分配是相关的
 	/* Allocate our parent dmatag */
 	if (bus_dma_tag_create(	/* parent	*/ bus_get_dma_tag(dev),
 				/* alignemnt	*/ 1,
@@ -278,6 +284,7 @@ aha_isa_attach(device_t dev)
 		goto fail;
         }                              
 
+	// 开启板卡，准备正常运行
 	if (aha_init(aha)) {
 		device_printf(dev, "init failed\n");
 		goto fail;
@@ -299,6 +306,7 @@ aha_isa_attach(device_t dev)
 		goto fail;
 	}
 
+	// 创建，绑定，解绑中断处理程序
 	error = bus_setup_intr(dev, aha->irq, INTR_TYPE_CAM|INTR_ENTROPY|
 	    INTR_MPSAFE, NULL, aha_intr, aha, &aha->ih);
 	if (error) {

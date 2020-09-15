@@ -170,6 +170,7 @@ kobj_class_compile_static(kobj_class_t cls, kobj_ops_t ops)
 	kobj_class_compile_common(cls, ops);
 }
 
+// 查找kobj_class中的methods，不包括其他的部分
 static kobj_method_t*
 kobj_lookup_method_class(kobj_class_t cls, kobjop_desc_t desc)
 {
@@ -192,10 +193,12 @@ kobj_lookup_method_mi(kobj_class_t cls,
 	kobj_method_t *ce;
 	kobj_class_t *basep;
 
+	// 在kobj_class中查找方法
 	ce = kobj_lookup_method_class(cls, desc);
 	if (ce)
 		return ce;
 
+	// baseclasses保存的可以认为是kobj_class的多基类，通过递归调用查找其中的方法
 	basep = cls->baseclasses;
 	if (basep) {
 		for (; *basep; basep++) {
@@ -215,6 +218,7 @@ kobj_lookup_method(kobj_class_t cls,
 {
 	kobj_method_t *ce;
 
+	// 如果通过递归调用还是没有找到对应的方法，那么就调用default方法
 	ce = kobj_lookup_method_mi(cls, desc);
 	if (!ce)
 		ce = &desc->deflt;
@@ -306,6 +310,7 @@ kobj_init(kobj_t obj, kobj_class_t cls)
 	KOBJ_UNLOCK();
 }
 
+// 静态？？
 void
 kobj_init_static(kobj_t obj, kobj_class_t cls)
 {

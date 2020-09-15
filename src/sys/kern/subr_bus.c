@@ -79,6 +79,7 @@ SYSCTL_ROOT_NODE(OID_AUTO, dev, CTLFLAG_RW, NULL, NULL);
  */
 typedef struct driverlink *driverlink_t;
 struct driverlink {
+	// driver是一个kernel object class类型
 	kobj_class_t	driver;
 	TAILQ_ENTRY(driverlink) link;	/* list of drivers in devclass */
 	int		pass;
@@ -94,6 +95,10 @@ typedef TAILQ_HEAD(devclass_list, devclass) devclass_list_t;
 typedef TAILQ_HEAD(driver_list, driverlink) driver_list_t;
 typedef TAILQ_HEAD(device_list, device) device_list_t;
 
+/* devclass的主要作用包含两个:
+	1. 设备实例的单元号分配
+	2. 保存特定总线类型的设备驱动程序列表
+ */
 struct devclass {
 	TAILQ_ENTRY(devclass) link;
 	devclass_t	parent;		/* parent in devclass hierarchy */
@@ -1734,6 +1739,9 @@ devclass_add_device(devclass_t dc, device_t dev)
 	if (!dev->nameunit)
 		return (ENOMEM);
 
+	/* 
+		给dev分配一个uint number
+	 */
 	if ((error = devclass_alloc_unit(dc, dev, &dev->unit)) != 0) {
 		free(dev->nameunit, M_BUS);
 		dev->nameunit = NULL;
@@ -1815,6 +1823,10 @@ make_device(device_t parent, const char *name, int unit)
 
 	dev->parent = parent;
 	TAILQ_INIT(&dev->children);
+
+	/*
+		强制转化为kobj类型的指针
+	*/
 	kobj_init((kobj_t) dev, &null_class);
 	dev->driver = NULL;
 	dev->devclass = NULL;
@@ -1922,6 +1934,9 @@ device_add_child_ordered(device_t dev, u_int order, const char *name, int unit)
 		return (child);
 	child->order = order;
 
+	/*  
+		比较每个驱动设备的order值（倒序排列），然后进行插入
+	*/
 	TAILQ_FOREACH(place, &dev->children, link) {
 		if (place->order > order)
 			break;
@@ -2012,6 +2027,9 @@ device_delete_children(device_t dev)
 
 	error = 0;
 
+	/*
+		相当于是delete child做了一个循环
+	*/
 	while ((child = TAILQ_FIRST(&dev->children)) != NULL) {
 		error = device_delete_child(dev, child);
 		if (error) {
@@ -4936,7 +4954,7 @@ root_bus_module_handler(module_t mod, int what, void* arg)
 {
 	switch (what) {
 	case MOD_LOAD:
-		TAILQ_INIT(&bus_data_devices);
+		TAILQ_INIT(&bus_data_devices);	
 		kobj_class_compile((kobj_class_t) &root_driver);
 		root_bus = make_device(NULL, "root", 0);
 		root_bus->desc = "System root bus";
@@ -4976,7 +4994,12 @@ root_bus_configure(void)
 
 	PDEBUG(("."));
 
-	/* Eventually this will be split up, but this is sufficient for now. */
+	/* Eventually this will be split up, but this is sufficient for now. 
+		在boot阶段，设备树会被多次扫描，每次扫描或者通过驱动设备就可以连接到设备。
+		系统会为每个驱动设置一个通行证编号，只有当通行证编号小于系统范围内的通行证编号
+		的时候，驱动才可以与设备进行连接。这里把bus的通行证编号被设置为BUS_PASS_DEFAULT，
+		即通行证的最高等级，应该是为了后续总线上的设备跟驱动能够进行连接
+	*/
 	bus_set_pass(BUS_PASS_DEFAULT);
 }
 

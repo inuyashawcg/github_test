@@ -62,7 +62,7 @@ typedef enum device_state {
 } device_state_t;
 
 /**
- * @brief Device information exported to userspace.
+ * @brief Device information exported to userspace. 
  * The strings are placed one after the other, separated by NUL characters.
  * Fields should be added after the last one and order maintained for compatibility
  */
