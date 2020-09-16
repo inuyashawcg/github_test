@@ -67,13 +67,14 @@ typedef enum device_state {
  * Fields should be added after the last one and order maintained for compatibility
  */
 #define BUS_USER_BUFFER		(3*1024)
+// 像用户空间发送的device信息
 struct u_device {
 	uintptr_t	dv_handle;
 	uintptr_t	dv_parent;
 	uint32_t	dv_devflags;		/**< @brief API Flags for device */
 	uint16_t	dv_flags;		/**< @brief flags for dev state */
 	device_state_t	dv_state;		/**< @brief State of attachment */
-	char		dv_fields[BUS_USER_BUFFER]; /**< @brief NUL terminated fields */
+	char		dv_fields[BUS_USER_BUFFER]; /**< @brief NUL terminated fields 下边的内容应该是这个字符串包含的内容*/
 	/* name (name of the device in tree) */
 	/* desc (driver description) */
 	/* drivername (Name of driver without unit number) */
@@ -84,17 +85,17 @@ struct u_device {
 
 /* Flags exported via dv_flags. */
 #define	DF_ENABLED	0x01		/* device should be probed/attached */
-#define	DF_FIXEDCLASS	0x02		/* devclass specified at create time */
-#define	DF_WILDCARD	0x04		/* unit was originally wildcard */
-#define	DF_DESCMALLOCED	0x08		/* description was malloced */
-#define	DF_QUIET	0x10		/* don't print verbose attach message */
+#define	DF_FIXEDCLASS	0x02		/* devclass specified at create time 创建的时候指定了devclass*/
+#define	DF_WILDCARD	0x04		/* unit was originally wildcard unit是原始的通配符*/
+#define	DF_DESCMALLOCED	0x08		/* description was malloced 已经分配空间的标识符*/
+#define	DF_QUIET	0x10		/* don't print verbose attach message 不要打印详细的附加信息*/
 #define	DF_DONENOMATCH	0x20		/* don't execute DEVICE_NOMATCH again */
 #define	DF_EXTERNALSOFTC 0x40		/* softc not allocated by us */
-#define	DF_REBID	0x80		/* Can rebid after attach */
+#define	DF_REBID	0x80		/* Can rebid after attach attach之后可以重新呼叫*/
 #define	DF_SUSPENDED	0x100		/* Device is suspended. */
 #define	DF_QUIET_CHILDREN 0x200		/* Default to quiet for all my children */
 #define	DF_ATTACHED_ONCE 0x400		/* Has been attached at least once */
-#define	DF_NEEDNOMATCH	0x800		/* Has a pending NOMATCH event */
+#define	DF_NEEDNOMATCH	0x800		/* Has a pending NOMATCH event 有一个挂起的NOMATCH事件*/
 
 /**
  * @brief Device request structure used for ioctl's.
@@ -114,8 +115,8 @@ struct devreq {
 		struct devreq_buffer dru_buffer;
 		void	*dru_data;
 	} dr_dru;
-#define	dr_buffer	dr_dru.dru_buffer	/* variable-sized buffer */
-#define	dr_data		dr_dru.dru_data		/* fixed-size buffer */
+#define	dr_buffer	dr_dru.dru_buffer	/* variable-sized buffer 可变大小的缓冲区*/
+#define	dr_data		dr_dru.dru_data		/* fixed-size buffer 固定大小的缓冲区*/
 };
 
 #define	DEV_ATTACH	_IOW('D', 1, struct devreq)
@@ -314,6 +315,11 @@ struct driver {
  * @brief A resource mapping.
  */
 struct resource_map {
+	/*
+		typedef void *bus_space_tag_t;
+		typedef uint8_t *bus_space_handle_t;
+		typedef unsigned long bus_size_t;
+	*/
 	bus_space_tag_t r_bustag;
 	bus_space_handle_t r_bushandle;
 	bus_size_t r_size;
@@ -325,9 +331,9 @@ struct resource_map {
  */
 struct resource_map_request {
 	size_t	size;
-	rman_res_t offset;
+	rman_res_t offset;	//64 bit的一个数值
 	rman_res_t length;
-	vm_memattr_t memattr;
+	vm_memattr_t memattr;	// char类型
 };
 
 void	resource_init_map_request_impl(struct resource_map_request *_args,
@@ -692,6 +698,7 @@ void	bus_data_generation_update(void);
 #define BUS_PROBE_SPECIFIC	0	/* Only I can use this device */
 #define BUS_PROBE_VENDOR	(-10)	/* Vendor supplied driver */
 #define BUS_PROBE_DEFAULT	(-20)	/* Base OS default driver */
+/* 如果系统当中有新的和旧的驱动同时支持某个设备，旧驱动的返回值是Low，新驱动的返回值是default*/
 #define BUS_PROBE_LOW_PRIORITY	(-40)	/* Older, less desirable drivers */
 #define BUS_PROBE_GENERIC	(-100)	/* generic driver for dev */
 #define BUS_PROBE_HOOVER	(-1000000) /* Driver for any dev on bus */
@@ -706,6 +713,8 @@ void	bus_data_generation_update(void);
  * and is used by most drivers.  Drivers needed by the scheduler are
  * probed in earlier passes.
  */
+
+/* 系统会设置一个pass number来限制驱动跟设备是否会匹配，防止它们多次匹配*/
 #define	BUS_PASS_ROOT		0	/* Used to attach root0. */
 #define	BUS_PASS_BUS		10	/* Buses and bridges. */
 #define	BUS_PASS_CPU		20	/* CPU devices. */

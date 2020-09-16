@@ -154,6 +154,7 @@ struct device {
 static MALLOC_DEFINE(M_BUS, "bus", "Bus data structures");
 static MALLOC_DEFINE(M_BUS_SC, "bus-sc", "Bus data structures, softc");
 
+// 事件处理程序
 EVENTHANDLER_LIST_DEFINE(device_attach);
 EVENTHANDLER_LIST_DEFINE(device_detach);
 EVENTHANDLER_LIST_DEFINE(dev_lookup);
@@ -167,6 +168,7 @@ static bool device_frozen;
 #ifdef BUS_DEBUG
 
 static int bus_debug = 1;
+// debug相关？？
 SYSCTL_INT(_debug, OID_AUTO, bus_debug, CTLFLAG_RWTUN, &bus_debug, 0,
     "Bus debug level");
 
@@ -176,6 +178,8 @@ SYSCTL_INT(_debug, OID_AUTO, bus_debug, CTLFLAG_RWTUN, &bus_debug, 0,
 /**
  * Produce the indenting, indent*2 spaces plus a '.' ahead of that to
  * prevent syslog from deleting initial spaces
+ * 
+ * 感觉像是打印设备和驱动信息的一些功能函数
  */
 #define indentprintf(p)	do { int iJ; printf("."); for (iJ=0; iJ<indent; iJ++) printf("  "); printf p ; } while (0)
 
@@ -891,11 +895,12 @@ static kobj_method_t null_methods[] = {
 };
 
 DEFINE_CLASS(null, null_methods, 0);
-
+//////////wcg
 /*
  * Bus pass implementation
  */
 
+// driver_list_t 是driverlink的一个双端队列
 static driver_list_t passes = TAILQ_HEAD_INITIALIZER(passes);
 int bus_current_pass = BUS_PASS_ROOT;
 
@@ -922,6 +927,10 @@ driver_register_pass(struct driverlink *new)
 	 * Walk the passes list.  If we already know about this pass
 	 * then there is nothing to do.  If we don't, then insert this
 	 * driver link into the list.
+	 * 
+	 * 如果new的pass level一直都是大于passes中的pass level，那么就什么
+	 * 都不做，退出循环，最后在passes中的末尾插入new。如果有小于的，那就把
+	 * new插入到相应的位置（这里应该也是从小到大排序）
 	 */
 	TAILQ_FOREACH(dl, &passes, passlink) {
 		if (dl->pass < new->pass)
@@ -950,13 +959,17 @@ bus_set_pass(int pass)
 		panic("Attempt to lower bus pass level");
 
 	TAILQ_FOREACH(dl, &passes, passlink) {
-		/* Skip pass values below the current pass level. */
+		/* Skip pass values below the current pass level. 
+			直接过滤掉所有小于 bus_current_pass 的devicelink
+		*/
 		if (dl->pass <= bus_current_pass)
 			continue;
 
 		/*
 		 * Bail once we hit a driver with a pass level that is
 		 * too high.
+		 * 如果有大于 bus_current_pass 的，再跟pass比较，如果比pass
+		 * 还要大，就break，因为passes中已经有比pass更大的pass level了
 		 */
 		if (dl->pass > pass)
 			break;
@@ -966,6 +979,7 @@ bus_set_pass(int pass)
 		 * the tree.
 		 */
 		bus_current_pass = dl->pass;
+		// 提升bus pass等级的一个宏
 		BUS_NEW_PASS(root_bus);
 	}
 
@@ -5471,7 +5485,7 @@ device_do_deferred_actions(void)
 	TAILQ_FOREACH(dc, &devclasses, link) {
 		TAILQ_FOREACH(dl, &dc->drivers, link) {
 			if (dl->flags & DL_DEFERRED_PROBE) {
-				devclass_driver_added(dc, dl->driver);
+				(dc, dl->driver);
 				dl->flags &= ~DL_DEFERRED_PROBE;
 			}
 		}

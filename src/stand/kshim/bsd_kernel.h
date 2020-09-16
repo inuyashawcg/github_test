@@ -573,8 +573,8 @@ struct resource_i {
 
 struct resource {
 	struct resource_i	*__r_i;
-	bus_space_tag_t		r_bustag; /* bus_space tag */
-	bus_space_handle_t	r_bushandle;	/* bus_space handle */
+	bus_space_tag_t		r_bustag; /* bus_space tag void类型的一个指针 */
+	bus_space_handle_t	r_bushandle;	/* bus_space handle uint8类型的指针 */
 };
 
 struct resource_spec {
