@@ -1,0 +1,18 @@
+{
+    "files.associations": {
+        "*.inc": "c",
+        "typeinfo": "c",
+        "__bit_reference": "c",
+        "algorithm": "c",
+        "bitset": "c",
+        "chrono": "c",
+        "hash_map": "c",
+        "hash_set": "c",
+        "map": "c",
+        "set": "c",
+        "unordered_map": "c",
+        "unordered_set": "c",
+        "hashtable": "c",
+        "memory_resource": "cpp"
+    }
+}
