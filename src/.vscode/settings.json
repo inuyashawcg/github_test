@@ -21,6 +21,7 @@
         "memory_resource": "c",
         "locale": "cpp",
         "*.c0": "cpp",
-        "typeinfo": "c"
+        "typeinfo": "c",
+        "string": "c"
     }
 }

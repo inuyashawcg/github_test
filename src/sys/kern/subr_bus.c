@@ -78,6 +78,7 @@ SYSCTL_ROOT_NODE(OID_AUTO, dev, CTLFLAG_RW, NULL, NULL);
  * Used to attach drivers to devclasses.
  */
 typedef struct driverlink *driverlink_t;
+/* driverlink相当于是对driver的封装，使得driver能够附加更多的信息，便于管理 */
 struct driverlink {
 	// driver是一个kernel object class类型
 	kobj_class_t	driver;
@@ -91,6 +92,11 @@ struct driverlink {
 /*
  * Forward declarations
  */
+
+/* 
+	这几种类型都是HEAD，它所包含的其实是指向队列头部和尾部next的两个指针 
+	如果是ENTRY的话，那么包含的是前后相连元素的指针
+*/ 
 typedef TAILQ_HEAD(devclass_list, devclass) devclass_list_t;
 typedef TAILQ_HEAD(driver_list, driverlink) driver_list_t;
 typedef TAILQ_HEAD(device_list, device) device_list_t;
@@ -107,6 +113,8 @@ struct devclass {
 	device_t	*devices;	/* array of devices indexed by unit */
 	int		maxunit;	/* size of devices array */
 	int		flags;
+
+	/* 这个标志用来表示devclass是否含有children */
 #define DC_HAS_CHILDREN		1
 
 	struct sysctl_ctx_list sysctl_ctx;
@@ -997,6 +1005,9 @@ bus_set_pass(int pass)
  * Devclass implementation
  */
 
+/*
+	devclasses里边的每一元素都是一个双端链表，而他自己也是一个双端链表
+*/
 static devclass_list_t devclasses = TAILQ_HEAD_INITIALIZER(devclasses);
 
 /**
@@ -1014,6 +1025,11 @@ static devclass_list_t devclasses = TAILQ_HEAD_INITIALIZER(devclasses);
  * @param parentname	the parent devclass name or @c NULL
  * @param create	non-zero to create a devclass
  */
+
+/* 
+	该函数为一个static类型函数，说明其他的文件或者模块是不能访问它的，
+	也就是说它只能被这个文件中的函数访问
+*/
 static devclass_t
 devclass_find_internal(const char *classname, const char *parentname,
 		       int create)
@@ -1114,6 +1130,8 @@ devclass_driver_added(devclass_t dc, driver_t *driver)
 
 	/*
 	 * Call BUS_DRIVER_ADDED for any existing buses in this class.
+	 * BUS_DRIVER_ADDED：这个宏是编译完成的时候才会出现，这个可以查看bus_if.m文件
+	 * 中的相关代码，可以看到这个宏应该表示的是 bus_generic_driver_added（）函数
 	 */
 	for (i = 0; i < dc->maxunit; i++)
 		if (dc->devices[i] && device_is_attached(dc->devices[i]))
@@ -1126,6 +1144,8 @@ devclass_driver_added(devclass_t dc, driver_t *driver)
 	 * DC_HAS_CHILDREN flag when a child devclass is created on
 	 * the parent, so we only walk the list for those devclasses
 	 * that have children.
+	 * 如果devclass没有children，那么就直接return；如果哟children的话，
+	 * 那就从devclasses中去查找，每个子child也add driver
 	 */
 	if (!(dc->flags & DC_HAS_CHILDREN))
 		return;
@@ -1159,6 +1179,7 @@ devclass_add_driver(devclass_t dc, driver_t *driver, int pass, devclass_t *dcp)
 	if (pass <= BUS_PASS_ROOT)
 		return (EINVAL);
 
+	/* driverlink对象分配空间 */
 	dl = malloc(sizeof *dl, M_BUS, M_NOWAIT|M_ZERO);
 	if (!dl)
 		return (ENOMEM);
@@ -1177,11 +1198,15 @@ devclass_add_driver(devclass_t dc, driver_t *driver, int pass, devclass_t *dcp)
 	 * first base class. This will allow the system to
 	 * search for drivers in both devclasses for children
 	 * of a device using this driver.
+	 * 
 	 */
 	if (driver->baseclasses)
 		parentname = driver->baseclasses[0]->name;
 	else
 		parentname = NULL;
+	/* 
+		创建了一个以 driver->name 命名的devclass，而且会把它通过参数传递出去
+	*/
 	*dcp = devclass_find_internal(driver->name, parentname, TRUE);
 
 	dl->driver = driver;
@@ -1435,6 +1460,7 @@ devclass_get_name(devclass_t dc)
  *
  * @returns		the device with the given unit number or @c
  *			NULL if there is no such device
+	从这里我们可以推测，总线查找设备的时候可以通过unit来进行
  */
 device_t
 devclass_get_device(devclass_t dc, int unit)
@@ -1531,6 +1557,7 @@ devclass_get_drivers(devclass_t dc, driver_t ***listp, int *countp)
 	int count;
 
 	count = 0;
+	/* 统计driverlink数组中元素的个数，然后分配资源 */ 
 	TAILQ_FOREACH(dl, &dc->drivers, link)
 		count++;
 	list = malloc(count * sizeof(driver_t *), M_TEMP, M_NOWAIT);
@@ -1538,6 +1565,7 @@ devclass_get_drivers(devclass_t dc, driver_t ***listp, int *countp)
 		return (ENOMEM);
 
 	count = 0;
+	/* 把每一个driverlink中的driver都赋给listp */
 	TAILQ_FOREACH(dl, &dc->drivers, link) {
 		list[count] = dl->driver;
 		count++;
@@ -1552,6 +1580,9 @@ devclass_get_drivers(devclass_t dc, driver_t ***listp, int *countp)
  * @brief Get the number of devices in a devclass
  *
  * @param dc		the devclass to examine
+ * 由于存在devclass delete掉device的操作，所以有可能中device数组中间
+ * 有的元素是空的，这时候就不能考虑在内，可以参考 devclass_find_free_unit()
+ * 函数的代码，就是用来统计被free掉的unit device
  */
 int
 devclass_get_count(devclass_t dc)
@@ -1669,6 +1700,12 @@ devclass_alloc_unit(devclass_t dc, device_t dev, int *unitp)
 
 	/* If we were given a wired unit number, check for existing device */
 	/* XXX imp XXX */
+	/* 
+		首先查询devclass中的devices数组中uint位是否已经有元素了，
+		这么做的原因可能是存在device delete的操作，会把中间的某些元素
+		给释放掉，这样的话可能就有中间部分的位置空出来，新的元素就可以放到
+		这些位置 
+	*/
 	if (unit != -1) {
 		if (unit >= 0 && unit < dc->maxunit &&
 		    dc->devices[unit] != NULL) {
@@ -1698,6 +1735,7 @@ devclass_alloc_unit(devclass_t dc, device_t dev, int *unitp)
 	 * We've selected a unit beyond the length of the table, so let's
 	 * extend the table to make room for all units up to and including
 	 * this one.
+	 * 所有的位置都有元素填充的话，就必须要扩充devices数组的容量
 	 */
 	if (unit >= dc->maxunit) {
 		device_t *newlist, *oldlist;
@@ -1812,6 +1850,12 @@ devclass_delete_device(devclass_t dc, device_t dev)
  *
  * @returns the new device
  */
+
+/* 
+	devclass拥有唯一的名字，device可以通过这个名字将相应的devclass纳入到
+	自身的属性当中
+	疑问：一个devclass是否可以被多个device引用？？
+ */
 static device_t
 make_device(device_t parent, const char *name, int unit)
 {
@@ -1823,6 +1867,7 @@ make_device(device_t parent, const char *name, int unit)
 	if (name) {
 		dc = devclass_find_internal(name, NULL, TRUE);
 		if (!dc) {
+			// 没有devclass的话就直接打印警告信息，说明declass对于device相当重要
 			printf("make_device: can't find device class %s\n",
 			    name);
 			return (NULL);
@@ -1860,6 +1905,7 @@ make_device(device_t parent, const char *name, int unit)
 			return (NULL);
 		}
 	}
+	// 把所有的子设备都设置为默认静默状态
 	if (parent != NULL && device_has_quiet_children(parent))
 		dev->flags |= DF_QUIET | DF_QUIET_CHILDREN;
 	dev->ivars = NULL;
@@ -2140,6 +2186,7 @@ device_probe_child(device_t dev, device_t child)
 	/*
 	 * If the state is already probed, then return.  However, don't
 	 * return if we can rebid this object.
+	 * 如果设备已经被probe了，那就返回。但是如果该设备可以被重新绑定，那就要继续执行
 	 */
 	if (child->state == DS_ALIVE && (child->flags & DF_REBID) == 0)
 		return (0);
@@ -2864,6 +2911,8 @@ device_set_driver(device_t dev, driver_t *driver)
  * candidate drivers and then choosing the driver which returned the
  * best value. This driver is then attached to the device using
  * device_attach().
+ * 选择某一个设备最佳匹配的driver，然后呼叫这个driver去初始化硬件设备，也可以看出一个
+ * 设备是可以对应多种driver的，比如说显卡驱动，我既可以选择英伟达的，也可以用Intel的？
  *
  * The set of suitable drivers is taken from the list of drivers in
  * the parent device's devclass. If the device was originally created
@@ -2872,7 +2921,10 @@ device_set_driver(device_t dev, driver_t *driver)
  * are probed. If no drivers return successful probe values in the
  * parent devclass, the search continues in the parent of that
  * devclass (see devclass_get_parent()) if any.
- *
+ * 
+ * 一个设备的驱动是从父设备的devclass中获取的，如果一个设备使用了一个非常特殊的名字
+ * 进行注册的，则驱动就可以通过名字进行设备搜索。如果在parent的devclass中没有找到，
+ * 那么就会在父devclass中再次查找（parent devclass跟parent of devclass不一样）
  * @param dev		the device to initialise
  *
  * @retval 0		success
@@ -2888,9 +2940,11 @@ device_probe(device_t dev)
 
 	GIANT_REQUIRED;
 
+	/* 说明该设备已经被attached了，不能重复attach */
 	if (dev->state >= DS_ALIVE && (dev->flags & DF_REBID) == 0)
 		return (-1);
 
+	/* DF_ENABLED: 设备的使能标志*/
 	if (!(dev->flags & DF_ENABLED)) {
 		if (bootverbose && device_get_name(dev) != NULL) {
 			device_print_prettyname(dev);
@@ -4007,6 +4061,7 @@ bus_generic_driver_added(device_t dev, driver_t *driver)
 	device_t child;
 
 	DEVICE_IDENTIFY(driver, dev);
+	/* 在所有device children中遍历 */
 	TAILQ_FOREACH(child, &dev->children, link) {
 		if (child->state == DS_NOTPRESENT ||
 		    (child->flags & DF_REBID))
