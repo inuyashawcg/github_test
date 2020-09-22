@@ -22,6 +22,8 @@
         "locale": "cpp",
         "*.c0": "cpp",
         "typeinfo": "c",
-        "string": "c"
+        "string": "c",
+        "__locale": "c",
+        "thread": "c"
     }
 }

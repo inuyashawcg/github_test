@@ -46,7 +46,7 @@ typedef enum modeventtype {
 	MOD_LOAD,
 	MOD_UNLOAD,
 	MOD_SHUTDOWN,
-	MOD_QUIESCE
+	MOD_QUIESCE		// 模块即将卸载的时候使用这个值
 } modeventtype_t;
 
 typedef struct module *module_t;
@@ -54,10 +54,11 @@ typedef int (*modeventhand_t)(module_t, int /* modeventtype_t */, void *);
 
 /*
  * Struct for registering modules statically via SYSINIT.
+ * 通过system init来进行注册
  */
 typedef struct moduledata {
 	const char	*name;		/* module name */
-	modeventhand_t  evhand;		/* event handler */
+	modeventhand_t  evhand;		/* event handler 事件处理程序*/
 	void		*priv;		/* extra data */
 } moduledata_t;
 
@@ -146,6 +147,15 @@ struct mod_pnp_match_info
 	SYSINIT(name##module, sub, order, module_register_init, &data);	\
 	struct __hack
 
+/* 
+  parameter：
+	name: 	表示模块的名字
+	data： 	moduledata_t类型的结构体数据，各个名字段都是已经初始化好了的
+	sub：	参考enum sysinit_sub_id {}中的具体数值含义，sub总被设置为SI_SUB_DRIVERS
+			位置 sys/kernel.h
+	order：	制定相应的KLD在子系统sub中的初始化顺序。在 enum sysinit_elem_order {}中
+			定义了该参数的合法值，一般设置为 SI_ORDER_MIDDLE，位置 sys/kernel.h
+*/
 #ifdef KLD_TIED
 #define	DECLARE_MODULE(name, data, sub, order)				\
 	DECLARE_MODULE_WITH_MAXVER(name, data, sub, order, __FreeBSD_version)

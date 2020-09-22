@@ -87,10 +87,10 @@ extern volatile int ticks;
  * The SI_SUB_LAST value must have the highest lexical value.
  */
 enum sysinit_sub_id {
-	SI_SUB_DUMMY		= 0x0000000,	/* not executed; for linker*/
-	SI_SUB_DONE		= 0x0000001,	/* processed*/
-	SI_SUB_TUNABLES		= 0x0700000,	/* establish tunable values */
-	SI_SUB_COPYRIGHT	= 0x0800001,	/* first use of console*/
+	SI_SUB_DUMMY		= 0x0000000,	/* not executed; for linker 未执行*/
+	SI_SUB_DONE		= 0x0000001,	/* processed 处理完*/
+	SI_SUB_TUNABLES		= 0x0700000,	/* establish tunable values 建立可调整的值*/
+	SI_SUB_COPYRIGHT	= 0x0800001,	/* first use of console 第一个控制台*/
 	SI_SUB_VM		= 0x1000000,	/* virtual memory system init*/
 	SI_SUB_KMEM		= 0x1800000,	/* kernel memory*/
 	SI_SUB_HYPERVISOR	= 0x1A40000,	/*
@@ -99,7 +99,7 @@ enum sysinit_sub_id {
 						 * setup.
 						 */
 	SI_SUB_WITNESS		= 0x1A80000,	/* witness initialization */
-	SI_SUB_MTX_POOL_DYNAMIC	= 0x1AC0000,	/* dynamic mutex pool */
+	SI_SUB_MTX_POOL_DYNAMIC	= 0x1AC0000,	/* dynamic mutex pool 动态互斥锁池*/
 	SI_SUB_LOCK		= 0x1B00000,	/* various locks */
 	SI_SUB_EVENTHANDLER	= 0x1C00000,	/* eventhandler init */
 	SI_SUB_VNET_PRELINK	= 0x1E00000,	/* vnet init before modules */
@@ -134,7 +134,7 @@ enum sysinit_sub_id {
 	SI_SUB_DTRACE		= 0x3020000,	/* DTrace subsystem */
 	SI_SUB_DTRACE_PROVIDER	= 0x3048000,	/* DTrace providers */
 	SI_SUB_DTRACE_ANON	= 0x308C000,	/* DTrace anon enabling */
-	SI_SUB_DRIVERS		= 0x3100000,	/* Let Drivers initialize */
+	SI_SUB_DRIVERS		= 0x3100000,	/* Let Drivers initialize 设备驱动程序使能标志*/
 	SI_SUB_CONFIGURE	= 0x3800000,	/* Configure devices */
 	SI_SUB_VFS		= 0x4000000,	/* virtual filesystem*/
 	SI_SUB_CLOCKS		= 0x4800000,	/* real time and stat clocks*/

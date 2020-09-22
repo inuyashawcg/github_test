@@ -170,7 +170,7 @@ kobj_class_compile_static(kobj_class_t cls, kobj_ops_t ops)
 	kobj_class_compile_common(cls, ops);
 }
 
-// 查找kobj_class中的methods，不包括其他的部分
+// 查找kobj_class_t cls中的methods，不包括其他的部分
 static kobj_method_t*
 kobj_lookup_method_class(kobj_class_t cls, kobjop_desc_t desc)
 {

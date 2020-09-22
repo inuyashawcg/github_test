@@ -1132,6 +1132,8 @@ devclass_driver_added(devclass_t dc, driver_t *driver)
 	 * Call BUS_DRIVER_ADDED for any existing buses in this class.
 	 * BUS_DRIVER_ADDED：这个宏是编译完成的时候才会出现，这个可以查看bus_if.m文件
 	 * 中的相关代码，可以看到这个宏应该表示的是 bus_generic_driver_added（）函数
+	 * 
+	 * 驱动注册之前首先要判断设备是否attach
 	 */
 	for (i = 0; i < dc->maxunit; i++)
 		if (dc->devices[i] && device_is_attached(dc->devices[i]))
@@ -2179,6 +2181,7 @@ device_probe_child(device_t dev, device_t child)
 
 	GIANT_REQUIRED;
 
+	/* 设备是从parent的devclass中查找相应的driver，所以这里dc定义成父设备的devclass*/
 	dc = dev->devclass;
 	if (!dc)
 		panic("device_probe_child: parent device has no devclass");
@@ -2923,8 +2926,9 @@ device_set_driver(device_t dev, driver_t *driver)
  * devclass (see devclass_get_parent()) if any.
  * 
  * 一个设备的驱动是从父设备的devclass中获取的，如果一个设备使用了一个非常特殊的名字
- * 进行注册的，则驱动就可以通过名字进行设备搜索。如果在parent的devclass中没有找到，
- * 那么就会在父devclass中再次查找（parent devclass跟parent of devclass不一样）
+ * 进行注册的，那么只有叫这个名字的驱动会被搜索，否则所有的驱动都会被搜索。
+ * 如果在parent的devclass中没有找到，那么就会在父devclass中再次查找
+ * （parent devclass跟parent of devclass不一样）
  * @param dev		the device to initialise
  *
  * @retval 0		success
@@ -2938,6 +2942,7 @@ device_probe(device_t dev)
 {
 	int error;
 
+	/* 打印一段程序运行的信息*/
 	GIANT_REQUIRED;
 
 	/* 说明该设备已经被attached了，不能重复attach */
