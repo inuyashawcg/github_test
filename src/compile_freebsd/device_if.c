@@ -46,7 +46,7 @@ static void * null_register(device_t dev)
 struct kobjop_desc device_probe_desc = {
 	0, { &device_probe_desc, (kobjop_t)kobj_error_method }
 };
-
+ 
 struct kobjop_desc device_identify_desc = {
 	0, { &device_identify_desc, (kobjop_t)kobj_error_method }
 };

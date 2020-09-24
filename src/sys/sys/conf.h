@@ -174,12 +174,12 @@ typedef int dumper_hdr_t(struct dumperinfo *di, struct kerneldumpheader *kdh,
 #define	D_INIT		0x80000000	/* cdevsw initialized */
 
 /*
- * Character device switch table
+ * Character device switch table 字符设备开关表
  */
 struct cdevsw {
-	int			d_version;
+	int			d_version;				// 指明驱动程序所支持的FreeBSD的版本信息
 	u_int			d_flags;
-	const char		*d_name;
+	const char		*d_name;			// 驱动程序的名字
 	d_open_t		*d_open;
 	d_fdopen_t		*d_fdopen;
 	d_close_t		*d_close;

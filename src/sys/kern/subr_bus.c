@@ -1119,7 +1119,7 @@ devclass_find(const char *classname)
  * we ever move beyond a few dozen devices doing this, we may need to
  * reevaluate...
  *
- * @param dc		the devclass to edit
+ * @param dc		the devclass to edit 暂时将其理解为总线的devclass
  * @param driver	the driver that was just added
  */
 static void
@@ -1133,7 +1133,7 @@ devclass_driver_added(devclass_t dc, driver_t *driver)
 	 * BUS_DRIVER_ADDED：这个宏是编译完成的时候才会出现，这个可以查看bus_if.m文件
 	 * 中的相关代码，可以看到这个宏应该表示的是 bus_generic_driver_added（）函数
 	 * 
-	 * 驱动注册之前首先要判断设备是否attach
+	 * 驱动注册之前首先要判断设备是否attach，从devices数组中一个一个找
 	 */
 	for (i = 0; i < dc->maxunit; i++)
 		if (dc->devices[i] && device_is_attached(dc->devices[i]))
@@ -1166,8 +1166,12 @@ devclass_driver_added(devclass_t dc, driver_t *driver)
  * all devices in the devclass will be called to allow them to attempt
  * to re-probe any unmatched children.
  *
- * @param dc		the devclass to edit
+ * @param dc		the devclass to edit 这里可以暂时将其理解为某一个总线的devclass
  * @param driver	the driver to register
+ * 
+ * DRIVER_MODULE()函数其实就是声明了一个driver加载到哪个总线上，从上述的表述可以看到，该函数
+ * 会被宏自动呼叫，说明这个函数就是驱动程序加载的功能函数，dc应该就是总线的devclass，driver的
+ * name应该也会被handler函数指定
  */
 int
 devclass_add_driver(devclass_t dc, driver_t *driver, int pass, devclass_t *dcp)
@@ -1208,13 +1212,25 @@ devclass_add_driver(devclass_t dc, driver_t *driver, int pass, devclass_t *dcp)
 		parentname = NULL;
 	/* 
 		创建了一个以 driver->name 命名的devclass，而且会把它通过参数传递出去
+		add：这里其实是创建了一个driver name命名的的devclass，进一步推测，
+		因为device跟driver都会在devclasses中查找是否有相关命名的devclass，
+		所以可以做出一个假设：driver name和device的devclass name都等于bus的
+		devclass name，他们以此作为标识来进行判断识别
+		所以无论是driver还是device，只要执行了devclass_find_internal()这个
+		函数，并且发现没有相应的devclass存在，那么他们创建的devclass就是总线的
+		bus devclass
 	*/
 	*dcp = devclass_find_internal(driver->name, parentname, TRUE);
 
 	dl->driver = driver;
+	/*
+		将driverlink添加到bus devclass中
+	*/
 	TAILQ_INSERT_TAIL(&dc->drivers, dl, link);
 	driver->refs++;		/* XXX: kobj_mtx */
 	dl->pass = pass;
+
+	/* 注册pass level */
 	driver_register_pass(dl);
 
 	if (device_frozen) {
@@ -1437,6 +1453,10 @@ devclass_find_driver_internal(devclass_t dc, const char *classname)
 	PDEBUG(("%s in devclass %s", classname, DEVCLANAME(dc)));
 
 	TAILQ_FOREACH(dl, &dc->drivers, link) {
+		/* 
+			比较driver与父设备的devclass name,那就可以推断，总线上的可能还会有不同类型的驱动，
+			也就是driver name跟devclass name是不一样的？？ 
+		*/
 		if (!strcmp(dl->driver->name, classname))
 			return (dl);
 	}
@@ -1856,7 +1876,11 @@ devclass_delete_device(devclass_t dc, device_t dev)
 /* 
 	devclass拥有唯一的名字，device可以通过这个名字将相应的devclass纳入到
 	自身的属性当中
-	疑问：一个devclass是否可以被多个device引用？？
+	疑问：一个devclass是否可以被多个device引用？
+	可能就是多个device的devclass指向同一个devclass，可能就是这些device属于
+	同一个类型，所以用一个devclass来管理就可以了，然后unit number就相当于是
+	这中类型下的device的编号
+	再进一步考虑
  */
 static device_t
 make_device(device_t parent, const char *name, int unit)
@@ -2194,6 +2218,7 @@ device_probe_child(device_t dev, device_t child)
 	if (child->state == DS_ALIVE && (child->flags & DF_REBID) == 0)
 		return (0);
 
+	/* 遍历父设备的devclass管理的drivers，与子设备进行匹配，应该是要获取匹配值的大小，然后判断是否是最佳匹配 */ 
 	for (; dc; dc = dc->parent) {
 		for (dl = first_matching_driver(dc, child);
 		     dl;
@@ -2201,13 +2226,17 @@ device_probe_child(device_t dev, device_t child)
 			/* If this driver's pass is too high, then ignore it. */
 			if (dl->pass > bus_current_pass)
 				continue;
-
 			PDEBUG(("Trying %s", DRIVERNAME(dl->driver)));
+
+			/* match到device之后，通过driverlink来设置device的driver */
 			result = device_set_driver(child, dl->driver);
 			if (result == ENOMEM)
 				return (result);
 			else if (result != 0)
 				continue;
+			/*
+				判断child是否有devclass，如果没有，设置一个新的devclass
+			*/ 
 			if (!hasclass) {
 				if (device_set_devclass(child,
 				    dl->driver->name) != 0) {
@@ -2529,12 +2558,19 @@ device_printf(device_t dev, const char * fmt, ...)
 static void
 device_set_desc_internal(device_t dev, const char* desc, int copy)
 {
+	/* 
+		设置desc首先就是判断desc是否已经被设置过了，如果已经被设置过了，那么就要free掉
+		device的flag就是对的device当前状态的一个描述，参考bus.h中一些宏定义
+	*/
 	if (dev->desc && (dev->flags & DF_DESCMALLOCED)) {
 		free(dev->desc, M_BUS);
 		dev->flags &= ~DF_DESCMALLOCED;
 		dev->desc = NULL;
 	}
 
+	/*
+		凡是函数名称中带有internel的，就是要判断是否要创建新的实例
+	*/
 	if (copy && desc) {
 		dev->desc = malloc(strlen(desc) + 1, M_BUS, M_NOWAIT);
 		if (dev->desc) {
@@ -2814,6 +2850,11 @@ device_is_suspended(device_t dev)
 /**
  * @brief Set the devclass of a device
  * @see devclass_add_device().
+ * 从device_probe()函数中的应用可以看到，classname 是 driverlink->driver->name,
+ * 也就是说传入的是一个driver的name。要设置devclass，却传入了一个driver name？？
+ * dev 传入的是 child device，child的devclass name = driver name？？
+ * QA：因为他们是挂载到同一个总线上的，所以driver name = bus devclass name = child
+ * 		devclass name
  */
 int
 device_set_devclass(device_t dev, const char *classname)
@@ -2823,6 +2864,7 @@ device_set_devclass(device_t dev, const char *classname)
 
 	if (!classname) {
 		if (dev->devclass)
+			/* 从devclass中delete掉dev */
 			devclass_delete_device(dev->devclass, dev);
 		return (0);
 	}
@@ -2871,19 +2913,30 @@ device_set_devclass_fixed(device_t dev, const char *classname)
 int
 device_set_driver(device_t dev, driver_t *driver)
 {
+	/* 首先判断这个设备是否已经处于attached的状态，如果是，就返回busy */
 	if (dev->state >= DS_ATTACHED)
 		return (EBUSY);
 
+	/* 如果device当前的driver已经是这个driver，直接返回 */
 	if (dev->driver == driver)
 		return (0);
 
+	/* 判断上下文是否为空，并且是否是我们自己设置的上下文 */
 	if (dev->softc && !(dev->flags & DF_EXTERNALSOFTC)) {
 		free(dev->softc, M_BUS_SC);
 		dev->softc = NULL;
 	}
+	/* 设置device的描述 */
 	device_set_desc(dev, NULL);
+
+	/* delete掉device中的kobj成分 */
 	kobj_delete((kobj_t) dev, NULL);
 	dev->driver = driver;
+
+	/* 
+		如果driver为空，那么就安装kobj的相关流程，为device重新创建一个driver实例，
+		如果不为空，那就为device创建一个null kobj_class
+	*/
 	if (driver) {
 		kobj_init((kobj_t) dev, (kobj_class_t) driver);
 		if (!(dev->flags & DF_EXTERNALSOFTC) && driver->size > 0) {
@@ -2951,12 +3004,14 @@ device_probe(device_t dev)
 
 	/* DF_ENABLED: 设备的使能标志*/
 	if (!(dev->flags & DF_ENABLED)) {
+		/* device_get_name 其实是获取的devclass的name*/
 		if (bootverbose && device_get_name(dev) != NULL) {
 			device_print_prettyname(dev);
 			printf("not probed (disabled)\n");
 		}
 		return (-1);
 	}
+	/* 这里的dev暂时按照总线的child理解，所以这里传入的参数是总线和子device */
 	if ((error = device_probe_child(dev->parent, dev)) != 0) {
 		if (bus_current_pass == BUS_PASS_DEFAULT &&
 		    !(dev->flags & DF_DONENOMATCH)) {
@@ -5094,6 +5149,12 @@ driver_module_handler(module_t mod, int what, void *arg)
 	int error, pass;
 
 	dmd = (struct driver_module_data *)arg;
+
+	/* 
+		bus_devclass其实就是根据dmd的busname创建的一个对象，而dmd其实就是driver模块
+		的一个handler，而驱动本质上也就是以kernel module，所以这里的模块加载其实就是
+		驱动的加载，然后根据这个驱动构建一个devclass来管理某种类型的驱动
+	*/
 	bus_devclass = devclass_find_internal(dmd->dmd_busname, NULL, TRUE);
 	error = 0;
 

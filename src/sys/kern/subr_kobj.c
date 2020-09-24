@@ -89,6 +89,7 @@ static const struct kobj_method null_method = {
 	0, 0,
 };
 
+/* 返回错误值6：设备未被config */
 int
 kobj_error_method(void)
 {

@@ -43,9 +43,9 @@
 #define	MDT_SETNAME	"modmetadata_set"
 
 typedef enum modeventtype {
-	MOD_LOAD,
+	MOD_LOAD,		// 模块加载时用到这个值
 	MOD_UNLOAD,
-	MOD_SHUTDOWN,
+	MOD_SHUTDOWN,	// 系统即将关闭时，使用这个
 	MOD_QUIESCE		// 模块即将卸载的时候使用这个值
 } modeventtype_t;
 

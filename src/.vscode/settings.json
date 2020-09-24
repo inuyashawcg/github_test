@@ -24,6 +24,9 @@
         "typeinfo": "c",
         "string": "c",
         "__locale": "c",
-        "thread": "c"
+        "thread": "c",
+        "string_view": "cpp",
+        "iterator": "cpp",
+        "vector": "cpp"
     }
 }

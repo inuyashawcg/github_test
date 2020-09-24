@@ -753,6 +753,7 @@ int	driver_module_handler(struct module *, int, void *);
 
 /**
  * Module support for automatically adding drivers to buses.
+ * 支持向总线自动添加drivers的结构体
  */
 struct driver_module_data {
 	int		(*dmd_chainevh)(struct module *, int, void *);
