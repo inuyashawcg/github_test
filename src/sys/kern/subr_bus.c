@@ -908,7 +908,7 @@ DEFINE_CLASS(null, null_methods, 0);
  * Bus pass implementation
  */
 
-// driver_list_t 是driverlink的一个双端队列
+// driver_list_t 是driverlink的一个双端队列，管理所有driver的pass等级
 static driver_list_t passes = TAILQ_HEAD_INITIALIZER(passes);
 int bus_current_pass = BUS_PASS_ROOT;
 
@@ -1171,7 +1171,15 @@ devclass_driver_added(devclass_t dc, driver_t *driver)
  * 
  * DRIVER_MODULE()函数其实就是声明了一个driver加载到哪个总线上，从上述的表述可以看到，该函数
  * 会被宏自动呼叫，说明这个函数就是驱动程序加载的功能函数，dc应该就是总线的devclass，driver的
- * name应该也会被handler函数指定
+ * name应该也会被handler函数指定。DRIVER_MODULE()这个宏定义函数里边会包含有driver_module_handler()函数，
+ * 所以宏定义里边的参数可以对照着来看：
+ * 	参数1：name，表示driver的名称,但是跟driver->name貌似不太一样
+ * 	参数2：busname，总线的名称，从 driver_module_handler 里边有一个devclass_find_internal(dmd->dmd_busname, NULL, TRUE)
+ * 		这个操作，这里边的busname其实就是从宏里边传入的busname，所以系统会去devclasses中找总线的devclass
+ * 	参数3：driver，这个参数一般都是各个字段都已经初始化完成了的driver_t类型的结构体，其中的name应该是与第一个参数是一致的
+ * 	参数4：devclass，传入的是一个未初始化的devclass_t结构体，赋值操作： devclass_find_internal(dmd->dmd_busname, NULL, TRUE)
+ * 	参数5：evh，模块事件的处理程序
+ * 	参数6：arg，evh的参数。如果evh=0，那么arg=0
  */
 int
 devclass_add_driver(devclass_t dc, driver_t *driver, int pass, devclass_t *dcp)
@@ -1195,6 +1203,8 @@ devclass_add_driver(devclass_t dc, driver_t *driver, int pass, devclass_t *dcp)
 	 * so that the class doesn't get freed when the last instance
 	 * goes. This means we can safely use static methods and avoids a
 	 * double-free in devclass_delete_driver.
+	 * 
+	 * driver初始化的时候会用通过一些 DEVMETHOD() 宏定义向methods中注册驱动需要用到的一些函数
 	 */
 	kobj_class_compile((kobj_class_t) driver);
 
@@ -1701,7 +1711,7 @@ devclass_get_sysctl_tree(devclass_t dc)
 
  * @param dc		the devclass to allocate from
  * @param unitp		points at the location for the allocated unit
- *			number
+ *			number	从实际使用中可以看到，这个值很大可能是-1
  *
  * @retval 0		success
  * @retval EEXIST	the requested unit number is already allocated
@@ -1715,7 +1725,9 @@ devclass_alloc_unit(devclass_t dc, device_t dev, int *unitp)
 
 	PDEBUG(("unit %d in devclass %s", unit, DEVCLANAME(dc)));
 
-	/* Ask the parent bus if it wants to wire this device. */
+	/* 
+		Ask the parent bus if it wants to wire this device. 
+	*/
 	if (unit == -1)
 		BUS_HINT_DEVICE_UNIT(device_get_parent(dev), dev, dc->name,
 		    &unit);
@@ -1798,6 +1810,9 @@ devclass_alloc_unit(devclass_t dc, device_t dev, int *unitp)
  * @retval 0		success
  * @retval EEXIST	the requested unit number is already allocated
  * @retval ENOMEM	memory allocation failure
+ * 
+ * dc是从devclasses中查找出来的或者是新建立的一个，不能确定到底是不是parent bus的devclass
+ * dev是新建立的一个device
  */
 static int
 devclass_add_device(devclass_t dc, device_t dev)
@@ -1809,12 +1824,15 @@ devclass_add_device(devclass_t dc, device_t dev)
 	buflen = snprintf(NULL, 0, "%s%d$", dc->name, INT_MAX);
 	if (buflen < 0)
 		return (ENOMEM);
+	/*
+		给device nameunit申请空间，但是计算空间大小的时候用的却是dc->name
+	*/
 	dev->nameunit = malloc(buflen, M_BUS, M_NOWAIT|M_ZERO);
 	if (!dev->nameunit)
 		return (ENOMEM);
 
 	/* 
-		给dev分配一个uint number
+		给dev分配一个uint number,总线本身的unit编号应该是0？？
 	 */
 	if ((error = devclass_alloc_unit(dc, dev, &dev->unit)) != 0) {
 		free(dev->nameunit, M_BUS);
@@ -1823,6 +1841,10 @@ devclass_add_device(devclass_t dc, device_t dev)
 	}
 	dc->devices[dev->unit] = dev;
 	dev->devclass = dc;
+
+	/* 
+		device的unit值是通过用户指定的devclass name来确定的
+	 */
 	snprintf(dev->nameunit, buflen, "%s%d", dc->name, dev->unit);
 
 	return (0);
@@ -1880,7 +1902,14 @@ devclass_delete_device(devclass_t dc, device_t dev)
 	可能就是多个device的devclass指向同一个devclass，可能就是这些device属于
 	同一个类型，所以用一个devclass来管理就可以了，然后unit number就相当于是
 	这中类型下的device的编号
-	再进一步考虑
+
+	再进一步考虑，make_device函数可以指定new device的devclass name，所以这里就可能会出现两种情况：
+		第一种就是用户指定的这个name在devclasses中还没有，这种情况可能会出现在新创建一个bus的时候，比如
+		用户打算在root_bus中添加一个子bus，这个时候就可以命名一个新的devclass name，系统就会创建一个新
+		的devclass；
+		第二种情况是用户指定的这个name在devclasses中已经存在了，使用场景比如说是用户往已知的bus中添加新
+		的device，这个时候就可以指定已知bus的devclass name作为新device的devclass name，这样该设备就
+		可以与bus devclass建立联系（主要就是分配unit number）
  */
 static device_t
 make_device(device_t parent, const char *name, int unit)
@@ -1891,6 +1920,10 @@ make_device(device_t parent, const char *name, int unit)
 	PDEBUG(("%s at %s as unit %d", name, DEVICENAME(parent), unit));
 
 	if (name) {
+		/* 
+			这一步仅仅是查询在devclasses中有没有对应的devclass，有的话就直接拿过来用，
+			没有的话就新创建一个，所以到这里还不能确定子设备的devclass跟父设备有什么联系
+		*/
 		dc = devclass_find_internal(name, NULL, TRUE);
 		if (!dc) {
 			// 没有devclass的话就直接打印警告信息，说明declass对于device相当重要
@@ -1926,6 +1959,11 @@ make_device(device_t parent, const char *name, int unit)
 		dev->flags |= DF_WILDCARD;
 	if (name) {
 		dev->flags |= DF_FIXEDCLASS;
+
+		/* 
+			到了这一步才开始建立devclass跟device的联系，也就是说dev跟devclass都已经
+			实例化了之后，再开始确定两者的关系
+		*/
 		if (devclass_add_device(dc, dev)) {
 			kobj_delete((kobj_t) dev, M_BUS);
 			return (NULL);
@@ -1977,6 +2015,11 @@ device_print_child(device_t dev, device_t child)
  *			specified
  *
  * @returns		the new device
+ * 
+ * 	注释中说明了要将一个新设备添加到已经存在的一个parent device，如何来判断一个
+ * 	父设备是否存在？
+ * 	实例中基本上所有的情况都是把unit number设置为-1，很可能就是在后边进行一步判断
+ * 	parent bus是否希望添加这个设备
  */
 device_t
 device_add_child(device_t dev, const char *name, int unit)
@@ -2014,7 +2057,11 @@ device_add_child_ordered(device_t dev, u_int order, const char *name, int unit)
 	    name, DEVICENAME(dev), order, unit));
 	KASSERT(name != NULL || unit == -1,
 	    ("child device with wildcard name and specific unit number"));
-
+	/* 
+		make_device只在生成root bus的时候单独使用过，其他的都是通过调用device_add_child()
+		来实现的，make_device也只是指定了一个devclass name，并没有在函数外部事先实例化出一个对象，
+		绝大部分的实例中给出的unit = -1
+	 */
 	child = make_device(dev, name, unit);
 	if (child == NULL)
 		return (child);
@@ -3011,7 +3058,9 @@ device_probe(device_t dev)
 		}
 		return (-1);
 	}
-	/* 这里的dev暂时按照总线的child理解，所以这里传入的参数是总线和子device */
+	/* 
+		这里的dev可以理解为总线管理的devices[]中的元素的children中的元素 
+	*/
 	if ((error = device_probe_child(dev->parent, dev)) != 0) {
 		if (bus_current_pass == BUS_PASS_DEFAULT &&
 		    !(dev->flags & DF_DONENOMATCH)) {
@@ -4114,6 +4163,8 @@ bus_generic_get_resource_list(device_t dev, device_t child)
  * This implementation of BUS_DRIVER_ADDED() simply calls the driver's
  * DEVICE_IDENTIFY() method to allow it to add new children to the bus
  * and then calls device_probe_and_attach() for each unattached child.
+ * 
+ * dev表示的是bus devclass devices[]中管理的device
  */
 void
 bus_generic_driver_added(device_t dev, driver_t *driver)

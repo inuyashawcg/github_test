@@ -111,6 +111,7 @@ kobj_class_compile_common(kobj_class_t cls, kobj_ops_t ops)
 
 	/*
 	 * First register any methods which need it.
+	 * 只要methods中的方法的id被设置为0，那么就表示该函数是要被用到的
 	 */
 	for (i = 0, m = cls->methods; m->desc; i++, m++) {
 		if (m->desc->id == 0)
