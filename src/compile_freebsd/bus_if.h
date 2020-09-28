@@ -278,7 +278,10 @@ typedef struct resource * bus_alloc_resource_t(device_t _dev, device_t _child,
  * caller did not use the RF_ACTIVE to specify that it should be
  * activated immediately, the caller is responsible for calling
  * BUS_ACTIVATE_RESOURCE() when it actually uses the resource.
- *
+ * 
+ * 资源的类型包括中断，DMA，memory，IO，GPIO等等，参考 <machine/resource.h>
+ * 资源的话应该还是要激活一下才能使用？？
+ * 
  * @param _dev		the parent device of @p _child
  * @param _child	the device which is requesting an allocation
  * @param _type		the type of resource to allocate

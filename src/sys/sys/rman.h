@@ -41,6 +41,7 @@
 #include <machine/resource.h>
 #endif
 
+/* 定义了资源的flag类型 */
 #define	RF_ALLOCATED	0x0001	/* resource has been reserved */
 #define	RF_ACTIVE	0x0002	/* resource allocation has been activated */
 #define	RF_SHAREABLE	0x0004	/* resource permits contemporaneous sharing */

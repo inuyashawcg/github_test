@@ -425,6 +425,10 @@ int	bus_generic_activate_resource(device_t dev, device_t child, int type,
 device_t
 	bus_generic_add_child(device_t dev, u_int order, const char *name,
 			      int unit);
+
+/*
+	调整分配的资源的start或者/和end，要求新的资源范围至少要大于原有的
+*/
 int	bus_generic_adjust_resource(device_t bus, device_t child, int type,
 				    struct resource *r, rman_res_t start,
 				    rman_res_t end);
@@ -433,9 +437,21 @@ struct resource *
 				   int *rid, rman_res_t start, rman_res_t end,
 				   rman_res_t count, u_int flags);
 int	bus_generic_attach(device_t dev);
+
+/*
+	允许驱动程序将中断绑定到特定的CPU
+*/
 int	bus_generic_bind_intr(device_t dev, device_t child,
 			      struct resource *irq, int cpu);
+
+/* 
+	用于判断bus中的某个子设备是否存在
+*/
 int	bus_generic_child_present(device_t dev, device_t child);
+
+/*
+	允许驱动程序指定特定中断的触发模式和极性，大概就是上升沿，下降沿，高低电平触发等
+*/
 int	bus_generic_config_intr(device_t, int, enum intr_trigger,
 				enum intr_polarity);
 int	bus_generic_describe_intr(device_t dev, device_t child,

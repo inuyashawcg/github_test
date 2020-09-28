@@ -271,6 +271,7 @@ sysinit_tslog_shim(const void * data)
 	DATA_WSET(sysinit_set,uniquifier ## _sys_init)
 #endif
 
+/* 对内核模块子系统初始化进行运行时排序 */
 #define	SYSINIT(uniquifier, subsystem, order, func, ident)	\
 	C_SYSINIT(uniquifier, subsystem, order,			\
 	(sysinit_cfunc_t)(sysinit_nfunc_t)func, (void *)(ident))

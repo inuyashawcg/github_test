@@ -27,6 +27,7 @@
         "thread": "c",
         "string_view": "cpp",
         "iterator": "cpp",
-        "vector": "cpp"
+        "vector": "cpp",
+        "*.def": "cpp"
     }
 }

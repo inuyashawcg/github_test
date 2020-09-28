@@ -2281,6 +2281,7 @@ device_probe_child(device_t dev, device_t child)
 				return (result);
 			else if (result != 0)
 				continue;
+
 			/*
 				判断child是否有devclass，如果没有，设置一个新的devclass
 			*/ 
@@ -2301,10 +2302,18 @@ device_probe_child(device_t dev, device_t child)
 				}
 			}
 
-			/* Fetch any flags for the device before probing. */
+			/* 
+				Fetch any flags for the device before probing. 
+				查阅FreeBSD manual page 可以看到，如果在对设备分配资源的时候出现了某种错误，
+				然后再执行 DEVICE_PROBE() 的时候就会报错
+			*/
 			resource_int_value(dl->driver->name, child->unit,
 			    "flags", &child->devflags);
 
+			/*
+				DEVICE_PROBE() 函数会对设备和驱动进行匹配，返回一个匹配值，如果这个值等于0的话，
+				那就表示这个驱动跟设备是最佳匹配的关系
+			*/
 			result = DEVICE_PROBE(child);
 
 			/* Reset flags and devclass before the next probe. */
@@ -2379,6 +2388,9 @@ device_probe_child(device_t dev, device_t child)
 		 * because if the state is > DS_ALIVE, we know it must
 		 * be.
 		 *
+		 * 如果我们发现device的最佳匹配的driver跟它目前的driver是不一样的，那么就会将原来的那个driver
+		 * detach掉，然后跟新的driver进行热attach
+		 * 
 		 * This assumes that all DF_REBID drivers can have
 		 * their probe routine called at any time and that
 		 * they are idempotent as well as completely benign in
@@ -3123,6 +3135,7 @@ device_attach(device_t dev)
 	uint16_t attachentropy;
 	int error;
 
+	/* 检查资源是否不可用 */
 	if (resource_disabled(dev->driver->name, dev->unit)) {
 		device_disable(dev);
 		if (bootverbose)
@@ -3133,8 +3146,14 @@ device_attach(device_t dev)
 	device_sysctl_init(dev);
 	if (!device_is_quiet(dev))
 		device_print_child(dev->parent, dev);
+
+	/* 获取attach的时间 */
 	attachtime = get_cyclecount();
-	dev->state = DS_ATTACHING;
+	dev->state = DS_ATTACHING;	/* 修改设备的状态为正在attach */
+
+	/* 
+		DEVICE_ATTACH()：涉及到这些宏定义的函数貌似是跟具体的驱动程序有关
+	*/
 	if ((error = DEVICE_ATTACH(dev)) != 0) {
 		printf("device_attach: %s%d attach returned %d\n",
 		    dev->driver->name, dev->unit, error);
@@ -3313,7 +3332,7 @@ resource_list_init(struct resource_list *rl)
 }
 
 /**
- * @brief Reclaim memory used by a resource list.
+ * @brief Reclaim memory used by a resource list. 回收被resource list使用的资源
  *
  * This function frees the memory for all resource entries on the list
  * (if any).
@@ -3360,12 +3379,14 @@ resource_list_add_next(struct resource_list *rl, int type, rman_res_t start,
 }
 
 /**
- * @brief Add or modify a resource entry.
+ * @brief Add or modify a resource entry. 添加或者修改资源项
  *
  * If an existing entry exists with the same type and rid, it will be
  * modified using the given values of @p start, @p end and @p
  * count. If no entry exists, a new one will be created using the
  * given values.  The resource list entry that matches is then returned.
+ * 如果新添加的资源项已经存在的话，那么就对其进行数据更新，更新的数据貌似仅仅包括start，
+ * end，count。如果不存在的话，就直接添加到资源列表，并返回该资源项
  *
  * @param rl		the resource list to edit
  * @param type		the resource entry type (e.g. SYS_RES_MEMORY)
@@ -3380,12 +3401,17 @@ resource_list_add(struct resource_list *rl, int type, int rid,
 {
 	struct resource_list_entry *rle;
 
+	/* 
+		遍历整个resource list，如果找到了type和id都一样的资源项，就返回
+	 */
 	rle = resource_list_find(rl, type, rid);
 	if (!rle) {
 		rle = malloc(sizeof(struct resource_list_entry), M_BUS,
 		    M_NOWAIT);
 		if (!rle)
 			panic("resource_list_add: can't record entry");
+
+		/* 将新的元素插入链表尾部，感觉不像是根据rid的大小顺序排列的 */
 		STAILQ_INSERT_TAIL(rl, rle, link);
 		rle->type = type;
 		rle->rid = rid;
@@ -3393,6 +3419,11 @@ resource_list_add(struct resource_list *rl, int type, int rid,
 		rle->flags = 0;
 	}
 
+	/* 
+		这个貌似仅仅是判断了一下是否具有这个列表项，跟在这个列表项中是否加载资源是没有关系的。
+		如果没有这个列表项的话，就添加这么一个列表项，而不是资源的话应该是后加的？？
+		res不为空的话，估计就是表示这块资源正在被使用,如果资源正在被使用的话，是不能被重新add的
+	*/
 	if (rle->res)
 		panic("resource_list_add: resource entry is busy");
 
@@ -3422,6 +3453,10 @@ resource_list_busy(struct resource_list *rl, int type, int rid)
 	rle = resource_list_find(rl, type, rid);
 	if (rle == NULL || rle->res == NULL)
 		return (0);
+
+	/* 
+		判断list中某个资源是否被占用，可以利用flag的值
+	 */
 	if ((rle->flags & (RLE_RESERVED | RLE_ALLOCATED)) == RLE_RESERVED) {
 		KASSERT(!(rman_get_flags(rle->res) & RF_ACTIVE),
 		    ("reserved resource is active"));
@@ -3432,6 +3467,7 @@ resource_list_busy(struct resource_list *rl, int type, int rid)
 
 /**
  * @brief Determine if a resource entry is reserved.
+ * 判断某一个资源项是不是需要被保留，从下边的逻辑可以看出也是通过判断flag的值来实现
  *
  * Returns true if a resource entry is reserved meaning that it has an
  * associated "reserved" resource.  The resource can either be
@@ -3455,7 +3491,7 @@ resource_list_reserved(struct resource_list *rl, int type, int rid)
 }
 
 /**
- * @brief Find a resource entry by type and rid.
+ * @brief Find a resource entry by type and rid. 资源的查找则是通过type和rid两个参数来实现
  *
  * @param rl		the resource list to search
  * @param type		the resource entry type (e.g. SYS_RES_MEMORY)
@@ -3506,6 +3542,11 @@ resource_list_delete(struct resource_list *rl, int type, int rid)
  * parent bus when it is reserved.  The resource list entry is marked
  * with RLE_RESERVED to note that it is a reserved resource.
  *
+ * bus可以通过这个函数保留在系统中比较活跃的资源，即使这个资源并不是通过驱动来分配的。
+ * 通常在bus添加新的子设备的时候调用。设计思想可能是我向bus添加了一个新的子设备，需要
+ * 为其分配资源，有的资源可能在驱动中并没有明确声明要使用，但是在系统中却是被频繁调用的，
+ * 这个时候仍然要把这些资源在子设备中被保留？？
+ * 
  * Subsequent attempts to allocate the resource with
  * resource_list_alloc() will succeed the first time and will set
  * RLE_ALLOCATED to note that it has been allocated.  When a reserved
@@ -3540,6 +3581,7 @@ resource_list_reserve(struct resource_list *rl, device_t bus, device_t child,
 	int passthrough = (device_get_parent(child) != bus);
 	struct resource *r;
 
+	/* 该资源是不能被越级保存，只能被其直接子设备保存 */
 	if (passthrough)
 		panic(
     "resource_list_reserve() should only be called for direct children");
@@ -3570,10 +3612,11 @@ resource_list_reserve(struct resource_list *rl, device_t bus, device_t child,
  * somewhere in the child device's ivars (see device_get_ivars()) and
  * its implementation of BUS_ALLOC_RESOURCE() would find that list and
  * then call resource_list_alloc() to perform the allocation.
- *
+ * 总线的驱动会存储子设备的资源列表
+ * 
  * @param rl		the resource list to allocate from
  * @param bus		the parent device of @p child
- * @param child		the device which is requesting an allocation
+ * @param child		the device which is requesting an allocation 请求资源分配的设备
  * @param type		the type of resource to allocate
  * @param rid		a pointer to the resource identifier
  * @param start		hint at the start of the resource range - pass
@@ -3594,6 +3637,8 @@ resource_list_alloc(struct resource_list *rl, device_t bus, device_t child,
     int type, int *rid, rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
 	struct resource_list_entry *rle = NULL;
+
+	/* 涉及到资源分配的时候，首先要判断一下child跟bus的是否是直接关联 */
 	int passthrough = (device_get_parent(child) != bus);
 	int isdefault = RMAN_IS_DEFAULT_RANGE(start, end);
 
@@ -3609,6 +3654,9 @@ resource_list_alloc(struct resource_list *rl, device_t bus, device_t child,
 
 	if (rle->res) {
 		if (rle->flags & RLE_RESERVED) {
+			/* 
+				表示资源已经被分配给了其他的子设备，所以这里才要返回null？？
+			*/
 			if (rle->flags & RLE_ALLOCATED)
 				return (NULL);
 			if ((flags & RF_ACTIVE) &&
@@ -3624,6 +3672,7 @@ resource_list_alloc(struct resource_list *rl, device_t bus, device_t child,
 		return (NULL);
 	}
 
+	/* 如果已经分配了source，那么就把已经分配的资源激活，如果没有分配的话就重新分配 */
 	if (isdefault) {
 		start = rle->start;
 		count = ulmax(count, rle->count);
@@ -3667,6 +3716,7 @@ resource_list_release(struct resource_list *rl, device_t bus, device_t child,
     int type, int rid, struct resource *res)
 {
 	struct resource_list_entry *rle = NULL;
+	/* 就算是释放资源，也还是要判断父子设备之间的直接关联 */
 	int passthrough = (device_get_parent(child) != bus);
 	int error;
 
@@ -3679,10 +3729,12 @@ resource_list_release(struct resource_list *rl, device_t bus, device_t child,
 
 	if (!rle)
 		panic("resource_list_release: can't find resource");
+	/* 如果resource为空的话，则是不需要进行释放操作的，结果返回一个panic */
 	if (!rle->res)
 		panic("resource_list_release: resource entry is not busy");
 	if (rle->flags & RLE_RESERVED) {
 		if (rle->flags & RLE_ALLOCATED) {
+			/* 这里要判断一下资源是否正在被使用 */
 			if (rman_get_flags(res) & RF_ACTIVE) {
 				error = bus_deactivate_resource(child, type,
 				    rid, res);
@@ -3707,6 +3759,11 @@ resource_list_release(struct resource_list *rl, device_t bus, device_t child,
 /**
  * @brief Release all active resources of a given type
  *
+ * 这里可以推断一下资源的组织形式：资源的话首先是有一个type，用来进行对资源的大分类，
+ * 比如说中断，DMA，GPIO，I/O等；然后是rid，这个之前分析过，像是一个索引之类的东西，
+ * 感觉像是一个资源的二级分类标志，比如中断资源中的中断1，中断2等等，用于定位某一类
+ * 资源中的某一个资源项
+ * 
  * Release all active resources of a specified type.  This is intended
  * to be used to cleanup resources leaked by a driver after detach or
  * a failed attach.

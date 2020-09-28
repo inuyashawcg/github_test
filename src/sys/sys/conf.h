@@ -114,6 +114,10 @@ typedef int d_open_t(struct cdev *dev, int oflags, int devtype, struct thread *t
 typedef int d_fdopen_t(struct cdev *dev, int oflags, struct thread *td, struct file *fp);
 typedef int d_close_t(struct cdev *dev, int fflag, int devtype, struct thread *td);
 typedef void d_strategy_t(struct bio *bp);
+/*
+	cmd就表示从用户空间传进来的ioctl命令，cmd是由驱动程序定义的数值型常量，用来识别d_ioctl函数可执行的
+	不同的输入输出操作，一般情况下是用在switch语句中；ioctl操作中所需要的任何参数都是通过data来提供
+*/
 typedef int d_ioctl_t(struct cdev *dev, u_long cmd, caddr_t data,
 		      int fflag, struct thread *td);
 
