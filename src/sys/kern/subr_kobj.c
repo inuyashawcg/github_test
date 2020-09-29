@@ -112,6 +112,7 @@ kobj_class_compile_common(kobj_class_t cls, kobj_ops_t ops)
 	/*
 	 * First register any methods which need it.
 	 * 只要methods中的方法的id被设置为0，那么就表示该函数是要被用到的
+	 * 通过下面的++操作和赋值操作，可以看出method的id是被重新赋值，从1开始
 	 */
 	for (i = 0, m = cls->methods; m->desc; i++, m++) {
 		if (m->desc->id == 0)
@@ -120,6 +121,7 @@ kobj_class_compile_common(kobj_class_t cls, kobj_ops_t ops)
 
 	/*
 	 * Then initialise the ops table.
+	 * 这里涉及到了对cache中函数的操作，都定义成空方法
 	 */
 	for (i = 0; i < KOBJ_CACHE_SIZE; i++)
 		ops->cache[i] = &null_method;
@@ -127,6 +129,10 @@ kobj_class_compile_common(kobj_class_t cls, kobj_ops_t ops)
 	cls->ops = ops;
 }
 
+/* 
+	先近似认为cls为一个deriver，init函数执行的时候会判断cls的ops是否为空，
+	如果为空的话，就要在kobj_class_compile 函数中新建一个ops
+*/
 void
 kobj_class_compile(kobj_class_t cls)
 {
@@ -136,6 +142,7 @@ kobj_class_compile(kobj_class_t cls)
 
 	/*
 	 * Allocate space for the compiled ops table.
+	 * 从kobj_init()函数中的逻辑来看，cls已经确定是null
 	 */
 	ops = malloc(sizeof(struct kobj_ops), M_KOBJ, M_NOWAIT);
 	if (!ops)
@@ -240,6 +247,7 @@ kobj_class_free(kobj_class_t cls)
 	/*
 	 * Protect against a race between kobj_create and
 	 * kobj_delete.
+	 * 如果cls的引用计数为0了，那就证明现在已经没有任何一个对象再使用它了，可以free掉
 	 */
 	if (cls->refs == 0) {
 		/*
@@ -286,6 +294,9 @@ kobj_init_common(kobj_t obj, kobj_class_t cls)
 	cls->refs++;
 }
 
+/*
+	驱动方面，可以近似认为obj表示一个device，cls表示一个driver
+*/
 void
 kobj_init(kobj_t obj, kobj_class_t cls)
 {
@@ -295,6 +306,7 @@ kobj_init(kobj_t obj, kobj_class_t cls)
 
 	/*
 	 * Consider compiling the class' method table.
+	 * 当ops为空的时候执行compile操作
 	 */
 	if (!cls->ops) {
 		/*
@@ -307,6 +319,11 @@ kobj_init(kobj_t obj, kobj_class_t cls)
 		goto retry;
 	}
 
+	/* 
+		obj是device的一个子集，cls就相当于driver。因为device不仅仅包含obj，还包含别的量，
+		所以kobj_init_common()函数就相当于把device中包含的obj中的ops设置成driver的ops，
+		然后把driver的引用计数++
+	*/
 	kobj_init_common(obj, cls);
 
 	KOBJ_UNLOCK();
@@ -336,10 +353,14 @@ kobj_delete(kobj_t obj, struct malloc_type *mtype)
 	 */
 	KOBJ_ASSERT(MA_NOTOWNED);
 	KOBJ_LOCK();
+
 	cls->refs--;
 	refs = cls->refs;
 	KOBJ_UNLOCK();
 
+	/*
+		这里仅仅是把cls，也就是kobj_class部分给free掉了，并没有对cache中保存的函数进行任何操作
+	*/
 	if (!refs)
 		kobj_class_free(cls);
 

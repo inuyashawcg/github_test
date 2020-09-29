@@ -1833,6 +1833,9 @@ devclass_add_device(devclass_t dc, device_t dev)
 
 	/* 
 		给dev分配一个uint number,总线本身的unit编号应该是0？？
+		通过device probe函数的逻辑来看，devclass是以driver name命名的，
+		所以可以认为是另外一种情况，driver对应的devclass为它所管理的device
+		分配unit
 	 */
 	if ((error = devclass_alloc_unit(dc, dev, &dev->unit)) != 0) {
 		free(dev->nameunit, M_BUS);
@@ -1844,7 +1847,7 @@ devclass_add_device(devclass_t dc, device_t dev)
 
 	/* 
 		device的unit值是通过用户指定的devclass name来确定的
-	 */
+	*/
 	snprintf(dev->nameunit, buflen, "%s%d", dc->name, dev->unit);
 
 	return (0);
@@ -2275,7 +2278,9 @@ device_probe_child(device_t dev, device_t child)
 				continue;
 			PDEBUG(("Trying %s", DRIVERNAME(dl->driver)));
 
-			/* match到device之后，通过driverlink来设置device的driver */
+			/* 
+				match到device之后，通过driverlink来设置device的driver，如果result为0，就表示配置完成
+			*/
 			result = device_set_driver(child, dl->driver);
 			if (result == ENOMEM)
 				return (result);
@@ -2334,6 +2339,8 @@ device_probe_child(device_t dev, device_t child)
 			/*
 			 * Reset DF_QUIET in case this driver doesn't
 			 * end up as the best driver.
+			 * 如果这个匹配并不是最好的，那就重置 DF_QUIET 标识，推测可能是还要继续进行match，然后
+			 * 比较出虽然不是最佳匹配但是却是匹配等级最高的那个，用来作为该device的driver
 			 */
 			device_verbose(child);
 
@@ -2389,7 +2396,7 @@ device_probe_child(device_t dev, device_t child)
 		 * be.
 		 *
 		 * 如果我们发现device的最佳匹配的driver跟它目前的driver是不一样的，那么就会将原来的那个driver
-		 * detach掉，然后跟新的driver进行热attach
+		 * detach掉，然后跟新的driver进行attach
 		 * 
 		 * This assumes that all DF_REBID drivers can have
 		 * their probe routine called at any time and that
@@ -2420,6 +2427,9 @@ device_probe_child(device_t dev, device_t child)
 			/*
 			 * A bit bogus. Call the probe method again to make
 			 * sure that we have the right description.
+			 * 
+			 * 有点假。这里还需要在进行一次 DEVICE_PROBE 来确认我们有了正确
+			 * 的描述
 			 */
 			DEVICE_PROBE(child);
 #if 0
@@ -2913,7 +2923,10 @@ device_is_suspended(device_t dev)
  * 也就是说传入的是一个driver的name。要设置devclass，却传入了一个driver name？？
  * dev 传入的是 child device，child的devclass name = driver name？？
  * QA：因为他们是挂载到同一个总线上的，所以driver name = bus devclass name = child
- * 		devclass name
+ * 		devclass name？？
+ * 可以再看一下上面的逻辑，first match的时候里边会有一个判断：如果device的devclass不为空的话，
+ * 就在parent的devclass drivers中查找；如果为空，就直接返回parent devclass drivers队列中
+ * 的一个元素作为该device的driver
  */
 int
 device_set_devclass(device_t dev, const char *classname)
@@ -2933,6 +2946,11 @@ device_set_devclass(device_t dev, const char *classname)
 		return (EINVAL);
 	}
 
+	/* 
+		因为这里传入的是driver的devclass name，所以会在以driver命名的devclass中
+		添加响应的device，这样就解释了为什么会创建以driver name命名的devclass，也是
+		为了管理设备来用的
+	*/
 	dc = devclass_find_internal(classname, NULL, TRUE);
 	if (!dc)
 		return (ENOMEM);
@@ -2985,16 +3003,22 @@ device_set_driver(device_t dev, driver_t *driver)
 		free(dev->softc, M_BUS_SC);
 		dev->softc = NULL;
 	}
-	/* 设置device的描述 */
+	/* 设置device的desc，通过源码注释可以看到，desc其实是device对于driver的描述 */
 	device_set_desc(dev, NULL);
 
-	/* delete掉device中的kobj成分 */
+	/* 
+		delete掉device中的kobj成分，其中包含了对kobj_class的free操作，但是下边kobj_init
+		貌似又会对kobj_class来进行某种操作，所以这一步推断一下：device的kobj也是会存放某种信息
+		的，而且好像是跟driver有关（因为涉及到了kobj_class类型的操作）。类比一下devclass，难道
+		这个结构体也是用来管理某一类的对象或者方法？？
+	*/
 	kobj_delete((kobj_t) dev, NULL);
 	dev->driver = driver;
 
 	/* 
-		如果driver为空，那么就安装kobj的相关流程，为device重新创建一个driver实例，
-		如果不为空，那就为device创建一个null kobj_class
+		如果driver不为空，那么就按照kobj的相关流程，为device重新创建一个driver实例，
+		如果为空，那就为device创建一个null kobj_class
+		kobj_init 函数的操作貌似也就是把device跟driver的ops统一了一下
 	*/
 	if (driver) {
 		kobj_init((kobj_t) dev, (kobj_class_t) driver);
