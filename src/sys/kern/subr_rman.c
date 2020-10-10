@@ -131,6 +131,8 @@ rman_init(struct rman *rm)
 	if (once == 0) {
 		once = 1;
 		TAILQ_INIT(&rman_head);
+
+		/* 专门用来保护rman_head的一个锁，这里对其进行初始化操作 */
 		mtx_init(&rman_mtx, "rman head", NULL, MTX_DEF);
 	}
 
@@ -148,11 +150,20 @@ rman_init(struct rman *rm)
 	mtx_init(rm->rm_mtx, "rman", NULL, MTX_DEF);
 
 	mtx_lock(&rman_mtx);
+	/* 专门用来管理resource manager的一个双端链表，操作的时候需要加锁 */
 	TAILQ_INSERT_TAIL(&rman_head, rm, rm_link);
 	mtx_unlock(&rman_mtx);
 	return 0;
 }
 
+/*
+	该函数应该是对所划分的资源区域的管理，rm是表示的是resource manager，可能
+	是memory，也可能是interrupt。函数中包含一个将resource_i结构体添加到rm list
+	中的操作，所以这个函数的会扩大rm管理的资源的范围。如果是向刚刚初始化的总线添加，
+	猜测可能就是对该总线的某种资源管理区域进行初始化设置（因为这个时候rm list中应该
+	还是每天添加过元素的？），如果list中已经有了元素，这个时候就要判断新增加的资源项与
+	原有的资源项的区域是否有重叠？
+*/
 int
 rman_manage_region(struct rman *rm, rman_res_t start, rman_res_t end)
 {
@@ -161,8 +172,16 @@ rman_manage_region(struct rman *rm, rman_res_t start, rman_res_t end)
 
 	DPRINTF(("rman_manage_region: <%s> request: start %#jx, end %#jx\n",
 	    rm->rm_descr, start, end));
+	
+	/*
+		首先要来判断我们传入的start和end值是否符合要求，如果我们传入的start的值比
+		rm给定的start还要小，或者end比rm给定的end还要大，那就说明我们的参数已经超
+		过了rm所能管理的范围，所以这个是不能接受的
+	*/
 	if (start < rm->rm_start || end > rm->rm_end)
 		return EINVAL;
+
+	/* 如果传入的区域大小参数符合要求，那么就分配一块resource_i大小的区域 */
 	r = int_alloc_resource(M_NOWAIT);
 	if (r == NULL)
 		return ENOMEM;
@@ -174,17 +193,35 @@ rman_manage_region(struct rman *rm, rman_res_t start, rman_res_t end)
 
 	/* Skip entries before us. */
 	TAILQ_FOREACH(s, &rm->rm_list, r_link) {
+		/*
+			查找end为~0，这种情况貌似要特殊处理，根据set_resource的值来进行判断，
+			end = start + count,其中start和count用set的值，end通过这两个值进行计算
+			推断: set函数要在该函数之前执行
+		*/ 
 		if (s->r_end == ~0)
 			break;
+
+		/*
+			通过下面的逻辑我们可以看到，会存在resource list中有的资源在总线管理的范围之外，
+			或者分配的资源是空的？？
+			因为r是我们所要分配的资源，如果s -> end + 1 >= r -> r_start，说明r所需要的资源肯定
+			是要在s的后边，从这里我们可以推断，rm中resource list它的资源也是按照他们定义的范围往后
+			延续的，这样的做的好处就是便于对资源进行管理
+		*/
 		if (s->r_end + 1 >= r->r_start)
 			break;
 	}
 
 	/* If we ran off the end of the list, insert at the tail. */
 	if (s == NULL) {
+		// 貌似是向原来的resource list中添加资源项
 		TAILQ_INSERT_TAIL(&rm->rm_list, r, r_link);
 	} else {
-		/* Check for any overlap with the current region. */
+		/* 
+			Check for any overlap with the current region. 
+			检查是否与当前的区域重叠，意思就是rm list中已经有元素占用了该区域，
+			所以新增加的区域如果跟这部分区域有重叠，就会报冲突
+		*/
 		if (r->r_start <= s->r_end && r->r_end >= s->r_start) {
 			rv = EBUSY;
 			goto out;

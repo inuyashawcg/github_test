@@ -63,6 +63,11 @@ static_hints_to_env(void *data __unused)
 	char *line, *eq;
 	int eqidx, i;
 
+	/* 
+		extern char static_hints[];
+		C 库函数 char *strchr(const char *str, int c) 
+		: 在参数 str 所指向的字符串中搜索第一次出现字符 c（一个无符号字符）的位置
+	 */
 	cp = static_hints;
 	while (cp && *cp != '\0') {
 		eq = strchr(cp, '=');
@@ -74,12 +79,16 @@ static_hints_to_env(void *data __unused)
 		i = strlen(cp);
 		line = malloc(i + 1, M_TEMP, M_WAITOK);
 		strcpy(line, cp);
+
+		/* 这一步的操作应该是把等号替换为空 */
 		line[eqidx] = line[i] = '\0';
 		/*
 		 * Before adding a hint to the dynamic environment, check if
 		 * another value for said hint has already been added.  This is
 		 * needed because static environment overrides static hints and
 		 * dynamic environment overrides all.
+		 * 
+		 * 向系统添加 hint 值，感觉有点像是map
 		 */
 		if (testenv(line) == 0)
 			kern_setenv(line, line + eqidx + 1);
@@ -142,6 +151,9 @@ res_find(char **hintp_cookie, int *line, int *startln,
 	 * indicates to us that we should be figuring out based on the current
 	 * environment where to search.  This keeps us sane throughout the
 	 * entirety of a single search.
+	 * 
+	 * 我们希望调用者可以提供一个它们正在追踪的 hintp_cookie 值，如果它们没有提供的话，
+	 * 我们就需要根据当前的环境去确定要搜索的位置
 	 */
 	if (*hintp_cookie == NULL) {
 		hintp = NULL;
@@ -150,6 +162,7 @@ res_find(char **hintp_cookie, int *line, int *startln,
 			 * static_hints, if it was previously used, has
 			 * already been folded in to the environment
 			 * by this point.
+			 * 静态提示，如果之前被使用过，那它已经被合并到环境当中了
 			 */
 			mtx_lock(&kenv_lock);
 			cp = kenvp[0];

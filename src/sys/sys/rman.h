@@ -115,6 +115,8 @@ TAILQ_HEAD(resource_head, resource_i);
 
 struct rman {
 	struct	resource_head 	rm_list;
+
+	/* 貌似涉及到resource manager 的都需要加锁来保护一下？ */
 	struct	mtx *rm_mtx;	/* mutex used to protect rm_list */
 	TAILQ_ENTRY(rman)	rm_link; /* link in list of all rmans */
 	rman_res_t	rm_start;	/* index of globally first entry */

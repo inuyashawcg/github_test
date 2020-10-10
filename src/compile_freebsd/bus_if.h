@@ -658,6 +658,9 @@ typedef struct resource_list * bus_get_resource_list_t(device_t _dev,
  * implement their resource handling. It should return the resource
  * list of the given child device.
  * 
+ * 这个函数实现的功能可能是获取到child它所拥有的resource list，但是这个resource仅仅是
+ * 一个空壳，实际的资源还未分配到其中，所以parent bus就要根据子设备资源链表来给他分配资源？？
+ * 
  * @param _dev		the parent device of @p _child
  * @param _child	the device which owns the resource list
  */
@@ -824,7 +827,7 @@ typedef int bus_describe_intr_t(device_t _dev, device_t _child,
  * @param _child	the device which allocated the resource
  * @param _irq		the resource representing the interrupt
  * @param _cookie	the cookie value returned when the interrupt
- *			was originally registered
+ *			was originally registered 中断最初注册的时候返回cookie的值
  * @param _descr	the description to associate with the interrupt
  */
 

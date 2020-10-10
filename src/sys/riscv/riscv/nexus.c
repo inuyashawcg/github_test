@@ -138,8 +138,15 @@ nexus_fdt_probe(device_t dev)
 static int
 nexus_attach(device_t dev)
 {
-
+	/* 
+		从定义可以看出， mem_rman应该是memory resource manger，
+		还要一个定义的是irq_rman,应该是中断资源管理
+	*/
 	mem_rman.rm_start = 0;
+
+	/*
+		#define	BUS_SPACE_MAXADDR 	0xFFFFFFFFFFFFFFFFUL
+	*/
 	mem_rman.rm_end = BUS_SPACE_MAXADDR;
 	mem_rman.rm_type = RMAN_ARRAY;
 	mem_rman.rm_descr = "I/O memory addresses";

@@ -313,29 +313,31 @@ struct driver {
 
 /**
  * @brief A resource mapping.
+ * 类比一下虚拟内存方面的知识，这个很可能就是用来记录资源属性的一个结构体，包括位置、tag
  */
 struct resource_map {
-	/*
-		typedef void *bus_space_tag_t;
-		typedef uint8_t *bus_space_handle_t;
-		typedef unsigned long bus_size_t;
-	*/
+
+	/* 不同的平台也是有不同的定义的，应该是表示bus资源空间相关的数据，tag？？ */
 	bus_space_tag_t r_bustag;
-	bus_space_handle_t r_bushandle;
+
+	/* 感觉像是平台相关，不同的平台的定义是不一样的,但是基本上都是表示int32、int64或者 unsigned long类型 */
+	bus_space_handle_t r_bushandle;  
 	bus_size_t r_size;
 	void	*r_vaddr;
 };
 	
 /**
  * @brief Optional properties of a resource mapping request.
+ * 资源映射请求相关，这个很可能跟虚拟内存有联系，结构体中包含了一个内存属性相关的元素
  */
 struct resource_map_request {
 	size_t	size;
-	rman_res_t offset;	//64 bit的一个数值
+	rman_res_t offset;	//64 bit的一个数值，应该是表示偏移量，很可能与查找资源所在的位置有关
 	rman_res_t length;
-	vm_memattr_t memattr;	// char类型
+	vm_memattr_t memattr;	// char类型，vm：虚拟内存相关，内存属性代码
 };
 
+/* 仅仅是设置了一下内存的属性 memattr = VM_MEMATTR_UNCACHEABLE */
 void	resource_init_map_request_impl(struct resource_map_request *_args,
 	    size_t _sz);
 #define	resource_init_map_request(rmr) 					\
@@ -352,7 +354,11 @@ struct	resource;
  */
 struct resource_list_entry {
 	STAILQ_ENTRY(resource_list_entry) link;
+
+	/* 就如上述所说，这个应该是表示资源的类型 */
 	int	type;			/**< @brief type argument to alloc_resource */
+
+	/* 资源id，应该是某一个大类资源下的资源的id */
 	int	rid;			/**< @brief resource identifier */
 	int	flags;			/**< @brief resource flags */
 	struct	resource *res;		/**< @brief the real resource when allocated */
@@ -454,6 +460,10 @@ int	bus_generic_child_present(device_t dev, device_t child);
 */
 int	bus_generic_config_intr(device_t, int, enum intr_trigger,
 				enum intr_polarity);
+
+/* 
+	配置中断的描述
+*/
 int	bus_generic_describe_intr(device_t dev, device_t child,
 				  struct resource *irq, void *cookie,
 				  const char *descr);
@@ -572,6 +582,14 @@ int	bus_child_pnpinfo_str(device_t child, char *buf, size_t buflen);
 int	bus_child_location_str(device_t child, char *buf, size_t buflen);
 void	bus_enumerate_hinted_children(device_t bus);
 
+/* 
+	从parent bus中分配资源，从给bus_alloc_resource()函数的start，end赋值的情况来看，
+	start和end表示的应该是子设备所能获取到的资源的范围，从0到开始到最大值，而不是表示子设备
+	所请求的分配的索引范围，count的赋值是1，表示请求分配的量，所以可以推测一下：这个函数每次
+	只向parent bus请求一个资源项，在parent bus资源链表中的任意位置
+	更正一下，start如果是0的话就表示起始地址是任意的，end如果是~0的话表示结束地址是任意的，
+	逻辑上有点差别。
+*/
 static __inline struct resource *
 bus_alloc_resource_any(device_t dev, int type, int *rid, u_int flags)
 {

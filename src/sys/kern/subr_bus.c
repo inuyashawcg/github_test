@@ -3636,7 +3636,7 @@ resource_list_reserve(struct resource_list *rl, device_t bus, device_t child,
  * somewhere in the child device's ivars (see device_get_ivars()) and
  * its implementation of BUS_ALLOC_RESOURCE() would find that list and
  * then call resource_list_alloc() to perform the allocation.
- * 总线的驱动会存储子设备的资源列表
+ * 总线的驱动会存储子设备的资源列表，这里做出一个假设：子设备
  * 
  * @param rl		the resource list to allocate from
  * @param bus		the parent device of @p child
@@ -3667,6 +3667,10 @@ resource_list_alloc(struct resource_list *rl, device_t bus, device_t child,
 	int isdefault = RMAN_IS_DEFAULT_RANGE(start, end);
 
 	if (passthrough) {
+		/* 
+			BUS_ALLOC_RESOURCE 子设备向父设备请求资源分配，判断条件是如果子设备的parent不是
+			bus，那么就调用这个宏来获取parent 不是的资源；如果是，就执行下面的操作 
+		*/
 		return (BUS_ALLOC_RESOURCE(device_get_parent(bus), child,
 		    type, rid, start, end, count, flags));
 	}
@@ -4347,6 +4351,8 @@ bus_generic_adjust_resource(device_t dev, device_t child, int type,
  *
  * This simple implementation of BUS_ALLOC_RESOURCE() simply calls the
  * BUS_ALLOC_RESOURCE() method of the parent of @p dev.
+ * 有些驱动实例中用到的函数是bus_generic_rl_alloc_resource(),可以参考一下这个
+ * 函数的功能实现
  */
 struct resource *
 bus_generic_alloc_resource(device_t dev, device_t child, int type, int *rid,
@@ -4662,10 +4668,14 @@ bus_generic_rl_alloc_resource(device_t dev, device_t child, int type,
 		return (BUS_ALLOC_RESOURCE(device_get_parent(dev), child,
 		    type, rid, start, end, count, flags));
 
+	/* 
+		获取到了子设备资源链表，链表可能是空的，只是标定了子设备需要的资源的类型，也可能有rid等等
+		这些，然后parent bus需要根据type，rid等标识来给从自身管理的资源列表中给子设备分配
+	*/
 	rl = BUS_GET_RESOURCE_LIST(dev, child);
 	if (!rl)
 		return (NULL);
-
+	/* 这一步可能就是要开始执行分配操作了 */
 	return (resource_list_alloc(rl, dev, child, type, rid,
 	    start, end, count, flags));
 }
@@ -4711,6 +4721,8 @@ bus_null_rescan(device_t dev)
  * indirection through the parent's method table, making for slightly
  * less-wordy code.  In the future, it might make sense for this code
  * to maintain some sort of a list of resources allocated by each device.
+ * 
+ * 所有这些真正要做的就是通过父级的方法表隐藏间接寻址，从而使代码稍微不那么冗长
  */
 
 int
@@ -4719,12 +4731,20 @@ bus_alloc_resources(device_t dev, struct resource_spec *rs,
 {
 	int i;
 
+	/* 
+		从这个代码来看的话，rs跟res应该是存在某种联系，struct resource_spec{}里边包含了
+		三个元素：rid，flag，跟type，所以很可能是用来表示对应res中元素的属性
+	*/
 	for (i = 0; rs[i].type != -1; i++)
 		res[i] = NULL;
 	for (i = 0; rs[i].type != -1; i++) {
 		res[i] = bus_alloc_resource_any(dev,
 		    rs[i].type, &rs[i].rid, rs[i].flags);
 		if (res[i] == NULL && !(rs[i].flags & RF_OPTIONAL)) {
+			/*
+				如果res在alloc之后还是为空，那就证明分配失败，索性把dev的resource设置
+				为空，然后返回device配置失败
+			*/
 			bus_release_resources(dev, rs, res);
 			return (ENXIO);
 		}
