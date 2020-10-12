@@ -1,0 +1,34 @@
+hypothetical   	假设的，假定的
+probe			盘问，查看，检测，探究
+suspend			暂停，中止，延缓，推迟
+transition		过渡，变革，变迁
+mandatory		强制的，义务的，法定的
+omit			省略
+protocol		协议
+peripheral		外围的，次要的，周边的
+prominent		重要的，突出的，显眼的
+migration		迁移，移居，转移，改变
+entity			实体
+hang			悬挂，挂载
+normalize		规范化，标准化，正常化
+mechanism		机制，构造，方法
+integrated		集成的，综合的，完整统一的
+conversion		转换
+customization	定制
+reveal			揭示，显示，透露
+PnP: 			Plug-n-Play	 即插即用
+proprietary		专有的，专利的，专营的
+legacy			遗产，遗留
+practical		实际的，真实的，客观存在的
+parse			解析
+enumeration		枚举，列举事实
+contiguous		连续的
+manipulate		操纵，使用，控制
+legitimate		合理的，合法的
+miscellaneous	其他的，各种各样的
+scatter			分散，散开，驱散
+arbitrary		任意的，随机的，武断的
+chunk			块，大块
+
+
+sudo apt-get install build-essential mercurial make cmake autoconf automake libtool libasound2-dev libpulse-dev libaudio-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libxxf86vm-dev libxss-dev libgl1-mesa-dev libdbus-1-dev libudev-dev libgles2-mesa-dev libegl1-mesa-dev libibus-1.0-dev fcitx-libs-dev libsamplerate0-dev libsndio-dev libwayland-dev libxkbcommon-dev

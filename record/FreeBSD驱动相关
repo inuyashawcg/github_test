@@ -1,0 +1,54 @@
+搞清楚Linux系统的总线，驱动跟设备之间的关系是什么样的，可以从一下方面入手分析:
+linux总线是分级的，直接跟CPU打交道的是可能仅仅只有一种总线类型（PCI），然后其他类型的总线或者设备通过类似于桥类型的一种功能模块统一跟PCI进行数据交互。但是嵌入式可能跟PC的机制是不同的，嵌入式有可能是某些设备直接跟CPU打交道的？
+设备的挂载，驱动的注册
+
+
+驱动程序可以通过KLD命令进行动态加载
+
+FreeBSD的makefile文件进行了简化，会包含有 .include <bsd.kmod.mk> 
+
+FreeBSD中舍弃了Block Device驱动，原因参考FreeBSD Architecture Handbook:
+内核通常会给块设备程序提供一个缓存来进行操作，缓存会对写入操作的结果进行重新排序，这会使得应用程序无法实时感知磁盘通的数据。这也会导致磁盘一旦发生crash，数据恢复将变得非常困难。所以FreeBSD采取的措施就是直接舍弃块设备驱动，直接都改为字符设备
+
+网络设备驱动是通过system call socket来进行实现的
+
+驱动程序可以通过 resource_*() 函数对配置文件进行修改
+FreeBSD 3.0版本之后引入了一种新的总线方式newbus，它的设计目的是提供一种更加面向对象的方法来管理系统提供的各种各样的总线和设备
+
+
+
+BIOS-->MBR-->BL-->加载内核-->设定运行等级-->init-->加载内核模块-->执行不同运行级别的脚本程序-->执行/etc/rc.d/rc.local-->执行/bin/login
+grub  systemd
+
+Linux与C源码阅读：
+https://lxr.missinglinkelectronics.com/linux
+
+Graphviz
+
+/usr/obj/usr/src/sys/MYKERNEL/device_if.h
+
+通过配置FreeBSD ssh远程登录到虚拟机，然后拷贝文件到主机
+FreeBSD:
+	vi /etc/ssh/sshd_config
+	/etc/rc.d/sshd restart
+主机登录：
+ssh root@192.168.153.128
+FreeBSD ip: 192.168.153.128
+然后利用scp命令拷贝即可：
+scp root@192.168.153.128:/usr/obj/src/sys/MYKERNEL/device_if.h /home/wcg/Desktop
+
+FreeBSD svn:
+https://svn.freebsd.org/base/stable/12/
+
+Newbus机制：
+每个设备都可以有子设备，一旦有子设备，该设备就会被成为bus；bus跟bus之间可以通过“桥”的设备进行通信
+
+“桥”设备可以认为是在一个总线中的设备，然后它拥有一个子设备，然后这个子设备是属于另外一个总线的的设备。比如PCI-to-PCI bridge，
+它其实就是一个parent bus是PCI的，名字叫做pcibN的设备，然后它有一个child，名字叫做pciN，然后这个child在需要attach的一个总线上
+
+在有些设备平台上，不同的总线的中断是分开控制的，例如PCI和ISA总线。但是在有些平台，PCI和ISA总线中断都是通过上层nexus来进行控制
+为了规范化访问内存和接口映射资源，newbus集成了NetBSD的bus_space APIS，可以用来替代inb/outb,read/writes。这也使得驱动能够更加简单的使用内存映射寄存器和端口映射寄存器
+
+Newbus最核心的设计思想就是“基于对象编程”，每一个设备都会有一个它所支持的方法表，系统或者其他设备可以通过这个方法表中提供的方法来对这个设备进行控制，或者获取相应的服务等等
+
+newbus系统中，设备的方法是有多个drivers来提供。当一个设备通过自动配置的方式跟驱动匹配之后，它将会使用对应驱动所声明的方法表；当设备跟驱动取消匹配之后，它跟这个方法表就会断开连接，等到它再匹配新的驱动之后，则它又会连接新的方法表。这样就可以动态替换驱动

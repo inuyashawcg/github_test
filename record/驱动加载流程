@@ -1,0 +1,110 @@
+这里以从上到下的顺序进行驱动程序加载的简单分析
+通过阅读驱动代码实例，我们可以比较清晰的了解驱动程序编写的总体架构。一般就是定义一些操作设备的功能函数，填充相关的结构体，最后再调用宏:
+DRIVER_MODULE(name, busname, driver, devclass, evh, arg)
+name: 模块的名称
+busname: 挂载的总线名称
+driver: 驱动
+devclass: devclass结构体
+evh: 事件处理函数
+arg: 事件处理函数参数
+
+其中会涉及连个比较重要的结构体:
+static struct driver_module_data name##_##busname##_driver_mod = {	\
+	evh, arg,							\
+	#busname,							\
+	(kobj_class_t) &driver,						\
+	&devclass,							\
+	pass								\
+};									\
+									\
+static moduledata_t name##_##busname##_mod = {				\
+	#busname "/" #name,						\
+	driver_module_handler,						\
+	&name##_##busname##_driver_mod					\
+};	
+
+我们需要关注的是 driver_module_handler() 函数,截取部分代码:
+
+bus_devclass = devclass_find_internal(dmd->dmd_busname, NULL, TRUE);
+	error = 0;
+
+	switch (what) {
+	case MOD_LOAD:
+		if (dmd->dmd_chainevh)
+			error = dmd->dmd_chainevh(mod,what,dmd->dmd_chainarg);
+
+		pass = dmd->dmd_pass;
+		driver = dmd->dmd_driver;
+		PDEBUG(("Loading module: driver %s on bus %s (pass %d)",
+		    DRIVERNAME(driver), dmd->dmd_busname, pass));
+		error = devclass_add_driver(bus_devclass, driver, pass,
+		    dmd->dmd_devclass);
+		break;
+		...
+
+在MOD_LOAD条件成立时，会调用 devclass_add_driver(),到这里我们就可以认为程序进入了驱动加载阶段
+
+	/*
+		将driverlink添加到bus devclass中
+	*/
+	TAILQ_INSERT_TAIL(&dc->drivers, dl, link);
+	driver->refs++;		/* XXX: kobj_mtx */
+	dl->pass = pass;
+
+	/* 注册pass level */
+	driver_register_pass(dl);
+
+	if (device_frozen) {
+		dl->flags |= DL_DEFERRED_PROBE;
+	} else {
+		devclass_driver_added(dc, driver);
+	}
+	bus_data_generation_update();
+	return (0);
+
+它会调用到另外一个函数 devclass_driver_added(),函数就是对已经加载到devclass中的驱动程序进行注册。这里边会遇到一个宏BUS_DRIVER_ADDED，他就会牵涉到newbus机制中的有关.m的机制。.m文件是用来定义接口的，我们可以把接口写到其中然后进行编译，就会生成对应的.c和.h文件。所以我们要查看BUS_DRIVER_ADDED到底表示的是什么含义，就需要编译源码，找到相应的文件。（定义在bus_if.h文件中）
+通过阅读源码可以看出，BUS_DRIVER_ADDED他所调用的函数是依赖于具体的驱动程序，不同驱动的实现方式也是有一定的区别，所以要结合具体的场景。但是它会有一个default函数，如果用户没有定义相应的函数，那么就会调用default函数，这里就以default函数作为基准进行分析。
+
+void bus_generic_driver_added(device_t dev, driver_t *driver)
+{
+	device_t child;
+
+	DEVICE_IDENTIFY(driver, dev);
+	/* 在所有device children中遍历 */
+	TAILQ_FOREACH(child, &dev->children, link) {
+		if (child->state == DS_NOTPRESENT ||
+		    (child->flags & DF_REBID))
+			device_probe_and_attach(child);
+	}
+}
+
+里边又有一个宏DEVICE_IDENTIFY，这个宏主要用于总线对于设备的识别。在FreeBSD中支持的一些老的总线，比如ISA总线，它是不具有自动识别设备的功能的(目前还不太清楚ISA机制是什么样的，先暂时这么认为)，这个时候就需要利用这个DEVICE_IDENTIFY宏来进行设备的识别。一般这种类型的宏都是跟驱动类型相关的，但是这个宏的话也没有找到default函数，具体的实现方式也不清楚。通过查看一些实例中的device_identify()函数，也可以发现实现方式多种多样，所以就默认是正确吧。
+接下来就进入到了device_probe_and_attach()函数:
+
+int
+device_probe_and_attach(device_t dev)
+{
+	int error;
+
+	GIANT_REQUIRED;
+
+	error = device_probe(dev);
+	if (error == -1)
+		return (0);
+	else if (error != 0)
+		return (error);
+
+	CURVNET_SET_QUIET(vnet0);
+	error = device_attach(dev);
+	CURVNET_RESTORE();
+	return error;
+}
+
+一共是分成了两步，第一步是device_probe(dev)；第二步是在第一步结果正确之后，在执行device_attach(dev)
+device_probe()主要是检测设备，方式是通过比较driver -> name与device -> devclass -> name是否一致。如果一致的话，就对该设备和驱动进行匹配度的检查，分两种情况:
+找到了最佳匹配，也就是函数返回的结果为0.这个时候就会break掉循环检测，就以该驱动来匹配设备
+未找到最佳匹配。这个时候就要对所有的驱动进行检测，找出其中匹配程度最高的一项来匹配该设备
+device_attach(): 涉及到了一些有关资源分配和sysctl相关的操作，这里目前还有些疑问，暂时先不做考虑，以后在补充
+
+
+

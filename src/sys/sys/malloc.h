@@ -136,6 +136,18 @@ struct malloc_type_header {
 	char				mth_name[MALLOC_MAX_NAME];
 };
 
+/*
+	MALLOC_DEFINE宏应该是用于自定以一个新的malloc_type，malloc_type结构体描述了所分配内存的目的，
+		对性能是没有影响的，主要用于内存分析和基本健全性检查
+
+	type: 新malloc_type结构的名字，通常以M_为前缀并包含全大写字母，如 M_FOO
+	shortdesc: 接收新的malloc_type结构的简短信息，该参数应用于vmstat -m命令的输出。shortdesc不应该包含
+		空格，这样使用脚本解析vmstat -m命令的时候输出才会更容易一些
+	longdesc: 接收新malloc_type结构的长描述信息
+
+	如果是要定义一个私有的malloc_type，那么就需要在MALLOC_DEFINE宏调用前加上static关键字。事实上，如果非
+	静态的MALLOC_DEFINE没有对应的MALLOC_DECLARE调用，则gcc-4.x将会给出一个编译警告
+*/
 #ifdef _KERNEL
 #define	MALLOC_DEFINE(type, shortdesc, longdesc)			\
 	struct malloc_type type[1] = {					\
@@ -146,6 +158,9 @@ struct malloc_type_header {
 	SYSUNINIT(type##_uninit, SI_SUB_KMEM, SI_ORDER_ANY,		\
 	    malloc_uninit, type)
 
+/*
+	类比MALLOC_DEFINE，MALLOC_DECLARE定义了一个新的带extern的malloc_type结构
+*/
 #define	MALLOC_DECLARE(type) \
 	extern struct malloc_type type[1]
 
