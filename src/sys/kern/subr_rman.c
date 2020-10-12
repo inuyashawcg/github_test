@@ -107,6 +107,7 @@ SYSCTL_INT(_debug, OID_AUTO, rman_debug, CTLFLAG_RWTUN,
 
 static MALLOC_DEFINE(M_RMAN, "rman", "Resource manager");
 
+/* rman_head 是一个rman类型的队列 */
 struct rman_head rman_head;
 static struct mtx rman_mtx; /* mutex to protect rman_head */
 static int int_rman_release_resource(struct rman *rm, struct resource_i *r);
@@ -128,6 +129,7 @@ rman_init(struct rman *rm)
 {
 	static int once = 0;
 
+	/* 保证一些init操作只执行一次 */
 	if (once == 0) {
 		once = 1;
 		TAILQ_INIT(&rman_head);
@@ -241,7 +243,13 @@ rman_manage_region(struct rman *rm, rman_res_t start, rman_res_t end)
 		if (t && (r->r_end + 1 != t->r_start || t->r_flags != 0))
 			t = NULL;
 
-		/* See if we can merge with the current region. */
+		/* 
+			See if we can merge with the current region.
+			如果前一个resource的end等于后一个resource的start，那么就将两个resource
+			合并到一起；如果后一个resource的end又等于后后一个resource的start，那么就
+			将着3个resource合并到一起，以此类推，所有的首位地址相连的resource都可以合并
+			到一起
+		*/
 		if (s->r_end + 1 == r->r_start && s->r_flags == 0) {
 			/* Can we merge all 3 regions? */
 			if (t != NULL) {
@@ -268,6 +276,15 @@ out:
 	return rv;
 }
 
+/*
+	通过manual page上的解释我们可以看到，该函数是添加region，这里就可以推测:
+	nexus中调用这个函数可能就是给bus设置一个IO和中断的region，以后凡是涉及到
+	io或者中断操作的都是在这个区域中进行操作，后边如果有新的设备添加，可能会有新的
+	region引入，这时候就再次调用这个函数，就可以把新的资源region添加到已有的region
+	当中
+	从nexus源代码中的逻辑可以看到，调用region函数的时候已经把最大的地址传入，所以
+	以后还会有别的资源添加，还有地址空间可以使用吗？
+*/
 int
 rman_init_from_resource(struct rman *rm, struct resource *r)
 {
@@ -470,6 +487,18 @@ rman_adjust_resource(struct resource *rr, rman_res_t start, rman_res_t end)
 
 #define	SHARE_TYPE(f)	(f & (RF_SHAREABLE | RF_PREFETCHABLE))
 
+/* 
+	该函数是rman的逻辑主体，它尝试在rm管理的区域中找到一块连续的区域供device使用，
+	需要满足 start + count - 1 <= end，flag表示数据对齐的要求，bound表示对边界
+	的限制，通常情况下设置为0，表示对于边界没有任何限制。RF_SHAREABLE如果被设置的话
+	就会分配一个共享区域，否则分配一个独占的区域
+	end值表示resource所能接受的最高的ending value，意思可能是resource的end最大不能
+	超过指定的值，所以只需要保证计算出来的end值小于指定的值就可以；start表示resource所能
+	接受的最小的值，也就是bus分配给resource的start是可以大于这个指定的start的值的。从这
+	可以看出，resource的分配其实是一个动态变化的过程，前后都有可以调整的裕度值，这个函数所
+	要做的工作也就是从rm管理的资源项中找到一个符合要求的，又满足一定限制条件的资源项分配给
+	device即可
+*/
 struct resource *
 rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 			    rman_res_t count, rman_res_t bound, u_int flags,
@@ -491,6 +520,10 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 
 	mtx_lock(rm->rm_mtx);
 
+	/*
+		指向resource list的起始位置元素，rm_list管理着resource manager中包含的resource，
+		所以其实就是在resource list中找到一个元素，能够满足设备的需要
+	*/
 	r = TAILQ_FIRST(&rm->rm_list);
 	if (r == NULL) {
 	    DPRINTF(("NULL list head\n"));
@@ -498,6 +531,12 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 	    DPRINTF(("rman_reserve_resource_bound: trying %#jx <%#jx,%#jx>\n",
 		    r->r_end, start, count-1));
 	}
+
+	/*
+		循环条件中可以看出，如果元素的end值小于指定的start + count - 1，需要继续查找，也就是
+		这种情况下的resource是不符合要求的，也就是resource的end一定要大于计算值，这样才能把请求的
+		资源给包含起来
+	*/
 	for (r = TAILQ_FIRST(&rm->rm_list);
 	     r && r->r_end < start + count - 1;
 	     r = TAILQ_NEXT(r, r_link)) {
@@ -519,12 +558,16 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 	bmask = ~(bound - 1);
 	/*
 	 * First try to find an acceptable totally-unshared region.
+	 * 优先查找非共享区域
 	 */
 	for (s = r; s; s = TAILQ_NEXT(s, r_link)) {
 		DPRINTF(("considering [%#jx, %#jx]\n", s->r_start, s->r_end));
 		/*
 		 * The resource list is sorted, so there is no point in
 		 * searching further once r_start is too large.
+		 * 资源列表已经排序，因此一旦r_start过大，就没有不要再查找
+		 * 如果s还是表示rm_list中的元素，s -> r_start 如果大于end - (count - 1)，
+		 * count一定，那么分配的resource的end肯定是要超过所要求的最大end值的
 		 */
 		if (s->r_start > end - (count - 1)) {
 			DPRINTF(("s->r_start (%#jx) + count - 1> end (%#jx)\n",
@@ -543,7 +586,7 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 		rstart = ummax(s->r_start, start);
 		/*
 		 * Try to find a region by adjusting to boundary and alignment
-		 * until both conditions are satisfied. This is not an optimal
+		 * until both conditions are staisfied. This is not an optimal
 		 * algorithm, but in most cases it isn't really bad, either.
 		 */
 		do {

@@ -146,6 +146,7 @@ nexus_attach(device_t dev)
 
 	/*
 		#define	BUS_SPACE_MAXADDR 	0xFFFFFFFFFFFFFFFFUL
+		rman_init()函数执行之前要求先把type和descr设置完毕
 	*/
 	mem_rman.rm_end = BUS_SPACE_MAXADDR;
 	mem_rman.rm_type = RMAN_ARRAY;
@@ -210,6 +211,9 @@ static struct resource *
 nexus_alloc_resource(device_t bus, device_t child, int type, int *rid,
     u_long start, u_long end, u_long count, u_int flags)
 {
+	/*
+		DEVTONX(child)其实就是获取child的ivars，child的ivars中包含有其对资源的需求
+	*/
 	struct nexus_device *ndev = DEVTONX(child);
 	struct resource *rv;
 	struct resource_list_entry *rle;

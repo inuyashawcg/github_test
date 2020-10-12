@@ -30,6 +30,7 @@
         "tuple": "cpp",
         "utility": "cpp",
         "istream": "cpp",
-        "ostream": "cpp"
+        "ostream": "cpp",
+        "cstdint": "cpp"
     }
 }

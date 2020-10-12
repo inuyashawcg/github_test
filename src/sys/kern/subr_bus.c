@@ -251,6 +251,11 @@ devclass_sysctl_init(devclass_t dc)
 
 	if (dc->sysctl_tree != NULL)
 		return;
+
+	/*
+		sysctl_ctx其实就是一个双端队列,sysctl_ctx_init函数所做的工作就是
+		首先判断一下sysctl_ctx是否为空，如果不为空的话就初始该队列
+	*/
 	sysctl_ctx_init(&dc->sysctl_ctx);
 	dc->sysctl_tree = SYSCTL_ADD_NODE(&dc->sysctl_ctx,
 	    SYSCTL_STATIC_CHILDREN(_dev), OID_AUTO, dc->name,
