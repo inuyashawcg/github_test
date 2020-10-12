@@ -35,7 +35,10 @@ static echo_t *echo_message;
 
 static struct cdev *echo_dev;   
 
-// 一般情况下，d_open会执行设备输入输出前的准备工作，而d_close函数会取消之前所做的工作
+/*
+	一般情况下，d_open会执行设备输入输出前的准备工作，而d_close函数会取消之前所做的工作
+	通过函数设计可以发现，传参一般都会选择传指针
+*/
 static int
 echo_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 {

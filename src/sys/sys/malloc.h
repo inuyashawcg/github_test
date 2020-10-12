@@ -183,7 +183,24 @@ extern struct mtx malloc_mtx;
  */
 typedef void malloc_type_list_func_t(struct malloc_type *, void *);
 
+/*
+	用于释放contigmalloc申请的内存区域，释放完成后可用于内存的再分配,size要设置为跟malloc
+	大小的相同值
+*/
 void	contigfree(void *addr, unsigned long size, struct malloc_type *type);
+/*
+	该函数用于连续物理地址的分配，size表示其大小，如果为0的话会报错，如果分配成功的话，那么
+	所分配的内存物理地址范围将落在闭区间[low, high]中
+
+	aligment用于指定所分配内存的物理对齐边界，以字节作为单位，取值的话必须是2的幂
+
+	参数boundary指定所分配的内存不可以跨越的物理地址的边界：任何boundary的整数倍地址都是该
+	内存不能够跨越的，此参数值只能是0或者2的幂，取0表示没有边界的限制
+
+	flags用于定制函数contigmalloc的行为，取值为M_ZERO，表示所分配的物理内存全部由0填充；
+	M_NOWAIT，表示因资源短缺而无法立即实现时要返回null；M_WAITOK，表示调用该函数的进程愿意
+	等待该资源而进入阻塞状态，直到资源可获取时才唤醒
+*/
 void	*contigmalloc(unsigned long size, struct malloc_type *type, int flags,
 	    vm_paddr_t low, vm_paddr_t high, unsigned long alignment,
 	    vm_paddr_t boundary) __malloc_like __result_use_check
