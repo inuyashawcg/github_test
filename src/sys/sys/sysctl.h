@@ -141,6 +141,12 @@ struct ctlname {
 #define	SYSCTL_CT_ASSERT_MASK 0
 #endif
 
+/*
+	oidp: 指向sysctl的指针
+	arg1：指向sysctl所管理的数据
+	arg2：sysctl所管理数据的长度
+	req：描述了sysctl的请求
+*/
 #define	SYSCTL_HANDLER_ARGS struct sysctl_oid *oidp, void *arg1,	\
 	intmax_t arg2, struct sysctl_req *req
 
@@ -232,12 +238,28 @@ void sysctl_unregister_oid(struct sysctl_oid *oidp);
 #define	SYSCTL_DECL(name)			\
 	extern struct sysctl_oid sysctl__##name
 
-/* Hide these in macros. */
+/* 
+	Hide these in macros. 
+	当所连接的sysctl是动态结点时，传递给参数parent的应该是对 SYSCTL_CHILDREN 的调用，
+	这里，动态结点是通过 SYSCTL_ADD_NODE 创建的。SYSCTL_CHILDREN 宏只有一个指针参数，
+	该指针是 SYSCTL_ADD_NODE 函数调用的返回值
+	
+*/
 #define	SYSCTL_CHILDREN(oid_ptr)		(&(oid_ptr)->oid_children)
 #define	SYSCTL_PARENT(oid_ptr)					\
     (((oid_ptr)->oid_parent != &sysctl__children) ?		\
 	__containerof((oid_ptr)->oid_parent, struct sysctl_oid,	\
 	oid_children) : (struct sysctl_oid *)NULL)
+
+/*
+	当要连接的父sysctl是静态结点的时候，传递给参数parent的应该是 SYSCTL_STATIC_CHILDREN 的调用
+	这里，静态结点是基础系统的一部分
+	SYSCTL_STATIC_CHILDREN 的参数是父sysctl的名字，必须要以下划线为前缀，并且所有的点好都必须要用下划线
+	来替代。例如我们打算连接的父sysctl名字是hw.usb的时候，我们传入的参数就应该是_hw_usb
+	如果我们传递不带参数的 SYSCTL_STATIC_CHILDREN宏，例如SYSCTL_STATIC_CHILDREN(//无参数),给 SYSCTL_ADD_NODE
+	函数的parent，那么就会创建一种新的sysctl顶层类
+
+*/	
 #define	SYSCTL_STATIC_CHILDREN(oid_name)	(&sysctl__##oid_name.oid_children)
 
 /* === Structs and macros related to context handling. === */
@@ -292,6 +314,10 @@ TAILQ_HEAD(sysctl_ctx_list, sysctl_ctx_entry);
 	SYSCTL_CHILDREN(&sysctl__##parent),	\
 	nbr, #name, kind, a1, a2, handler, fmt, descr, label)
 
+/*
+	该宏能够创建一个能处理任意数据类型的sysctl，如果调用成功的话，宏将返回一个指向该sysctl的指针，否则返回null
+	其他类型，比如int long这些，都是它的变种。通常情况下，应该针对相应的数据类型指定对应宏，不应该都用OID
+*/
 #define	SYSCTL_ADD_OID(ctx, parent, nbr, name, kind, a1, a2, handler, fmt, descr) \
 	sysctl_add_oid(ctx, parent, nbr, name, kind, a1, a2, handler, fmt, __DESCR(descr), NULL)
 
@@ -543,6 +569,28 @@ TAILQ_HEAD(sysctl_ctx_list, sysctl_ctx_entry);
 	    ((access) & SYSCTL_CT_ASSERT_MASK) == CTLTYPE_INT) && \
 	    sizeof(int) == sizeof(*(ptr)))
 
+/*
+	参数：（大部分类似，作为对比 SYSCTL_ADD_*）
+		ctx： sysctl上下文的指针
+		parent: 指向父sysctl的子列表的指针
+		number： sysctl的号码，应该总是要设置为 OID_AUTO
+		name： sysctl的名称
+		access： 指明sysctl的存取标志(access flag)，应该指明该sysctl是只读(CTLFLAG_RD),或者是可读可写(CTLFLAG_RW)
+		arg： 该参数为一个指针，指向sysctl将要处理的数据，或者是NULL
+		len： 除非是调用 SYSCTL_ADD_OPAQUE，否则该参数总是要设置为0
+		handler： 函数指针，指向该处理该sysctl读写请求的函数或者为0
+		format：格式名，指定该sysctl将要处理的数据类型，完整的格式名列表是：
+				N： node，结点
+				A： char*，字符指针
+				I： int，整数
+				IU： unsigned int，无符号整数
+				L： long，长整型
+				LU： unsigned long，无符号长整型
+				S foo： struct foo，foo结构体类型
+		Descry：sysctl的文本描述，词描述信息可以通过sysctl -d命令输出
+	
+	SYSCTL_ADD_* 所创建的sysctl必须要连接到一个父sysctl上
+*/
 #define	SYSCTL_ADD_INT(ctx, parent, nbr, name, access, ptr, val, descr)	\
 ({									\
 	int *__ptr = (ptr);						\
@@ -723,6 +771,9 @@ TAILQ_HEAD(sysctl_ctx_list, sysctl_ctx_entry);
 	CTASSERT(((access) & CTLTYPE) == 0 ||				\
 	    ((access) & SYSCTL_CT_ASSERT_MASK) == CTLTYPE_OPAQUE)
 
+/*
+	创建一个处理一块数据的sysctl，所处理的数据类型可调整，大小通过参数len指定
+*/
 #define	SYSCTL_ADD_OPAQUE(ctx, parent, nbr, name, access, ptr, len, fmt, descr)	\
 ({									\
 	CTASSERT(((access) & CTLTYPE) == 0 ||				\
@@ -754,6 +805,9 @@ TAILQ_HEAD(sysctl_ctx_list, sysctl_ctx_entry);
 	    ptr, arg, handler, fmt, descr);				\
 	CTASSERT(((access) & CTLTYPE) != 0)
 
+/*
+	创建一个能使用函数来处理其读写请求的新sysctl，该处理函数通常用在导入或者导出前处理相应数据
+*/
 #define	SYSCTL_ADD_PROC(ctx, parent, nbr, name, access, ptr, arg, handler, fmt, descr) \
 ({									\
 	CTASSERT(((access) & CTLTYPE) != 0);				\

@@ -43,8 +43,8 @@ enum uio_rw {
 
 /* Segment flag values. */
 enum uio_seg {
-	UIO_USERSPACE,		/* from user data space */
-	UIO_SYSSPACE,		/* from system space */
+	UIO_USERSPACE,		/* from user data space  I/O指向了进程地址空间*/
+	UIO_SYSSPACE,		/* from system space I/O指向了内核地址空间*/
 	UIO_NOCOPY		/* don't copy, already in object */
 };
 #endif /* __BSD_VISIBLE */

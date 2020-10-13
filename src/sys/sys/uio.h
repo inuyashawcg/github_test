@@ -52,13 +52,28 @@ typedef	__off_t	off_t;
 
 #ifdef _KERNEL
 
+/*
+	device driver I/O routines
+	可能会涉及到用户态和内核态之前的数据传输
+*/
 struct uio {
+	// 要处理的I/O向量数组。对于分散/聚集I/O，这将是多个向量
 	struct	iovec *uio_iov;		/* scatter/gather list */
+
+	// 当前I/O数组的数量
 	int	uio_iovcnt;		/* length of scatter/gather list */
+
+	// 设备的偏移量
 	off_t	uio_offset;		/* offset in target object */
+
+	// 传输后更新的要处理的剩余字节数
 	ssize_t	uio_resid;		/* remaining bytes to process */
 	enum	uio_seg uio_segflg;	/* address space */
-	enum	uio_rw uio_rw;		/* operation */
+	enum	uio_rw uio_rw;		/* operation  所需传输的方向，UIO_READ或UIO_WRITE。*/
+
+	/*
+		指向了相关联的指针，如果uio_segflg指示要从地址空间进行传输，则使用该指针
+	*/
 	struct	thread *uio_td;		/* owner */
 };
 

@@ -11,10 +11,7 @@
 
 MALLOC_DEFINE(M_ECHO, "echo buffer", "buffer for echo driver");
 
-// 增加了两个ioctl命令的定义, _IO表示IO control， _IOW表示IO Write，其实也是IO control的一种
-
 #define ECHO_CLEAR_BUFFER _IO('E', 1)
-#define ECHO_SET_BUFFER_SIZE _IOW('E', 2, int)
 
 static d_open_t 	echo_open;
 static d_close_t	echo_close;
@@ -39,8 +36,9 @@ typedef struct echo {
 } echo_t;
 
 static echo_t *echo_message;
-
-static struct cdev *echo_dev;   
+static struct cdev *echo_dev;
+static struct sysctl_ctx_list clist;
+static struct sysctl_oid *piod;
 
 static int
 echo_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
@@ -107,32 +105,6 @@ echo_read(struct cdev *dev, struct uio *uio, int ioflag)
 	return (error);
 }
 
-// 新增函数，重新调整buffer的大小
-static int
-echo_set_buffer_size(int size)
-{
-    int error = 0;
-
-    if (echo_message -> buffer_size == size) 
-        return error；
-
-    if (size >= 128 && size <= 512) {
-        // 如果原来的缓冲区的长度比新的还要长，那么realloc会截断原来的缓冲区
-        echo_message -> buffer = realloc(echo_message -> buffer, size, M_ECHO, M_WAITOK);
-        echo_message -> buffer_size = size;
-
-        // 下面的代码也只有在缓冲区被截断之后才会执行，它先修正所存储数据的长度，然后再将其修改为以空结尾
-        if (echo_message -> length >= size) {
-            echo_message -> length = size - 1;
-            echo_message -> buffer[size - 1] = '\0';
-        } 
-    } else {
-        error = EINVAL;
-    }
-
-    return error;    
-}
-
 // 新增函数，ioctl
 static int
 echo_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag, struct thread* td)
@@ -144,11 +116,6 @@ echo_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag, struct thread*
             echo_message -> length = 0;
             uprintf("Buffer cleared.\n");
             break;
-        case ECHO_SET_BUFFER_SIZE:
-            error = echo_set_buffer_size(*(int*)data);      // data就表示预期调整的缓冲区的大小，从用户空间获取
-            if (error == 0)
-                uprintf("Buffer resized.\n");
-            break;
         default:
             error = ENOTTY;
             break;
@@ -157,6 +124,36 @@ echo_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag, struct thread*
     return error;
 }
 
+// 新增了一个sysctl函数
+static int
+sysctl_set_buffer_size(SYSCTL_HANDLER_ARGS)
+{
+    int error = 0;
+    int size = echo_message -> buffer_size;
+
+    /*
+        通过调用 sysctl_handle_int 函数从用户空间获取新的sysctl设置值(也就是预期缓冲区大小)，它的第二个参数
+        所传递的是&size。由此可见，此函数接受指向sysctl原设置值的指针并且用新的sysctl设置值改写了它所指向的变量
+        的值
+    */
+    error = sysctl_handle_int(poid, &size, 0, req);
+    if (error || !req -> newptr || echo_message -> buffer_size == size)
+        return error;
+
+    if (size >= 128 && size <= 512) {
+        echo_message -> buffer = realloc(echo_message -> buffer, size, M_ECHO, MWAITOK);
+        echo_message -> buffer_size = size;
+
+        if (echo_message -> length >= size) {
+            echo_message -> length = size - 1;
+            echo_message -> buffer[size - 1] = '\0';
+        }
+    } else {
+        return EINVAL;
+    }
+
+    return error;
+}
 
 static int
 echo_modevent(module_t mod_unused, int event, void *arg_unused)
@@ -174,6 +171,11 @@ echo_modevent(module_t mod_unused, int event, void *arg_unused)
 
         echo_message -> buffer_size = 256;
         echo_message -> buffer = malloc(echo_message -> buffer_size, M_ECHO, M_WAITOK);
+
+        sysctl_ctx_init($clist);
+        poid = SYSCTL_ADD_NODE(&clist, SYSCTL_STATIC_CHILDREN(/* 树顶层 */)， OID_AUTO， "echo", CTLFLAG_RW, 0, "echo root node");
+        SYSCTL_ADD_PROC(&clist, SYSCTL_CHILDREN(poid), OID_AUTO, "buffer_size", CTLTYPE_INT | CTLTYPE_RW,
+                            &echo_message -> buffer_size, 0, sysctl_set_buffer_size, "I", "echo buffer size");
 
 		echo_dev = make_dev(&echo_cdevsw, 0, UID_ROOT, GID_WHEEL, 0600, "echo");
 		uprintf("Echo driver loaded.\n");

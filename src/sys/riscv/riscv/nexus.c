@@ -316,7 +316,7 @@ nexus_activate_resource(device_t bus, device_t child, int type, int rid,
 
 	/*
 	 * If this is a memory resource, map it into the kernel.
-	 */
+	*/
 	if (type == SYS_RES_MEMORY || type == SYS_RES_IOPORT) {
 		paddr = (bus_addr_t)rman_get_start(r);
 		psize = (bus_size_t)rman_get_size(r);

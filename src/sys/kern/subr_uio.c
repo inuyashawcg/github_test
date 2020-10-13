@@ -198,6 +198,11 @@ uiomove(void *cp, int n, struct uio *uio)
 	return (uiomove_faultflag(cp, n, uio, 0));
 }
 
+/*
+	函数 uiomove_nofault 要求可以访问缓冲区和I/O向量，而不会导致页面错误
+	源地址和目标地址必须分别进行物理映射以进行读写访问，并且源地址和目标地址都不能分页
+	因此，函数 uiomove_nofault 可以从禁止获取虚拟内存系统锁或休眠的上下文中调用。
+*/
 int
 uiomove_nofault(void *cp, int n, struct uio *uio)
 {
@@ -286,6 +291,12 @@ out:
  * is almost definitely a bad thing, so we catch that here as well.  We
  * return a runtime failure, but it might be desirable to generate a runtime
  * assertion failure instead.
+ * 
+ * 该函数其实就是对uiomove的一个包装，uiomove存在于driver程序当中，该函数主要服务于内存
+ * 中已经存在的buffer中的数据，通过man page的解释可以看到，其功能可以理解为用户空间与内核
+ * 空间的数据交互？
+ * 它根据现有缓冲区的大小验证uio_offset和uio_resid值，在请求部分重叠缓冲区时处理短传输
+ * 当uio_offset大于或等于缓冲区大小时，结果是成功的，没有传输字节，有效地发信号给EOF
  */
 int
 uiomove_frombuf(void *buf, int buflen, struct uio *uio)
