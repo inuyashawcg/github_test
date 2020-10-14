@@ -339,8 +339,17 @@ typedef struct devclass *devclass_t;
 typedef struct device *device_t;
 typedef void (driver_intr_t)(void *arg);
 typedef int (driver_filter_t)(void *arg);
+
+/* 表示相应过滤器例程无法处理此中断，次返回值等同于错误码 */
 #define	FILTER_STRAY		0x01
+
+/* 表示相应过滤器例程已经完整处理了中断，返回值等同于成功码 */
 #define	FILTER_HANDLED		0x02
+
+/*
+	表示相应过滤器例程已经安排ithread例程来执行部分工作，
+	相应的过滤器例程只有当关联到某个ithread例程的时候才会返回此值
+*/
 #define	FILTER_SCHEDULE_THREAD	0x04
 
 typedef int device_attach_t (device_t dev);

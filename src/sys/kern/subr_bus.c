@@ -4776,6 +4776,30 @@ bus_release_resources(device_t dev, const struct resource_spec *rs,
  *
  * This function simply calls the BUS_ALLOC_RESOURCE() method of the
  * parent of @p dev.
+ * 
+ * 该函数用于为指定的设备分配硬件资源。如果分配成功，就返回一个指向resource结构体的指针，否则返回NULL
+ * 该函数通常会在device_attach执行的期间调用，但是如果在device_probe执行期间调用，那么在函数返回返回
+ * 前，必须要调用bus_release_resource函数将所分配的资源给释放掉
+ * 
+ * 参数:
+ * 	dev: 给出了请求成为相应硬件资源宿主。在分配之前，资源的宿主为其父总线
+ * 
+ * 	type：表示dev需分配的资源的类别，主要包含三种:
+ * 		SYS_RES_IQR - 中断请求线(interrupt-request line)
+ *  	SYS_RES_IOPORT - 输入输出端口(I/O port)
+ *  	SYS_RES_MEMOTY - 输入输出内存(I/O memory)
+ * 
+ * 	rid: 期望接收一个资源ID(RID)，如果调用成功，bus_alloc_resource函数将返回一个与传入rid不同的RID
+ * 
+ * 	start & end: 硬件资源的起始地址和结束地址，如果要使用默认的总线值，可简单的向start传递0ul，end传递~0ul
+ * 
+ *  count: 该硬件资源的字节数。如果使用了默认的start和end值，那么参数count只在其值大于默认的总线值的时候在有用
+ * 
+ *  flag: 用于指定该硬件资源的详细特性，取值如下:
+ * 		RF_ALLOCATED: 分配硬件资源，但是不激活它
+ * 		RF_ACTIVE: 分配硬件资源并自动将其激活
+ * 		RF_SHAREABLE: 硬件资源允许共享，除非该资源不可共享，否则总是要设置此标志
+ * 		RF_TIMESHARE: 硬件资源允许分时共享
  */
 struct resource *
 bus_alloc_resource(device_t dev, int type, int *rid, rman_res_t start,
@@ -4810,6 +4834,9 @@ bus_adjust_resource(device_t dev, int type, struct resource *r, rman_res_t start
  *
  * This function simply calls the BUS_ACTIVATE_RESOURCE() method of the
  * parent of @p dev.
+ * 
+ * 用于激活之前所分配的硬件资源。当然，资源在使用之前必须要激活。大多数驱动程序都会简单地将RF_ACTIVE传递给bus_alloc_resource函数
+ * 或者bus_alloc_resource_any函数，以免再调用bus_activate_resource函数
  */
 int
 bus_activate_resource(device_t dev, int type, int rid, struct resource *r)
@@ -4824,6 +4851,7 @@ bus_activate_resource(device_t dev, int type, int rid, struct resource *r)
  *
  * This function simply calls the BUS_DEACTIVATE_RESOURCE() method of the
  * parent of @p dev.
+ * 使硬件资源无效，该函数主要用于总线驱动程序
  */
 int
 bus_deactivate_resource(device_t dev, int type, int rid, struct resource *r)
@@ -4868,6 +4896,8 @@ bus_unmap_resource(device_t dev, int type, struct resource *r,
  *
  * This function simply calls the BUS_RELEASE_RESOURCE() method of the
  * parent of @p dev.
+ * 
+ * 用于释放之前所分配的硬件资源，当然，正在使用的资源是不能够被释放的
  */
 int
 bus_release_resource(device_t dev, int type, int rid, struct resource *r)
@@ -4885,6 +4915,27 @@ bus_release_resource(device_t dev, int type, int rid, struct resource *r)
  *
  * This function simply calls the BUS_SETUP_INTR() method of the
  * parent of @p dev.
+ * 
+ * 该函数用于将中断处理程序注册到IRQ上，前提是IRQ必须经过bus_alloc_resource函数调用分配。通常
+ * 情况下是在device_attach函数执行期间调用
+ * 
+ * 参数：
+ * 	dev: 发出中断的设备，该设备必须要拥有IRQ
+ * 
+ * 	r: 期望传入的是bus_alloc_resource函数(用于给指定的dev分配IRQ)调用成功后的返回值
+ * 
+ * 	flags: 用于区分不同类别的中断处理程序和/或中断，此参数取值参考bus.h文件中enum intr_type，常用的如下:
+ * 		INTR_MPSAFE: 表明此中断是多处理器安全的，无需通过Giant保护，也就是说，所有的竞态条件都将由此中断
+ * 					 处理程序自行处理。现代的代码都应该传递此标志
+ * 		INTR_ENTROPY: 表明此中断是好的无序状态来源，可有随机设备(entropy device) /dev/random使用
+ * 
+ *  filter & ithread: 中断处理程序的过滤器例程(filter routine)和ithread例程(ithread routine)
+ * 
+ * 	arg: 中断处理程序被调用时唯一传入的参数。一般来说，我们通常将dev的软件上下文传递给arg
+ * 
+ * 	cookiep: 期望接收一个指向void*类型数据的指针。如果bus_setup_intr函数调用成功，它将通过cookiep带出
+ * 			 一个cookie，该cookie必须在中断处理程序中销毁
+ * 因此，很容易想到，bus_teardown_intr函数用于取消给定中断处理程序的注册
  */
 int
 bus_setup_intr(device_t dev, struct resource *r, int flags,

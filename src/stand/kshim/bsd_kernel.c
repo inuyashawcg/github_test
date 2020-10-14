@@ -115,6 +115,10 @@ bus_dma_tag_destroy(bus_dma_tag_t dmat)
 	return (0);
 }
 
+/*
+	该函数是出于使用方便的目的而对bus_alloc_resource函数的包装，它将start，end，count三个参数
+	都设置为其中默认的总线值
+*/
 struct resource *
 bus_alloc_resource_any(device_t dev, int type, int *rid, unsigned int flags)
 {

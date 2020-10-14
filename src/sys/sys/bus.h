@@ -826,6 +826,15 @@ DECLARE_MODULE(name##_##busname, name##_##busname##_mod,		\
 	EARLY_DRIVER_MODULE_ORDERED(name, busname, driver, devclass,	\
 	    evh, arg, order, BUS_PASS_DEFAULT)
 
+/*
+	参数：
+		name: 用于识别驱动程序
+		busname: 指定该驱动程序的输入输出总线(pci, isa, usb等)
+		driver: 期望接收的是一个各字段都已初始化好的、类型为driver_t的结构体数据
+		devclass: 预期传入的是一个未初始化的devclass_t结构变量，该参数用于内核的内部记录
+		evh: 可选的模块事件处理程序，一般都设置为0，因为DRIVER_MODULE宏会提供一个自己的处理函数
+		arg: void* 类型，它将作为由evh参数所指定的模块事件处理程序的参数。如果evh设置为0，那么arg也必须是0
+*/
 #define	DRIVER_MODULE(name, busname, driver, devclass, evh, arg)	\
 	EARLY_DRIVER_MODULE(name, busname, driver, devclass, evh, arg,	\
 	    BUS_PASS_DEFAULT)
@@ -855,22 +864,57 @@ static __inline void varp ## _set_ ## var(device_t dev, type t)		\
  * Generated with sys/tools/bus_macro.sh
  */
 
+/*
+	重新调整读写指令的运行顺序往往能使它们运行的更快，所以处理器通常都会采用这种方式。然而优化之后很可能会导致驱动程序的PMIO和
+	MMIO操作搞乱。内存格栅(memory barrier)的引入就能防止出现这样的问题，阻止指令重新调整顺序
+*/
 #define bus_barrier(r, o, l, f) \
 	bus_space_barrier((r)->r_bustag, (r)->r_bushandle, (o), (l), (f))
+
+/*
+	bus_read_N 函数用于从参数r指定的offset地址开始读取N字节，
+	其中r是调用 bus_alloc_resource 函数成功分配输入输出区后的返回值
+*/
 #define bus_read_1(r, o) \
 	bus_space_read_1((r)->r_bustag, (r)->r_bushandle, (o))
+
+/*
+	bus_read_multi_N 函数用于执行count次从r指定的offset地址开始读取N字节的操作并将所读取到
+	的数据存入datap中。简而言之，就是 bus_read_multi_N 函数从同一个地址多次读取数据
+*/
 #define bus_read_multi_1(r, o, d, c) \
 	bus_space_read_multi_1((r)->r_bustag, (r)->r_bushandle, (o), (d), (c))
+
+/*
+	bus_space_read_region_N 函数用于从r指定的offset地址开始读取count个N字节数据并将所读取到
+	的数据存入datap中。也就是说，bus_space_read_region_N 用于从输入输出区读取连续的N字节数据(也就是一个数组)
+*/
 #define bus_read_region_1(r, o, d, c) \
 	bus_space_read_region_1((r)->r_bustag, (r)->r_bushandle, (o), (d), (c))
+
+/* set作用类似于write，参考write表述 */
 #define bus_set_multi_1(r, o, v, c) \
 	bus_space_set_multi_1((r)->r_bustag, (r)->r_bushandle, (o), (v), (c))
 #define bus_set_region_1(r, o, v, c) \
 	bus_space_set_region_1((r)->r_bustag, (r)->r_bushandle, (o), (v), (c))
+
+/*
+	bus_write_N 函数用于向参数r指定的offset地址写入一个N字节的数据
+*/
 #define bus_write_1(r, o, v) \
 	bus_space_write_1((r)->r_bustag, (r)->r_bushandle, (o), (v))
+
+/*
+	bus_write_multi_N 函数从datap中获取count个N字节数据并将它们写入r指定的offset地址。也就是说 bus_write_multi_N
+	函数用于将多个值写入到同一个位置
+*/
 #define bus_write_multi_1(r, o, d, c) \
 	bus_space_write_multi_1((r)->r_bustag, (r)->r_bushandle, (o), (d), (c))
+
+/*
+	bus_write_region_N 函数从datap中获取count个N字节数据并将它们写入r指定的offset地址开始的单元，着count个数据将依次
+	连续写入。也就是 bus_write_region_N 函数用于向输入输出区写入连续的N个字节(也就是一个数组)
+*/
 #define bus_write_region_1(r, o, d, c) \
 	bus_space_write_region_1((r)->r_bustag, (r)->r_bushandle, (o), (d), (c))
 #define bus_read_stream_1(r, o) \
