@@ -5312,6 +5312,11 @@ root_bus_module_handler(module_t mod, int what, void* arg)
 	return (0);
 }
 
+/*
+	moduledata_t 是一个 moduledata 结构体类型对象，其实就是通过sysinit来注册的一个
+	结构体类型，包含了模块的属性: 名称，模块事件处理程序(这个应该就是sysinit执行到该模块
+	的时候调用的函数)，额外的数据等等
+*/
 static moduledata_t root_bus_mod = {
 	"rootbus",
 	root_bus_module_handler,

@@ -47,6 +47,9 @@ mtx_system_init(void *arg)
 }
 SYSINIT(mtx_system_init, SI_SUB_LOCK, SI_ORDER_MIDDLE, mtx_system_init, NULL);
 
+/*
+	该函数主要是用来创建DMA标签(DMA tag)，DMA tag主要用来描述DMA事务的特性和限制
+*/
 int
 bus_dma_tag_create(bus_dma_tag_t parent, bus_size_t alignment,
 		   bus_size_t boundary, bus_addr_t lowaddr,
@@ -55,6 +58,9 @@ bus_dma_tag_create(bus_dma_tag_t parent, bus_size_t alignment,
 		   bus_size_t maxsegsz, int flags, bus_dma_lock_t *lockfunc,
 		   void *lockfuncarg, bus_dma_tag_t *dmat)
 {
+	/*
+		从上述的定义中可以看到，bus_dma_tag 包含了对齐方式和最大size两个元素
+	*/
 	struct bus_dma_tag *ret;
 
 	ret = malloc(sizeof(struct bus_dma_tag), XXX, XXX);

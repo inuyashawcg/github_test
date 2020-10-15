@@ -73,7 +73,7 @@ extern volatile int ticks;
 #endif /* _KERNEL */
 
 /*
- * Enumerated types for known system startup interfaces.
+ * Enumerated types for known system startup interfaces. 已知的系统启动接口的类型
  *
  * Startup occurs in ascending numeric order; the list entries are
  * sorted prior to attempting startup to guarantee order.  Items
@@ -134,7 +134,7 @@ enum sysinit_sub_id {
 	SI_SUB_DTRACE		= 0x3020000,	/* DTrace subsystem */
 	SI_SUB_DTRACE_PROVIDER	= 0x3048000,	/* DTrace providers */
 	SI_SUB_DTRACE_ANON	= 0x308C000,	/* DTrace anon enabling */
-	SI_SUB_DRIVERS		= 0x3100000,	/* Let Drivers initialize 设备驱动程序使能标志*/
+	SI_SUB_DRIVERS		= 0x3100000,	/* Let Drivers initialize 设备驱动程序初始化标志*/
 	SI_SUB_CONFIGURE	= 0x3800000,	/* Configure devices */
 	SI_SUB_VFS		= 0x4000000,	/* virtual filesystem*/
 	SI_SUB_CLOCKS		= 0x4800000,	/* real time and stat clocks*/
@@ -197,6 +197,7 @@ enum sysinit_elem_order {
  *
  * The C_* macros take functions expecting const void * arguments
  * while the non-C_* macros take functions expecting just void * arguments.
+ * C_*宏接受的函数需要const void*参数，而非C_*宏接受只需要void*参数的函数。
  *
  * With -Wcast-qual on, the compiler issues warnings:
  *	- if we pass non-const data or functions taking non-const data
@@ -217,7 +218,7 @@ struct sysinit {
 	enum sysinit_sub_id	subsystem;	/* subsystem identifier*/
 	enum sysinit_elem_order	order;		/* init order within subsystem*/
 	sysinit_cfunc_t func;			/* function		*/
-	const void	*udata;			/* multiplexer/argument */
+	const void	*udata;			/* multiplexer/argument 多路复用器/参数？？*/
 };
 
 /*

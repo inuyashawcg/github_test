@@ -127,6 +127,7 @@ struct uio;
  *
  *	Describes a single contiguous DMA transaction.  Values
  *	are suitable for programming into DMA registers.
+	描述单个连续的DMA事务，它的值适合于编写到DMA寄存器
  */
 typedef struct bus_dma_segment {
 	bus_addr_t	ds_addr;	/* DMA address */
@@ -145,22 +146,47 @@ typedef int bus_dma_filter_t(void *, bus_addr_t);
 void busdma_lock_mutex(void *arg, bus_dma_lock_op_t op);
 
 /*
- * Allocate a device specific dma_tag encapsulating the constraints of
+ * Allocate a device specific dma_tag encapsulating(封装) the constraints of
  * the parent tag in addition to other restrictions specified:
  *
- *	alignment:	Alignment for segments.
- *	boundary:	Boundary that segments cannot cross.
+ *  parent:		指定了此标签的父标签，如果是要创建顶层的DMA标签，那么就将 bus_get_dma_tag(device_t dev)
+ * 				作为 parent 参数传递给 bus_dma_tag_create
+ * 
+ *	alignment:	Alignment for segments. 指定了此标签各DMA分段的物理内存对齐(以字节为单位).DMA映射依据DMA
+				的标签属性而分配内存区域，这些内存区域也被称为DMA分段(DMA segment), callback函数的arg参数
+				其实就是被赋予了一个DMA分段地址。alignment取值必须是1(表示没有特别的对齐要求)或者2的幂。例如，
+				如果驱动程序要求DMA缓冲区对齐到4KB的整数倍，那么alignment参数应传递4096
+
+ *	boundary:	Boundary that segments cannot cross. 指定各DMA分段不能跨越的物理地址边界-它们不能跨越任何
+				boundary的整数倍地址。此参数的取值必须是0(表示没有边界限制)或者是2的幂
+
  *	lowaddr:	Low restricted address that cannot appear in a mapping.
  *	highaddr:	High restricted address that cannot appear in a mapping.
+				high和low限制了DMA不能使用的地址范围。例如，某个设备的DMA不能使用高于4G的地址，那么它将以0xffffffff
+				作为lowaddr而以 BUS_SPACE_MAXADDR 作为 highaddr？？ BUS_SPACE_MAXADDR 表示体系结构最大可寻址范围
+
  *	filtfunc:	An optional function to further test if an address
  *			within the range of lowaddr and highaddr cannot appear
  *			in a mapping.
  *	filtfuncarg:	An argument that will be passed to filtfunc in addition
  *			to the address to test.
+			两者指定了一个可选的回调函数和其首参数。当准备加载(映射)位于 lowaddr 和 highaddr之间的DMA区域的时候，函数
+			会被调用。如果范围之内没有可用的空间，那么 filtfunc 则会告知系统；如果两个参数同时设置为NULL，那就相当于在
+			从low到high范围内的所有空间都被视为是不可访问的
+
  *	maxsize:	Maximum mapping size supported by this tag.
+				单个DMA映射最大可分配的内存大小(以字节作为单位)
+
  *	nsegments:	Number of discontinuities allowed in maps.
- *	maxsegsz:	Maximum size of a segment in the map.
- *	flags:		Bus DMA flags.
+				指定单个DMA映射允许包含的分散/聚集段(scatter/gather segment)的最大数量。一个分散/聚集段实际上就是
+				一个内存页。其名字的来源是: 当我们把一组物理上不连续的页组合成一个逻辑上连续的缓冲区时，我们必须将写操作
+				分散而把读操作聚集。有些设备需要操作连续的内存，但有时候并没有足够大的连续内存块，这个时候就可以使用分散/
+				聚集的方式组成缓冲区来欺骗设备。每一个DMA分段都是一个分散/聚集段
+				nsegments 可以用 BUS_SPACE_UNRESTRICTED 赋值，表示没有数量限制。但是采用这种方式创建的DMA不能用于
+				创建DMA映射，而只能作为其他标签的父标签，因为系统无法支持由无限个分散/聚集段所构成的DMA映射
+
+ *	maxsegsz:	Maximum size of a segment in the map. 指定单个DMA映射中DMA分段个体的最大字节数
+ *	flags:		Bus DMA flags. 描述tag create函数的行为
  *	lockfunc:	An optional function to handle driver-defined lock
  *			operations.
  *	lockfuncarg:	An argument that will be passed to lockfunc in addition

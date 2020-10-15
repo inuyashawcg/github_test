@@ -218,14 +218,17 @@ symbol_name(vm_offset_t va, db_strategy_t strategy)
  * boot time initialization.  It also allows substitution of subsystem
  * (for instance, a scheduler, kernel profiler, or VM system) by object
  * module.  Finally, it allows for optional "kernel threads".
+ * 
+ * 从函数的逻辑来看，该函数首先是对所有的subinit进行排序，然后执行各个模块的例程，然后
+ * 再判断是否有经过kld机制新加载的一些模块，如果有的话就跳转到restart，继续上述步骤
  */
 void
 mi_startup(void)
 {
 
-	struct sysinit **sipp;	/* system initialization*/
-	struct sysinit **xipp;	/* interior loop of sort*/
-	struct sysinit *save;	/* bubble*/
+	struct sysinit **sipp;	/* system initialization */
+	struct sysinit **xipp;	/* interior loop of sort 内部循环排序*/
+	struct sysinit *save;	/* bubble 冒泡排序？？*/
 
 #if defined(VERBOSE_SYSINIT)
 	int last;

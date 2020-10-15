@@ -231,8 +231,8 @@ typedef struct bus_dma_segment {
 } bus_dma_segment_t;
 
 struct bus_dma_tag {
-	uint32_t	alignment;
-	uint32_t	maxsize;
+	uint32_t	alignment;	/* 对齐方式 */
+	uint32_t	maxsize;	/* 最大size */
 };
 
 typedef void *bus_dmamap_t;
