@@ -149,7 +149,7 @@ struct mod_pnp_match_info
 
 /* 
   parameter：
-	name: 	表示模块的名字
+	name:   表示模块的名字
 	data： 	moduledata_t类型的结构体数据，各个名字段都是已经初始化好了的
 	sub：	参考enum sysinit_sub_id {}中的具体数值含义，sub总被设置为SI_SUB_DRIVERS
 			位置 sys/kernel.h
