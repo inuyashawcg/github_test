@@ -86,6 +86,8 @@ static ihandle_t stdout;
 
 static ofw_def_t	*ofw_def_impl = NULL;
 static ofw_t		ofw_obj;
+
+/* ofw： open firmware 开放固件 */
 static struct ofw_kobj	ofw_kernel_obj;
 static struct kobj_ops	ofw_kernel_kops;
 
@@ -232,6 +234,7 @@ OF_init(void *cookie)
 	phandle_t chosen;
 	int rv;
 
+	/* ofw_def_impl: kobj_class* */
 	if (ofw_def_impl == NULL)
 		return (-1);
 
