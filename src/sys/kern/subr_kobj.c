@@ -97,6 +97,10 @@ kobj_error_method(void)
 	return ENXIO;
 }
 
+/*
+	从函数逻辑来看，主要进行了两部分的操作，首先是把kobj_class管理的methods数组中元素的desc->id
+	赋值；然后是对ops中的cache(其实也是一个方法数组)进行初始化操作
+*/
 static void
 kobj_class_compile_common(kobj_class_t cls, kobj_ops_t ops)
 {

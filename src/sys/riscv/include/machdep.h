@@ -38,6 +38,8 @@
 #define	_MACHINE_MACHDEP_H_
 
 struct riscv_bootparams {
+
+	/* vm_offset_t: unsigned long */
 	vm_offset_t	kern_l1pt;	/* Kernel L1 base */
 	vm_offset_t	kern_phys;	/* Kernel base (physical) addr */
 	vm_offset_t	kern_stack;

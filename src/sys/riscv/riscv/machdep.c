@@ -735,12 +735,13 @@ cache_setup(void)
 }
 
 /*
- * Fake up a boot descriptor table.
+ * Fake up a boot descriptor table. 伪造一个启动描述符表
  * RISCVTODO: This needs to be done via loader (when it's available).
  */
 vm_offset_t
 fake_preload_metadata(struct riscv_bootparams *rvbp __unused)
 {
+	/* uint32_t: unsigned int, 35 * 4 = 140？？ */
 	static uint32_t fake_preload[35];
 #ifdef DDB
 	vm_offset_t zstart = 0, zend = 0;
@@ -750,24 +751,38 @@ fake_preload_metadata(struct riscv_bootparams *rvbp __unused)
 
 	i = 0;
 
+	/* 
+		从索引0处开始， MODINFO_NAME是2个字节， 索引1存放字符串的长度+1=7。strlen求的是字符串的
+		长度，所以不包括末尾的\0，sizeof求的是字符串所占内存的长度，需要加上\0. strcpy会把最后的\0
+		也一起拷贝过去。kernel\0 一共是7个字节，2和3索引处存放 
+	*/
 	fake_preload[i++] = MODINFO_NAME;
 	fake_preload[i++] = strlen("kernel") + 1;
 	strcpy((char*)&fake_preload[i++], "kernel");
 	i += 1;
+
+	/* 
+		MODINFO_TYPE： 2字节，索引4处存放，索引5存放字符串长度+1=13，分配4个元素的位置来存放
+
+	*/
 	fake_preload[i++] = MODINFO_TYPE;
 	fake_preload[i++] = strlen("elf64 kernel") + 1;
 	strcpy((char*)&fake_preload[i++], "elf64 kernel");
 	i += 3;
+
+	/* 10: MODINFO_ADDR, KERNBASE一共是8字节，所以需要两个元素位置位置*/
 	fake_preload[i++] = MODINFO_ADDR;
 	fake_preload[i++] = sizeof(vm_offset_t);
 	*(vm_offset_t *)&fake_preload[i++] =
 	    (vm_offset_t)(KERNBASE + KERNENTRY);
 	i += 1;
+
+	/* 14： MODINFO_SIZE*/
 	fake_preload[i++] = MODINFO_SIZE;
 	fake_preload[i++] = sizeof(vm_offset_t);
 	fake_preload[i++] = (vm_offset_t)&end -
 	    (vm_offset_t)(KERNBASE + KERNENTRY);
-	i += 1;
+	i += 1; 	// 此时i = 18
 #ifdef DDB
 #if 0
 	/* RISCVTODO */
@@ -788,6 +803,11 @@ fake_preload_metadata(struct riscv_bootparams *rvbp __unused)
 		lastaddr = (vm_offset_t)&end;
 	fake_preload[i++] = 0;
 	fake_preload[i] = 0;
+
+	/*
+		看代码逻辑，仅仅对 preload_metadata 进行了赋值操作，对真正传入的参数
+		__unused 没有做任何操作？？
+	*/
 	preload_metadata = (void *)fake_preload;
 
 	return (lastaddr);

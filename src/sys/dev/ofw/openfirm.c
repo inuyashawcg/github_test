@@ -200,11 +200,13 @@ SET_DECLARE(ofw_set, ofw_def_t);
 boolean_t
 OF_install(char *name, int prio)
 {
+	/* ofw_def_t类型其实就是kobj_class类型 */
 	ofw_def_t *ofwp, **ofwpp;
 	static int curr_prio = 0;
 
 	/* Allow OF layer to be uninstalled */
 	if (name == NULL) {
+		/* ofw_def_impl也是kobj_class类型 */
 		ofw_def_impl = NULL;
 		return (FALSE);
 	}
@@ -366,7 +368,11 @@ OF_instance_to_package(ihandle_t instance)
 	return (OFW_INSTANCE_TO_PACKAGE(ofw_obj, instance));
 }
 
-/* Get the length of a property of a package. */
+/* 
+	Get the length of a property of a package. 
+	返回与propname相关联的属性值的长度，如果该属性存在但是没有相关联的值，那么返回0；
+	如果该属性不存在，返回-1
+*/
 ssize_t
 OF_getproplen(phandle_t package, const char *propname)
 {
@@ -385,7 +391,11 @@ OF_hasprop(phandle_t package, const char *propname)
 	return (OF_getproplen(package, propname) >= 0 ? 1 : 0);
 }
 
-/* Get the value of a property of a package. */
+/* 
+	Get the value of a property of a package. 
+	从buf中拷贝propname属性相关的buflen个字节到指定的内存，如果该属性存在，那么就返回
+	真实的大小；如果该属性不存在，就返回-1
+*/
 ssize_t
 OF_getprop(phandle_t package, const char *propname, void *buf, size_t buflen)
 {
@@ -396,6 +406,11 @@ OF_getprop(phandle_t package, const char *propname, void *buf, size_t buflen)
 	return (OFW_GETPROP(ofw_obj, package, propname, buf, buflen));
 }
 
+/* 
+	从buf中拷贝最多len个字节到指定的内存当中，然后转换成大端模式。如果属性不存在的话，返回-1，
+	否则返回真实的字节数；len必须是4的倍数
+	propname：表示属性的名称
+ */
 ssize_t
 OF_getencprop(phandle_t node, const char *propname, pcell_t *buf, size_t len)
 {
@@ -409,7 +424,7 @@ OF_getencprop(phandle_t node, const char *propname, pcell_t *buf, size_t len)
 		return (retval);
 
 	for (i = 0; i < len/4; i++)
-		buf[i] = be32toh(buf[i]);
+		buf[i] = be32toh(buf[i]);	/* big endian */
 
 	return (retval);
 }

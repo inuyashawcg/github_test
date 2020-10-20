@@ -315,6 +315,9 @@ fdt_data_get(void *data, int cells)
 	return (fdt64_to_cpu(*((uint64_t *)data)));
 }
 
+/*
+	获取device tree结点的 #address-size属性
+*/
 int
 fdt_addrsize_cells(phandle_t node, int *addr_cells, int *size_cells)
 {
@@ -322,7 +325,8 @@ fdt_addrsize_cells(phandle_t node, int *addr_cells, int *size_cells)
 	int cell_size;
 
 	/*
-	 * Retrieve #{address,size}-cells.
+	 * Retrieve(检索) #{address,size}-cells. 
+	 * OF_getencprop： 获取设备结点的属性
 	 */
 	cell_size = sizeof(cell);
 	if (OF_getencprop(node, "#address-cells", &cell, cell_size) < cell_size)
@@ -550,12 +554,20 @@ fdt_get_mem_regions(struct mem_region *mr, int *mrcnt, uint64_t *memsize)
 	int addr_cells, size_cells;
 	int i, reg_len, rv, tuple_size, tuples;
 
+	/* 
+		返回设备树结点的phandle(结点的首地址？)，查找的方式是通过结点的路径/memory
+	*/
 	memory = OF_finddevice("/memory");
 	if (memory == -1) {
 		rv = ENXIO;
 		goto out;
 	}
 
+	/* 
+		OF_parent: 返回 parent node 的phandle
+		获取到了memory结点的 #address-size属性，这两个属性目前理解是定了该结点的子结点的
+		reg属性的配置的格式，reg描述了该设备在父总线中的资源地址和大小
+	*/
 	if ((rv = fdt_addrsize_cells(OF_parent(memory), &addr_cells,
 	    &size_cells)) != 0)
 		goto out;
@@ -565,6 +577,10 @@ fdt_get_mem_regions(struct mem_region *mr, int *mrcnt, uint64_t *memsize)
 		goto out;
 	}
 
+	/* 
+		tuple：元数，数组
+		tuple_size 是存放某种类型数据的数组的大小？？
+	*/
 	tuple_size = sizeof(pcell_t) * (addr_cells + size_cells);
 	reg_len = OF_getproplen(memory, "reg");
 	if (reg_len <= 0 || reg_len > sizeof(reg)) {
@@ -572,12 +588,15 @@ fdt_get_mem_regions(struct mem_region *mr, int *mrcnt, uint64_t *memsize)
 		goto out;
 	}
 
+	/* OF_getprop： 可以认为是判断reg是否存在 */
 	if (OF_getprop(memory, "reg", reg, reg_len) <= 0) {
 		rv = ENXIO;
 		goto out;
 	}
 
 	memory_size = 0;
+
+	/* 表示子设备在父设备中所占有的资源块的个数 */
 	tuples = reg_len / tuple_size;
 	regp = (pcell_t *)&reg;
 	for (i = 0; i < tuples; i++) {
