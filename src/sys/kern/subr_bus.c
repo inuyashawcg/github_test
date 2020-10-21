@@ -1136,7 +1136,7 @@ devclass_driver_added(devclass_t dc, driver_t *driver)
 	/*
 	 * Call BUS_DRIVER_ADDED for any existing buses in this class.
 	 * BUS_DRIVER_ADDED：这个宏是编译完成的时候才会出现，这个可以查看bus_if.m文件
-	 * 中的相关代码，可以看到这个宏应该表示的是 bus_generic_driver_added（）函数
+	 * 中的相关代码，可以看到这个宏应该表示的是 bus_generic_driver_added 函数
 	 * 
 	 * 驱动注册之前首先要判断设备是否attach，从devices数组中一个一个找
 	 */
@@ -1209,7 +1209,8 @@ devclass_add_driver(devclass_t dc, driver_t *driver, int pass, devclass_t *dcp)
 	 * goes. This means we can safely use static methods and avoids a
 	 * double-free in devclass_delete_driver.
 	 * 
-	 * driver初始化的时候会用通过一些 DEVMETHOD() 宏定义向methods中注册驱动需要用到的一些函数
+	 * driver初始化的时候会用通过一些 DEVMETHOD() 宏定义向methods中注册驱动需要用到的一些函数，
+	 * 然后初始化了driver -> ops
 	 */
 	kobj_class_compile((kobj_class_t) driver);
 
@@ -5365,8 +5366,8 @@ driver_module_handler(module_t mod, int what, void *arg)
 
 	/* 
 		bus_devclass其实就是根据dmd的busname创建的一个对象，而dmd其实就是driver模块
-		的一个handler，而驱动本质上也就是以kernel module，所以这里的模块加载其实就是
-		驱动的加载，然后根据这个驱动构建一个devclass来管理某种类型的驱动
+		的一个handler，而驱动本质上也就是一个kernel module
+		这里应该是查找是否存在管理某个总线的devclass
 	*/
 	bus_devclass = devclass_find_internal(dmd->dmd_busname, NULL, TRUE);
 	error = 0;

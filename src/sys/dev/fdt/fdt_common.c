@@ -601,6 +601,10 @@ fdt_get_mem_regions(struct mem_region *mr, int *mrcnt, uint64_t *memsize)
 	regp = (pcell_t *)&reg;
 	for (i = 0; i < tuples; i++) {
 
+		/*
+			addr_cells: 资源地址
+			size_cells: 资源大小
+		*/
 		rv = fdt_data_to_res(regp, addr_cells, size_cells,
 			(u_long *)&mr[i].mr_start, (u_long *)&mr[i].mr_size);
 

@@ -240,7 +240,11 @@ OF_instance_to_package(ihandle_t instance)
 	return (args.package);
 }
 
-/* Get the length of a property of a package. */
+/* 
+	Get the length of a property of a package. 
+	该函数的作用可以理解为怕判断 package 结点中以 propname 命名的属性关联值是否存在；如果我们获取到了这个属性，
+	函数返回与该属性相关联的数据长度，如果没有关联数据，则返回0，如果根本这个属性，那么就返回-1
+*/
 int
 OF_getproplen(phandle_t package, const char *propname)
 {
@@ -264,7 +268,11 @@ OF_getproplen(phandle_t package, const char *propname)
 	return (args.proplen);
 }
 
-/* Get the value of a property of a package. */
+/* 
+	Get the value of a property of a package.
+	拷贝最多buflen长度的数据(propname 属性相关)到buf的指定区域，成功的话就返回真实的数据长度，如果该属性
+	是不存在的，则返回-1
+*/
 int
 OF_getprop(phandle_t package, const char *propname, void *buf, int buflen)
 {
@@ -292,7 +300,11 @@ OF_getprop(phandle_t package, const char *propname, void *buf, int buflen)
 	return (args.size);
 }
 
-/* Get the next property of a package. */
+/* 
+	Get the next property of a package. 
+	作用类似于OF_getprop，也是拷贝数据到buf指定区域(接口有变动，size参数没有了)，如果没有相关属性，
+	那么就拷贝结点的第一个属性过去，如果还是没有，就返回0；如果出现内部错误，就返回-1，其他情况返回1
+*/
 int
 OF_nextprop(phandle_t package, const char *previous, char *buf)
 {
@@ -318,7 +330,10 @@ OF_nextprop(phandle_t package, const char *previous, char *buf)
 	return (args.flag);
 }
 
-/* Set the value of a property of a package. */
+/* 
+	Set the value of a property of a package. 
+	设置propname属性的关联值(数据长度为len)到buf指定区域的地址的开头处
+*/
 /* XXX Has a bug on FirePower */
 int
 OF_setprop(phandle_t package, const char *propname, void *buf, int len)

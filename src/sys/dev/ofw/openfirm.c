@@ -324,7 +324,10 @@ OF_interpret(const char *cmd, int nreturns, ...)
  * Device tree functions
  */
 
-/* Return the next sibling of this node or 0. */
+/* 
+	Return the next sibling of this node or 0. 
+	返回节点下一个同级节点的phandle
+*/
 phandle_t
 OF_peer(phandle_t node)
 {
@@ -357,7 +360,10 @@ OF_parent(phandle_t node)
 	return (OFW_PARENT(ofw_obj, node));
 }
 
-/* Return the package handle that corresponds to an instance handle. */
+/* 
+	Return the package handle that corresponds to an instance handle. 
+	返回一个结点的phandle？？
+*/
 phandle_t
 OF_instance_to_package(ihandle_t instance)
 {
@@ -433,6 +439,7 @@ OF_getencprop(phandle_t node, const char *propname, pcell_t *buf, size_t len)
  * Recursively search the node and its parent for the given property, working
  * downward from the node to the device tree root.  Returns the value of the
  * first match.
+ * 从当前结点一直向上查找具有propname属性的结点，一直到根结点
  */
 ssize_t
 OF_searchprop(phandle_t node, const char *propname, void *buf, size_t len)
@@ -567,7 +574,10 @@ OF_setprop(phandle_t package, const char *propname, const void *buf, size_t len)
 	return (OFW_SETPROP(ofw_obj, package, propname, buf,len));
 }
 
-/* Convert a device specifier to a fully qualified pathname. */
+/* 
+	Convert a device specifier to a fully qualified pathname. 
+	将设备说明符转换为完全限定的路径名
+*/
 ssize_t
 OF_canon(const char *device, char *buf, size_t len)
 {

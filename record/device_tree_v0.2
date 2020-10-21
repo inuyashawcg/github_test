@@ -40,9 +40,7 @@ status: string
 	 "fail-sss": 同上，sss表示检测到的错误信息
 
 #address-cells and #size-cells: u32
-	该属性用于拥有子设备结点的设备结点，并且描述子设备如何寻址
-	boot program应该要支持所有的设备结点拥有该属性，意思就是所有的设备结点都应该被支持拥有子结点
-	如果没有明确指定该属性，client program应该假设#address-cells为2，#size-cells为1
+	不同的平台，不同的总线，地址位长度可能不同，有32位地址，有64位地址，为了适应这个，规范规定一个32位的长度为一个cell。"#address-cells"属性用来表示总线地址需要几个cell表示，该属性本身是u32类型的。"#size-cells"属性用来表示子总线地址空间的长度需要几个cell表示，属性本身的类型也是u32。可以这么理解父节点表示总线，总线上每个设备的地址长度以及地址范围是总线的一个特性，用"#address-cells","#size-cells"属性表示，比如总线是32位，那么"#address-cells"设置成1就可以了。这两个属性不可以继承，就是说在未定义这两个属性的时候，不会继承更高一级父节点的设置，如果没有设置的话，内核默认认为"#address-cells"为2，"#size-cells"为1
 
 	soc {
 		#address-cells = <1>;
@@ -56,9 +54,6 @@ status: string
 			interrupt-parent = <&ipic>;
 		};
 	};
-	从给出的例子以及page中的解释来看，#address-cells不是表示真实的地址，而是指定reg参数里边有多少个元素是表示地址的，
-	#size-cells有多少个元素是表示size的，可以理解为该属性就是给子设备定义了一个属性配置的格式。所以，serial设备的reg
-	属性要遵守父结点的要求，0x4600表示地址，应该是对应 #address-cells = <1>; 0x100表示大小，对应 #size-cells = <1>
 
 reg: <prop encoded array>编码为任意数量的(address, size) pairs
 	描述了设备在父总线定义的地址空间范围内的资源地址，最常见的是指内存映射IO寄存器块的偏移量和长度，root node在地址空间范围内

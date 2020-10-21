@@ -53,6 +53,8 @@ struct ofw_bus_iinfo {
 
 struct ofw_compat_data {
 	const char	*ocd_str;
+
+	/* uintptr_t: unsigned long */
 	uintptr_t	 ocd_data;
 };
 

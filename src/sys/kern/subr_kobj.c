@@ -116,7 +116,12 @@ kobj_class_compile_common(kobj_class_t cls, kobj_ops_t ops)
 	/*
 	 * First register any methods which need it.
 	 * 只要methods中的方法的id被设置为0，那么就表示该函数是要被用到的
-	 * 通过下面的++操作和赋值操作，可以看出method的id是被重新赋值，从1开始
+	 * 通过下面的++操作和赋值操作，可以看出method的id是被重新赋值，貌似是从1开始的
+	 * 
+	 * 通过驱动实例可以看到，一般都会包含一个 device_method_t 类型的数组， device_method_t其实就是kobj_method_t
+	 * 类型。再结合 kobj_class 的定义，可以看到 device_method_t数组其实就是 kobj_class结构体中的 *methods。
+	 * 然后分析下面这个循环，功能就是遍历整个数组，然后给每个元素(也就是驱动例程注册的方法)的desc->id重新赋值，应该就是
+	 * 注册驱动例程所有要用到的函数
 	 */
 	for (i = 0, m = cls->methods; m->desc; i++, m++) {
 		if (m->desc->id == 0)

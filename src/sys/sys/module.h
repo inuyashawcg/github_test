@@ -187,6 +187,8 @@ struct mod_pnp_match_info
  * Generic macros to create pnp info hints that modules may export
  * to allow external tools to parse their internal device tables
  * to make an informed guess about what driver(s) to load.
+ * 
+ * 为设备注册即插即用的信息
  */
 #define	MODULE_PNP_INFO(d, b, unique, t, n)				\
 	static const struct mod_pnp_match_info _module_pnp_##b##_##unique = {	\
