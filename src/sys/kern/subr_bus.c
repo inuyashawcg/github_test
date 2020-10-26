@@ -908,7 +908,7 @@ static kobj_method_t null_methods[] = {
 };
 
 DEFINE_CLASS(null, null_methods, 0);
-//////////wcg
+
 /*
  * Bus pass implementation
  */
@@ -4280,6 +4280,8 @@ bus_generic_driver_added(device_t dev, driver_t *driver)
  * attached, then it calls BUS_NEW_PASS() on that device.  If the
  * device is not already attached, it attempts to attach a driver to
  * it.
+ * 
+ * 这里可以看出，device跟driver已经挂载到root_bus上了
  */
 void
 bus_generic_new_pass(device_t dev)

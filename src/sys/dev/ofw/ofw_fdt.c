@@ -149,6 +149,8 @@ ofw_fdt_init(ofw_t ofw, void *data)
  * phandle is a u32 value, therefore we cannot use the pointer to node as
  * phandle in 64 bit. We also do not use the usual fdt offset as phandle,
  * as it can be 0, and the OF interface has special meaning for phandle 0.
+ * 
+ * 将结点相对于设备树起始结点的offset作为其在OF interface的phandle
  */
 
 static phandle_t
@@ -159,10 +161,16 @@ fdt_offset_phandle(int offset)
 	return ((phandle_t)offset + fdt_off_dt_struct(fdtp));
 }
 
+/*
+	比较传入的node address 值跟device tree blob起始地址的大小，其实就是判断
+	地址是否越界
+*/
 static int
 fdt_phandle_offset(phandle_t p)
 {
 	int pint = (int)p;
+
+	/* 查找device tree blob的起始地址 */
 	int dtoff = fdt_off_dt_struct(fdtp);
 
 	if (pint < dtoff)
@@ -170,22 +178,30 @@ fdt_phandle_offset(phandle_t p)
 	return (pint - dtoff);
 }
 
-/* Return the next sibling of this node or 0. */
+/* 
+	Return the next sibling of this node or 0. 
+	返回结点的下一个同级，或者是0
+*/
 static phandle_t
 ofw_fdt_peer(ofw_t ofw, phandle_t node)
 {
 	int offset;
 
 	if (node == 0) {
-		/* Find root node */
+		/* Find root node 获取根节点的offset */
 		offset = fdt_path_offset(fdtp, "/");
 
+		/* 通过device tree blob起始地址 + offset 找到根节点所在的位置 */
 		return (fdt_offset_phandle(offset));
 	}
 
 	offset = fdt_phandle_offset(node);
 	if (offset < 0)
 		return (0);
+
+	/* 
+		递归搜索节点，找到同级结点返回，或者返回0
+	*/
 	offset = fdt_next_subnode(fdtp, offset);
 	return (fdt_offset_phandle(offset));
 }
