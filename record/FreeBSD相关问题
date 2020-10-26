@@ -40,15 +40,6 @@ scp root@192.168.153.128:/usr/obj/src/sys/MYKERNEL/device_if.h /home/wcg/Desktop
 FreeBSD svn:
 https://svn.freebsd.org/base/stable/12/
 
-Newbus机制：
-每个设备都可以有子设备，一旦有子设备，该设备就会被成为bus；bus跟bus之间可以通过“桥”的设备进行通信
 
-“桥”设备可以认为是在一个总线中的设备，然后它拥有一个子设备，然后这个子设备是属于另外一个总线的的设备。比如PCI-to-PCI bridge，
-它其实就是一个parent bus是PCI的，名字叫做pcibN的设备，然后它有一个child，名字叫做pciN，然后这个child在需要attach的一个总线上
-
-在有些设备平台上，不同的总线的中断是分开控制的，例如PCI和ISA总线。但是在有些平台，PCI和ISA总线中断都是通过上层nexus来进行控制
-为了规范化访问内存和接口映射资源，newbus集成了NetBSD的bus_space APIS，可以用来替代inb/outb,read/writes。这也使得驱动能够更加简单的使用内存映射寄存器和端口映射寄存器
-
-Newbus最核心的设计思想就是“基于对象编程”，每一个设备都会有一个它所支持的方法表，系统或者其他设备可以通过这个方法表中提供的方法来对这个设备进行控制，或者获取相应的服务等等
-
-newbus系统中，设备的方法是有多个drivers来提供。当一个设备通过自动配置的方式跟驱动匹配之后，它将会使用对应驱动所声明的方法表；当设备跟驱动取消匹配之后，它跟这个方法表就会断开连接，等到它再匹配新的驱动之后，则它又会连接新的方法表。这样就可以动态替换驱动
+virtualBox: 改成橋接模式，要不然ip地址會比較混亂
+	192.168.2.23

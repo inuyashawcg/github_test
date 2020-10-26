@@ -287,6 +287,10 @@ ofw_bus_is_compatible_strict(device_t dev, const char *compatible)
 	return (0);
 }
 
+/* 
+	通過實例可以看到，compat參數通常是一個數組(驅動程序當中)，裏邊會保存有設備可以匹配的驅動的信息,然後調用
+	ofw_bus_is_compatible 函數，獲取設備中的 compatible的信息，跟數組中的信息進行比較，看是否有匹配的
+*/
 const struct ofw_compat_data *
 ofw_bus_search_compatible(device_t dev, const struct ofw_compat_data *compat)
 {

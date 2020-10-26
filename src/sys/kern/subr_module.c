@@ -45,6 +45,8 @@ caddr_t preload_metadata;
 
 /*
  * Search for the preloaded module (name)
+ * 应该是通过名称来判断预先加载的模块类型，以riscv为例，在initriscv函数中判断的类型是
+ * “elf kernel”和“elf64 kernel”
  */
 caddr_t
 preload_search_by_name(const char *name)

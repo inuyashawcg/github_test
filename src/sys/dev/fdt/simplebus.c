@@ -169,7 +169,10 @@ simplebus_init(device_t dev, phandle_t node)
 {
 	struct simplebus_softc *sc;
 
+	/* 获取上下文 */
 	sc = device_get_softc(dev);
+
+	/* 获取与dev相关联的devicetree node */
 	if (node == 0)
 		node = ofw_bus_get_node(dev);
 	sc->dev = dev;

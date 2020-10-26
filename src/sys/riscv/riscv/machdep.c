@@ -651,6 +651,9 @@ add_physmap_entry(uint64_t base, uint64_t length, vm_paddr_t *physmap,
 	/*
 	 * Find insertion point while checking for overlap.  Start off by
 	 * assuming the new entry will be added to the end.
+	 * 
+	 * 在initriscv函数中，执行该函数的条件是从device tree解析出的memory起始地址小于 riscv_bootparams 参数中
+	 * 规定的device tree blob物理地址的起始值
 	 */
 	insert_idx = _physmap_idx;
 	for (i = 0; i <= _physmap_idx; i += 2) {
@@ -816,6 +819,7 @@ fake_preload_metadata(struct riscv_bootparams *rvbp __unused)
 void
 initriscv(struct riscv_bootparams *rvbp)
 {
+	/* 内存资源块 */
 	struct mem_region mem_regions[FDT_MEM_REGIONS];
 	vm_offset_t rstart, rend;
 	vm_offset_t s, e;
@@ -850,6 +854,7 @@ initriscv(struct riscv_bootparams *rvbp)
 	if (fdt_get_mem_regions(mem_regions, &mem_regions_sz, NULL) != 0)
 		panic("Cannot get physical memory regions");
 
+	/* s表示device tree blob的物理起始地址， e表示其size的最大值，限定了地址范围*/
 	s = rvbp->dtbp_phys;
 	e = s + DTB_SIZE_MAX;
 

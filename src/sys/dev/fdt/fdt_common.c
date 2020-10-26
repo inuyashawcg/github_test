@@ -565,8 +565,8 @@ fdt_get_mem_regions(struct mem_region *mr, int *mrcnt, uint64_t *memsize)
 
 	/* 
 		OF_parent: 返回 parent node 的phandle
-		获取到了memory结点的 #address-size属性，这两个属性目前理解是定了该结点的子结点的
-		reg属性的配置的格式，reg描述了该设备在父总线中的资源地址和大小
+		获取到了memory结点的 #address-size属性(在父节点中，所以要执行OF_parent)，这两个属性目前理解是规定了
+		该结点的子结点的reg属性的配置的格式(地址是32位还是64位)
 	*/
 	if ((rv = fdt_addrsize_cells(OF_parent(memory), &addr_cells,
 	    &size_cells)) != 0)
@@ -579,9 +579,11 @@ fdt_get_mem_regions(struct mem_region *mr, int *mrcnt, uint64_t *memsize)
 
 	/* 
 		tuple：元数，数组
-		tuple_size 是存放某种类型数据的数组的大小？？
+		tuple_size 用来判断一共有多少个cell
 	*/
 	tuple_size = sizeof(pcell_t) * (addr_cells + size_cells);
+
+	/* reg_len表示memory结点的reg属性的数据大小 */
 	reg_len = OF_getproplen(memory, "reg");
 	if (reg_len <= 0 || reg_len > sizeof(reg)) {
 		rv = ERANGE;
@@ -596,8 +598,10 @@ fdt_get_mem_regions(struct mem_region *mr, int *mrcnt, uint64_t *memsize)
 
 	memory_size = 0;
 
-	/* 表示子设备在父设备中所占有的资源块的个数 */
+	/* tuples表示一共有多少个memory结点 */
 	tuples = reg_len / tuple_size;
+
+	/* 指向reg的指针 */
 	regp = (pcell_t *)&reg;
 	for (i = 0; i < tuples; i++) {
 
@@ -612,6 +616,8 @@ fdt_get_mem_regions(struct mem_region *mr, int *mrcnt, uint64_t *memsize)
 			goto out;
 
 		regp += addr_cells + size_cells;
+
+		/* 计算总的memory大小 */
 		memory_size += mr[i].mr_size;
 	}
 
@@ -620,6 +626,7 @@ fdt_get_mem_regions(struct mem_region *mr, int *mrcnt, uint64_t *memsize)
 		goto out;
 	}
 
+	/* 保存一共有多少个资源块,并且柑橘传入的参数来确定是否保存memory总大小 */
 	*mrcnt = i;
 	if (memsize != NULL)
 		*memsize = memory_size;

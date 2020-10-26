@@ -240,6 +240,10 @@ OF_init(void *cookie)
 	if (ofw_def_impl == NULL)
 		return (-1);
 
+	/*
+		ofw_kernel_obj 是struct ofw_obj类型，通过定义可以看到，它其实就是对kobj进行了
+		一点扩展，主体是一样的
+	*/
 	ofw_obj = &ofw_kernel_obj;
 	/*
 	 * Take care of compiling the selected class, and
@@ -399,7 +403,7 @@ OF_hasprop(phandle_t package, const char *propname)
 
 /* 
 	Get the value of a property of a package. 
-	从buf中拷贝propname属性相关的buflen个字节到指定的内存，如果该属性存在，那么就返回
+	拷贝propname属性相关的buflen个字节到buf中指定的内存，如果该属性存在，那么就返回
 	真实的大小；如果该属性不存在，就返回-1
 */
 ssize_t
@@ -413,7 +417,7 @@ OF_getprop(phandle_t package, const char *propname, void *buf, size_t buflen)
 }
 
 /* 
-	从buf中拷贝最多len个字节到指定的内存当中，然后转换成大端模式。如果属性不存在的话，返回-1，
+	拷贝最多len个字节到buf指定的内存当中，然后转换成大端模式。如果属性不存在的话，返回-1，
 	否则返回真实的字节数；len必须是4的倍数
 	propname：表示属性的名称
  */
