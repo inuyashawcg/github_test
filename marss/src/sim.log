@@ -1,0 +1,133 @@
+* (marss-riscv): MARSS-RISCV: Micro-Architectural System Simulator for RISC-V
+* (marss-riscv): Created log file: ./sim.log
+* (marss-riscv): bios: riscv64-unknown-linux-gnu/bbl64.bin
+* (marss-riscv): kernel: riscv64-unknown-linux-gnu/kernel-riscv64.bin
+* (marss-riscv): drive0-file: riscv64-unknown-linux-gnu/riscv64.img
+* (marss-riscv): Setting up TinyEMU options
+	* code_tlb_size: 32
+	* load_tlb_size: 32
+	* store_tlb_size: 32
+	* guest_ram_size: 2048 MB
+* (marss-riscv): Setting up simulation options
+	* -sim_file_path: .
+	* -sim-file-prefix: sim
+	* -sim-log-file: ./sim.log
+	* core_type: in-order
+	* rtc_freq_mhz: 10 MHz
+	* cpu_freq_mhz: 1000 MHz
+	* enable_bpu: true
+	* bpu_type: bimodal
+	* bpu_flush_on_context_switch: false
+	* enable_l1_caches: true
+	* enable_l2_cache: true
+	* dram_model_type: base
+* (marss-riscv): Setting up in-order RISC-V core
+	* core_id: 0
+	* core_name: 64-bit inorder riscv CPU
+	* core_type: in-order
+	* num_cpu_stages: 5
+	* num_data_fwd_buses: 6
+	* ex_to_mem_selector_queue_size: 16
+* (marss-riscv): Setting up functional units
+	* num_int_alu_stages: 1
+	* int_alu_stage_0: 1 cycle(s)
+	* num_int_mul_stages: 1
+	* int_mul_stage_0: 4 cycle(s)
+	* num_int_div_stages: 1
+	* int_div_stage_0: 67 cycle(s)
+	* num_fpu_fma_stages: 4
+	* fpu_fma_stage_0: 1 cycle(s)
+	* fpu_fma_stage_1: 1 cycle(s)
+	* fpu_fma_stage_2: 1 cycle(s)
+	* fpu_fma_stage_3: 1 cycle(s)
+	* num_fpu_alu_stages: 1
+	* fpu_alu latency: 1
+	* fadd latency: 2 cycle(s)
+	* fsub latency: 2 cycle(s)
+	* fmul latency: 2 cycle(s)
+	* fdiv latency: 8 cycle(s)
+	* fsqrt latency: 8 cycle(s)
+	* fsgnj latency: 2 cycle(s)
+	* fmin latency: 4 cycle(s)
+	* fmax latency: 4 cycle(s)
+	* feq latency: 2 cycle(s)
+	* flt latency: 2 cycle(s)
+	* fle latency: 2 cycle(s)
+	* fcvt latency: 2 cycle(s)
+	* cvt latency: 2 cycle(s)
+	* fmv latency: 2 cycle(s)
+	* fclass latency: 1 cycle(s)
+	* system_insn_latency latency: 3
+* (marss-riscv): Setting up base dram
+	* dram_model_type: base
+	* mem_access_latency: 50 cycle(s)
+* (marss-riscv): Setting up memory controller
+	* burst_length: 64
+	* fetch_cpu_stage_queue_size: 64
+	* mem_cpu_stage_queue_size: 64
+	* global_mem_request_queue_size: 64
+	* dram_model_type: base
+* (marss-riscv): Setting up L2-cache
+	* level: 2
+	* num_blks: 4096
+	* num_ways: 16
+	* num_sets: 256
+	* set_bits: 8
+	* tag_bits: 58
+	* max_words_per_blk: 8
+	* word_size: 8 bytes
+	* line_size: 64 bytes
+	* total_size: 256 KB
+	* evict_policy: bit-plru
+	* read_alloc_policy: true
+	* write_alloc_policy: true
+	* write_policy: writeback
+	* read_latency: 5 cycle(s)
+	* write_latency: 1 cycle(s)
+* (marss-riscv): Setting up L1-instruction cache
+	* level: 1
+	* num_blks: 512
+	* num_ways: 4
+	* num_sets: 128
+	* set_bits: 7
+	* tag_bits: 58
+	* max_words_per_blk: 8
+	* word_size: 8 bytes
+	* line_size: 64 bytes
+	* total_size: 32 KB
+	* evict_policy: bit-plru
+	* read_alloc_policy: true
+	* write_alloc_policy: true
+	* write_policy: writeback
+	* read_latency: 1 cycle(s)
+	* write_latency: 1 cycle(s)
+* (marss-riscv): Setting up L1-data cache
+	* level: 1
+	* num_blks: 512
+	* num_ways: 8
+	* num_sets: 64
+	* set_bits: 6
+	* tag_bits: 58
+	* max_words_per_blk: 8
+	* word_size: 8 bytes
+	* line_size: 64 bytes
+	* total_size: 32 KB
+	* evict_policy: bit-plru
+	* read_alloc_policy: true
+	* write_alloc_policy: true
+	* write_policy: writeback
+	* read_latency: 1 cycle(s)
+	* write_latency: 1 cycle(s)
+* (marss-riscv): no caches found, setting page_walk_cache to NULL
+* (marss-riscv): found l1-data cache, setting page_walk_cache to dcache
+* (marss-riscv): Setting up branch target buffer (BTB)
+	* size: 32
+	* sets: 16
+	* set_bits: 4
+	* ways: 2
+	* evict_policy: bit-plru
+* (marss-riscv): Setting up branch history table (bht)
+	* size: 256
+	* index_bits: 8
+* (marss-riscv): Setting up return address stack (RAS)
+	* size: 6

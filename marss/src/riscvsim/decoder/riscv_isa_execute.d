@@ -1,0 +1,52 @@
+riscvsim/decoder/riscv_isa_execute.o: \
+ riscvsim/decoder/riscv_isa_execute.c \
+ riscvsim/decoder/../../riscv_cpu_priv.h \
+ riscvsim/decoder/../../riscv_cpu.h riscvsim/decoder/../../cutils.h \
+ riscvsim/decoder/../../iomem.h \
+ riscvsim/decoder/../../riscvsim/utils/sim_params.h \
+ riscvsim/decoder/../../riscvsim/utils/../../json.h \
+ riscvsim/decoder/../../riscvsim/utils/../../cutils.h \
+ riscvsim/decoder/../../riscvsim/utils/../riscv_sim_macros.h \
+ riscvsim/decoder/../../riscvsim/core/riscv_sim_cpu.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/bpu.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/../riscv_sim_typedefs.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/../riscv_sim_macros.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/../utils/sim_params.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/../utils/sim_stats.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/../utils/../riscv_sim_macros.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/adaptive_predictor.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/bht.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/btb.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/../utils/evict_policy.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/ras.h \
+ riscvsim/decoder/../../riscvsim/core/../bpu/../riscv_sim_macros.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/memory_hierarchy.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/../riscv_sim_typedefs.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/../utils/sim_log.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/../utils/sim_params.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/cache.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/../utils/evict_policy.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/memory_controller.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/../../cutils.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/../utils/circular_queue.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/dram.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/memory_controller_utils.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/temu_mem_map_wrapper.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/../utils/cpu_latches.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/../utils/../bpu/bpu.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/../utils/../decoder/riscv_instruction.h \
+ riscvsim/decoder/../../riscvsim/core/../memory_hierarchy/../utils/../decoder/../riscv_sim_typedefs.h \
+ riscvsim/decoder/../../riscvsim/core/../riscv_sim_typedefs.h \
+ riscvsim/decoder/../../riscvsim/core/../utils/cpu_latches.h \
+ riscvsim/decoder/../../riscvsim/core/../utils/sim_exception.h \
+ riscvsim/decoder/../../riscvsim/core/../utils/../riscv_sim_macros.h \
+ riscvsim/decoder/../../riscvsim/core/../utils/cpu_latches.h \
+ riscvsim/decoder/../../riscvsim/core/../utils/sim_params.h \
+ riscvsim/decoder/../../riscvsim/core/../utils/sim_stats.h \
+ riscvsim/decoder/../../riscvsim/core/../utils/sim_trace.h \
+ riscvsim/decoder/../../riscvsim/core/../utils/sim_exception.h \
+ riscvsim/decoder/../../rtc_timer.h \
+ riscvsim/decoder/../../riscv_cpu_xlen_typedefs.h \
+ riscvsim/decoder/../../softfp.h riscvsim/decoder/../riscv_sim_typedefs.h \
+ riscvsim/decoder/riscv_instruction.h \
+ riscvsim/decoder/fp_execute_template.h
