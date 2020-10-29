@@ -38,6 +38,7 @@ static const uint32_t *default_get_dirty_bits(PhysMemoryMap *map, PhysMemoryRang
 static void default_set_addr(PhysMemoryMap *map,
                              PhysMemoryRange *pr, uint64_t addr, BOOL enabled);
 
+/* 就是实例化处一个 PhysMemoryMap 对象，然后把其中功能函数设置为default function */
 PhysMemoryMap *phys_mem_map_init(void)
 {
     PhysMemoryMap *s;
@@ -54,6 +55,7 @@ void phys_mem_map_end(PhysMemoryMap *s)
     int i;
     PhysMemoryRange *pr;
 
+    /* 从这里可以看出，n_phys_mem_range 就是表示内存区域的个数 */
     for(i = 0; i < s->n_phys_mem_range; i++) {
         pr = &s->phys_mem_range[i];
         if (pr->is_ram) {
@@ -69,6 +71,12 @@ PhysMemoryRange *get_phys_mem_range(PhysMemoryMap *s, uint64_t paddr)
 {
     PhysMemoryRange *pr;
     int i;
+
+    /* 
+        根据传入的paddr这个地址来获取物理内存区域，首先遍历 phys_mem_range 数组，
+        然后通过 base addr+size 来判断paddr是否在这个区域，如果在，就返回这个地址
+        区域，否则就返回null
+    */
     for(i = 0; i < s->n_phys_mem_range; i++) {
         pr = &s->phys_mem_range[i];
         if (paddr >= pr->addr && paddr < pr->addr + pr->size)
@@ -84,6 +92,11 @@ PhysMemoryRange *register_ram_entry(PhysMemoryMap *s, uint64_t addr,
 
     assert(s->n_phys_mem_range < PHYS_MEM_RANGE_MAX);
     assert((size & (DEVRAM_PAGE_SIZE - 1)) == 0 && size != 0);
+
+    /*
+        其实就是向传入的map s中注册一个ran入口，把其中的is_ram标志位设置位TRUE就表示
+        这块区域是用于模拟ram，然后需要把 n_phys_mem_range 加1，注意前面用的是引用
+    */
     pr = &s->phys_mem_range[s->n_phys_mem_range++];
     pr->map = s;
     pr->is_ram = TRUE;
@@ -106,6 +119,7 @@ static PhysMemoryRange *default_register_ram(PhysMemoryMap *s, uint64_t addr,
 
     pr = register_ram_entry(s, addr, size, devram_flags);
 
+    /* 通过malloc申请的空间来模拟实际的物理内存 */
     pr->phys_mem = mallocz(size);
     if (!pr->phys_mem) {
         fprintf(stderr, "Could not allocate VM memory\n");
@@ -186,6 +200,9 @@ PhysMemoryRange *cpu_register_device(PhysMemoryMap *s, uint64_t addr,
                                      DeviceReadFunc *read_func, DeviceWriteFunc *write_func,
                                      int devio_flags)
 {
+    /*
+        从代码逻辑可以看到，注册ram跟注册device主要差别就是is_ram标志位的设置
+    */
     PhysMemoryRange *pr;
     assert(s->n_phys_mem_range < PHYS_MEM_RANGE_MAX);
     assert(size <= 0xffffffff);
@@ -244,10 +261,13 @@ void phys_mem_set_addr(PhysMemoryRange *pr, uint64_t addr, BOOL enabled)
 /* return NULL if no valid RAM page. The access can only be done in the page */
 uint8_t *phys_mem_get_ram_ptr(PhysMemoryMap *map, uint64_t paddr, BOOL is_rw)
 {
+    /* 获取包含传入地址的memory range */
     PhysMemoryRange *pr = get_phys_mem_range(map, paddr);
     uintptr_t offset;
     if (!pr || !pr->is_ram)
         return NULL;
+
+    /* 计算出来paddr在所在的memory region(也就是pr)中的offset */
     offset = paddr - pr->addr;
     if (is_rw)
         phys_mem_set_dirty_bit(pr, offset);

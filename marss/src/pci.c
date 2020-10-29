@@ -51,6 +51,9 @@ struct PCIDevice {
     PCIIORegion io_regions[PCI_NUM_REGIONS];
 };
 
+/*
+    主要还是包含了两个map元素来管理pci bus所拥有的资源，然后就是中断
+*/
 struct PCIBus {
     int bus_num;
     PCIDevice *device[256];

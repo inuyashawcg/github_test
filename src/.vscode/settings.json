@@ -28,6 +28,7 @@
         "string_view": "cpp",
         "iterator": "cpp",
         "vector": "cpp",
-        "*.def": "cpp"
+        "*.def": "cpp",
+        "algorithm": "c"
     }
 }

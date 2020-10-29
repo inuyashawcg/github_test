@@ -34,7 +34,8 @@
 
 //#define DEBUG_VIRTIO
 
-/* MMIO addresses - from the Linux kernel */
+/* MMIO addresses - from the Linux kernel 可以看到地址以4为间隔逐渐增大 */
+/* 代码逻辑中很多数据的处理都与4相关，这个要特别注意一下 */
 #define VIRTIO_MMIO_MAGIC_VALUE		0x000
 #define VIRTIO_MMIO_VERSION		0x004
 #define VIRTIO_MMIO_DEVICE_ID		0x008
@@ -96,12 +97,12 @@
 #define MAX_QUEUE_NUM 16
 
 typedef struct {
-    uint32_t ready; /* 0 or 1 */
+    uint32_t ready; /* 0 or 1 是否准备就绪的一个标识 */
     uint32_t num;
-    uint16_t last_avail_idx;
-    virtio_phys_addr_t desc_addr;
-    virtio_phys_addr_t avail_addr;
-    virtio_phys_addr_t used_addr;
+    uint16_t last_avail_idx;        /* 最后一个可用元素的索引?? */
+    virtio_phys_addr_t desc_addr;   /* 描述符数组，每个描述符记录一个对buffer的描述 */ 
+    virtio_phys_addr_t avail_addr;  /* 用于guest端表示当前那些描述符是可用的 */
+    virtio_phys_addr_t used_addr;   /* 表示host端哪些描述符已经被使用了 */
     BOOL manual_recv; /* if TRUE, the device_recv() callback is not called */
 } QueueState;
 
@@ -109,15 +110,24 @@ typedef struct {
 #define VRING_DESC_F_WRITE	2
 #define VRING_DESC_F_INDIRECT	4
 
+/* 
+    desc应该是对一个buffer来进行描述的，注意其所包含的元素位数是不一样的，从下面的函数逻辑来看，
+    当我们找到一个buffer是处于可写状态的时候，如果还要继续找可写状态的buffer，是需要借助next来
+    实现，说明 QueueState->desc_addr 中相邻元素的属性应该是不同的，所以才要借助next来进行跳转
+    查找
+*/
 typedef struct {
     uint64_t addr;
     uint32_t len;
-    uint16_t flags; /* VRING_DESC_F_x */
-    uint16_t next;
+    uint16_t flags; /* VRING_DESC_F_x 根据下面的代码逻辑推测，这个标识应该是要判断buffer的状态 */
+    uint16_t next;  /* 指向下一个描述符 */
 } VIRTIODesc;
 
-/* return < 0 to stop the notification (it must be manually restarted
-   later), 0 if OK */
+/* 
+    return < 0 to stop the notification (it must be manually restarted
+    later), 0 if OK 
+    notify: 很可能跟guest和host通信有关，要注意queue_idx跟desc_idx到底起什么作用
+*/
 typedef int VIRTIODeviceRecvFunc(VIRTIODevice *s1, int queue_idx,
                                  int desc_idx, int read_size,
                                  int write_size);
@@ -126,33 +136,49 @@ typedef int VIRTIODeviceRecvFunc(VIRTIODevice *s1, int queue_idx,
 typedef uint8_t *VIRTIOGetRAMPtrFunc(VIRTIODevice *s, virtio_phys_addr_t paddr, BOOL is_rw);
 
 struct VIRTIODevice {
-    /* 
-        这两个参数指定了virtio device所在的位置和空间大小
-    */
     PhysMemoryMap *mem_map;
     PhysMemoryRange *mem_range;
+
     /* PCI only */
     PCIDevice *pci_dev;
+
     /* MMIO only */
     IRQSignal *irq;
-    VIRTIOGetRAMPtrFunc *get_ram_ptr;
+
+    /* 判断某个地址是否存在ram */
+    VIRTIOGetRAMPtrFunc *get_ram_ptr;   
     int debug;
 
     uint32_t int_status;
     uint32_t status;
+
+    /* 设备特征选择？ */
     uint32_t device_features_sel;
-    uint32_t queue_sel; /* currently selected queue */
-    QueueState queue[MAX_QUEUE];
+
+    /*
+        currently selected queue 当前选定的队列
+        从virtio架构来看，会有两个环形缓冲区来负责处理数据流传输，两者可能是相关的？
+    */
+    uint32_t queue_sel; 
+    QueueState queue[MAX_QUEUE];    /* 一共是8个 QueueState 队列 */
 
     /* device specific */
     uint32_t device_id;
     uint32_t vendor_id;
     uint32_t device_features;
-    VIRTIODeviceRecvFunc *device_recv;
-    void (*config_write)(VIRTIODevice *s); /* called after the config
-                                              is written */
+    VIRTIODeviceRecvFunc *device_recv;  /* 设备获取？ */
+    void (*config_write)(VIRTIODevice *s); /* called after the config is written */
+
+    /*
+        config_space 中存放的应该是config项，最多是256个，config_space_size 应该是表示目前
+        该数组中一共有多少项
+        从后边有些函数的逻辑看，从该数组中取值的时候貌似都是以4字节为单位来取的，这可能就是要求
+        config_space_size 必须是4的倍数的原因，所以总的config项应该是 config_space_size / 4
+    */
     uint32_t config_space_size; /* in bytes, must be multiple of 4 */
-    uint8_t config_space[MAX_CONFIG_SPACE_SIZE];
+
+    /* uint8_t是 unsigned char 类型，所以整个数组的长度是256 byte，应该是管理着虚拟IO设备的配置信息 */
+    uint8_t config_space[MAX_CONFIG_SPACE_SIZE];    
 };
 
 static uint32_t virtio_mmio_read(void *opaque, uint32_t offset1, int size_log2);
@@ -170,6 +196,8 @@ static void virtio_reset(VIRTIODevice *s)
     s->queue_sel = 0;
     s->device_features_sel = 0;
     s->int_status = 0;
+
+    /* 把device管理的queue中的数据全部重置 */
     for(i = 0; i < MAX_QUEUE; i++) {
         QueueState *qs = &s->queue[i];
         qs->ready = 0;
@@ -183,33 +211,37 @@ static void virtio_reset(VIRTIODevice *s)
 
 static uint8_t *virtio_pci_get_ram_ptr(VIRTIODevice *s, virtio_phys_addr_t paddr, BOOL is_rw)
 {
+    /* 传入的是pci device管理的pci bus中的memory map，下面MIMO直接传入 virtio device 的memory map */
     return pci_device_get_dma_ptr(s->pci_dev, paddr, is_rw);
 }
 
 static uint8_t *virtio_mmio_get_ram_ptr(VIRTIODevice *s, virtio_phys_addr_t paddr, BOOL is_rw)
 {
-    return phys_mem_get_ram_ptr(s->mem_map, paddr, is_rw);
+    return phys_mem_get_ram_ptr(s->mem_map, paddr, is_rw);  /* 同上 */
 }
 
 static void virtio_add_pci_capability(VIRTIODevice *s, int cfg_type,
                                       int bar, uint32_t offset, uint32_t len,
                                       uint32_t mult)
 {
-    uint8_t cap[20];
+    uint8_t cap[20];    /* 20 byte */
     int cap_len;
     if (cfg_type == 2)
         cap_len = 20;
     else
         cap_len = 16;
     memset(cap, 0, cap_len);
-    cap[0] = 0x09; /* vendor specific */
-    cap[2] = cap_len; /* set by pci_add_capability() */
-    cap[3] = cfg_type;
+
+    cap[0] = 0x09;      /* vendor specific */
+    cap[2] = cap_len;   /* set by pci_add_capability() */
+    cap[3] = cfg_type;  
     cap[4] = bar;
     put_le32(cap + 8, offset);
     put_le32(cap + 12, len);
+
     if (cfg_type == 2)
         put_le32(cap + 16, mult);
+
     pci_add_capability(s->pci_dev, cap, cap_len);
 }
 
@@ -217,6 +249,8 @@ static void virtio_pci_bar_set(void *opaque, int bar_num,
                                uint32_t addr, BOOL enabled)
 {
     VIRTIODevice *s = opaque;
+
+    /* 激活memory */
     phys_mem_set_addr(s->mem_range, addr, enabled);
 }
 
@@ -340,6 +374,10 @@ static int virtio_memcpy_from_ram(VIRTIODevice *s, uint8_t *buf,
     int l;
 
     while (count > 0) {
+        /*
+            首先计算从addr开始，到虚拟页结束一共还剩余多少空间，然后将计算值跟count进行比较，返回较小的那个；
+            如果count超过了这个页剩余区域大小，那就到下一个可用区域接着读取
+        */
         l = min_int(count, VIRTIO_PAGE_SIZE - (addr & (VIRTIO_PAGE_SIZE - 1)));
         ptr = s->get_ram_ptr(s, addr, FALSE);
         if (!ptr)
@@ -375,6 +413,14 @@ static int get_desc(VIRTIODevice *s, VIRTIODesc *desc,
                     int queue_idx, int desc_idx)
 {
     QueueState *qs = &s->queue[queue_idx];
+
+    /* 
+        通过 queue_idx 和 desc_idx 来获取描述符信息，然后再拷贝相应的数据；
+        从函数实现的逻辑推断，VIRTIODevice结构体中的queue存放的是它所管理的所有的内存区域(ram / device)的描述符信息，
+        我们先通过 queue_idex 找到响应的 QueueState 对象，然后再根据 desc_idx 在 QueueState 管理的 desc_addr 
+        数组中去找到对应的元素，然后把这个desc的内容拷贝出来
+
+    */
     return virtio_memcpy_from_ram(s, (void *)desc, qs->desc_addr +
                                   desc_idx * sizeof(VIRTIODesc),
                                   sizeof(VIRTIODesc));
@@ -422,6 +468,8 @@ static int memcpy_to_from_queue(VIRTIODevice *s, uint8_t *buf,
 
     for(;;) {
         l = min_int(count, desc.len - offset);
+
+        /* 通过 to_queue 判断是从ram中读取数据，还是向ram写入数据*/
         if (to_queue)
             virtio_memcpy_to_ram(s, desc.addr + offset, buf, l);
         else
@@ -480,6 +528,7 @@ static void virtio_consume_desc(VIRTIODevice *s,
     set_irq(s->irq, 1);
 }
 
+/* 获取读/写内存区域的大小 */
 static int get_desc_rw_size(VIRTIODevice *s, 
                              int *pread_size, int *pwrite_size,
                              int queue_idx, int desc_idx)
@@ -520,6 +569,10 @@ static int get_desc_rw_size(VIRTIODevice *s,
 /* XXX: test if the queue is ready ? */
 static void queue_notify(VIRTIODevice *s, int queue_idx)
 {
+    /* 
+        VIRTIODevice 中有一个数组来存储该对象所需要的 QueueState，首先通过 queue_idx
+        来获取指定的那个 QueueState
+    */
     QueueState *qs = &s->queue[queue_idx];
     uint16_t avail_idx;
     int desc_idx, read_size, write_size;
@@ -527,6 +580,10 @@ static void queue_notify(VIRTIODevice *s, int queue_idx)
     if (qs->manual_recv)
         return;
 
+    /* 
+        获取指向由memory range管理的某一块物理内存区域中起始地址 + offset位置的指针，然后解引用
+        该指针，得到保存在该区域的值。这里起始地址就是 qs->avail_addr + 2
+    */
     avail_idx = virtio_read16(s, qs->avail_addr + 2);
     while (qs->last_avail_idx != avail_idx) {
         desc_idx = virtio_read16(s, qs->avail_addr + 4 + 
@@ -992,6 +1049,7 @@ typedef struct {
 } BlockRequest;
 
 typedef struct VIRTIOBlockDevice {
+    /* 这里必须要保证 VIRTIODevice 位于第一个位置 */
     VIRTIODevice common;
     BlockDevice *bs;
 
@@ -999,6 +1057,7 @@ typedef struct VIRTIOBlockDevice {
     BlockRequest req; /* request in progress */
 } VIRTIOBlockDevice;
 
+/* 可能是request消息头部包含的信息 */
 typedef struct {
     uint32_t type;
     uint32_t ioprio;
@@ -1050,6 +1109,7 @@ static void virtio_block_req_end(VIRTIODevice *s, int ret)
     }
 }
 
+/* request callback? */
 static void virtio_block_req_cb(void *opaque, int ret)
 {
     VIRTIODevice *s = opaque;
@@ -1074,14 +1134,17 @@ static int virtio_block_recv_request(VIRTIODevice *s, int queue_idx,
     uint8_t *buf;
     int len, ret;
 
+    /* 如果请求正在被处理，则返回-1？？ */
     if (s1->req_in_progress)
         return -1;
     
+    /* offset = 0，所以这里取出的数据就是header */
     if (memcpy_from_queue(s, &h, queue_idx, desc_idx, 0, sizeof(h)) < 0)
         return 0;
     s1->req.type = h.type;
     s1->req.queue_idx = queue_idx;
     s1->req.desc_idx = desc_idx;
+
     switch(h.type) {
     case VIRTIO_BLK_T_IN:
         s1->req.buf = malloc(write_size);

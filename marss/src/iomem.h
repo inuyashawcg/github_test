@@ -44,18 +44,26 @@ typedef uint32_t DeviceReadFunc(void *opaque, uint32_t offset, int size_log2);
 typedef struct PhysMemoryMap PhysMemoryMap;
 
 typedef struct {
-    PhysMemoryMap *map;
+    PhysMemoryMap *map;     /* 指向当前对应的memory map */
     uint64_t addr;
     uint64_t org_size; /* original size */
     uint64_t size; /* =org_size or 0 if the mapping is disabled */
-    BOOL is_ram;
+    BOOL is_ram;    /* memory区域标识，判断该区域是ram还是IO区域？ */
+
     /* the following is used for RAM access */
     int devram_flags;
     uint8_t *phys_mem;
+
+    /*
+        当cpu往内存里写数据时，首先会写到Cache里，这样就造成了内存和cache中数据的不一致问题，
+        当存此数据的cache要被新的数据取代时，需要把刚才更改的数据回写到内存中。dirty bit就是
+        标记要回写到内存中的cache数据的位
+    */
     int dirty_bits_size; /* in bytes */
     uint32_t *dirty_bits; /* NULL if not used */
     uint32_t *dirty_bits_tab[2];
     int dirty_bits_index; /* 0-1 */
+
     /* the following is used for I/O access */
     void *opaque;
     DeviceReadFunc *read_func;
@@ -65,9 +73,14 @@ typedef struct {
 
 #define PHYS_MEM_RANGE_MAX 32
 
+/*
+    该结构体的主要作用就是管理分配到的memory区域，同时定义了一些操作这些区域的功能函数
+*/
 struct PhysMemoryMap {
-    int n_phys_mem_range;
-    PhysMemoryRange phys_mem_range[PHYS_MEM_RANGE_MAX];
+    int n_phys_mem_range;   /* 从命名来看，这个参数应该是表示所占有的物理地址区域的个数？ n: number */
+    PhysMemoryRange phys_mem_range[PHYS_MEM_RANGE_MAX]; /* 管理map到的所有的物理内存区域范围 */
+
+    /* 注册ram */
     PhysMemoryRange *(*register_ram)(PhysMemoryMap *s, uint64_t addr,
                                      uint64_t size, int devram_flags);
     void (*free_ram)(PhysMemoryMap *s, PhysMemoryRange *pr);
@@ -87,6 +100,7 @@ PhysMemoryRange *register_ram_entry(PhysMemoryMap *s, uint64_t addr,
 static inline PhysMemoryRange *cpu_register_ram(PhysMemoryMap *s, uint64_t addr,
                                   uint64_t size, int devram_flags)
 {
+    /* 参考 default_register_ram */
     return s->register_ram(s, addr, size, devram_flags);
 }
 PhysMemoryRange *cpu_register_device(PhysMemoryMap *s, uint64_t addr,
@@ -99,6 +113,8 @@ void phys_mem_set_addr(PhysMemoryRange *pr, uint64_t addr, BOOL enabled);
 static inline const uint32_t *phys_mem_get_dirty_bits(PhysMemoryRange *pr)
 {
     PhysMemoryMap *map = pr->map;
+
+    /* 参考 default_get_dirty_bits */
     return map->get_dirty_bits(map, pr);
 }
 
