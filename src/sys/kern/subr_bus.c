@@ -982,7 +982,7 @@ bus_set_pass(int pass)
 		 * Bail once we hit a driver with a pass level that is
 		 * too high.
 		 * 如果有大于 bus_current_pass 的，再跟pass比较，如果比pass
-		 * 还要大，就break，因为passes中已经有比pass更大的pass level了
+		 * 还要大，就break，因为passes中已经没有比pass更大的pass level了
 		 */
 		if (dl->pass > pass)
 			break;
@@ -5336,15 +5336,13 @@ DECLARE_MODULE(rootbus, root_bus_mod, SI_SUB_DRIVERS, SI_ORDER_FIRST);
 void
 root_bus_configure(void)
 {
-
-	PDEBUG(("."));
-
 	/* Eventually this will be split up, but this is sufficient for now. 
 		在boot阶段，设备树会被多次扫描，每次扫描或者通过驱动设备就可以连接到设备。
 		系统会为每个驱动设置一个通行证编号，只有当通行证编号小于系统范围内的通行证编号
 		的时候，驱动才可以与设备进行连接。这里把bus的通行证编号被设置为BUS_PASS_DEFAULT，
 		即通行证的最高等级，应该是为了后续总线上的设备跟驱动能够进行连接
 	*/
+	PDEBUG(("."));
 	bus_set_pass(BUS_PASS_DEFAULT);
 }
 
