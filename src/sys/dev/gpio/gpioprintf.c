@@ -44,18 +44,12 @@ gpioprintf_attach(device_t dev) {
     return 0;
 }
 
-static int
-gpioprintf_detach(device_t dev) {
-    uprintf("gpioprintf detach!\n");
-    return 0;
-}
 
 static devclass_t gpioprintf_devclass;
 
 static device_method_t gpioprintf_methods[] = {
     DEVMETHOD(device_probe,		gpioprintf_probe),
 	DEVMETHOD(device_attach,	gpioprintf_attach),
-	DEVMETHOD(device_detach,	gpioprintf_detach),
 
 	DEVMETHOD_END
 };
@@ -67,4 +61,3 @@ static driver_t gpioprintf_driver = {
 };
 
 DRIVER_MODULE(gpioprintf, gpiobus, gpioprintf_driver, gpioprintf_devclass, 0, 0);
-MODULE_DEPEND(gpioprintf, gpiobus, 1, 1, 1);

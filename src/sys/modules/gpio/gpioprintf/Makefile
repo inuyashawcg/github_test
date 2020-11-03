@@ -31,7 +31,7 @@
 
 .PATH:	${SRCTOP}/sys/dev/gpio/
 
-KMOD=	gpioled
+KMOD=	gpioprintf
 
 SRCS=	gpioprintf.c
 
