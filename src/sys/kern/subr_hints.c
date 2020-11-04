@@ -346,6 +346,12 @@ resource_find(int *line, int *startln,
 	return ENOENT;
 }
 
+/*
+	name: 表示要从以name命名的设备中获取资源
+	unit: device的unit值，-1是特殊的，用于通配entry
+	resname: 资源的名称
+	result: 指向资源存储memory区域的指针
+*/
 int
 resource_int_value(const char *name, int unit, const char *resname, int *result)
 {
@@ -402,6 +408,10 @@ resource_string_value(const char *name, int unit, const char *resname,
 	int line;
 
 	line = 0;
+
+	/* 
+		通过find函数将获取到的string信息添加到str中，然后在传给result
+	*/
 	error = resource_find(&line, NULL, name, &unit, resname, NULL,
 	    NULL, NULL, NULL, NULL, NULL, &str);
 	if (error)

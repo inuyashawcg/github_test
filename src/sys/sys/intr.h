@@ -39,6 +39,7 @@
 
 #define	INTR_IRQ_INVALID	0xFFFFFFFF
 
+/* 中断类型 */
 enum intr_map_data_type {
 	INTR_MAP_DATA_ACPI = 0,
 	INTR_MAP_DATA_FDT,
@@ -79,10 +80,10 @@ typedef int intr_child_irq_filter_t(void *arg, uintptr_t irq);
 
 struct intr_pic;
 
-/* Interrupt source definition. */
+/* Interrupt source definition. 中断资源定义*/
 struct intr_irqsrc {
 	device_t		isrc_dev;	/* where isrc is mapped */
-	u_int			isrc_irq;	/* unique identificator */
+	u_int			isrc_irq;	/* unique identificator 唯一标识器*/
 	u_int			isrc_flags;
 	char			isrc_name[INTR_ISRC_NAMELEN];
 	cpuset_t		isrc_cpu;	/* on which CPUs is enabled */

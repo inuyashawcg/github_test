@@ -100,6 +100,9 @@ struct u_rman {
  * NB: Changing the offset/size/type of existing fields in struct resource
  * NB: breaks the device driver ABI and is strongly FORBIDDEN.
  * NB: Appending new fields is probably just misguided.
+ * 
+ * 从定义来看，resource_i 才是真正保存资源大小、地址等等信息的结构体，
+ * resource相当于是增加了资源的标识，handle应该是资源的处理函数
  */
 
 struct resource {

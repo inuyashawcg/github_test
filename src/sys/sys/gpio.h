@@ -102,6 +102,7 @@ struct gpio_req {
  * gpio_access_32 / GPIOACCESS32
  *
  * Simultaneously read and/or change up to 32 adjacent pins.
+ * 同时读取或者更改32个连续的引脚
  * If the device cannot change the pins simultaneously, returns EOPNOTSUPP.
  *
  * This accesses an adjacent set of up to 32 pins starting at first_pin within

@@ -65,7 +65,7 @@ static struct cdevsw gpioc_cdevsw = {
 
 struct gpioc_softc {
 	device_t	sc_dev;		/* gpiocX dev */
-	device_t	sc_pdev;	/* gpioX dev */
+	device_t	sc_pdev;	/* gpioX dev  parent device */
 	struct cdev	*sc_ctl_dev;	/* controller device */
 	int		sc_unit;
 };
@@ -88,12 +88,16 @@ gpioc_attach(device_t dev)
 	sc->sc_dev = dev;
 	sc->sc_pdev = device_get_parent(dev);
 	sc->sc_unit = device_get_unit(dev);
+
+	/* 初始化创建的新device的参数 */
 	make_dev_args_init(&devargs);
 	devargs.mda_devsw = &gpioc_cdevsw;
 	devargs.mda_uid = UID_ROOT;
 	devargs.mda_gid = GID_WHEEL;
 	devargs.mda_mode = 0600;
 	devargs.mda_si_drv1 = sc;
+
+	/* 创建一个cdev，赋值给sc->sc_ctl_dev */
 	err = make_dev_s(&devargs, &sc->sc_ctl_dev, "gpioc%d", sc->sc_unit);
 	if (err != 0) {
 		printf("Failed to create gpioc%d", sc->sc_unit);
@@ -118,6 +122,9 @@ gpioc_detach(device_t dev)
 	return (0);
 }
 
+/*
+	通过ioctl的方式来控制对gpio执行的操作
+*/
 static int 
 gpioc_ioctl(struct cdev *cdev, u_long cmd, caddr_t arg, int fflag, 
     struct thread *td)

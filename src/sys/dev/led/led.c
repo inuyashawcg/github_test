@@ -26,13 +26,14 @@ __FBSDID("$FreeBSD: releng/12.0/sys/dev/led/led.c 326408 2017-11-30 20:33:45Z pf
 #include <sys/uio.h>
 #include <sys/sx.h>
 
+/* led sofr context?? */
 struct ledsc {
 	LIST_ENTRY(ledsc)	list;
 	char			*name;
 	void			*private;
 	int			unit;
-	led_t			*func;
-	struct cdev *dev;
+	led_t			*func;		/* 功能函数 */
+	struct cdev *dev;			/* 表示一个字符设备 */
 	struct sbuf		*spec;
 	char			*str;
 	char			*ptr;
@@ -279,21 +280,28 @@ led_create(led_t *func, void *priv, char const *name)
 struct cdev *
 led_create_state(led_t *func, void *priv, char const *name, int state)
 {
-	struct ledsc	*sc;
+	/* ledsc 应该也是表示led software context，所以需要加锁*/
+	struct ledsc	*sc;	
 
 	sc = malloc(sizeof *sc, M_LED, M_WAITOK | M_ZERO);
 
 	sx_xlock(&led_sx);
 	sc->name = strdup(name, M_LED);
 	sc->unit = alloc_unr(led_unit);
-	sc->private = priv;
+	
+	/* 从实例中可以看到，priv传入的参数是softc指针 */
+	sc->private = priv;		
 	sc->func = func;
+
+	/* make_dev 函数创建的是一个字符设备 */
 	sc->dev = make_dev(&led_cdevsw, sc->unit,
 	    UID_ROOT, GID_WHEEL, 0600, "led/%s", name);
 	sx_xunlock(&led_sx);
 
 	mtx_lock(&led_mtx);
 	sc->dev->si_drv1 = sc;
+
+	/* 静态ledsc类型的链表，用来管理所有创建的led设备，插入到表头 */
 	LIST_INSERT_HEAD(&led_list, sc, list);
 	if (state != -1)
 		sc->func(sc->private, state != 0);

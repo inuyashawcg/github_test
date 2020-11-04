@@ -71,12 +71,16 @@
 
 struct gpiobus_pin_data
 {
-	int		mapped;		/* pin is mapped/reserved. */
+	int		mapped;		/* pin is mapped/reserved. pin已经映射/保留，应该就是指pin是否已经被使用了 */
 	char		*name;		/* pin name. */
 };
 
 #ifdef INTRNG
 struct intr_map_data_gpio {
+	/* 
+		intr_map_data 结构体包含了数据大小和中断类型，从定义来看，中断也是分成了很多种类，
+		包括GPIO，ACPI，FDT等等
+	*/
 	struct intr_map_data	hdr;
 	u_int			gpio_pin_num;
 	u_int			gpio_pin_flags;
@@ -84,6 +88,11 @@ struct intr_map_data_gpio {
 };
 #endif
 
+/*
+	通过不同驱动程序的实现来看，这个softc所包含的东西总体性比较强、用于管理和指示重要信息的元素。
+	比如锁，可能总线中的很多设计操作softc状态信息的地方都要用到；rman，管理总线中的所有资源；
+	sc_npins，显示总线包含的总的引脚数；等等
+*/
 struct gpiobus_softc
 {
 	struct mtx	sc_mtx;		/* bus mutex */
@@ -105,10 +114,10 @@ typedef struct gpiobus_pin *gpio_pin_t;
 
 struct gpiobus_ivar
 {
-	struct resource_list	rl;	/* isr resource list */
-	uint32_t	npins;	/* pins total */
-	uint32_t	*flags;	/* pins flags */
-	uint32_t	*pins;	/* pins map */
+	struct resource_list	rl;	/* isr resource list 中断资源列表 */
+	uint32_t	npins;	/* pins total 总的引脚数 */
+	uint32_t	*flags;	/* pins flags 引脚标识 */
+	uint32_t	*pins;	/* pins map 引脚映射 */
 };
 
 #ifdef FDT

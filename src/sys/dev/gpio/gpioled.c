@@ -51,18 +51,23 @@ __FBSDID("$FreeBSD: releng/12.0/sys/dev/gpio/gpioled.c 326255 2017-11-27 14:52:4
  */
 #define	GPIOLED_PIN	0
 
+/* 锁操作 */
 #define	GPIOLED_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
 #define	GPIOLED_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
 #define	GPIOLED_LOCK_INIT(_sc)		mtx_init(&(_sc)->sc_mtx,	\
     device_get_nameunit((_sc)->sc_dev), "gpioled", MTX_DEF)
 #define	GPIOLED_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_mtx)
 
+/*
+	定义一个softc结构体用来保存必要的状态量，比如锁会在attach的时候初始化，
+	然后后面需要再执行锁操作的时候，就可以直接get softc，然后lock即可，方便使用和管理
+*/
 struct gpioled_softc 
 {
-	device_t	sc_dev;
-	device_t	sc_busdev;
-	struct mtx	sc_mtx;
-	struct cdev	*sc_leddev;
+	device_t	sc_dev;			/* 结构体关联的设备类型 */
+	device_t	sc_busdev;		/* 父设备类型，总线 */
+	struct mtx	sc_mtx;			/* 锁 */
+	struct cdev	*sc_leddev;		/* 字符设备类型 */
 	int		sc_invert;
 };
 
@@ -71,17 +76,24 @@ static int gpioled_probe(device_t);
 static int gpioled_attach(device_t);
 static int gpioled_detach(device_t);
 
+/* 控制GPIO高低电平 */
 static void 
 gpioled_control(void *priv, int onoff)
 {
 	struct gpioled_softc *sc;
 
 	sc = (struct gpioled_softc *)priv;
+
+	/* 改变softc状态的时候，加锁？ */
 	GPIOLED_LOCK(sc);
+
+	/* 设置引脚属性为输出模式 */
 	if (GPIOBUS_PIN_SETFLAGS(sc->sc_busdev, sc->sc_dev, GPIOLED_PIN,
 	    GPIO_PIN_OUTPUT) == 0) {
 		if (sc->sc_invert)
 			onoff = !onoff;
+
+		/* 设置引脚的高低电平 */
 		GPIOBUS_PIN_SET(sc->sc_busdev, sc->sc_dev, GPIOLED_PIN,
 		    onoff ? GPIO_PIN_HIGH : GPIO_PIN_LOW);
 	}

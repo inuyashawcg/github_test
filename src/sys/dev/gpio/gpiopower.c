@@ -83,7 +83,7 @@ gpiopower_attach(device_t dev)
 	if (ofw_bus_is_compatible(dev, "gpio-poweroff"))
 		sc->sc_rbmask = RB_HALT | RB_POWEROFF;
 	else
-		sc->sc_rbmask = 0;
+		sc->sc_rbmask = 0;	/* reboot mask */
 	EVENTHANDLER_REGISTER(shutdown_final, gpiopower_assert, dev,
 	    SHUTDOWN_PRI_LAST);
 	gpio_pin_setflags(sc->sc_pin, GPIO_PIN_OUTPUT);

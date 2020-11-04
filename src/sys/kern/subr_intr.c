@@ -1501,15 +1501,26 @@ struct intr_map_entry
 {
 	device_t 		dev;
 	intptr_t 		xref;
-	struct intr_map_data 	*map_data;
-	struct intr_irqsrc 	*isrc;
+	struct intr_map_data 	*map_data;		/* 中断数据，包括数据大小和数据类型 */
+	struct intr_irqsrc 	*isrc;		/* 中断资源 */
 	/* XXX TODO DISCONECTED PICs */
 	/*int			flags */
 };
 
 /* XXX Convert irq_map[] to dynamicaly expandable one. */
+
+/* irq_map 应该是管理着所有的中断资源，数组 */
 static struct intr_map_entry *irq_map[2 * NIRQ];
+
+/* 记录总的分配的资源数 */
 static int irq_map_count = nitems(irq_map);
+
+/*
+	从代码逻辑来看，irq_map_first_free_idx 记录着 irq_map 数组中第一个数据为空的元素的索引，
+	由此可以推测，我们申请的中断资源都会存放到 irq_map 数组中，然后 irq_map_first_free_idx 在每一次
+	新的元素添加之后就向后移动一位，以便后面又申请的元素能够快速存放到空闲位置；如果之前申请的元素被释放了，
+	free idx可能是要指向相应的位置，等有新的资源时重新填充
+*/
 static int irq_map_first_free_idx;
 static struct mtx irq_map_lock;
 
@@ -1595,7 +1606,8 @@ intr_map_copy_map_data(u_int res_id, device_t *map_dev, intptr_t *map_xref,
 
 
 /*
- * Allocate and fill new entry in irq_map table.
+ * Allocate and fill new entry in irq_map table. 申请中断资源，并且返回该资源在 irq_map
+ * 数组中的索引
  */
 u_int
 intr_map_irq(device_t dev, intptr_t xref, struct intr_map_data *data)
@@ -1612,6 +1624,8 @@ intr_map_irq(device_t dev, intptr_t xref, struct intr_map_data *data)
 	entry->isrc = NULL;
 
 	mtx_lock(&irq_map_lock);
+
+	/* 把重新申请的资源放置到第一个空闲位置 */
 	for (i = irq_map_first_free_idx; i < irq_map_count; i++) {
 		if (irq_map[i] == NULL) {
 			irq_map[i] = entry;

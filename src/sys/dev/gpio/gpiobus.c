@@ -92,12 +92,14 @@ gpio_alloc_intr_resource(device_t consumer_dev, int *rid, u_int alloc_flags,
 	struct intr_map_data_gpio *gpio_data;
 	struct resource *res;
 
+	/* 分配GPIO类型的中断资源存储区域 */
 	gpio_data = (struct intr_map_data_gpio *)intr_alloc_map_data(
 	    INTR_MAP_DATA_GPIO, sizeof(*gpio_data), M_WAITOK | M_ZERO);
 	gpio_data->gpio_pin_num = pin->pin;
 	gpio_data->gpio_pin_flags = pin->flags;
 	gpio_data->gpio_intr_mode = intr_mode;
 
+	/* irq 是当前申请资源在资源管理数组中的位置索引 */
 	irq = intr_map_irq(pin->dev, 0, (struct intr_map_data *)gpio_data);
 	res = bus_alloc_resource(consumer_dev, SYS_RES_IRQ, rid, irq, irq, 1,
 	    alloc_flags);
@@ -105,6 +107,8 @@ gpio_alloc_intr_resource(device_t consumer_dev, int *rid, u_int alloc_flags,
 		intr_free_intr_map_data((struct intr_map_data *)gpio_data);
 		return (NULL);
 	}
+
+	/* 设置res的虚拟地址为 gpio_data */
 	rman_set_virtual(res, gpio_data);
 	return (res);
 }
@@ -122,13 +126,14 @@ int
 gpio_check_flags(uint32_t caps, uint32_t flags)
 {
 
-	/* Filter unwanted flags. */
+	/* Filter unwanted flags. 过滤不需要的标志 */
 	flags &= caps;
 
-	/* Cannot mix input/output together. */
+	/* Cannot mix input/output together. input和output属性是不能同时存在的 */
 	if (flags & GPIO_PIN_INPUT && flags & GPIO_PIN_OUTPUT)
 		return (EINVAL);
-	/* Cannot mix pull-up/pull-down together. */
+
+	/* Cannot mix pull-up/pull-down together. 拉高和拉低也是不能同时存在的 */
 	if (flags & GPIO_PIN_PULLUP && flags & GPIO_PIN_PULLDOWN)
 		return (EINVAL);
 
@@ -249,8 +254,12 @@ gpiobus_init_softc(device_t dev)
 int
 gpiobus_alloc_ivars(struct gpiobus_ivar *devi)
 {
-
-	/* Allocate pins and flags memory. */
+	/* 
+		仅仅申请了pins和flags所需要的空间
+		Allocate pins and flags memory. 可以看到pins跟flag都是指向32位整数的指针，
+		可能就是它们所指向的数据的每一位都代表一个pin，所以就可以通过这两个数来对所有的pin
+		进行响应的控制
+	*/
 	devi->pins = malloc(sizeof(uint32_t) * devi->npins, M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
 	if (devi->pins == NULL)
@@ -296,12 +305,14 @@ gpiobus_acquire_pin(device_t bus, uint32_t pin)
 		device_printf(bus, "warning: pin %d is already mapped\n", pin);
 		return (-1);
 	}
+
+	/* 从这里可以看出，mapped表示该引脚是否被已经被引用了 */
 	sc->sc_pins[pin].mapped = 1;
 
 	return (0);
 }
 
-/* Release mapped pin */
+/* Release mapped pin 如果某个引脚被占用了，可以通过这个函数对起进行释放 */
 int
 gpiobus_release_pin(device_t bus, uint32_t pin)
 {
@@ -331,6 +342,7 @@ gpiobus_parse_pins(struct gpiobus_softc *sc, device_t child, int mask)
 	struct gpiobus_ivar *devi = GPIOBUS_IVAR(child);
 	int i, npins;
 
+	/* 根据mask判断需要解析的是哪个引脚 */
 	npins = 0;
 	for (i = 0; i < 32; i++) {
 		if (mask & (1 << i))
@@ -341,6 +353,10 @@ gpiobus_parse_pins(struct gpiobus_softc *sc, device_t child, int mask)
 		return (EINVAL);
 	}
 	devi->npins = npins;
+
+	/*
+		仅仅申请了pins和flags所需要的内存空间
+	*/
 	if (gpiobus_alloc_ivars(devi) != 0) {
 		device_printf(child, "cannot allocate device ivars\n");
 		return (EINVAL);
@@ -349,7 +365,10 @@ gpiobus_parse_pins(struct gpiobus_softc *sc, device_t child, int mask)
 	for (i = 0; i < 32; i++) {
 		if ((mask & (1 << i)) == 0)
 			continue;
-		/* Reserve the GPIO pin. */
+		/* 
+		 	Reserve the GPIO pin. 因为前面已经判断我们要应用i引脚，结果到这里发现这个引脚
+			已经被引用了，所以报错
+		*/
 		if (gpiobus_acquire_pin(sc->sc_busdev, i) != 0) {
 			gpiobus_free_ivars(devi);
 			return (EINVAL);
@@ -382,10 +401,15 @@ gpiobus_attach(device_t dev)
 
 	/*
 	 * Get parent's pins and mark them as unmapped
+	 * 从函数执行逻辑来看，bus_generic_probe函数会调用 DEVICE_IDENTIFY 这个宏，这个宏主要就是用于
+	 * 总线驱动创建子设备，然后parent device 添加子设备。bus_generic_probe(dev)中的dev就代表父设备
 	 */
 	bus_generic_probe(dev);
 	bus_enumerate_hinted_children(dev);
 
+	/*
+		bus_generic_attach(dev) 作用的主要对象是dev的children，所以传入的参数一般都是bus device
+	*/
 	return (bus_generic_attach(dev));
 }
 
@@ -543,6 +567,10 @@ gpiobus_hinted_child(device_t bus, const char *dname, int dunit)
 
 	child = BUS_ADD_CHILD(bus, 0, dname, dunit);
 	devi = GPIOBUS_IVAR(child);
+
+	/*
+		
+	*/
 	resource_int_value(dname, dunit, "pins", &pins);
 	if (gpiobus_parse_pins(sc, child, pins)) {
 		resource_list_free(&devi->rl);
