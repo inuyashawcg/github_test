@@ -86,6 +86,10 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/subr_rman.c 300317 2016-05-20 17:57:47Z
  * addresses on IA32 hardware.
  */
 struct resource_i {
+	/*
+		指明隶属于那个resource结构体，resource可以看做时候对resource_i的扩充，增加了
+		tag和handle属性
+	*/
 	struct resource		r_r;
 	TAILQ_ENTRY(resource_i)	r_link;
 	LIST_ENTRY(resource_i)	r_sharelink;
@@ -497,7 +501,8 @@ rman_adjust_resource(struct resource *rr, rman_res_t start, rman_res_t end)
 	接受的最小的值，也就是bus分配给resource的start是可以大于这个指定的start的值的。从这
 	可以看出，resource的分配其实是一个动态变化的过程，前后都有可以调整的裕度值，这个函数所
 	要做的工作也就是从rm管理的资源项中找到一个符合要求的，又满足一定限制条件的资源项分配给
-	device即可
+	device
+	如果共享段已经存在，那总线就会将设备添加到consumers当中
 */
 struct resource *
 rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
@@ -506,7 +511,7 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 {
 	u_int new_rflags;
 	struct resource_i *r, *s, *rv;
-	rman_res_t rstart, rend, amask, bmask;
+	rman_res_t rstart, rend, amask, bmask; 	/* amask：align mask； bmask: bound mask */
 
 	rv = NULL;
 
@@ -516,6 +521,17 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 	       dev == NULL ? "<null>" : device_get_nameunit(dev)));
 	KASSERT((flags & RF_FIRSTSHARE) == 0,
 	    ("invalid flags %#x", flags));
+
+	/*
+		 RF_FIRSTSHARE           0x0020              0000 0000 0010 0000
+		~RF_FIRSTSHARE                               1111 1111 1101 1111     
+		flag & ~RF_FIRSTSHARE ==>> 把 flag 的第6个bit位置0
+
+		 RF_ALLOCATED			0x0001				 0000 0000 0000 0001
+		|RF_ALLOCATED ==>> 把处理后的 flag 的第1个bit位再置1
+
+		所以 new_rflags 的格式为: xxxx xxxx xx0x xxx1								 
+	*/
 	new_rflags = (flags & ~RF_FIRSTSHARE) | RF_ALLOCATED;
 
 	mtx_lock(rm->rm_mtx);
@@ -534,8 +550,10 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 
 	/*
 		循环条件中可以看出，如果元素的end值小于指定的start + count - 1，需要继续查找，也就是
-		这种情况下的resource是不符合要求的，也就是resource的end一定要大于计算值，这样才能把请求的
-		资源给包含起来
+		这种情况下的resource是不符合要求的，resource的end一定要大于计算值，这样才能把请求的
+		资源给包含起来，所以r就表示第一个符合要求的区域
+		rm_list是resource_i类型的队列，里边的每一个元素都是对resource manager所管理的每一块资源
+		的描述，所以我们可以通过遍历rm_list来查找合适的资源区域
 	*/
 	for (r = TAILQ_FIRST(&rm->rm_list);
 	     r && r->r_end < start + count - 1;
@@ -550,15 +568,29 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 		goto out;
 	}
 
+	/*
+		flags = xxxx xxxx xxxx xxxx 
+		RF_ALIGNMENT(flags)  ->  (((flags) & RF_ALIGNMENT_MASK) >> RF_ALIGNMENT_SHIFT)
+		RF_ALIGNMENT_MASK = 0x003F << RF_ALIGNMENT_SHIFT = 0x003F << 10
+			0000 0000 0011 1111 << 10  = 1111 1100 0000 0000  相当于是把flags前10个bit置0
+		RF_ALIGNMENT(flags) = xxxx xx00 0000 0000 >> 10 = 0000 0000 00xx xxxx,相当于是取出
+		了flags的 bit10-bit15 
+	*/
 	amask = (1ull << RF_ALIGNMENT(flags)) - 1;
 	KASSERT(start <= RM_MAX_END - amask,
 	    ("start (%#jx) + amask (%#jx) would wrap around", start, amask));
 
-	/* If bound is 0, bmask will also be 0 */
+	/* 
+		If bound is 0, bmask will also be 0 
+		所有正整数的按位取反是其本身+1的负数，这里是先减去1然后取反，bmask = -bound
+		-1取反结果为0
+	*/
 	bmask = ~(bound - 1);
+
 	/*
 	 * First try to find an acceptable totally-unshared region.
-	 * 优先查找非共享区域
+	 * 优先查找非共享区域。r目前指向的是第一个满足要求的region，然后又赋值给s，所以目前s也是
+	 * 指向该region。后续如果需要继续查找的话，就是通过s指针来进行
 	 */
 	for (s = r; s; s = TAILQ_NEXT(s, r_link)) {
 		DPRINTF(("considering [%#jx, %#jx]\n", s->r_start, s->r_end));
@@ -579,15 +611,24 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 			    s->r_start, amask));
 			break;
 		}
+		/* 如果是共享区域就直接跳过 */
 		if (s->r_flags & RF_ALLOCATED) {
 			DPRINTF(("region is allocated\n"));
 			continue;
 		}
+
+		/*
+			从r_start和start中选一个比较大的那个值作为resource start的值，说明存在一种情况就是
+			我们请求的资源项start < r_start，相当于是已经越界了，所以要关注这种情况下的解决办法
+			(前面只是判断了start+count， 并没有对start进行比较)
+		*/
 		rstart = ummax(s->r_start, start);
 		/*
 		 * Try to find a region by adjusting to boundary and alignment
 		 * until both conditions are staisfied. This is not an optimal
 		 * algorithm, but in most cases it isn't really bad, either.
+		 * 
+		 * 调增rstart，rend的值，使得其满足region边界要求？
 		 */
 		do {
 			rstart = (rstart + amask) & ~amask;
@@ -606,6 +647,9 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 		if ((rend - rstart + 1) >= count) {
 			DPRINTF(("candidate region: [%#jx, %#jx], size %#jx\n",
 			       rstart, rend, (rend - rstart + 1)));
+			/* 
+				如果s刚好能够容纳请求的资源区域，那就直接返回rv(其实就是s)
+			*/
 			if ((s->r_end - s->r_start + 1) == count) {
 				DPRINTF(("candidate region is entire chunk\n"));
 				rv = s;
@@ -623,8 +667,9 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 			 * beginning or the end of s, so we only need to
 			 * split it in two.  The first case requires
 			 * two new allocations; the second requires but one.
+			 * 也就是说下面的情况不是完全匹配的类型，可能会进一步对原有的region进行拆分
 			 */
-			rv = int_alloc_resource(M_NOWAIT);
+			rv = int_alloc_resource(M_NOWAIT);		/* 这一阶段之前，rv一直是null，rv指向新分配的region */
 			if (rv == NULL)
 				goto out;
 			rv->r_start = rstart;
@@ -634,6 +679,7 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 			rv->r_rm = rm;
 
 			if (s->r_start < rv->r_start && s->r_end > rv->r_end) {
+				/* 需要拆分成三块区域的情况 */
 				DPRINTF(("splitting region in three parts: "
 				       "[%#jx, %#jx]; [%#jx, %#jx]; [%#jx, %#jx]\n",
 				       s->r_start, rv->r_start - 1,
@@ -648,6 +694,10 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 					rv = NULL;
 					goto out;
 				}
+
+				/* 
+					r代表拆分后的第3块区域，rv表示中间的区域，s还是表示第1块区域 
+				*/
 				r->r_start = rv->r_end + 1;
 				r->r_end = s->r_end;
 				r->r_flags = s->r_flags;
@@ -684,6 +734,7 @@ rman_reserve_resource_bound(struct rman *rm, rman_res_t start, rman_res_t end,
 	 * to be considered compatible with the client's request.  (The
 	 * former restriction could probably be lifted without too much
 	 * additional work, but this does not seem warranted.)
+	 * 候选区域一定要满足size和sharing类型这两种属性，才能被认为与客户端的请求兼容
 	 */
 	DPRINTF(("no unshared regions found\n"));
 	if ((flags & RF_SHAREABLE) == 0)

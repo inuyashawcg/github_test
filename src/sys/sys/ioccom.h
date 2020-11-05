@@ -55,9 +55,38 @@
 
 #define	_IOC(inout,group,num,len)	((unsigned long) \
 	((inout) | (((len) & IOCPARM_MASK) << 16) | ((group) << 8) | (num)))
+
+/*
+    paramters:
+        g: 表示组号(group)，应该是一个8位的魔数，我们可以选择任意值，只在驱动程序中保持一致即可
+        n: 表示序数，用于将本驱动程序中的各个ioctl命令分开
+        t: 表示输入输出操作所传输的数据类型。很显然，_IO宏没有参数t，因为它所定义的命令不会引发
+           数据传输
+    
+    魔数，其实也称为神奇数字，我们大多数人是在学习计算机过程中接触到这个词的。它被用来为重要的数据定义标签，
+    用独特的数字唯－地标识该数据，这种独特的数字是只有少数人才能掌握其奥秘的“神秘力量”。故，直接出现的一个
+    数字，只要其意义不明确，感觉很诡异，就称之为魔数。魔数应用的地方太多了，如elf 文件头：
+    ELF Header :
+        Magic : 7f 45 4c 46 01 01 01 00 00 00 00 00 00 00 00 00
+    这个Magic 后面的一长串就是魔数， elf 解析器（通常是程序加载器）用它来校验文件的类型是否是elf
+*/
+
+/*  
+    创建一个不传输数据的输入输出操作ioctl命令，也就是这类命令的d_ioctl函数中参数data是
+    没有用的，例如弹出可移动媒体
+*/
 #define	_IO(g,n)	_IOC(IOC_VOID,	(g), (n), 0)
 #define	_IOWINT(g,n)	_IOC(IOC_VOID,	(g), (n), sizeof(int))
+
+/*
+    创建一个读操作的ioctl命令，该操作可以从设备向用户空间传输数据，例如：获取出错信息
+    与_IO宏的主要区别就是 IOC_OUT - IOC_VOID，表示命令的类型
+*/
 #define	_IOR(g,n,t)	_IOC(IOC_OUT,	(g), (n), sizeof(t))
+
+/*
+    创建一个写操作的ioctl命令，该操作可以将用户空间向设备传送数据。例如：设置设备参数
+*/
 #define	_IOW(g,n,t)	_IOC(IOC_IN,	(g), (n), sizeof(t))
 /* this should be _IORW, but stdio got there first */
 #define	_IOWR(g,n,t)	_IOC(IOC_INOUT,	(g), (n), sizeof(t))

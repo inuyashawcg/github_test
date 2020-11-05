@@ -117,6 +117,7 @@ struct resource_map;
 TAILQ_HEAD(resource_head, resource_i);
 
 struct rman {
+	/* resource_i类型的队列 */
 	struct	resource_head 	rm_list;
 
 	/* 貌似涉及到resource manager 的都需要加锁来保护一下？ */

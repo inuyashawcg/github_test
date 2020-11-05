@@ -92,15 +92,23 @@ gpio_alloc_intr_resource(device_t consumer_dev, int *rid, u_int alloc_flags,
 	struct intr_map_data_gpio *gpio_data;
 	struct resource *res;
 
-	/* 分配GPIO类型的中断资源存储区域 */
+	/* 
+		根据gpio_data的类型和大小来申请map data存放空间
+	*/
 	gpio_data = (struct intr_map_data_gpio *)intr_alloc_map_data(
 	    INTR_MAP_DATA_GPIO, sizeof(*gpio_data), M_WAITOK | M_ZERO);
 	gpio_data->gpio_pin_num = pin->pin;
 	gpio_data->gpio_pin_flags = pin->flags;
-	gpio_data->gpio_intr_mode = intr_mode;
+	gpio_data->gpio_intr_mode = intr_mode;	/* 上升沿、下降沿 */
 
-	/* irq 是当前申请资源在资源管理数组中的位置索引 */
+	/* 
+		有一个静态数组irq_map专门来管理intr_map_data, irq是当前申请资源在资源管理数组中的位置索引 
+	*/
 	irq = intr_map_irq(pin->dev, 0, (struct intr_map_data *)gpio_data);
+
+	/*
+		根据上述函数返回的索引值分配中断资源，其实就是由consumer_dev的parent(bus)来分配
+	*/
 	res = bus_alloc_resource(consumer_dev, SYS_RES_IRQ, rid, irq, irq, 1,
 	    alloc_flags);
 	if (res == NULL) {
@@ -569,15 +577,19 @@ gpiobus_hinted_child(device_t bus, const char *dname, int dunit)
 	devi = GPIOBUS_IVAR(child);
 
 	/*
-		
+		向以dname命名、unit值为dunit的设备申请资源，资源名称是pins，最后一个参数应该是引脚索引或者指针。
+		从代码可以看出，主要是给pin和irq申请
 	*/
 	resource_int_value(dname, dunit, "pins", &pins);
+
+	/* gpiobus_parse_pins：pins资源申请，通过返回值判断函数执行是否成功 */
 	if (gpiobus_parse_pins(sc, child, pins)) {
 		resource_list_free(&devi->rl);
 		free(devi, M_DEVBUF);
 		device_delete_child(bus, child);
 	}
 	if (resource_int_value(dname, dunit, "irq", &irq) == 0) {
+		/* SYS_RES_IRQ: 中断资源标识 */
 		if (bus_set_resource(child, SYS_RES_IRQ, 0, irq, 1) != 0)
 			device_printf(bus,
 			    "warning: bus_set_resource() failed\n");
@@ -594,6 +606,11 @@ gpiobus_set_resource(device_t dev, device_t child, int type, int rid,
 	dprintf("%s: entry (%p, %p, %d, %d, %p, %ld)\n",
 	    __func__, dev, child, type, rid, (void *)(intptr_t)start, count);
 	devi = GPIOBUS_IVAR(child);
+
+	/* 
+		type, rid, start, cout 这些参数应该表示的是设备(child)需要新添加的资源项，然后bus
+		根据这个设备的resource list来分配相应的资源
+	*/
 	rle = resource_list_add(&devi->rl, type, rid, start,
 	    start + count - 1, count);
 	if (rle == NULL)
@@ -612,17 +629,28 @@ gpiobus_alloc_resource(device_t bus, device_t child, int type, int *rid,
 	struct resource_list_entry *rle;
 	int isdefault;
 
+	/* 只分配interrupt resource？ */
 	if (type != SYS_RES_IRQ)
 		return (NULL);
+
+	/* RMAN_IS_DEFAULT_RANGE：判断是否采用默认配置  */
 	isdefault = (RMAN_IS_DEFAULT_RANGE(start, end) && count == 1);
 	rle = NULL;
 	if (isdefault) {
+		/* 
+			BUS_GET_RESOURCE_LIST -> gpiobus_get_resource_list,其实就是获取child设备中的
+			ivar->reosource list
+		*/
 		rl = BUS_GET_RESOURCE_LIST(bus, child);
 		if (rl == NULL)
 			return (NULL);
+		
+		/* 在child设备的resource list中查找 type-rid 匹配的resource list entry */
 		rle = resource_list_find(rl, type, *rid);
 		if (rle == NULL)
 			return (NULL);
+
+		/* 还要保证entry的状态不能是busy */
 		if (rle->res != NULL)
 			panic("%s: resource entry is busy", __func__);
 		start = rle->start;
@@ -630,6 +658,8 @@ gpiobus_alloc_resource(device_t bus, device_t child, int type, int *rid,
 		end = rle->end;
 	}
 	sc = device_get_softc(bus);
+
+	/* start和end通过什么方式来确定是需要关注的点 */
 	rv = rman_reserve_resource(&sc->sc_intr_rman, start, end, count, flags,
 	    child);
 	if (rv == NULL)

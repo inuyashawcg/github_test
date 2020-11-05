@@ -51,9 +51,9 @@ struct ofw_bus_iinfo {
 	pcell_t			opi_addrc;
 };
 
-/* compatible屬性(匹配驅動) - 匹配值 */
+/* compatible属性(匹配驱动) - 匹配值 */
 struct ofw_compat_data {
-	/* 用來描述驅動的生產廠家，驅動的類型等信息 */
+	/* 用来描述设备的生厂家，驱动的类型等信息 */
 	const char	*ocd_str;
 	
 	/* uintptr_t: unsigned long */

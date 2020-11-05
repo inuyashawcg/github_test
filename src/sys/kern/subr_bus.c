@@ -3453,7 +3453,12 @@ resource_list_add(struct resource_list *rl, int type, int rid,
 		这个貌似仅仅是判断了一下是否具有这个列表项，跟在这个列表项中是否加载资源是没有关系的。
 		如果没有这个列表项的话，就添加这么一个列表项，而不是资源的话应该是后加的？？
 		res不为空的话，估计就是表示这块资源正在被使用,如果资源正在被使用的话，是不能被重新add的
-	*/
+
+		通过gpiobus.c文件中 gpiobus_set_resource 函数的实现，可以推断之前的判断是正确的。这个函数
+		它实现的功能应该就是对设备需要的资源的大小和类型进行声明，而不是说给这个设备已经分配的资源就是这个
+		样子。调用完该函数之后，后续可能就是把这个资源链表提供给bus，然后bus再根据这个链表给设备分配相应
+		的资源
+ 	*/
 	if (rle->res)
 		panic("resource_list_add: resource entry is busy");
 
@@ -3529,6 +3534,7 @@ resource_list_reserved(struct resource_list *rl, int type, int rid)
  *
  * @returns the resource entry pointer or NULL if there is no such
  * entry.
+ * 
  */
 struct resource_list_entry *
 resource_list_find(struct resource_list *rl, int type, int rid)
@@ -4919,6 +4925,7 @@ bus_release_resource(device_t dev, int type, int rid, struct resource *r)
  * This function simply calls the BUS_SETUP_INTR() method of the
  * parent of @p dev.
  * 
+ * 驱动程序只需要注册一个处理程序函数以服务相应的设备的中断请求即可
  * 该函数用于将中断处理程序注册到IRQ上，前提是IRQ必须经过bus_alloc_resource函数调用分配。通常
  * 情况下是在device_attach函数执行期间调用
  * 
@@ -4934,7 +4941,7 @@ bus_release_resource(device_t dev, int type, int rid, struct resource *r)
  * 
  *  filter & ithread: 中断处理程序的过滤器例程(filter routine)和ithread例程(ithread routine)
  * 
- * 	arg: 中断处理程序被调用时唯一传入的参数。一般来说，我们通常将dev的软件上下文传递给arg
+ * 	arg: 中断处理程序被调用时唯一传入的参数。一般来说，我们通常将dev的软件上下文(softc)传递给arg
  * 
  * 	cookiep: 期望接收一个指向void*类型数据的指针。如果bus_setup_intr函数调用成功，它将通过cookiep带出
  * 			 一个cookie，该cookie必须在中断处理程序中销毁

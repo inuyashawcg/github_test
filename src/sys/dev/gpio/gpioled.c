@@ -122,9 +122,12 @@ gpioled_attach(device_t dev)
 
 	state = 0;
 
+	/* 获取以name命名的string类型的resource */
 	if (resource_string_value(device_get_name(dev), 
 	    device_get_unit(dev), "name", &name))
 		name = NULL;
+	
+	/* 获取以invert命令的int类型的值 */
 	resource_int_value(device_get_name(dev),
 	    device_get_unit(dev), "invert", &sc->sc_invert);
 

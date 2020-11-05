@@ -100,7 +100,7 @@ struct gpiobus_softc
 	device_t	sc_busdev;	/* bus device */
 	device_t	sc_owner;	/* bus owner */
 	device_t	sc_dev;		/* driver device */
-	int		sc_npins;	/* total pins on bus */
+	int		sc_npins;	/* total pins on bus bus所管理的总的引脚数量 */
 	struct gpiobus_pin_data	*sc_pins; /* pin data */
 };
 
@@ -112,6 +112,7 @@ struct gpiobus_pin
 };
 typedef struct gpiobus_pin *gpio_pin_t;
 
+/* ivar与resource分配强相关 */
 struct gpiobus_ivar
 {
 	struct resource_list	rl;	/* isr resource list 中断资源列表 */

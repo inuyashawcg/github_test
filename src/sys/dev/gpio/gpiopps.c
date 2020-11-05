@@ -43,6 +43,10 @@ __FBSDID("$FreeBSD: releng/12.0/sys/dev/gpio/gpiopps.c 300811 2016-05-26 23:56:1
 #ifdef FDT
 #include <dev/ofw/ofw_bus.h>
 
+/*
+	pps: pulse per second
+	一个PPS源就是一个每秒能提供高精度信号的设备，以便于app利用它来调整系统时钟时间(也就是为app提供精准时钟)
+*/
 static struct ofw_compat_data compat_data[] = {
 	{"pps-gpio", 	1},
 	{NULL,          0}
@@ -54,10 +58,10 @@ static devclass_t pps_devclass;
 struct pps_softc {
 	device_t         dev;
 	gpio_pin_t	 gpin;
-	void            *ihandler;
+	void            *ihandler;	/* 处理函数 */
 	struct resource *ires;
 	int		 irid;
-	struct cdev     *pps_cdev;
+	struct cdev     *pps_cdev;	/* 字符设备 */
 	struct pps_state pps_state;
 	struct mtx       pps_mtx;
 	bool		 falling_edge;
@@ -70,7 +74,10 @@ gpiopps_open(struct cdev *dev, int flags, int fmt, struct thread *td)
 {
 	struct pps_softc *sc = dev->si_drv1;
 
-	/* We can't be unloaded while open, so mark ourselves BUSY. */
+	/* 
+		We can't be unloaded while open, so mark ourselves BUSY. 
+		只是改变了device的状态
+	*/
 	mtx_lock(&sc->pps_mtx);
 	if (device_get_state(sc->dev) < DS_BUSY) {
 		device_busy(sc->dev);
@@ -88,6 +95,7 @@ gpiopps_close(struct cdev *dev, int flags, int fmt, struct thread *td)
 	/*
 	 * Un-busy on last close. We rely on the vfs counting stuff to only call
 	 * this routine on last-close, so we don't need any open-count logic.
+	 * 依赖VFS(虚拟文件系统)计数的机制，在最后一次关闭中调用这个函数
 	 */
 	mtx_lock(&sc->pps_mtx);
 	device_unbusy(sc->dev);
@@ -102,7 +110,10 @@ gpiopps_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int flags, struct thre
 	struct pps_softc *sc = dev->si_drv1;
 	int err;
 
-	/* Let the kernel do the heavy lifting for ioctl. */
+	/* 
+		Let the kernel do the heavy lifting for ioctl. 
+		让kernel来完成ioctl的繁重工作
+	*/
 	mtx_lock(&sc->pps_mtx);
 	err = pps_ioctl(cmd, data, &sc->pps_state);
 	mtx_unlock(&sc->pps_mtx);
@@ -118,6 +129,10 @@ static struct cdevsw pps_cdevsw = {
 	.d_name =       PPS_CDEV_NAME,
 };
 
+/* 
+	filter是有能力处理完整个中断的，但是一般计算复杂度比较高的工作时，为了提高整体效率，还是
+	会去调用与其关联的ithread例程来执行它们
+*/
 static int
 gpiopps_ifltr(void *arg)
 {
@@ -134,6 +149,8 @@ gpiopps_ifltr(void *arg)
 	 * hardware interrupt can't happen until the threaded handler for the
 	 * current interrupt exits, after which the system does the EOI that
 	 * enables a new hardware interrupt).
+	 * 我们不能同时读写，因为我们不能同时运行线程处理程序和过滤器处理程序（因为在当前中断的
+	 * 	线程处理程序退出之前，新的硬件中断不会发生，之后系统将执行启用新硬件中断的EOI）
 	 */
 	pps_capture(&sc->pps_state);
 	return (FILTER_SCHEDULE_THREAD);
@@ -194,7 +211,10 @@ gpiopps_fdt_attach(device_t dev)
 	sc->pps_state.driver_mtx = &sc->pps_mtx;
 	pps_init_abi(&sc->pps_state);
 
-	/* Check which edge we're configured to capture (default is rising). */
+	/* 
+		Check which edge we're configured to capture (default is rising). 
+		设备树相关，判断dev中是否含有以 assert-falling-edge 命名的属性(配置上升沿和下降沿触发)
+	*/
 	if (ofw_bus_has_prop(dev, "assert-falling-edge"))
 		edge = GPIO_INTR_EDGE_FALLING;
 	else
@@ -203,6 +223,7 @@ gpiopps_fdt_attach(device_t dev)
 	/*
 	 * Look up the configured gpio pin and ensure it can be configured for
 	 * the interrupt mode we need.
+	 * 其实就是查找是否含某个gpio pin
 	 */
 	node = ofw_bus_get_node(dev);
 	if ((err = gpio_pin_get_by_ofw_idx(dev, node, 0, &sc->gpin)) != 0) {
@@ -212,6 +233,7 @@ gpiopps_fdt_attach(device_t dev)
 	device_printf(dev, "PPS input on %s pin %u\n",
 	    device_get_nameunit(sc->gpin->dev), sc->gpin->pin);
 
+	/* 获取gpio pin的capabilities */
 	if ((err = gpio_pin_getcaps(sc->gpin, &pincaps)) != 0) {
 		device_printf(dev, "Cannot query capabilities of gpio pin\n");
 		gpiopps_detach(dev);
@@ -226,6 +248,7 @@ gpiopps_fdt_attach(device_t dev)
 	/*
 	 * Transform our 'gpios' property into an interrupt resource and set up
 	 * the interrupt.
+	 * 在注册中断处理函数之前，首先要做的就是成功分配IRQ，也就是interrupt resource
 	 */
 	if ((sc->ires = gpio_alloc_intr_resource(dev, &sc->irid, RF_ACTIVE,
 	    sc->gpin, edge)) == NULL) {
@@ -234,6 +257,9 @@ gpiopps_fdt_attach(device_t dev)
 		return (err);
 	}
 
+	/* 
+		资源分配完成之后，注册我们的中断处理函数，一般这一步是在attach阶段来执行的 
+	*/
 	err = bus_setup_intr(dev, sc->ires, INTR_TYPE_CLK | INTR_MPSAFE, 
 	    gpiopps_ifltr, gpiopps_ithrd, sc, &sc->ihandler);
 	if (err != 0) {
@@ -249,6 +275,10 @@ gpiopps_fdt_attach(device_t dev)
 	devargs.mda_gid = GID_WHEEL;
 	devargs.mda_mode = 0660;
 	devargs.mda_si_drv1 = sc;
+
+	/* 
+		通过devargs中的信息创建字符设备结点
+	*/
 	err = make_dev_s(&devargs, &sc->pps_cdev, PPS_CDEV_NAME "%d", 
 	    device_get_unit(dev));
 	if (err != 0) {
@@ -260,6 +290,10 @@ gpiopps_fdt_attach(device_t dev)
 	return (0);
 }
 
+/*
+	很多驱动程序中的probe函数的实现都是只有 device_set_desc 这么一个函数，那么这个函数也就
+	从属于任何总线能检测到的设备，前提是设备的名称是唯一的？？
+*/
 static int
 gpiopps_fdt_probe(device_t dev)
 {

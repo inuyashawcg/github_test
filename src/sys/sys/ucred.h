@@ -46,6 +46,8 @@ struct loginclass;
  *
  * Please do not inspect cr_uid directly to determine superuserness.  The
  * priv(9) interface should be used to check for privilege.
+ * 
+ * ucred: user credential structure 用户凭证结构体
  */
 #if defined(_KERNEL) || defined(_WANT_UCRED)
 struct ucred {

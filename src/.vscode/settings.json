@@ -29,6 +29,7 @@
         "iterator": "cpp",
         "vector": "cpp",
         "*.def": "cpp",
-        "algorithm": "c"
+        "algorithm": "c",
+        "cstdint": "cpp"
     }
 }

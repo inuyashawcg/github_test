@@ -47,7 +47,7 @@ __FBSDID("$FreeBSD: releng/12.0/sys/dev/gpio/gpiobacklight.c 299395 2016-05-11 0
 
 struct gpiobacklight_softc 
 {
-	gpio_pin_t		sc_pin;
+	gpio_pin_t		sc_pin;			
 	struct sysctl_oid	*sc_oid;
 	bool			sc_brightness;
 };
@@ -117,17 +117,24 @@ gpiobacklight_attach(device_t dev)
 	else
 		sc->sc_brightness = false;
 
+	/* map gpio pin */
 	gpio_pin_get_by_ofw_idx(dev, node, 0, &sc->sc_pin);
 	if (sc->sc_pin == NULL) {
 		device_printf(dev, "failed to map GPIO pin\n");
 		return (ENXIO);
 	}
 
+	/* 设置pin的flags */
 	gpio_pin_setflags(sc->sc_pin, GPIO_PIN_OUTPUT);
 
+	/* 激活pin  */
 	gpiobacklight_update_brightness(sc);
 
-	/* Init backlight interface */
+	/* 
+		Init backlight interface
+		通过sysctl控制背光亮度(引脚输出)
+		获取该设备的sysctl上下文和sysctl tree
+	*/
 	ctx = device_get_sysctl_ctx(dev);
 	tree = device_get_sysctl_tree(dev);
 	sc->sc_oid = SYSCTL_ADD_PROC(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,

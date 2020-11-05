@@ -212,11 +212,17 @@ typedef struct devclass		*devclass_t;
  * integer consisting of oring together zero or more of the following
  * flags:
  *
- *	FILTER_STRAY	- this device did not trigger the interrupt
+ *	FILTER_STRAY	- this device did not trigger the interrupt 
+					- 表示相应过滤器例程无法处理此中断，返回值等同于错误码
+
  *	FILTER_HANDLED	- the interrupt has been fully handled and can be EOId
+					- 表示相应的过滤器例程已经完整处理了中断，此返回值等同于成功码 
+
  *	FILTER_SCHEDULE_THREAD - the threaded interrupt handler should be
  *			  scheduled to execute
- *
+						- 表示相应的过滤器已经安排ithread例程来执行部分工作，相应的
+						过滤器例程只有当关联到某个ithread例程时才会返回此值
+						
  * If the driver does not provide a filter, then the interrupt code will
  * act is if the filter had returned FILTER_SCHEDULE_THREAD.  Note that it
  * is illegal to specify any other flag with FILTER_STRAY and that it is

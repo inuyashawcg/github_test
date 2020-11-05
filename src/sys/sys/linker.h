@@ -70,30 +70,31 @@ struct common_symbol {
 };
 
 struct linker_file {
+    /* kernel object，类型强转 */
     KOBJ_FIELDS;
     int			refs;		/* reference count */
     int			userrefs;	/* kldload(2) count */
     int			flags;
 #define LINKER_FILE_LINKED	0x1	/* file has been fully linked */
 #define LINKER_FILE_MODULES	0x2	/* file has >0 modules at preload */
-    TAILQ_ENTRY(linker_file) link;	/* list of all loaded files */
-    char*		filename;	/* file which was loaded */
-    char*		pathname;	/* file name with full path */
+    TAILQ_ENTRY(linker_file) link;	/* list of all loaded files 已经被加载的文件的链表 */
+    char*		filename;	/* file which was loaded 特制已经被加载文件的名称 */
+    char*		pathname;	/* file name with full path 完整的文件路径 */
     int			id;		/* unique id */
     caddr_t		address;	/* load address */
     size_t		size;		/* size of file */
-    caddr_t		ctors_addr;	/* address of .ctors */
+    caddr_t		ctors_addr;	/* address of .ctors char*类型 */
     size_t		ctors_size;	/* size of .ctors */
-    int			ndeps;		/* number of dependencies */
-    linker_file_t*	deps;		/* list of dependencies */
+    int			ndeps;		/* number of dependencies 所依赖的对象的数目 */
+    linker_file_t*	deps;		/* list of dependencies 依赖对象链表 */
     STAILQ_HEAD(, common_symbol) common; /* list of common symbols */
     TAILQ_HEAD(, module) modules;	/* modules in this file */
-    TAILQ_ENTRY(linker_file) loaded;	/* preload dependency support */
+    TAILQ_ENTRY(linker_file) loaded;	/* preload dependency support 预加载依赖项支持 */
     int			loadcnt;	/* load counter value */
 
     /*
      * Function Boundary Tracing (FBT) or Statically Defined Tracing (SDT)
-     * fields.
+     * fields. 函数边界跟踪（FBT）或静态定义跟踪（SDT）字段
      */
     int			nenabled;	/* number of enabled probes. */
     int			fbt_nentries;	/* number of fbt entries created. */

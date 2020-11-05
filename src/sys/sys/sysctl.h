@@ -50,9 +50,14 @@ struct thread;
  * component depends on its place in the hierarchy.  The top-level and kern
  * identifiers are defined here, and other identifiers are defined in the
  * respective subsystem header files.
+ * 
+ * sysctl调用的定义。sysctl调用对可以检查或修改的对象使用分层名称。名称用整数序列表示。
+ * 与文件路径名一样，每个组件的含义取决于其在层次结构中的位置。顶级标识符和kern标识符在
+ * 这里定义，其他标识符在相应的子系统头文件中定义。
  */
 
-#define	CTL_MAXNAME	24	/* largest number of components supported */
+/* largest number of components supported 支持的最大数量的组件 */
+#define	CTL_MAXNAME	24	
 
 /*
  * Each subsystem defined by sysctl defines a list of variables
@@ -60,12 +65,17 @@ struct thread;
  * levels defined below it, or it is a leaf of some particular
  * type given below. Each sysctl level defines a set of name/type
  * pairs to be used by sysctl(8) in manipulating the subsystem.
+ * 
+ * sysctl定义的每个子系统都为该子系统定义一个变量列表。每个名称要么是下面定义
+ * 了更多级别的节点，要么是下面给定的某个特定类型的叶。每个sysctl级别定义一组
+ * 名称/类型对，sysctl（8）将在操作子系统时使用。
  */
 struct ctlname {
 	char	*ctl_name;	/* subsystem name */
 	int	 ctl_type;	/* type of name */
 };
 
+/* 下面这些宏指明了name以某种形式定义 */
 #define	CTLTYPE		0xf	/* mask for the type */
 #define	CTLTYPE_NODE	1	/* name is a node */
 #define	CTLTYPE_INT	2	/* name describes an integer */
@@ -87,19 +97,25 @@ struct ctlname {
 #define	CTLFLAG_RD	0x80000000	/* Allow reads of variable */
 #define	CTLFLAG_WR	0x40000000	/* Allow writes to the variable */
 #define	CTLFLAG_RW	(CTLFLAG_RD|CTLFLAG_WR)
+
 #define	CTLFLAG_DORMANT	0x20000000	/* This sysctl is not active yet */
 #define	CTLFLAG_ANYBODY	0x10000000	/* All users can set this var */
 #define	CTLFLAG_SECURE	0x08000000	/* Permit set only if securelevel<=0 */
-#define	CTLFLAG_PRISON	0x04000000	/* Prisoned roots can fiddle */
+#define	CTLFLAG_PRISON	0x04000000	/* Prisoned roots can fiddle 被监督的root可以操作 */
+
 #define	CTLFLAG_DYN	0x02000000	/* Dynamic oid - can be freed */
-#define	CTLFLAG_SKIP	0x01000000	/* Skip this sysctl when listing */
+#define	CTLFLAG_SKIP	0x01000000	/* Skip this sysctl when listing 列出时跳过此sysctl */
 #define	CTLMASK_SECURE	0x00F00000	/* Secure level */
+
 #define	CTLFLAG_TUN	0x00080000	/* Default value is loaded from getenv() */
 #define	CTLFLAG_RDTUN	(CTLFLAG_RD|CTLFLAG_TUN)
 #define	CTLFLAG_RWTUN	(CTLFLAG_RW|CTLFLAG_TUN)
-#define	CTLFLAG_MPSAFE	0x00040000	/* Handler is MP safe */
-#define	CTLFLAG_VNET	0x00020000	/* Prisons with vnet can fiddle */
-#define	CTLFLAG_DYING	0x00010000	/* Oid is being removed */
+
+#define	CTLFLAG_MPSAFE	0x00040000	/* Handler is MP safe 多CPU操作安全 */
+#define	CTLFLAG_VNET	0x00020000	/* Prisons with vnet can fiddle 有vnet的监督时可以操作 */
+
+#define	CTLFLAG_DYING	0x00010000	/* Oid is being removed oid正在被删除 */
+
 #define	CTLFLAG_CAPRD	0x00008000	/* Can be read in capability mode */
 #define	CTLFLAG_CAPWR	0x00004000	/* Can be written in capability mode */
 #define	CTLFLAG_STATS	0x00002000	/* Statistics, not a tuneable */
@@ -110,6 +126,7 @@ struct ctlname {
  * Secure level.   Note that CTLFLAG_SECURE == CTLFLAG_SECURE1.
  *
  * Secure when the securelevel is raised to at least N.
+ * 当securelevel提升到至少N时，安全。
  */
 #define	CTLSHIFT_SECURE	20
 #define	CTLFLAG_SECURE1	(CTLFLAG_SECURE | (0 << CTLSHIFT_SECURE))
@@ -122,6 +139,9 @@ struct ctlname {
  * technology. This is the way nearly all new sysctl variables should
  * be implemented.
  * e.g. SYSCTL_INT(_parent, OID_AUTO, name, CTLFLAG_RW, &variable, 0, "");
+ * 
+ * 使用此项而不是下面类别中的硬接线编号，以使用链接器集技术获取动态分配的sysctl条目。
+ * 几乎所有新的sysctl变量都应该这样实现。
  */
 #define	OID_AUTO	(-1)
 
@@ -157,16 +177,17 @@ struct ctlname {
 /* definitions for sysctl_req 'flags' member */
 #if defined(__aarch64__) || defined(__amd64__) || defined(__powerpc64__) ||\
     (defined(__mips__) && defined(__mips_n64))
-#define	SCTL_MASK32	1	/* 32 bit emulation */
+#define	SCTL_MASK32	1	/* 32 bit emulation 32位模拟 */
 #endif
 
 /*
  * This describes the access space for a sysctl request.  This is needed
  * so that we can use the interface from the kernel or from user-space.
+ * 用于user space和kernel space的数据交换
  */
 struct sysctl_req {
-	struct thread	*td;		/* used for access checking */
-	int		 lock;		/* wiring state */
+	struct thread	*td;		/* used for access checking 用于访问检查 */
+	int		 lock;		/* wiring state 接线状态 - 参考上面 UNWIRED/WIRED 注释 */
 	void		*oldptr;
 	size_t		 oldlen;
 	size_t		 oldidx;
@@ -176,7 +197,7 @@ struct sysctl_req {
 	size_t		 newidx;
 	int		(*newfunc)(struct sysctl_req *, void *, size_t);
 	size_t		 validlen;
-	int		 flags;
+	int		 flags;		/* 可能就是为了区分32和64位 - SCTL_MASK32 */
 };
 
 SLIST_HEAD(sysctl_oid_list, sysctl_oid);
@@ -184,10 +205,12 @@ SLIST_HEAD(sysctl_oid_list, sysctl_oid);
 /*
  * This describes one "oid" in the MIB tree.  Potentially more nodes can
  * be hidden behind it, expanded by the handler.
+ * MIB： Manage Information Base - 管理信息库
+ * oid： Object Identifier - 对象标识符 
  */
 struct sysctl_oid {
 	struct sysctl_oid_list oid_children;
-	struct sysctl_oid_list *oid_parent;
+	struct sysctl_oid_list *oid_parent;		/* 指向存放父节点的数组 */
 	SLIST_ENTRY(sysctl_oid) oid_link;
 	int		 oid_number;
 	u_int		 oid_kind;
@@ -254,7 +277,7 @@ void sysctl_unregister_oid(struct sysctl_oid *oidp);
 /*
 	当要连接的父sysctl是静态结点的时候，传递给参数parent的应该是 SYSCTL_STATIC_CHILDREN 的调用
 	这里，静态结点是基础系统的一部分
-	SYSCTL_STATIC_CHILDREN 的参数是父sysctl的名字，必须要以下划线为前缀，并且所有的点好都必须要用下划线
+	SYSCTL_STATIC_CHILDREN 的参数是父sysctl的名字，必须要以下划线为前缀，并且所有的.号都必须要用下划线
 	来替代。例如我们打算连接的父sysctl名字是hw.usb的时候，我们传入的参数就应该是_hw_usb
 	如果我们传递不带参数的 SYSCTL_STATIC_CHILDREN宏，例如SYSCTL_STATIC_CHILDREN(//无参数),给 SYSCTL_ADD_NODE
 	函数的parent，那么就会创建一种新的sysctl顶层类

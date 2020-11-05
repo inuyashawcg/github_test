@@ -83,27 +83,40 @@ static MALLOC_DEFINE(M_SYSCTLTMP, "sysctltmp", "sysctl temp output buffer");
  * provided for the few places in the kernel which need to use that
  * API rather than using the dynamic API.  Use of the dynamic API is
  * strongly encouraged for most code.
+ * 
+ * sysctl_register_oid（）和sysctl_unregister_oid（）例程要求已经持有syscttlock，
+ * 因此sysctl_wlock（）和sysctl_wunlock（）例程是为内核中需要使用该API而不是使用动态
+ * API的少数地方提供的。对于大多数代码，强烈建议使用动态API。
  *
  * The sysctlmemlock is used to limit the amount of user memory wired for
  * sysctl requests.  This is implemented by serializing any userland
  * sysctl requests larger than a single page via an exclusive lock.
+ * 
+ * sysctl用户用于限制sysctl请求的内存量。这是通过通过排他锁序列化任何大于单个页面的
+ * userlandsysctl请求来实现的
  */
 static struct rmlock sysctllock;
 static struct sx __exclusive_cache_line sysctlmemlock;
 
+/* write lock? */
 #define	SYSCTL_WLOCK()		rm_wlock(&sysctllock)
 #define	SYSCTL_WUNLOCK()	rm_wunlock(&sysctllock)
+
+/* read lock? */
 #define	SYSCTL_RLOCK(tracker)	rm_rlock(&sysctllock, (tracker))
 #define	SYSCTL_RUNLOCK(tracker)	rm_runlock(&sysctllock, (tracker))
+
 #define	SYSCTL_WLOCKED()	rm_wowned(&sysctllock)
 #define	SYSCTL_ASSERT_LOCKED()	rm_assert(&sysctllock, RA_LOCKED)
 #define	SYSCTL_ASSERT_WLOCKED()	rm_assert(&sysctllock, RA_WLOCKED)
 #define	SYSCTL_ASSERT_RLOCKED()	rm_assert(&sysctllock, RA_RLOCKED)
+
 #define	SYSCTL_INIT()		rm_init_flags(&sysctllock, "sysctl lock", \
 				    RM_SLEEPABLE)
 #define	SYSCTL_SLEEP(ch, wmesg, timo)					\
 				rm_sleep(ch, &sysctllock, 0, wmesg, timo)
 
+/* sysctl根节点？ */
 static int sysctl_root(SYSCTL_HANDLER_ARGS);
 
 /* Root list */
@@ -440,6 +453,7 @@ sysctl_register_oid(struct sysctl_oid *oidp)
 	/*
 	 * Any negative OID number qualifies as OID_AUTO. Valid OID
 	 * numbers should always be positive.
+	 * 有效的OID number应该始终为正
 	 *
 	 * NOTE: DO NOT change the starting value here, change it in
 	 * <sys/sysctl.h>, and make sure it is at least 256 to
@@ -451,6 +465,7 @@ sysctl_register_oid(struct sysctl_oid *oidp)
 		/*
 		 * By decrementing the next OID number we spend less
 		 * time inserting the OIDs into a sorted list.
+		 * 通过减少下一个OID编号，我们可以减少将OID插入排序列表中的时间
 		 */
 		if (--newoid < CTL_AUTO_START)
 			newoid = 0x7fffffff;
@@ -569,7 +584,10 @@ sysctl_unregister_oid(struct sysctl_oid *oidp)
 		printf("%s: failed to unregister sysctl\n", __func__);
 }
 
-/* Initialize a new context to keep track of dynamically added sysctls. */
+/* 
+	Initialize a new context to keep track of dynamically added sysctls. 
+	初始化新上下文以跟踪动态添加的sysctl
+*/
 int
 sysctl_ctx_init(struct sysctl_ctx_list *c)
 {
@@ -582,6 +600,7 @@ sysctl_ctx_init(struct sysctl_ctx_list *c)
 	 * No locking here, the caller is responsible for not adding
 	 * new nodes to a context until after this function has
 	 * returned.
+	 * 这里没有锁定，调用方负责在该函数返回之前不向上下文添加新节点。
 	 */
 	TAILQ_INIT(c);
 	return (0);
@@ -806,6 +825,7 @@ sysctl_remove_oid_locked(struct sysctl_oid *oidp, int del, int recurse)
 /*
  * Create new sysctls at run time.
  * clist may point to a valid context initialized with sysctl_ctx_init().
+ * sysctl_ctx_init()函数用来创建sysctl上下文，之后才能调用sysctl_add_oid来添加新的sysctl
  */
 struct sysctl_oid *
 sysctl_add_oid(struct sysctl_ctx_list *clist, struct sysctl_oid_list *parent,
@@ -815,7 +835,7 @@ sysctl_add_oid(struct sysctl_ctx_list *clist, struct sysctl_oid_list *parent,
 {
 	struct sysctl_oid *oidp;
 
-	/* You have to hook up somewhere.. */
+	/* You have to hook up somewhere.. 必须要连接到某处*/
 	if (parent == NULL)
 		return(NULL);
 	/* Check if the node already exists, otherwise create it */
@@ -1735,6 +1755,7 @@ kernel_sysctl(struct thread *td, int *name, u_int namelen, void *old,
 	int error = 0;
 	struct sysctl_req req;
 
+	/* 首先是对sysctl request清空 */
 	bzero(&req, sizeof req);
 
 	req.td = td;
@@ -1891,6 +1912,10 @@ sysctl_find_oid(int *name, u_int namelen, struct sysctl_oid **noid,
 	int indx;
 
 	SYSCTL_ASSERT_LOCKED();
+
+	/*
+		sysctl__children: root list
+	*/
 	lsp = &sysctl__children;
 	indx = 0;
 	while (indx < CTL_MAXNAME) {
@@ -1931,6 +1956,7 @@ sysctl_find_oid(int *name, u_int namelen, struct sysctl_oid **noid,
 /*
  * Traverse our tree, and find the right node, execute whatever it points
  * to, and return the resulting error code.
+ * 遍历我们的树，找到正确的节点，执行它指向的任何内容，并返回结果错误代码
  */
 
 static int

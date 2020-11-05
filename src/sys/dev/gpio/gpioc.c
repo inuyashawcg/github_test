@@ -57,6 +57,9 @@ static int gpioc_detach(device_t dev);
 
 static d_ioctl_t	gpioc_ioctl;
 
+/*
+	定义gpio的字符设备方法表，version和name是必须要有的
+*/
 static struct cdevsw gpioc_cdevsw = {
 	.d_version	= D_VERSION,
 	.d_ioctl	= gpioc_ioctl,
