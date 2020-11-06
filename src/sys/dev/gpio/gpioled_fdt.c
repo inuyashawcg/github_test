@@ -74,7 +74,7 @@ gpioled_control(void *priv, int onoff)
 
 	led = (struct gpioled *)priv;
 	if (led->pin)
-		gpio_pin_set_active(led->pin, onoff);
+		gpio_pin_set_active(led->pin, onoff);	/* 激活pin，设置成高电平或低电平？？ */
 }
 
 static void
@@ -88,6 +88,10 @@ gpioleds_attach_led(struct gpioleds_softc *sc, phandle_t node,
 	led->parent_sc = sc;
 
 	state = 0;
+	/* 
+		给default-state属性malloc一块内存，default_state指针指向这块区域，
+		推测就是一个字符串
+	*/
 	if (OF_getprop_alloc(node, "default-state",
 	    (void **)&default_state) != -1) {
 		if (strcasecmp(default_state, "on") == 0)
@@ -101,6 +105,12 @@ gpioleds_attach_led(struct gpioleds_softc *sc, phandle_t node,
 			device_printf(sc->sc_dev,
 			    "unknown value for default-state in FDT\n");
 		}
+
+		/* 
+			仅仅做了一次比较后就不再使用了，完了直接free掉；下面的操作也是同样
+			的逻辑，把node中的属性提取出来，跟相应的值比较，然后更新某些变量的
+			状态，最后free掉
+		*/
 		OF_prop_free(default_state);
 	}
 
@@ -123,6 +133,10 @@ gpioleds_attach_led(struct gpioleds_softc *sc, phandle_t node,
 	}
 	gpio_pin_setflags(led->pin, GPIO_PIN_OUTPUT);
 
+	/*
+		因为函数是在上级函数中循环执行的，说明就是要为每一个led设备在操作系统中创建一个
+		字符设备结点来对该设备进行控制
+	*/
 	led->leddev = led_create_state(gpioled_control, led, name,
 	    state);
 
@@ -159,6 +173,7 @@ gpioled_attach(device_t dev)
 	phandle_t child, leds;
 	int total_leds;
 
+	/* 获取dev相关的设备树结点 */
 	if ((leds = ofw_bus_get_node(dev)) == -1)
 		return (ENXIO);
 
@@ -166,7 +181,10 @@ gpioled_attach(device_t dev)
 	sc->sc_dev = dev;
 	sc->sc_busdev = device_get_parent(dev);
 
-	/* Traverse the 'gpio-leds' node and count leds */
+	/* 
+		Traverse the 'gpio-leds' node and count leds 
+		遍历device tree中的gpio-leds结点，计算处总的led数量
+	*/
 	total_leds = 0;
 	for (child = OF_child(leds); child != 0; child = OF_peer(child)) {
 		if (!OF_hasprop(child, "gpios"))
@@ -175,14 +193,18 @@ gpioled_attach(device_t dev)
 	}
 
 	if (total_leds) {
+		/* 给每一个led分配一块内存区域 */
 		sc->sc_leds =  malloc(sizeof(struct gpioled) * total_leds,
 		    M_DEVBUF, M_WAITOK | M_ZERO);
 
 		sc->sc_total_leds = 0;
 		/* Traverse the 'gpio-leds' node and count leds */
 		for (child = OF_child(leds); child != 0; child = OF_peer(child)) {
+			/* 如果子节点中包含有 gpios 属性，那就认为它是一个led设备 */
 			if (!OF_hasprop(child, "gpios"))
 				continue;
+			
+			/* 通过softc中的sc_leds管理所有的led */
 			gpioleds_attach_led(sc, child, &sc->sc_leds[sc->sc_total_leds]);
 			sc->sc_total_leds++;
 		}

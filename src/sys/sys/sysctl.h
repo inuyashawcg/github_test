@@ -287,7 +287,10 @@ void sysctl_unregister_oid(struct sysctl_oid *oidp);
 
 /* === Structs and macros related to context handling. === */
 
-/* All dynamically created sysctls can be tracked in a context list. */
+/* 
+	All dynamically created sysctls can be tracked in a context list. 
+	可以在上下文列表中跟踪所有动态创建的sysctl
+*/
 struct sysctl_ctx_entry {
 	struct sysctl_oid *entry;
 	TAILQ_ENTRY(sysctl_ctx_entry) link;

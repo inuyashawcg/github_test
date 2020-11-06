@@ -55,6 +55,9 @@ __FBSDID("$FreeBSD: releng/12.0/sys/dev/gpio/gpioiic.c 326255 2017-11-27 14:52:4
 #define	GPIOIIC_SDA_DFLT	1
 #define	GPIOIIC_MIN_PINS	2
 
+/*
+	类比spi总线，都把需要用到的pin包含到了softc中
+*/
 struct gpioiic_softc 
 {
 	device_t	sc_dev;
@@ -86,6 +89,11 @@ gpioiic_probe(device_t dev)
 		return (ENXIO);
 #endif
 	devi = GPIOBUS_IVAR(dev);
+
+	/*
+		首先判断总线的pin总数是否符合规定的，比如IIC总线应该就需要外接2根线，
+		SPI可能是4根，然后我们就需要在 gpiobus_ivar 结构体类型的变量中设置
+	*/
 	if (devi->npins < GPIOIIC_MIN_PINS) {
 		device_printf(dev,
 		    "gpioiic needs at least %d GPIO pins (only %d given).\n",

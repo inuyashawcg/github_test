@@ -567,6 +567,7 @@ sysctl_unregister_oid(struct sysctl_oid *oidp)
 	} else {
 		SLIST_FOREACH(p, oidp->oid_parent, oid_link) {
 			if (p == oidp) {
+				/* 从父节点中删除掉该结点 */
 				SLIST_REMOVE(oidp->oid_parent, oidp,
 				    sysctl_oid, oid_link);
 				error = 0;
@@ -586,7 +587,8 @@ sysctl_unregister_oid(struct sysctl_oid *oidp)
 
 /* 
 	Initialize a new context to keep track of dynamically added sysctls. 
-	初始化新上下文以跟踪动态添加的sysctl
+	初始化新上下文以跟踪动态添加的sysctl。主要功能是用于记录动态创建的sysctl，所以
+	c将作为参数传递给每一个SYSCTL_ADD_*调用
 */
 int
 sysctl_ctx_init(struct sysctl_ctx_list *c)
@@ -669,6 +671,8 @@ sysctl_ctx_entry_add(struct sysctl_ctx_list *clist, struct sysctl_oid *oidp)
 		return(NULL);
 	e = malloc(sizeof(struct sysctl_ctx_entry), M_SYSCTLOID, M_WAITOK);
 	e->entry = oidp;
+
+	/* 向队列的头部插入新添加的元素 */
 	TAILQ_INSERT_HEAD(clist, e, link);
 	return (e);
 }
@@ -683,6 +687,7 @@ sysctl_ctx_entry_find(struct sysctl_ctx_list *clist, struct sysctl_oid *oidp)
 	if (clist == NULL || oidp == NULL)
 		return(NULL);
 	TAILQ_FOREACH(e, clist, link) {
+		/* 直接比较oid是否一致 */
 		if(e->entry == oidp)
 			return(e);
 	}
@@ -704,6 +709,7 @@ sysctl_ctx_entry_del(struct sysctl_ctx_list *clist, struct sysctl_oid *oidp)
 	SYSCTL_WLOCK();
 	e = sysctl_ctx_entry_find(clist, oidp);
 	if (e != NULL) {
+		/* 直接调用 TAILQ_REMOVE 宏定义 */
 		TAILQ_REMOVE(clist, e, link);
 		SYSCTL_WUNLOCK();
 		free(e, M_SYSCTLOID);
@@ -718,7 +724,9 @@ sysctl_ctx_entry_del(struct sysctl_ctx_list *clist, struct sysctl_oid *oidp)
  * Remove dynamically created sysctl trees.
  * oidp - top of the tree to be removed
  * del - if 0 - just deregister, otherwise free up entries as well
+ * 			如果0-只需取消注册，否则也会释放条目
  * recurse - if != 0 traverse the subtree to be deleted
+ * 			遍历要删除的子树
  */
 int
 sysctl_remove_oid(struct sysctl_oid *oidp, int del, int recurse)
@@ -731,6 +739,7 @@ sysctl_remove_oid(struct sysctl_oid *oidp, int del, int recurse)
 	return (error);
 }
 
+/* 通过name来移除相应的结点 */
 int
 sysctl_remove_name(struct sysctl_oid *parent, const char *name,
     int del, int recurse)
@@ -761,6 +770,9 @@ sysctl_remove_oid_locked(struct sysctl_oid *oidp, int del, int recurse)
 	SYSCTL_ASSERT_WLOCKED();
 	if (oidp == NULL)
 		return(EINVAL);
+	/*
+		首先判断该结点是不是dynamic类型
+	*/
 	if ((oidp->oid_kind & CTLFLAG_DYN) == 0) {
 		printf("Warning: can't remove non-dynamic nodes (%s)!\n",
 		    oidp->oid_name);
@@ -770,9 +782,13 @@ sysctl_remove_oid_locked(struct sysctl_oid *oidp, int del, int recurse)
 	 * WARNING: normal method to do this should be through
 	 * sysctl_ctx_free(). Use recursing as the last resort
 	 * method to purge your sysctl tree of leftovers...
+	 * - 使用递归作为最后的手段来清除sysctl树中的剩余部分。。。
 	 * However, if some other code still references these nodes,
 	 * it will panic.
+	 * - 但是，如果其他代码仍然引用这些节点，它将死机
 	 */
+
+	/* 判断oid的类型是不是 CTLTYPE_NODE */
 	if ((oidp->oid_kind & CTLTYPE) == CTLTYPE_NODE) {
 		if (oidp->oid_refcnt == 1) {
 			SLIST_FOREACH_SAFE(p,
@@ -783,6 +799,7 @@ sysctl_remove_oid_locked(struct sysctl_oid *oidp, int del, int recurse)
 					    oidp->oid_name, p->oid_name);
 					return (ENOTEMPTY);
 				}
+				/* 递归删除 */
 				error = sysctl_remove_oid_locked(p, del,
 				    recurse);
 				if (error)
@@ -798,6 +815,8 @@ sysctl_remove_oid_locked(struct sysctl_oid *oidp, int del, int recurse)
 				oidp->oid_refcnt, oidp->oid_name);
 			return (EINVAL);
 		}
+
+		/* 从oidp的父节点中删除掉该结点 */
 		sysctl_unregister_oid(oidp);
 		if (del) {
 			/*
@@ -805,8 +824,12 @@ sysctl_remove_oid_locked(struct sysctl_oid *oidp, int del, int recurse)
 			 * This preserves the previous behavior when the
 			 * sysctl lock was held across a handler invocation,
 			 * and is necessary for module unload correctness.
+			 * 
+			 * 等待运行处理程序的所有线程耗尽。这保留了在处理程序调用中持有
+			 * sysctl锁时的先前行为，这是模块卸载正确性所必需的
 			 */
 			while (oidp->oid_running > 0) {
+				/* 设置oidp的类型为正在被删除 */
 				oidp->oid_kind |= CTLFLAG_DYING;
 				SYSCTL_SLEEP(&oidp->oid_running, "oidrm", 0);
 			}
@@ -1488,7 +1511,12 @@ sysctl_handle_32(SYSCTL_HANDLER_ARGS)
  * Handle an int, signed or unsigned.
  * Two cases:
  *     a variable:  point arg1 at it.
+ * 		变量：指向它的arg1
  *     a constant:  pass it in arg2.
+ * 		常量：传入arg2
+ * 
+ * 应该是调用该函数的时候，如果我们需要传入的参数是变量，那就用arg1指向这个变量；
+ * 如果我们需要传入的是一个常量，那就直接通过arg2传入即可
  */
 
 int

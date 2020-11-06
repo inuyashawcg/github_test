@@ -58,12 +58,13 @@ static int ofw_gpiobus_parse_gpios_impl(device_t, phandle_t, char *,
  * GPIOBUS uses children's IVARs, so we cannot use this interface for cross
  * tree consumers.
  *
+ * GPIOBUS使用子级的ivar，因此我们不能将此接口用于跨树消费者
  */
 int
 gpio_pin_get_by_ofw_propidx(device_t consumer, phandle_t cnode,
     char *prop_name, int idx, gpio_pin_t *out_pin)
 {
-	phandle_t xref;
+	phandle_t xref;		/* 生产者？ */
 	pcell_t *cells;
 	device_t busdev;
 	struct gpiobus_pin pin;

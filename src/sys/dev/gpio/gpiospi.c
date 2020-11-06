@@ -57,8 +57,10 @@ __FBSDID("$FreeBSD: releng/12.0/sys/dev/gpio/gpiospi.c 310018 2016-12-13 10:03:2
 struct gpio_spi_softc {
 	device_t	sc_dev;
 	device_t	sc_busdev;
-	int		sc_freq;
-	uint8_t		sc_sclk;
+	int		sc_freq;	/* 频率？ */
+
+	/* 下面都是表示总线引脚 */
+	uint8_t		sc_sclk;	
 	uint8_t		sc_miso;
 	uint8_t		sc_mosi;
 	uint8_t		sc_cs0;
@@ -77,6 +79,9 @@ gpio_spi_probe(device_t dev)
 	return (0);
 }
 
+/*
+	Q&A: delay函数的作用是什么，什么情况下要来使用？？
+*/
 static void
 gpio_delay(struct gpio_spi_softc *sc)
 {
@@ -99,7 +104,10 @@ gpio_spi_attach(device_t dev)
 	sc->sc_dev = dev;
 	sc->sc_busdev = device_get_parent(dev);
 
-	/* Required variables */
+	/* 
+		Required variables
+		通过hints机制(目前都是利用设备树)获取value
+	*/
 	if (resource_int_value(device_get_name(dev),
 	    device_get_unit(dev), "sclk", &value))
 		 return (ENXIO);
@@ -194,7 +202,13 @@ static void
 gpio_spi_chip_activate(struct gpio_spi_softc *sc, int cs)
 {
 
-	/* called with locked gpiobus */
+	/* 
+		called with locked gpiobus
+		通过具体的使用场景激活某个pin。
+		Q&A: 为什么要有这么一个函数？ - 推测：因为GPIO是有功能复用的机制或者是硬件设计方面的因素，
+				具体实现的时候并不是所有的接口都是可以使用的。通过这种方式就可以灵活的配置，把能够
+				使用的那个pin给激活
+	*/
 	switch (cs) {
 	case 0:
 		GPIOBUS_PIN_SET(sc->sc_busdev, sc->sc_dev,
@@ -263,6 +277,9 @@ gpio_spi_chip_deactivate(struct gpio_spi_softc *sc, int cs)
 	}
 }
 
+/* 
+	spi总线的数据输入输出？？ 
+*/
 static uint8_t
 gpio_spi_txrx(struct gpio_spi_softc *sc, int cs, int mode, uint8_t data)
 {
@@ -282,6 +299,10 @@ gpio_spi_txrx(struct gpio_spi_softc *sc, int cs, int mode, uint8_t data)
 			    sc->sc_mosi, (data & mask)?1:0);
 			GPIOBUS_PIN_SET(sc->sc_busdev, sc->sc_dev,
 			    sc->sc_sclk, 0);
+
+			/*
+				Q&A: 需要等待上一步设置完成？
+			*/
 			gpio_delay(sc);
 			/* second step */
 			if (sc->sc_miso != 0xff) {
@@ -320,6 +341,10 @@ gpio_spi_txrx(struct gpio_spi_softc *sc, int cs, int mode, uint8_t data)
 	return (out & 0xff);
 }
 
+/*
+	因为SPI总线也是分client端和host端，所以不同端的接口是表示输入还是输入是不一样的，
+	所以这个函数应该就是针对这种情况的，根据cmd来判断是接收数据还是发送数据
+*/
 static int
 gpio_spi_transfer(device_t dev, device_t child, struct spi_command *cmd)
 {
