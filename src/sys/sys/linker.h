@@ -63,6 +63,9 @@ typedef struct linker_symval {
 
 typedef int (*linker_function_nameval_callback_t)(linker_file_t, int, linker_symval_t *, void *);
 
+/*
+    通用符号
+*/
 struct common_symbol {
     STAILQ_ENTRY(common_symbol) link;
     char*		name;
@@ -73,17 +76,20 @@ struct linker_file {
     /* kernel object，类型强转 */
     KOBJ_FIELDS;
     int			refs;		/* reference count */
-    int			userrefs;	/* kldload(2) count */
+    int			userrefs;	/* kldload(2) count kldload命令执行的次数？？ */
     int			flags;
+/*
+    Q&A: 为了区分linker file是否有module是平preload？？ 
+*/
 #define LINKER_FILE_LINKED	0x1	/* file has been fully linked */
 #define LINKER_FILE_MODULES	0x2	/* file has >0 modules at preload */
     TAILQ_ENTRY(linker_file) link;	/* list of all loaded files 已经被加载的文件的链表 */
-    char*		filename;	/* file which was loaded 特制已经被加载文件的名称 */
+    char*		filename;	/* file which was loaded 特指已经被加载文件的名称 */
     char*		pathname;	/* file name with full path 完整的文件路径 */
     int			id;		/* unique id */
     caddr_t		address;	/* load address */
     size_t		size;		/* size of file */
-    caddr_t		ctors_addr;	/* address of .ctors char*类型 */
+    caddr_t		ctors_addr;	/* address of .ctors    char*类型 */
     size_t		ctors_size;	/* size of .ctors */
     int			ndeps;		/* number of dependencies 所依赖的对象的数目 */
     linker_file_t*	deps;		/* list of dependencies 依赖对象链表 */
@@ -113,6 +119,7 @@ struct linker_class {
 
 /*
  * Function type used when iterating over the list of linker files.
+ * 迭代链接器文件列表时使用的函数类型
  */
 typedef int linker_predicate_t(linker_file_t, void *);
 
@@ -123,6 +130,7 @@ extern linker_file_t	linker_kernel_file;
 
 /*
  * Obtain a reference to a module, loading it if required.
+ * 获取对模块的引用，并在需要时加载它
  */
 int linker_reference_module(const char* _modname, struct mod_depend *_verinfo,
 			    linker_file_t* _result);
@@ -131,6 +139,9 @@ int linker_reference_module(const char* _modname, struct mod_depend *_verinfo,
  * Release a reference to a module, unloading it if there are no more
  * references.  Note that one should either provide a module name and
  * optional version info or a linker file, but not both.
+ * 
+ * module也是通过计数操作来决定是否释放，执行该函数的时候我们只需要提供module的名字和属性，或者linker file，
+ * 而不用两个都提供
  */
 int linker_release_module(const char *_modname, struct mod_depend *_verinfo,
 			  linker_file_t _file);
@@ -145,6 +156,7 @@ int linker_file_foreach(linker_predicate_t *_predicate, void *_context);
 /*
  * Lookup a symbol in a file.  If deps is TRUE, look in dependencies
  * if not found in file.
+ * 
  */
 caddr_t linker_file_lookup_symbol(linker_file_t _file, const char* _name,
 				  int _deps);
@@ -153,6 +165,8 @@ caddr_t linker_file_lookup_symbol(linker_file_t _file, const char* _name,
  * Lookup a linker set in a file.  Return pointers to the first entry,
  * last + 1, and count of entries.  Use: for (p = start; p < stop; p++) {}
  * void *start is really: "struct yoursetmember ***start;"
+ * 
+ * stop应该是指向最后一个元素的下一位位置
  */
 int linker_file_lookup_set(linker_file_t _file, const char *_name,
 			   void *_start, void *_stop, int *_count);
@@ -165,6 +179,7 @@ int linker_file_function_listall(linker_file_t,
 
 /*
  * Functions solely for use by the linker class handlers.
+ * 只供链接器类处理程序使用的函数
  */
 int linker_add_class(linker_class_t _cls);
 int linker_file_unload(linker_file_t _file, int flags);
@@ -173,6 +188,7 @@ linker_file_t linker_make_file(const char* _filename, linker_class_t _cls);
 
 /*
  * DDB Helpers, tuned specifically for ddb/db_kld.c
+ * DDB - internal kernel debuger,类似与gdb和kgdb
  */
 int linker_ddb_lookup(const char *_symstr, c_linker_sym_t *_sym);
 int linker_ddb_search_symbol(caddr_t _value, c_linker_sym_t *_sym,
@@ -183,12 +199,13 @@ int linker_ddb_search_symbol_name(caddr_t value, char *buf, u_int buflen,
 
 /*
  * stack(9) helper for situations where kernel locking is required.
+ * 堆栈（9）助手，用于需要内核锁定的情况，里边包含了一些对于堆栈的控制，包括pop，empty之类的
  */
 int linker_search_symbol_name(caddr_t value, char *buf, u_int buflen,
     long *offset);
 
 
-/* HWPMC helper */
+/* HWPMC helper 貌似是跟网络相关的 */
 void *linker_hwpmc_list_objects(void);
 
 #endif	/* _KERNEL */
@@ -220,7 +237,7 @@ void *linker_hwpmc_list_objects(void);
 #define MODINFOMD_CTORS_ADDR	0x000a		/* address of .ctors */
 #define MODINFOMD_CTORS_SIZE	0x000b		/* size of .ctors */
 #define MODINFOMD_FW_HANDLE	0x000c		/* Firmware dependent handle */
-#define MODINFOMD_KEYBUF	0x000d		/* Crypto key intake buffer */
+#define MODINFOMD_KEYBUF	0x000d		/* Crypto key intake buffer 加密密钥接收缓冲区 */
 #define MODINFOMD_NOCOPY	0x8000		/* don't copy this metadata to the kernel */
 
 #define MODINFOMD_DEPLIST	(0x4001 | MODINFOMD_NOCOPY)	/* depends on */
@@ -270,6 +287,10 @@ extern int kld_debug;
 
 #endif
 
+/*
+    elf lookup function
+    Elf_Addr Elf_Size - uint64_t
+*/
 typedef int elf_lookup_fn(linker_file_t, Elf_Size, int, Elf_Addr *);
 
 /* Support functions */
@@ -283,8 +304,11 @@ const Elf_Sym *elf_get_sym(linker_file_t _lf, Elf_Size _symidx);
 const char *elf_get_symname(linker_file_t _lf, Elf_Size _symidx);
 void	link_elf_ireloc(caddr_t kmdp);
 
+/*
+    ctf好像是跟网络安全相关的
+*/
 typedef struct linker_ctf {
-	const uint8_t 	*ctftab;	/* Decompressed CTF data. */
+	const uint8_t 	*ctftab;	/* Decompressed CTF data. 解压CTF数据 */
 	int 		ctfcnt;		/* Number of CTF data bytes. */
 	const Elf_Sym	*symtab;	/* Ptr to the symbol table. */
 	int		nsym;		/* Number of symbols. */
@@ -307,6 +331,8 @@ int elf_cpu_unload_file(linker_file_t);
 /*
  * This is version 1 of the KLD file status structure. It is identified
  * by its _size_ in the version field.
+ * 
+ * size信息是包含在version元素当中的
  */
 struct kld_file_stat_1 {
     int		version;	/* set to sizeof(struct kld_file_stat_1) */

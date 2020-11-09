@@ -38,11 +38,15 @@
  * The layout of some data structures defined in this header file is
  * such that we can provide compatibility with the SunOS 4.x shared
  * library scheme.
+ * 在这个头文件中定义的一些数据结构的布局使得我们可以提供与sunos4.x共享库方案的兼容性
  */
 
 #ifndef _SYS_LINK_AOUT_H_
 #define _SYS_LINK_AOUT_H_
 
+/*
+	dynamic linker
+*/
 struct dl_info;
 
 /*
@@ -50,11 +54,14 @@ struct dl_info;
  * to complete the link edit process of the object containing it.
  * A list of such objects (chained through `sod_next') is pointed at
  * by `sdt_sods' in the section_dispatch_table structure.
+ * 
+ * “共享对象描述符”描述了完成包含该对象的对象的链接编辑过程所需的共享对象。
+ * 这类对象的列表（通过“sod_next”链接）由节“dispatch”表结构中的“sdt_sods”指向。
  */
 
 struct sod {	/* Shared Object Descriptor */
 	long	sod_name;		/* name (relative to load address) */
-	u_int	sod_library  : 1,	/* Searched for by library rules */
+	u_int	sod_library  : 1,	/* Searched for by library rules 按库规则搜索 */
 		sod_reserved : 31;
 	short	sod_major;		/* major version number */
 	short	sod_minor;		/* minor version number */
@@ -66,6 +73,9 @@ struct sod {	/* Shared Object Descriptor */
  * keep track of all shared objects loaded into a process' address space.
  * These structures are only used at run-time and do not occur within
  * the text or data segment of an executable or shared library.
+ * 
+ * `共享对象映射由运行时链接编辑器使用(ld.so)跟踪加载到进程地址空间的所有共享对象。
+ * 这些结构只在运行时使用，不会出现在可执行或共享库的文本或数据段中。
  */
 struct so_map {		/* Shared Object Map */
 	caddr_t		som_addr;	/* Address at which object mapped */
@@ -75,15 +85,19 @@ struct so_map {		/* Shared Object Map */
 	caddr_t		som_sodbase;	/* Base address of this sod */
 	u_int		som_write : 1;	/* Text is currently writable */
 	struct _dynamic	*som_dynamic;	/* _dynamic structure */
-	caddr_t		som_spd;	/* Private data */
+	caddr_t		som_spd;	/* Private data 私有数据的地址 */
 };
 
 /*
  * Symbol description with size. This is simply an `nlist' with
  * one field (nz_size) added.
+ * 带尺寸的符号说明。这只是一个添加了一个字段（nz_size）的“nlist”
+ * 
  * Used to convey size information on items in the data segment
  * of shared objects. An array of these live in the shared object's
  * text segment and is addressed by the `sdt_nzlist' field.
+ * 用于传递共享对象数据段中项目的大小信息。它们的数组位于共享对象的文本段中，
+ * 由“sdt_nzlist”字段寻址
  */
 struct nzlist {
 	struct nlist	nlist;
@@ -101,6 +115,7 @@ struct nzlist {
 /*
  * The `section_dispatch_table' structure contains offsets to various data
  * structures needed to do run-time relocation.
+ * “section_dispatch_table”结构包含对执行运行时重定位所需的各种数据结构的偏移量
  */
 struct section_dispatch_table {
 	struct so_map *sdt_loaded;	/* List of loaded objects */
@@ -125,6 +140,10 @@ struct section_dispatch_table {
  * on the symbol's name. `rh_symbolnum' is the index of the symbol
  * in the shared object's symbol list (`sdt_nzlist'), `rh_next' is
  * the next symbol in the hash bucket (in case of collisions).
+ * 
+ * RRS符号哈希表，由“sdt_hash”在节“dispatch”中寻址。用于通过对符号名称进行哈希运算来
+ * 快速查找共享对象的符号。`rh_symbolnum'是共享对象的符号列表（`sdt_nzlist'）中符号的索引，
+ * `rh_next'是哈希桶中的下一个符号（如果发生冲突）
  */
 struct rrs_hash {
 	int	rh_symbolnum;		/* Symbol number */
@@ -134,13 +153,14 @@ struct rrs_hash {
 /*
  * `rt_symbols' is used to keep track of run-time allocated commons
  * and data items copied from shared objects.
+ * `rt_symbols'用于跟踪运行时分配的公共空间和从共享对象复制的数据项
  */
 struct rt_symbol {
 	struct nzlist		*rt_sp;		/* The symbol */
 	struct rt_symbol	*rt_next;	/* Next in linear list */
 	struct rt_symbol	*rt_link;	/* Next in bucket */
 	caddr_t			rt_srcaddr;	/* Address of "master" copy */
-	struct so_map		*rt_smp;	/* Originating map */
+	struct so_map		*rt_smp;	/* Originating map 原始映射？ */
 };
 
 /*
@@ -150,7 +170,7 @@ struct so_debug {
 	int	dd_version;		/* Version # of interface */
 	int	dd_in_debugger;		/* Set when run by debugger */
 	int	dd_sym_loaded;		/* Run-time linking brought more
-					   symbols into scope */
+					   symbols into scope 运行时链接将更多符号引入范围 */
 	char   	 *dd_bpt_addr;		/* Address of rtld-generated bpt */
 	int	dd_bpt_shadow;		/* Original contents of bpt */
 	struct rt_symbol *dd_cc;	/* Allocated commons/copied data */
@@ -168,6 +188,8 @@ struct so_debug {
  * Entry points into ld.so - user interface to the run-time linker.
  * Entries are valid for the given version numbers returned by ld.so
  * to crt0.
+ * 
+ * 进入的切入点ld.so-运行时链接器的用户界面。条目对于返回的给定版本号有效ld.so到crt0
  */
 struct ld_entry {
 	void	*(*dlopen)(const char *, int);	/* NONE */
@@ -189,6 +211,12 @@ struct ld_entry {
  * used by Sun is 3. We leave some room here and go to version number
  * 8 for NetBSD, the main difference lying in the support for the
  * `nz_list' type of symbols.
+ * 
+ * 如果可执行文件需要运行时链接编辑器的注意，则这是由\uu动态符号指向的结构。
+ * __如果不需要执行运行时链接（它始终存在于共享对象中），则动态值为零。
+ * 联合“d\u un”提供了不同版本的动态链接机制（由“d\u version”打开）。
+ * Sun使用的最后一个版本是3。我们在这里留出一些空间，转到NetBSD的第8版，
+ * 主要区别在于支持“nz_list”类型的符号。
  */
 
 struct _dynamic {

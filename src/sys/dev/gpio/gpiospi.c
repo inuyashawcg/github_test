@@ -57,7 +57,7 @@ __FBSDID("$FreeBSD: releng/12.0/sys/dev/gpio/gpiospi.c 310018 2016-12-13 10:03:2
 struct gpio_spi_softc {
 	device_t	sc_dev;
 	device_t	sc_busdev;
-	int		sc_freq;	/* 频率？ */
+	int		sc_freq;	/* 频率 */
 
 	/* 下面都是表示总线引脚 */
 	uint8_t		sc_sclk;	

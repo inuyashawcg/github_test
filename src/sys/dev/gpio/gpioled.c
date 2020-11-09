@@ -127,7 +127,7 @@ gpioled_attach(device_t dev)
 	    device_get_unit(dev), "name", &name))
 		name = NULL;
 	
-	/* 获取以invert命令的int类型的值 */
+	/* 获取以invert命名的int类型的值 */
 	resource_int_value(device_get_name(dev),
 	    device_get_unit(dev), "invert", &sc->sc_invert);
 

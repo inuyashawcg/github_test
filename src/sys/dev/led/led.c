@@ -280,7 +280,7 @@ led_create(led_t *func, void *priv, char const *name)
 struct cdev *
 led_create_state(led_t *func, void *priv, char const *name, int state)
 {
-	/* ledsc 应该也是表示led software context，所以需要加锁*/
+	/* ledsc 应该也是表示led software context */
 	struct ledsc	*sc;	
 
 	sc = malloc(sizeof *sc, M_LED, M_WAITOK | M_ZERO);

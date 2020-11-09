@@ -40,6 +40,9 @@
  * The following macros are used to declare global sets of objects, which
  * are collected by the linker into a `linker_set' as defined below.
  * For ELF, this is done by constructing a separate segment for each set.
+ * 
+ * 以下宏用于声明对象的全局集，这些对象由链接器收集到下面定义的“链接器集”中。
+ * 对于ELF，这是通过为每个集合构造一个单独的段来完成的。
  */
 
 #if defined(__powerpc64__)
@@ -79,6 +82,7 @@
 
 /*
  * Initialize before referring to a given linker set.
+ * 声明初始化linker set
  */
 #define SET_DECLARE(set, ptype)					\
 	extern ptype __weak_symbol *__CONCAT(__start_set_,set);	\
@@ -90,11 +94,14 @@
 	(&__CONCAT(__stop_set_,set))
 
 /*
- * Iterate over all the elements of a set.
+ * Iterate over all the elements of a set. 遍历set下的所有元素
  *
  * Sets always contain addresses of things, and "pvar" points to words
  * containing those addresses.  Thus is must be declared as "type **pvar",
  * and the address of each set item is obtained inside the loop by "*pvar".
+ * 
+ * 集合总是包含事物的地址，“pvar”指向包含这些地址的单词。因此is必须声明为“type**pvar”，
+ * 并且每个集合项的地址在循环内由“*pvar”获得
  */
 #define SET_FOREACH(pvar, set)						\
 	for (pvar = SET_BEGIN(set); pvar < SET_LIMIT(set); pvar++)

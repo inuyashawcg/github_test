@@ -266,7 +266,7 @@ gpiobus_alloc_ivars(struct gpiobus_ivar *devi)
 		仅仅申请了pins和flags所需要的空间
 		Allocate pins and flags memory. 可以看到pins跟flag都是指向32位整数的指针，
 		可能就是它们所指向的数据的每一位都代表一个pin，所以就可以通过这两个数来对所有的pin
-		进行响应的控制
+		进行相应的控制
 	*/
 	devi->pins = malloc(sizeof(uint32_t) * devi->npins, M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
@@ -629,7 +629,7 @@ gpiobus_alloc_resource(device_t bus, device_t child, int type, int *rid,
 	struct resource_list_entry *rle;
 	int isdefault;
 
-	/* 只分配interrupt resource？ */
+	/* 只分配interrupt resource */
 	if (type != SYS_RES_IRQ)
 		return (NULL);
 

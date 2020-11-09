@@ -76,7 +76,10 @@ SYSCTL_INT(_debug, OID_AUTO, kld_debug, CTLFLAG_RWTUN,
     &kld_debug, 0, "Set various levels of KLD debug");
 #endif
 
-/* These variables are used by kernel debuggers to enumerate loaded files. */
+/* 
+	These variables are used by kernel debuggers to enumerate loaded files. 
+	内核调试器使用这些变量来枚举加载的文件
+*/
 const int kld_off_address = offsetof(struct linker_file, address);
 const int kld_off_filename = offsetof(struct linker_file, filename);
 const int kld_off_pathname = offsetof(struct linker_file, pathname);
@@ -89,12 +92,14 @@ const int kld_off_next = offsetof(struct linker_file, link.tqe_next);
 static const char 	*linker_basename(const char *path);
 
 /*
- * Find a currently loaded file given its filename.
+ * Find a currently loaded file given its filename. 
+ * 通过filename来查找目前已经加载的file
  */
 static linker_file_t linker_find_file_by_name(const char* _filename);
 
 /*
  * Find a currently loaded file given its file id.
+ * 通过file id来查找已经加载的文件
  */
 static linker_file_t linker_find_file_by_id(int _fileid);
 
@@ -555,6 +560,7 @@ static linker_file_t
 linker_find_file_by_name(const char *filename)
 {
 	linker_file_t lf;
+	/* kernel object */
 	char *koname;
 
 	koname = malloc(strlen(filename) + 4, M_LINKER, M_WAITOK);
@@ -1988,6 +1994,9 @@ linker_search_kld(const char *name)
 	return (NULL);
 }
 
+/*
+	linker_search_path 函数获取到的路径
+*/
 static const char *
 linker_basename(const char *path)
 {
@@ -2004,6 +2013,7 @@ linker_basename(const char *path)
 #ifdef HWPMC_HOOKS
 /*
  * Inform hwpmc about the set of kernel modules currently loaded.
+ * 通知hwpmc当前加载的内核模块集
  */
 void *
 linker_hwpmc_list_objects(void)
