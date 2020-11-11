@@ -65,6 +65,7 @@ typedef struct moduledata {
 /*
  * A module can use this to report module specific data to the user via
  * kldstat(2).
+ * 通过 kldstat 命令向用户传递的数据内容
  */
 typedef union modspecific {
 	int	intval;
@@ -75,6 +76,7 @@ typedef union modspecific {
 
 /*
  * Module dependency declaration
+ * 用来说明module所支持的版本
  */
 struct mod_depend {
 	int	md_ver_minimum;
@@ -89,6 +91,7 @@ struct mod_version {
 	int	mv_version;
 };
 
+/* MDT: metadata? */
 struct mod_metadata {
 	int		md_version;	/* structure version MDTV_* */
 	int		md_type;	/* type of entry MDT_* */

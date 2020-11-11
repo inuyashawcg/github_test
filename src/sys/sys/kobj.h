@@ -52,6 +52,8 @@ struct kobj_method {
  * instance of the class is created, the method table will be compiled 
  * into a form more suited to efficient method dispatch. This compiled 
  * method table is always the first field of the object.
+ * 类只是一个方法表和一个sizeof值。当类的第一个实例被创建时，方法表将被编译成更适合
+ * 高效方法调度的形式。这个编译的方法表总是对象的第一个字段
  */
 #define KOBJ_CLASS_FIELDS						\
 	const char	*name;		/* class name */		\
@@ -77,6 +79,7 @@ struct kobj {
 
 /*
  * The ops table is used as a cache of results from kobj_lookup_method().
+ * ops表用作kobj_lookup_method（）的结果缓存
  */
 
 #define KOBJ_CACHE_SIZE	256
@@ -212,6 +215,7 @@ void		kobj_delete(kobj_t obj, struct malloc_type *mtype);
 
 /*
  * Maintain stats on hits/misses in lookup caches.
+ * 在查找缓存中维护命中/未命中的统计信息
  */
 #ifdef KOBJ_STATS
 extern u_int kobj_lookup_hits;
@@ -220,7 +224,7 @@ extern u_int kobj_lookup_misses;
 
 /*
  * Lookup the method in the cache and if it isn't there look it up the
- * slow way.
+ * slow way. 在缓存中查找方法，如果没有，则以慢速方式查找
  */
 #ifdef KOBJ_STATS
 #define KOBJOPLOOKUP(OPS,OP) do {				\

@@ -1315,6 +1315,8 @@ groupmember(gid_t gid, struct ucred *cred)
  * Due to care taken when setting the securelevel, we know that no jail will
  * be less secure that its parent (or the physical system), so it is sufficient
  * to test the current jail only.
+ * 由于在设置securelevel时非常小心，我们知道没有哪个监狱比它的父级（或物理系统）更安全，
+ * 所以只测试当前的监狱就足够了。
  *
  * XXXRW: Possibly since this has to do with privilege, it should move to
  * kern_priv.c.

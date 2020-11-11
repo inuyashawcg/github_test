@@ -50,6 +50,9 @@
  * The vnode is the focus of all file activity in UNIX.  There is a
  * unique vnode allocated for each active file, each current directory,
  * each mounted-on file, text file, and the root.
+ * 
+ * vnode是UNIX中所有文件活动的焦点。vnode由struct vnode描述。为每个活动文件、每个当前目录、
+ * 每个装入的文件、文本文件和根目录都分配了一个唯一的vnode
  */
 
 /*
@@ -259,6 +262,8 @@ struct xvnode {
 /*
  * Vnode attributes.  A field value of VNOVAL represents a field whose value
  * is unavailable (getattr) or which is not to be changed (setattr).
+ * 
+ * Vnode attributes 表示vnode属性，字段值VNOVAL表示值不可用（getattr）或不可更改的字段（setattr）
  */
 struct vattr {
 	enum vtype	va_type;	/* vnode type (for create) */

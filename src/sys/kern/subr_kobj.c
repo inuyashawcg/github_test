@@ -183,6 +183,7 @@ kobj_class_compile_static(kobj_class_t cls, kobj_ops_t ops)
 
 	/*
 	 * Increment refs to make sure that the ops table is not freed.
+	 * 增量引用以确保不会释放ops表
 	 */
 	cls->refs++;
 	kobj_class_compile_common(cls, ops);

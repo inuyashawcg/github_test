@@ -389,6 +389,7 @@ do {									\
 
 /*
  * Various virtual network stack macros compile to no-ops without VIMAGE.
+ * 各种虚拟网络堆栈宏编译为没有VIMAGE的操作
  */
 #define	curvnet			NULL
 

@@ -41,8 +41,8 @@
  * are collected by the linker into a `linker_set' as defined below.
  * For ELF, this is done by constructing a separate segment for each set.
  * 
- * 以下宏用于声明对象的全局集，这些对象由链接器收集到下面定义的“链接器集”中。
- * 对于ELF，这是通过为每个集合构造一个单独的段来完成的。
+ * 以下宏用于声明对象的全局集，这些对象由链接器收集到下面定义的“linker_set”中。
+ * 对于ELF，这是通过为每个集合构造一个单独的段来完成的
  */
 
 #if defined(__powerpc64__)
@@ -57,6 +57,8 @@
 
 /*
  * Private macros, not to be used outside this header file.
+ * __CONCAT 是把两个元素组装成一个symbol的名称，再通过 __GLOBL 宏告诉汇编器这个symbol是要被
+ * 链接器用到的
  */
 #ifdef __GNUCLIKE___SECTION
 #define __MAKE_SET_QV(set, sym, qv)			\
@@ -71,7 +73,7 @@
 #endif /* __GNUCLIKE___SECTION */
 
 /*
- * Public macros.
+ * Public macros. 
  */
 #define TEXT_SET(set, sym)	__MAKE_SET(set, sym)
 #define DATA_SET(set, sym)	__MAKE_SET(set, sym)
@@ -82,7 +84,7 @@
 
 /*
  * Initialize before referring to a given linker set.
- * 声明初始化linker set
+ * 弱符号
  */
 #define SET_DECLARE(set, ptype)					\
 	extern ptype __weak_symbol *__CONCAT(__start_set_,set);	\
@@ -102,6 +104,7 @@
  * 
  * 集合总是包含事物的地址，“pvar”指向包含这些地址的单词。因此is必须声明为“type**pvar”，
  * 并且每个集合项的地址在循环内由“*pvar”获得
+ * 从宏定义来看，SET_LIMIT 表示末尾，SET_BEGIN表示开头
  */
 #define SET_FOREACH(pvar, set)						\
 	for (pvar = SET_BEGIN(set); pvar < SET_LIMIT(set); pvar++)

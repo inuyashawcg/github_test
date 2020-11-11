@@ -44,6 +44,7 @@ struct mod_depend;
 
 /*
  * Object representing a file which has been loaded by the linker.
+ * 表示已经被链接器加载过的文件
  */
 typedef struct linker_file* linker_file_t;
 typedef TAILQ_HEAD(, linker_file) linker_file_list_t;
@@ -72,6 +73,10 @@ struct common_symbol {
     caddr_t		address;
 };
 
+/*
+    链接器操作的最小元素是目标文件，而目标文件和最终的可执行文件结构类似(ELF格式)，
+    Q&A： linker file应该是链接器管理目标文件的一个结构体？
+*/
 struct linker_file {
     /* kernel object，类型强转 */
     KOBJ_FIELDS;
@@ -89,12 +94,17 @@ struct linker_file {
     int			id;		/* unique id */
     caddr_t		address;	/* load address */
     size_t		size;		/* size of file */
-    caddr_t		ctors_addr;	/* address of .ctors    char*类型 */
+    caddr_t		ctors_addr;	/* address of .ctors    char*类型，跟C++构造函数有关联？ */
     size_t		ctors_size;	/* size of .ctors */
     int			ndeps;		/* number of dependencies 所依赖的对象的数目 */
+
+    /*
+        通过一些功能函数的实现逻辑可以看出，deps就是管理当前目标文件所有依赖的外部模块的队列，外部模块
+        会听一些变量或者函数给当前模块来使用，执行符号决议来判断是否可以找到相应的变量或者函数定义
+    */
     linker_file_t*	deps;		/* list of dependencies 依赖对象链表 */
-    STAILQ_HEAD(, common_symbol) common; /* list of common symbols */
-    TAILQ_HEAD(, module) modules;	/* modules in this file */
+    STAILQ_HEAD(, common_symbol) common; /* list of common symbols 模块的符号表？？ */
+    TAILQ_HEAD(, module) modules;	/* modules in this file 此文件中所包含的module */
     TAILQ_ENTRY(linker_file) loaded;	/* preload dependency support 预加载依赖项支持 */
     int			loadcnt;	/* load counter value */
 
@@ -108,6 +118,7 @@ struct linker_file {
 
 /*
  * Object implementing a class of file (a.out, elf, etc.)
+ * 表示文件格式？？
  */
 typedef struct linker_class *linker_class_t;
 typedef TAILQ_HEAD(, linker_class) linker_class_list_t;
@@ -131,6 +142,7 @@ extern linker_file_t	linker_kernel_file;
 /*
  * Obtain a reference to a module, loading it if required.
  * 获取对模块的引用，并在需要时加载它
+ * Q&A: module指的是动态库或者静态库文件？？
  */
 int linker_reference_module(const char* _modname, struct mod_depend *_verinfo,
 			    linker_file_t* _result);
@@ -150,13 +162,14 @@ int linker_release_module(const char *_modname, struct mod_depend *_verinfo,
  * Iterate over all of the currently loaded linker files calling the
  * predicate function while the function returns 0.  Returns the value
  * returned by the last predicate function.
+ * 
  */
 int linker_file_foreach(linker_predicate_t *_predicate, void *_context);
 
 /*
  * Lookup a symbol in a file.  If deps is TRUE, look in dependencies
  * if not found in file.
- * 
+ * 查找文件中的symbol(symbol table?)。如果没有找到，并且存在依赖，那么就去依赖中去查找
  */
 caddr_t linker_file_lookup_symbol(linker_file_t _file, const char* _name,
 				  int _deps);
@@ -166,7 +179,7 @@ caddr_t linker_file_lookup_symbol(linker_file_t _file, const char* _name,
  * last + 1, and count of entries.  Use: for (p = start; p < stop; p++) {}
  * void *start is really: "struct yoursetmember ***start;"
  * 
- * stop应该是指向最后一个元素的下一位位置
+ * stop应该是指向最后一个元素的下一个位置，set -> section？？
  */
 int linker_file_lookup_set(linker_file_t _file, const char *_name,
 			   void *_start, void *_stop, int *_count);
@@ -179,7 +192,7 @@ int linker_file_function_listall(linker_file_t,
 
 /*
  * Functions solely for use by the linker class handlers.
- * 只供链接器类处理程序使用的函数
+ * 只供 linker class处理程序使用的函数
  */
 int linker_add_class(linker_class_t _cls);
 int linker_file_unload(linker_file_t _file, int flags);
@@ -304,9 +317,7 @@ const Elf_Sym *elf_get_sym(linker_file_t _lf, Elf_Size _symidx);
 const char *elf_get_symname(linker_file_t _lf, Elf_Size _symidx);
 void	link_elf_ireloc(caddr_t kmdp);
 
-/*
-    ctf好像是跟网络安全相关的
-*/
+
 typedef struct linker_ctf {
 	const uint8_t 	*ctftab;	/* Decompressed CTF data. 解压CTF数据 */
 	int 		ctfcnt;		/* Number of CTF data bytes. */

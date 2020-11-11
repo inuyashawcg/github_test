@@ -115,10 +115,14 @@ static struct sx kld_sx;	/* kernel linker lock */
 /*
  * Load counter used by clients to determine if a linker file has been
  * re-loaded. This counter is incremented for each file load.
+ * loadcnt 应该是记录 linker file 被加载的次数
  */
 static int loadcnt;
 
+/* 应该是用于管理所有的linker class类型 */
 static linker_class_list_t classes;
+
+/* 应该是管理所有的linker file */
 static linker_file_list_t linker_files;
 static int next_file_id = 1;
 static int linker_no_more_classes = 0;
@@ -152,17 +156,22 @@ static modlisthead_t found_modules;
 
 static int	linker_file_add_dependency(linker_file_t file,
 		    linker_file_t dep);
+
 static caddr_t	linker_file_lookup_symbol_internal(linker_file_t file,
 		    const char* name, int deps);
+
 static int	linker_load_module(const char *kldname,
 		    const char *modname, struct linker_file *parent,
 		    const struct mod_depend *verinfo, struct linker_file **lfpp);
+
 static modlist_t modlist_lookup2(const char *name, const struct mod_depend *verinfo);
 
 static void
 linker_init(void *arg)
 {
-
+	/*
+		Shared/exclusive lock 共享独占锁
+	*/
 	sx_init(&kld_sx, "kernel linker");
 	TAILQ_INIT(&classes);
 	TAILQ_INIT(&linker_files);
@@ -201,19 +210,26 @@ linker_file_sysinit(linker_file_t lf)
 {
 	struct sysinit **start, **stop, **sipp, **xipp, *save;
 
+	/* kld printf */
 	KLD_DPF(FILE, ("linker_file_sysinit: calling SYSINITs for %s\n",
 	    lf->filename));
 
 	sx_assert(&kld_sx, SA_XLOCKED);
 
+	/*
+		找到linker file的起始和终止位置，然后多种的sysinit结构体进行排序，然后执行
+		相应的func？？
+	*/
 	if (linker_file_lookup_set(lf, "sysinit_set", &start, &stop, NULL) != 0)
 		return;
 	/*
 	 * Perform a bubble sort of the system initialization objects by
 	 * their subsystem (primary key) and order (secondary key).
+	 * 按子系统（主键）和顺序（次键）对系统初始化对象执行气泡式排序
 	 *
 	 * Since some things care about execution order, this is the operation
 	 * which ensures continued function.
+	 * 因为有些事情关心的是执行顺序，所以这是确保连续功能的操作
 	 */
 	for (sipp = start; sipp < stop; sipp++) {
 		for (xipp = sipp + 1; xipp < stop; xipp++) {
@@ -381,6 +397,8 @@ linker_file_register_modules(linker_file_t lf)
 		 * This fallback should be unnecessary, but if we get booted
 		 * from boot2 instead of loader and we are missing our
 		 * metadata then we have to try the best we can.
+		 * 这种回退应该是不必要的，但是如果我们从boot2引导而不是从loader引导，
+		 * 并且丢失了元数据，那么我们必须尽最大努力
 		 */
 		if (lf == linker_kernel_file) {
 			start = SET_BEGIN(modmetadata_set);
@@ -425,11 +443,15 @@ linker_load_file(const char *filename, linker_file_t *result)
 	linker_file_t lf;
 	int foundfile, error, modules;
 
-	/* Refuse to load modules if securelevel raised */
+	/* 
+		Refuse to load modules if securelevel raised 
+		如果安全等级提升，则拒绝加载模块
+	*/
 	if (prison0.pr_securelevel > 0)
 		return (EPERM);
 
 	sx_assert(&kld_sx, SA_XLOCKED);
+	
 	lf = linker_find_file_by_name(filename);
 	if (lf) {
 		KLD_DPF(FILE, ("linker_load_file: file %s is already loaded,"
@@ -445,6 +467,10 @@ linker_load_file(const char *filename, linker_file_t *result)
 	 * We do not need to protect (lock) classes here because there is
 	 * no class registration past startup (SI_SUB_KLD, SI_ORDER_ANY)
 	 * and there is no class deregistration mechanism at this time.
+	 * 
+	 * 我们不需要在这里保护（锁定）类，因为在启动之后没有类注册（SI_SUB_KLD，SI_ORDER_ANY），
+	 * 而且此时没有类注销机制.代码逻辑就是遍历classes中的所有元素，查找里边每个元素注册的
+	 * linker_load_file 函数，然后执行
 	 */
 	TAILQ_FOREACH(lc, &classes, link) {
 		KLD_DPF(FILE, ("linker_load_file: trying to load %s\n",
@@ -453,15 +479,24 @@ linker_load_file(const char *filename, linker_file_t *result)
 		/*
 		 * If we got something other than ENOENT, then it exists but
 		 * we cannot load it for some other reason.
+		 * 如果不是错误“没有对应的问价和文件夹”，那么就可以认为已经找到相应的文件，
+		 * 把 foundfile 的值设置为1
 		 */
 		if (error != ENOENT)
 			foundfile = 1;
 		if (lf) {
+			/*
+				向linker file注册modules
+			*/
 			error = linker_file_register_modules(lf);
 			if (error == EEXIST) {
 				linker_file_unload(lf, LINKER_UNLOAD_FORCE);
 				return (error);
 			}
+			/*
+				注册完成后，判断modules是否为空，然后向linker file注册sysctl，
+				再执行linker file 的 sysinit 操作
+			*/
 			modules = !TAILQ_EMPTY(&lf->modules);
 			linker_file_register_sysctls(lf, false);
 			linker_file_sysinit(lf);
@@ -471,6 +506,7 @@ linker_load_file(const char *filename, linker_file_t *result)
 			 * If all of the modules in this file failed
 			 * to load, unload the file and return an
 			 * error of ENOEXEC.
+			 * 如果在这个文件中的所有modules都加载失败，那就unload这个文件并返回错误码
 			 */
 			if (modules && TAILQ_EMPTY(&lf->modules)) {
 				linker_file_unload(lf, LINKER_UNLOAD_FORCE);
@@ -485,12 +521,14 @@ linker_load_file(const char *filename, linker_file_t *result)
 	/*
 	 * Less than ideal, but tells the user whether it failed to load or
 	 * the module was not found.
+	 * 不太理想，但会告诉用户是加载失败还是找不到模块
 	 */
 	if (foundfile) {
 
 		/*
 		 * If the file type has not been recognized by the last try
 		 * printout a message before to fail.
+		 * 如果文件类型尚未被上次尝试识别，请打印一条消息以失败
 		 */
 		if (error == ENOSYS)
 			printf("%s: %s - unsupported file type\n",
@@ -503,6 +541,9 @@ linker_load_file(const char *filename, linker_file_t *result)
 		 * value.  Preserve this so that apps like sysinstall
 		 * can recognize this special case and not post bogus
 		 * dialog boxes.
+		 * 
+		 * 格式无法识别或无法加载。当加载静态构建到内核中的模块时，EEXIST将作为返回值进行过滤。
+		 * 保留这一点，以便sysinstall这样的应用程序可以识别这种特殊情况，而不是发布伪造的对话框。
 		 */
 		if (error != EEXIST)
 			error = ENOEXEC;
@@ -556,6 +597,9 @@ linker_release_module(const char *modname, struct mod_depend *verinfo,
 	return (error);
 }
 
+/*
+	这里的filename是basename，找的就是.ko或者不带扩展名的文件
+*/
 static linker_file_t
 linker_find_file_by_name(const char *filename)
 {
@@ -563,10 +607,13 @@ linker_find_file_by_name(const char *filename)
 	/* kernel object */
 	char *koname;
 
+	/* +4 应该是给 .ko\0 申请位置空间 */
 	koname = malloc(strlen(filename) + 4, M_LINKER, M_WAITOK);
 	sprintf(koname, "%s.ko", filename);
 
 	sx_assert(&kld_sx, SA_XLOCKED);
+	
+	/* 在linker_files中查找koname命名的linker file */
 	TAILQ_FOREACH(lf, &linker_files, link) {
 		if (strcmp(lf->filename, koname) == 0)
 			break;
@@ -787,6 +834,9 @@ linker_file_add_dependency(linker_file_t file, linker_file_t dep)
  * linker_if.h exposure elsewhere.  Note: firstp and lastp are really void **.
  * This function is used in this file so we can avoid having lots of (void **)
  * casts.
+ * 
+ * 查找链接器集及其内容。这是一个帮助函数，可避免在其他地方暴露linker_if.h。注意：firstp
+ * 和lastp实际上是void**。这个函数在这个文件中使用，所以我们可以避免有很多（void**）类型转换
  */
 int
 linker_file_lookup_set(linker_file_t file, const char *name,
@@ -822,10 +872,19 @@ linker_file_lookup_symbol(linker_file_t file, const char *name, int deps)
 	return (sym);
 }
 
+/*
+	Q&A: symbol的作用是什么？
+		symbol的中文翻译是符号，linker中有一个过程叫符号决议，函数应该是对应的这个过程？？
+*/
 static caddr_t
 linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
     int deps)
 {
+	/*
+		从上述定义可以看到，c_linker_sym_t 表示一个const char*，linker_symval_t
+		相当于是对 linker_sym_t(不是c打头，char*类型) 的扩充，所以它们两个的核心应该
+		就是字符串类型的标识，也就是symbol
+	*/
 	c_linker_sym_t sym;
 	linker_symval_t symval;
 	caddr_t address;
@@ -843,6 +902,7 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 			 * For commons, first look them up in the
 			 * dependencies and only allocate space if not found
 			 * there.
+			 * 对于commons，首先在依赖项中查找它们，如果没有找到就只分配空间
 			 */
 			common_size = symval.size;
 		else {
@@ -851,7 +911,15 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 			return (symval.value);
 		}
 	}
+
+	/* 在当前linker file中找到了symbol并且存在依赖项，然后执行下面的步骤 */
 	if (deps) {
+		/*
+			ndeps 表示linker file依赖项的总数，执行递归查找。这个应该就是对应
+			符号决议的执行过程。在当前的目标文件中涉及到一些外部变量的引用，这个时候就要
+			去查找依赖项中是否含有这个符号；如果有，就证明可以找到对应变量的定义，编译就
+			可以继续执行，如果没有找到，编译就会报错
+		*/
 		for (i = 0; i < file->ndeps; i++) {
 			address = linker_file_lookup_symbol_internal(
 			    file->deps[i], name, 0);
@@ -867,6 +935,7 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 		 * This is a common symbol which was not found in the
 		 * dependencies.  We maintain a simple common symbol table in
 		 * the file object.
+		 * 这是在依赖项中找不到的公共符号。我们在file对象中维护一个简单的公共符号表
 		 */
 		struct common_symbol *cp;
 
@@ -878,7 +947,7 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 			}
 		}
 		/*
-		 * Round the symbol size up to align.
+		 * Round the symbol size up to align. 字节对齐
 		 */
 		common_size = (common_size + sizeof(int) - 1) & -sizeof(int);
 		cp = malloc(sizeof(struct common_symbol)
@@ -888,6 +957,10 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 		cp->name = cp->address + common_size;
 		strcpy(cp->name, name);
 		bzero(cp->address, common_size);
+
+		/* 
+			创建并添加新的symbol元素，所以这个函数还没有到符号决议那个阶段？ 
+		*/
 		STAILQ_INSERT_TAIL(&file->common, cp, link);
 
 		KLD_DPF(SYM, ("linker_file_lookup_symbol: new common"
@@ -931,6 +1004,10 @@ linker_debug_search_symbol(caddr_t value, c_linker_sym_t *sym, long *diffp)
 	best = 0;
 	off = (uintptr_t)value;
 	bestdiff = off;
+
+	/*
+		找到最佳symbol？？
+	*/
 	TAILQ_FOREACH(lf, &linker_files, link) {
 		if (LINKER_SEARCH_SYMBOL(lf, value, &es, &diff) != 0)
 			continue;
@@ -952,6 +1029,10 @@ linker_debug_search_symbol(caddr_t value, c_linker_sym_t *sym, long *diffp)
 	}
 }
 
+/*
+	判断linker_files所管理的所有linker file中是否含有某个symbol value，
+	然后应该是要获取sym的symval的值(传指针)
+*/
 static int
 linker_debug_symbol_values(c_linker_sym_t sym, linker_symval_t *symval)
 {
@@ -964,6 +1045,9 @@ linker_debug_symbol_values(c_linker_sym_t sym, linker_symval_t *symval)
 	return (ENOENT);
 }
 
+/*
+	首先通过value和offset定位到某一个symbol，然后再通过symbol获取symval.name
+*/
 static int
 linker_debug_search_symbol_name(caddr_t value, char *buf, u_int buflen,
     long *offset)
@@ -985,7 +1069,7 @@ linker_debug_search_symbol_name(caddr_t value, char *buf, u_int buflen,
 
 /*
  * DDB Helpers.  DDB has to look across multiple files with their own symbol
- * tables and string tables.
+ * tables and string tables. DDB必须查看多个具有自己的符号表和字符串表的文件
  *
  * Note that we do not obey list locking protocols here.  We really don't need
  * DDB to hang because somebody's got the lock held.  We'll take the chance
@@ -1025,6 +1109,8 @@ linker_ddb_search_symbol_name(caddr_t value, char *buf, u_int buflen,
 /*
  * stack(9) helper for non-debugging environemnts.  Unlike DDB helpers, we do
  * obey locking protocols, and offer a significantly less complex interface.
+ * 
+ * 把symval->name放到buf中
  */
 int
 linker_search_symbol_name(caddr_t value, char *buf, u_int buflen,
@@ -1040,6 +1126,12 @@ linker_search_symbol_name(caddr_t value, char *buf, u_int buflen,
 
 /*
  * Syscalls.
+ * 执行后获取到的file id赋值给fileid，然后在sys_kldload函数中用于设置td相关属性
+ * file在sys_kldload函数中传入的是pathname
+ * kld： loadable kernel module
+ * 
+ * Q&A:
+ * 		module和linker file之间的关系是什么样的？
  */
 int
 kern_kldload(struct thread *td, const char *file, int *fileid)
@@ -1048,15 +1140,24 @@ kern_kldload(struct thread *td, const char *file, int *fileid)
 	linker_file_t lf;
 	int error;
 
+	/* 检查安全等级和特权 */
 	if ((error = securelevel_gt(td->td_ucred, 0)) != 0)
 		return (error);
 
+	/* PRIV_KLD_LOAD: 表示可加载的内核模块权限 */
 	if ((error = priv_check(td, PRIV_KLD_LOAD)) != 0)
 		return (error);
 
 	/*
 	 * It is possible that kldloaded module will attach a new ifnet,
 	 * so vnet context must be set when this ocurs.
+	 * 
+	 * kldloaded模块可能会附加一个新的ifnet，所以当这个发生时必须设置vnet上下文
+	 * 
+	 * VNET是虚拟化网络堆栈的技术名称。基本思想是将全局资源（尤其是变量）更改为每个
+	 * 网络堆栈资源，并让函数、sysctl、eventhandlers等在正确实例的上下文中访问和
+	 * 处理它们。每个（虚拟）网络堆栈都连接到一个监狱，vnet0是基本系统的无限制默认
+	 * 网络堆栈
 	 */
 	CURVNET_SET(TD_TO_VNET(td));
 
@@ -1064,6 +1165,15 @@ kern_kldload(struct thread *td, const char *file, int *fileid)
 	 * If file does not contain a qualified name or any dot in it
 	 * (kldname.ko, or kldname.ver.ko) treat it as an interface
 	 * name.
+	 * 
+	 * 如果文件中不包含限定名或任何点(kldname.ko，或kldname.ver.ko)将其视为接口名称.
+	 * strchr表示获取某个字符第一次出现的位置，所以 kldname 表示的应该是包含路径名的文件
+	 * 名称，或者是包含扩展名： 
+	 * 		/###/###  
+	 * 		./###/###
+	 * 		/###/###.##
+	 * 		###.##
+	 * modname 应该就是不包含文件路径和扩展名: ###	
 	 */
 	if (strchr(file, '/') || strchr(file, '.')) {
 		kldname = file;
@@ -1072,8 +1182,12 @@ kern_kldload(struct thread *td, const char *file, int *fileid)
 		kldname = NULL;
 		modname = file;
 	}
-
+	/* 带x就表示独占锁 */
 	sx_xlock(&kld_sx);
+
+	/*
+		将获取到的linker file保存到lf(linker_file**类型)，parent和verinfo都是NULL
+	*/
 	error = linker_load_module(kldname, modname, NULL, NULL, &lf);
 	if (error) {
 		sx_xunlock(&kld_sx);
@@ -1098,11 +1212,15 @@ sys_kldload(struct thread *td, struct kldload_args *uap)
 	td->td_retval[0] = -1;
 
 	pathname = malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
+
+	/*
+		从用户空间 uap->file 拷贝数据到内核空间 pathname(kldload)
+	*/
 	error = copyinstr(uap->file, pathname, MAXPATHLEN, NULL);
 	if (error == 0) {
 		error = kern_kldload(td, pathname, &fileid);
 		if (error == 0)
-			td->td_retval[0] = fileid;
+			td->td_retval[0] = fileid;  /* pcb相关 */
 	}
 	free(pathname, M_TEMP);
 	return (error);
@@ -1409,6 +1527,10 @@ modlist_lookup(const char *name, int ver)
 {
 	modlist_t mod;
 
+	/*
+		遍历整个 found_modules(管理所有已知的module)，查看是否有符合version
+		的module元素存在
+	*/
 	TAILQ_FOREACH(mod, &found_modules, link) {
 		if (strcmp(mod->name, name) == 0 &&
 		    (ver == 0 || mod->version == ver))
@@ -1425,7 +1547,8 @@ modlist_lookup2(const char *name, const struct mod_depend *verinfo)
 
 	if (verinfo == NULL)
 		return (modlist_lookup(name, 0));
-	bestmod = NULL;
+
+	bestmod = NULL;		/* 找到最佳版本支持的module */
 	TAILQ_FOREACH(mod, &found_modules, link) {
 		if (strcmp(mod->name, name) != 0)
 			continue;
@@ -1750,6 +1873,7 @@ SYSCTL_STRING(_kern, OID_AUTO, module_path, CTLFLAG_RWTUN, linker_path,
 
 TUNABLE_STR("module_path", linker_path, sizeof(linker_path));
 
+/* 文件扩展名列表 */
 static char *linker_ext_list[] = {
 	"",
 	".ko",
@@ -1760,6 +1884,7 @@ static char *linker_ext_list[] = {
  * Check if file actually exists either with or without extension listed in
  * the linker_ext_list. (probably should be generic for the rest of the
  * kernel)
+ * 查找文件(可能会包含有linker_ext_list中的扩展名)是否存在
  */
 static char *
 linker_lookup_file(const char *path, int pathlen, const char *name,
@@ -1778,8 +1903,11 @@ linker_lookup_file(const char *path, int pathlen, const char *name,
 			extlen = len;
 	}
 	extlen++;		/* trailing '\0' */
+
+	/* 如果文件路径的最后不为"/",需要把"/"给加上 */
 	sep = (path[pathlen - 1] != '/') ? "/" : "";
 
+	/* 计算出路径+文件名+扩展名的长度，然后再+1(给末尾\0留一个位置) */
 	reclen = pathlen + strlen(sep) + namelen + extlen + 1;
 	result = malloc(reclen, M_LINKER, M_WAITOK);
 	for (cpp = linker_ext_list; *cpp; cpp++) {
@@ -1977,15 +2105,22 @@ linker_search_kld(const char *name)
 	char *cp, *ep, *result;
 	int len;
 
-	/* qualified at all? */
+	/* 
+		qualified at all? 
+		如果kldname是包含有完整路径的filename，就直接返回filename，如果没有包含
+		完整的路径，只是###.ko这种类型，就到默认路径下去查找
+	*/
 	if (strchr(name, '/'))
-		return (strdup(name, M_LINKER));
+		return (strdup(name, M_LINKER)); 	/* M_LINKER：自定义的malloc类型 */
 
 	/* traverse the linker path */
 	len = strlen(name);
 	for (ep = linker_path; *ep; ep++) {
 		cp = ep;
-		/* find the end of this component */
+		/* 
+			find the end of this component 
+			/boot/kernel   /boot/modules
+		*/
 		for (; *ep != 0 && *ep != ';'; ep++);
 		result = linker_lookup_file(cp, ep - cp, name, len, NULL);
 		if (result != NULL)
@@ -2053,6 +2188,8 @@ linker_hwpmc_list_objects(void)
 /*
  * Find a file which contains given module and load it, if "parent" is not
  * NULL, register a reference to it.
+ * parameter：
+ * 		lfpp：linker file pointer pointer
  */
 static int
 linker_load_module(const char *kldname, const char *modname,
@@ -2064,7 +2201,17 @@ linker_load_module(const char *kldname, const char *modname,
 	char *pathname;
 	int error;
 
+	/* 
+		编译的时候配置一些选项(SA_XLOCKED)，sx_assert 就是对这些配置进行检测，
+		如果不符合机会报错
+	*/
 	sx_assert(&kld_sx, SA_XLOCKED);
+
+	/*
+		如果没有给出module name，那就通过kldname进行查找；如果给出了module name，
+		就通过module name来进行查找。目的还是要获取pathname，需要着重比较一下 linker_search_kld
+		和 linker_search_module 处理逻辑上的区别
+	*/
 	if (modname == NULL) {
 		/*
  		 * We have to load KLD
@@ -2094,8 +2241,16 @@ linker_load_module(const char *kldname, const char *modname,
 	 * Actually it should be possible to have multiple KLDs with
 	 * the same basename but different path because they can
 	 * provide different versions of the same modules.
+	 * 
+	 * 不能加载多个具有相同基名XXX的文件：实际上应该可以有多个basename相同但路径不同的kld，
+	 * 因为它们可以提供相同模块的不同版本
 	 */
 	filename = linker_basename(pathname);
+
+	/*
+		如果找到了，返回该文件已经存在；如果没有找到，就根据linker file的dependence来创建
+		相应的module
+	*/
 	if (linker_find_file_by_name(filename))
 		error = EEXIST;
 	else do {

@@ -206,6 +206,12 @@
  * in a different (wrong) way).  If we do not provide an implementation
  * for a given compiler, let the compile fail if it is told to use
  * a feature that we cannot live without.
+ * 
+ * 弱符号：
+	若两个或两个以上全局符号（函数或变量名）名字一样，而其中之一声明为weak symbol（弱符号），
+	则这些全局符号不会引发重定义错误。链接器会忽略弱符号，去使用普通的全局符号来解析所有对这些
+	符号的引用，但当普通的全局符号不可用时，链接器会使用弱符号。当有函数或变量名可能被用户覆盖时，
+	该函数或变量名可以声明为一个弱符号。弱符号也称为weak alias（弱别名）
  */
 #define	__weak_symbol	__attribute__((__weak__))
 #if !__GNUC_PREREQ__(2, 5) && !defined(__INTEL_COMPILER)
@@ -217,7 +223,11 @@
 #define	__dead2		__attribute__((__noreturn__))
 #define	__pure2		__attribute__((__const__))
 #define	__unused
-/* XXX Find out what to do for __packed, __aligned and __section */
+/* 
+	XXX Find out what to do for __packed, __aligned and __section 
+	"section"关键字会将被修饰的变量或函数编译到特定的一块位置，不是物理存储器上的特定位置，
+	而是在可执行文件的特定段内
+*/
 #endif
 #if __GNUC_PREREQ__(2, 7) || defined(__INTEL_COMPILER)
 #define	__dead2		__attribute__((__noreturn__))
@@ -226,6 +236,11 @@
 #define	__used		__attribute__((__used__))
 #define	__packed	__attribute__((__packed__))
 #define	__aligned(x)	__attribute__((__aligned__(x)))
+
+/* 
+	__attribute__((section("section_name")))，其作用是将作用的函数或数据
+	放入指定名为"section_name"对应的段中
+*/
 #define	__section(x)	__attribute__((__section__(x)))
 #endif
 #if __GNUC_PREREQ__(4, 3) || __has_attribute(__alloc_size__)
@@ -569,6 +584,20 @@
 #endif	/* __STDC__ */
 #endif	/* __GNUC__ || __INTEL_COMPILER */
 
+/*
+	__asm__ 是GCC asm 关键字的宏定义，用来声明一个内联汇编表达式，所以任何一个内联汇编表达式都是以它开头的，是必不可少的
+	汇编程序中以.开头的名称并不是指令的助记符，不会被翻译成机器指令，而是给汇编器一些特殊指示，称为汇编指示（Assembler Directive）
+	或伪操作（Pseudo-operation）,举例说明 .globl 的作用：
+	-->	.globl _start
+	_start是一个符号（Symbol），符号在汇编程序中代表一个地址，可以用在指令中，汇编程序经过汇编器的处理之后，所有的符号都被替换成
+	它所代表的地址值。在C语言中我们通过变量名访问一个变量，其实就是读写某个地址的内存单元，我们通过函数名调用一个函数，其实就是跳转
+	到该函数第一条指令所在的地址，所以变量名和函数名都是符号，本质上是代表内存地址的
+	.globl指示告诉汇编器，_start这个符号要被链接器用到，所以要在目标文件的符号表中标记它是一个全局符号。_start就像C程序的main函数
+	一样特殊，是整个程序的入口，链接器在链接时会查找目标文件中的_start符号代表的地址，把它设置为整个程序的入口地址，所以每个汇编程序
+	都要提供一个_start符号并且用.globl声明。如果一个符号没有用.globl声明，就表示这个符号不会被链接器用到
+
+	所以这里的 __GLOBL 宏就是要提示链接器，#sym这个symbol是要被用到的
+*/
 #define	__GLOBL1(sym)	__asm__(".globl " #sym)
 #define	__GLOBL(sym)	__GLOBL1(sym)
 

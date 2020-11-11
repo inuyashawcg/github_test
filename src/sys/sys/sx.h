@@ -279,6 +279,7 @@ __sx_xunlock(struct sx *sx, struct thread *td, const char *file, int line)
 
 /*
  * Options passed to sx_*lock_hard().
+ * 以s开头的是share lock；以x开头的是exclusive lock
  */
 #define	SX_INTERRUPTIBLE	0x40
 

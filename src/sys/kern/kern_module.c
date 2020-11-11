@@ -46,10 +46,13 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/kern_module.c 333806 2018-05-18 17:58:0
 
 static MALLOC_DEFINE(M_MODULE, "module", "module data structures");
 
+/*
+	linker file 对 module 是包含的关系？
+*/
 struct module {
 	TAILQ_ENTRY(module)	link;	/* chain together all modules */
-	TAILQ_ENTRY(module)	flink;	/* all modules in a file */
-	struct linker_file	*file;	/* file which contains this module */
+	TAILQ_ENTRY(module)	flink;	/* all modules in a file 一个文件中所包含的全部module */
+	struct linker_file	*file;	/* file which contains this module 包含此模块的文件 */
 	int			refs;	/* reference count */
 	int 			id;	/* unique id number */
 	char 			*name;	/* module name */

@@ -528,6 +528,9 @@
  * defined for the API.  Historically, flags specified using the real uid
  * instead of the effective uid, and whether or not the check should be
  * allowed in jail.
+ * 
+ * 特权检查接口，模仿历史suser（）接口，但添加了特定的特权名称。当前没有为API定义标志。
+ * 历史上，使用实际uid而不是有效uid指定的标志，以及是否允许在监狱中进行检查
  */
 struct thread;
 struct ucred;

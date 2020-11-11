@@ -5360,6 +5360,10 @@ root_bus_configure(void)
  * drivers when modules are loaded. If @p what is MOD_LOAD, it calls
  * devclass_add_driver() for the driver described by the
  * driver_module_data structure pointed to by @p arg
+ * 
+ * 该函数会在module加载的时候自动注册device driver，当参数 what是 MOD_LOAD的时候，
+ * 函数会调用 devclass_add_driver， driver则是由 arg所指向的 driver_module_data
+ * 结构体来描述的
  */
 int
 driver_module_handler(module_t mod, int what, void *arg)
