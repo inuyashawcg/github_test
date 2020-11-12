@@ -228,7 +228,7 @@ mi_startup(void)
 
 	struct sysinit **sipp;	/* system initialization */
 	struct sysinit **xipp;	/* interior loop of sort 内部循环排序*/
-	struct sysinit *save;	/* bubble 冒泡排序？？*/
+	struct sysinit *save;	/* bubble 冒泡排序*/
 
 #if defined(VERBOSE_SYSINIT)
 	int last;

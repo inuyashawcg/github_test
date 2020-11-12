@@ -80,11 +80,18 @@ struct common_symbol {
 struct linker_file {
     /* kernel object，类型强转 */
     KOBJ_FIELDS;
+
+    /*
+        从 kern_kldunload函数的注释可以看到，linker file加载分为用户加载和内核加载，
+        用户加载部分就对应userrefs，内核加载部分就对应refs。用户执行kldunload时会检查
+        userrefs是否为0。如果等于0，而且这个linker file还是存在的，那就说明这个file
+        是内核加载的，那么用户就无权对其进行 unload操作
+    */
     int			refs;		/* reference count */
     int			userrefs;	/* kldload(2) count kldload命令执行的次数？？ */
     int			flags;
 /*
-    Q&A: 为了区分linker file是否有module是平preload？？ 
+    Q&A: 为了区分linker file是否有module是否preload？？ 
 */
 #define LINKER_FILE_LINKED	0x1	/* file has been fully linked */
 #define LINKER_FILE_MODULES	0x2	/* file has >0 modules at preload */
@@ -94,7 +101,10 @@ struct linker_file {
     int			id;		/* unique id */
     caddr_t		address;	/* load address */
     size_t		size;		/* size of file */
-    caddr_t		ctors_addr;	/* address of .ctors    char*类型，跟C++构造函数有关联？ */
+    /*
+        .ctors表示一个section，C++的话跟构造函数有关联
+    */
+    caddr_t		ctors_addr;	/* address of .ctors    char*类型 */
     size_t		ctors_size;	/* size of .ctors */
     int			ndeps;		/* number of dependencies 所依赖的对象的数目 */
 
@@ -103,6 +113,7 @@ struct linker_file {
         会听一些变量或者函数给当前模块来使用，执行符号决议来判断是否可以找到相应的变量或者函数定义
     */
     linker_file_t*	deps;		/* list of dependencies 依赖对象链表 */
+ 
     STAILQ_HEAD(, common_symbol) common; /* list of common symbols 模块的符号表？？ */
     TAILQ_HEAD(, module) modules;	/* modules in this file 此文件中所包含的module */
     TAILQ_ENTRY(linker_file) loaded;	/* preload dependency support 预加载依赖项支持 */
@@ -110,7 +121,7 @@ struct linker_file {
 
     /*
      * Function Boundary Tracing (FBT) or Statically Defined Tracing (SDT)
-     * fields. 函数边界跟踪（FBT）或静态定义跟踪（SDT）字段
+     * fields. 函数边界跟踪（FBT）或静态定义跟踪（SDT）字段，这个应该是跟调试相关的
      */
     int			nenabled;	/* number of enabled probes. */
     int			fbt_nentries;	/* number of fbt entries created. */
@@ -118,11 +129,14 @@ struct linker_file {
 
 /*
  * Object implementing a class of file (a.out, elf, etc.)
- * 表示文件格式？？
+ * 表示文件类型？？
  */
 typedef struct linker_class *linker_class_t;
 typedef TAILQ_HEAD(, linker_class) linker_class_list_t;
 
+/*
+    linker_class 就比 kobj_class 多了一个 TAILQ_ENTRY(linker_class)
+*/
 struct linker_class {
     KOBJ_CLASS_FIELDS;
     TAILQ_ENTRY(linker_class) link;	/* list of all file classes */
@@ -142,7 +156,6 @@ extern linker_file_t	linker_kernel_file;
 /*
  * Obtain a reference to a module, loading it if required.
  * 获取对模块的引用，并在需要时加载它
- * Q&A: module指的是动态库或者静态库文件？？
  */
 int linker_reference_module(const char* _modname, struct mod_depend *_verinfo,
 			    linker_file_t* _result);
@@ -240,16 +253,18 @@ void *linker_hwpmc_list_objects(void);
 #define MODINFOMD_SSYM		0x0003		/* start of symbols */
 #define MODINFOMD_ESYM		0x0004		/* end of symbols */
 #define MODINFOMD_DYNAMIC	0x0005		/* _DYNAMIC pointer */
+
 /* These values are MD on these two platforms */
 #if !defined(__sparc64__) && !defined(__powerpc__)
 #define MODINFOMD_ENVP		0x0006		/* envp[] */
 #define MODINFOMD_HOWTO		0x0007		/* boothowto */
 #define MODINFOMD_KERNEND	0x0008		/* kernend */
 #endif
+
 #define MODINFOMD_SHDR		0x0009		/* section header table */
 #define MODINFOMD_CTORS_ADDR	0x000a		/* address of .ctors */
 #define MODINFOMD_CTORS_SIZE	0x000b		/* size of .ctors */
-#define MODINFOMD_FW_HANDLE	0x000c		/* Firmware dependent handle */
+#define MODINFOMD_FW_HANDLE	0x000c		/* Firmware dependent handle 固件相关句柄 */
 #define MODINFOMD_KEYBUF	0x000d		/* Crypto key intake buffer 加密密钥接收缓冲区 */
 #define MODINFOMD_NOCOPY	0x8000		/* don't copy this metadata to the kernel */
 
@@ -317,7 +332,9 @@ const Elf_Sym *elf_get_sym(linker_file_t _lf, Elf_Size _symidx);
 const char *elf_get_symname(linker_file_t _lf, Elf_Size _symidx);
 void	link_elf_ireloc(caddr_t kmdp);
 
-
+/*
+    CTF：Compact C Type Format，主要用于动态跟踪、调试器和其他分析工具
+*/
 typedef struct linker_ctf {
 	const uint8_t 	*ctftab;	/* Decompressed CTF data. 解压CTF数据 */
 	int 		ctfcnt;		/* Number of CTF data bytes. */

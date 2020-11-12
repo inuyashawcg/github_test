@@ -116,7 +116,7 @@ enum sysinit_sub_id {
 	SI_SUB_VM_CONF		= 0x2300000,	/* config VM, set limits*/
 	SI_SUB_DDB_SERVICES	= 0x2380000,	/* capture, scripting, etc. */
 	SI_SUB_RUN_QUEUE	= 0x2400000,	/* set up run queue*/
-	SI_SUB_KTRACE		= 0x2480000,	/* ktrace */
+SI_SUB_KTRACE		= 0x2480000,	/* ktrace */	
 	SI_SUB_OPENSOLARIS	= 0x2490000,	/* OpenSolaris compatibility */
 	SI_SUB_AUDIT		= 0x24C0000,	/* audit */
 	SI_SUB_CREATE_INIT	= 0x2500000,	/* create init process*/
@@ -218,7 +218,7 @@ struct sysinit {
 	enum sysinit_sub_id	subsystem;	/* subsystem identifier*/
 	enum sysinit_elem_order	order;		/* init order within subsystem*/
 	sysinit_cfunc_t func;			/* function		*/
-	const void	*udata;			/* multiplexer/argument 多路复用器/参数？？*/
+	const void	*udata;			/* multiplexer/argument */
 };
 
 /*

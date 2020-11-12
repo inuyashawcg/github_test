@@ -119,7 +119,7 @@ static struct sx kld_sx;	/* kernel linker lock */
  */
 static int loadcnt;
 
-/* 应该是用于管理所有的linker class类型 */
+/* 应该是用于管理所有的linker file class */
 static linker_class_list_t classes;
 
 /* 应该是管理所有的linker file */
@@ -143,7 +143,12 @@ retry:									\
 } while(0)
 
 
-/* XXX wrong name; we're looking at version provision tags here, not modules */
+/* 
+	XXX wrong name; we're looking at version provision tags here, not modules 
+	我们在这里看到的是版本配置标记，而不是模块
+	modlist 里边并没有包含 module元素，仅仅是保留了 module的相关信息，包括module名称、
+	版本和隶属于哪个linker file，所以这个链表仅仅是起到了管理 module信息的作用
+*/
 typedef TAILQ_HEAD(, modlist) modlisthead_t;
 struct modlist {
 	TAILQ_ENTRY(modlist) link;	/* chain together all modules */
@@ -179,10 +184,10 @@ linker_init(void *arg)
 
 SYSINIT(linker, SI_SUB_KLD, SI_ORDER_FIRST, linker_init, NULL);
 
+/* 执行的顺序是比较靠后的 */
 static void
 linker_stop_class_add(void *arg)
 {
-
 	linker_no_more_classes = 1;
 }
 
@@ -196,11 +201,17 @@ linker_add_class(linker_class_t lc)
 	 * We disallow any class registration past SI_ORDER_ANY
 	 * of SI_SUB_KLD.  We bump the reference count to keep the
 	 * ops from being freed.
+	 * SI_ORDER_ANY是执行顺序的最高等级，也就表示是最后执行，所以任何超过这个等级的
+	 * class都不被允许注册
 	 */
 	if (linker_no_more_classes == 1)
 		return (EPERM);
 	kobj_class_compile((kobj_class_t) lc);
 	((kobj_class_t)lc)->refs++;	/* XXX: kobj_mtx */
+
+	/*
+		只要有新的class添加，就需要插入到 classes
+	*/
 	TAILQ_INSERT_TAIL(&classes, lc, link);
 	return (0);
 }
@@ -217,8 +228,7 @@ linker_file_sysinit(linker_file_t lf)
 	sx_assert(&kld_sx, SA_XLOCKED);
 
 	/*
-		找到linker file的起始和终止位置，然后多种的sysinit结构体进行排序，然后执行
-		相应的func？？
+		找到以 sysinit_set 命名的section(init_main.c)，里边存放的应该都是
 	*/
 	if (linker_file_lookup_set(lf, "sysinit_set", &start, &stop, NULL) != 0)
 		return;
@@ -280,6 +290,7 @@ linker_file_sysuninit(linker_file_t lf)
 	 *
 	 * Since some things care about execution order, this is the operation
 	 * which ensures continued function.
+	 * 有些事情需要关注执行的顺序
 	 */
 	for (sipp = start; sipp < stop; sipp++) {
 		for (xipp = sipp + 1; xipp < stop; xipp++) {
@@ -479,7 +490,7 @@ linker_load_file(const char *filename, linker_file_t *result)
 		/*
 		 * If we got something other than ENOENT, then it exists but
 		 * we cannot load it for some other reason.
-		 * 如果不是错误“没有对应的问价和文件夹”，那么就可以认为已经找到相应的文件，
+		 * 如果不是错误“没有对应的文件和文件夹”，那么就可以认为已经找到相应的文件，
 		 * 把 foundfile 的值设置为1
 		 */
 		if (error != ENOENT)
@@ -624,6 +635,9 @@ linker_find_file_by_name(const char *filename)
 	return (lf);
 }
 
+/*
+	利用id从linker_files队列中 linker file
+*/
 static linker_file_t
 linker_find_file_by_id(int fileid)
 {
@@ -652,6 +666,9 @@ linker_file_foreach(linker_predicate_t *predicate, void *context)
 	return (retval);
 }
 
+/*
+	 创建一个linker_file并初始化
+*/
 linker_file_t
 linker_make_file(const char *pathname, linker_class_t lc)
 {
@@ -663,6 +680,10 @@ linker_make_file(const char *pathname, linker_class_t lc)
 	filename = linker_basename(pathname);
 
 	KLD_DPF(FILE, ("linker_make_file: new file, filename='%s' for pathname='%s'\n", filename, pathname));
+
+	/*
+		linker_file 头部是kobj_class，首先创建一个kobj
+	*/
 	lf = (linker_file_t)kobj_create((kobj_class_t)lc, M_LINKER, M_WAITOK);
 	if (lf == NULL)
 		return (NULL);
@@ -691,7 +712,10 @@ linker_file_unload(linker_file_t file, int flags)
 	struct common_symbol *cp;
 	int error, i;
 
-	/* Refuse to unload modules if securelevel raised. */
+	/* 
+		Refuse to unload modules if securelevel raised. 
+		FreeBSD中监督机制(参考jail)，用来限制一些可能带来危险的操作
+	*/
 	if (prison0.pr_securelevel > 0)
 		return (EPERM);
 
@@ -715,11 +739,13 @@ linker_file_unload(linker_file_t file, int flags)
 
 	/*
 	 * Quiesce all the modules to give them a chance to veto the unload.
+	 * 停止所有模块，让它们有机会否决卸载
 	 */
 	MOD_SLOCK;
 	for (mod = TAILQ_FIRST(&file->modules); mod;
 	     mod = module_getfnext(mod)) {
-
+		
+		/* module_quiesce: 即将卸载某个module，执行相应的函数来判断卸载是否可行 */
 		error = module_quiesce(mod);
 		if (error != 0 && flags != LINKER_UNLOAD_FORCE) {
 			KLD_DPF(FILE, ("linker_file_unload: module %s"
@@ -738,6 +764,7 @@ linker_file_unload(linker_file_t file, int flags)
 	/*
 	 * Inform any modules associated with this file that they are
 	 * being unloaded.
+	 * 通知所有与该file相关联的module它们正在被卸载
 	 */
 	MOD_XLOCK;
 	for (mod = TAILQ_FIRST(&file->modules); mod; mod = next) {
@@ -761,6 +788,11 @@ linker_file_unload(linker_file_t file, int flags)
 	}
 	MOD_XUNLOCK;
 
+	/* 
+		release掉所有module之后，还要在 found_modules清除相关记录 
+		Q&A：如果module在别的地方正在被用到，要如何处理，还是说同一个module会注册
+		多次？如果是注册多次，前面的release操作要如何来解释？？
+	*/
 	TAILQ_FOREACH_SAFE(ml, &found_modules, link, nextml) {
 		if (ml->container == file) {
 			TAILQ_REMOVE(&found_modules, ml, link);
@@ -777,8 +809,11 @@ linker_file_unload(linker_file_t file, int flags)
 		linker_file_unregister_sysctls(file);
 		linker_file_sysuninit(file);
 	}
-	TAILQ_REMOVE(&linker_files, file, link);
+	TAILQ_REMOVE(&linker_files, file, link);	/* 从linker_files队列中移除该file */
 
+	/*
+		linker_file 结构体中的 deps中的元素也是 struct linker_file 类型
+	*/
 	if (file->deps) {
 		for (i = 0; i < file->ndeps; i++)
 			linker_file_unload(file->deps[i], flags);
@@ -790,6 +825,10 @@ linker_file_unload(linker_file_t file, int flags)
 		free(cp, M_LINKER);
 	}
 
+	/*
+		如果该 linker_file是 linker_elf_file格式，那么它就需要执行额外的步骤，因为elf格式的file
+		还包含了其他的元素，它们也是需要执行特定操作
+	*/
 	LINKER_UNLOAD(file);
 
 	EVENTHANDLER_INVOKE(kld_unload, file->filename, file->address,
@@ -912,7 +951,12 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 		}
 	}
 
-	/* 在当前linker file中找到了symbol并且存在依赖项，然后执行下面的步骤 */
+	/* 
+		在当前linker file中未找到了symbol并且存在依赖项；或者找到了但是symval.value = 0，
+		然后就要执行下面的步骤
+		推测：如果symval.value = 0，可能就表示某个变量或者函数是外部引用，这个时候就要去依赖项
+		中找相关的定义
+	*/
 	if (deps) {
 		/*
 			ndeps 表示linker file依赖项的总数，执行递归查找。这个应该就是对应
@@ -930,6 +974,13 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 			}
 		}
 	}
+
+	/*
+		在依赖项中仍然没有找到symbol，接着执行下面的代码。common_size > 0其实就表示前面已经赋值过，
+		推测：这种情况可能是我在当前文件表中找到了这个符号，但是该符号表示的是一个外部引用，然后在所有
+		的依赖项中还是没有找到对应的符号，最后就把这个符号放到了common队列中，所以common队列很可能是
+		用于管理找不到具体定义的这些符号
+	*/
 	if (common_size > 0) {
 		/*
 		 * This is a common symbol which was not found in the
@@ -958,9 +1009,6 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 		strcpy(cp->name, name);
 		bzero(cp->address, common_size);
 
-		/* 
-			创建并添加新的symbol元素，所以这个函数还没有到符号决议那个阶段？ 
-		*/
 		STAILQ_INSERT_TAIL(&file->common, cp, link);
 
 		KLD_DPF(SYM, ("linker_file_lookup_symbol: new common"
@@ -994,6 +1042,9 @@ linker_debug_lookup(const char *symstr, c_linker_sym_t *sym)
 }
 #endif
 
+/*
+	Q&A: 参数value表示的是什么，symbval->value?
+*/
 static int
 linker_debug_search_symbol(caddr_t value, c_linker_sym_t *sym, long *diffp)
 {
@@ -1006,7 +1057,8 @@ linker_debug_search_symbol(caddr_t value, c_linker_sym_t *sym, long *diffp)
 	bestdiff = off;
 
 	/*
-		找到最佳symbol？？
+		Q&A: diff越小越好，应该可以理解为差别越小越好，差别表示的是什么？
+		从上层函数调用来看，diffp表示的是一个offset值，所以这里的意思是偏移量越小越好？？
 	*/
 	TAILQ_FOREACH(lf, &linker_files, link) {
 		if (LINKER_SEARCH_SYMBOL(lf, value, &es, &diff) != 0)
@@ -1018,6 +1070,7 @@ linker_debug_search_symbol(caddr_t value, c_linker_sym_t *sym, long *diffp)
 		if (bestdiff == 0)
 			break;
 	}
+
 	if (best) {
 		*sym = best;
 		*diffp = bestdiff;
@@ -1129,9 +1182,6 @@ linker_search_symbol_name(caddr_t value, char *buf, u_int buflen,
  * 执行后获取到的file id赋值给fileid，然后在sys_kldload函数中用于设置td相关属性
  * file在sys_kldload函数中传入的是pathname
  * kld： loadable kernel module
- * 
- * Q&A:
- * 		module和linker file之间的关系是什么样的？
  */
 int
 kern_kldload(struct thread *td, const char *file, int *fileid)
@@ -1140,11 +1190,11 @@ kern_kldload(struct thread *td, const char *file, int *fileid)
 	linker_file_t lf;
 	int error;
 
-	/* 检查安全等级和特权 */
+	/* 检查thread安全等级和特权 */
 	if ((error = securelevel_gt(td->td_ucred, 0)) != 0)
 		return (error);
 
-	/* PRIV_KLD_LOAD: 表示可加载的内核模块权限 */
+	/* PRIV_KLD_LOAD: 表示可加载内核模块权限 */
 	if ((error = priv_check(td, PRIV_KLD_LOAD)) != 0)
 		return (error);
 
@@ -1156,7 +1206,7 @@ kern_kldload(struct thread *td, const char *file, int *fileid)
 	 * 
 	 * VNET是虚拟化网络堆栈的技术名称。基本思想是将全局资源（尤其是变量）更改为每个
 	 * 网络堆栈资源，并让函数、sysctl、eventhandlers等在正确实例的上下文中访问和
-	 * 处理它们。每个（虚拟）网络堆栈都连接到一个监狱，vnet0是基本系统的无限制默认
+	 * 处理它们。每个（虚拟）网络堆栈都连接到一个监督模块，vnet0是基本系统的无限制默认
 	 * 网络堆栈
 	 */
 	CURVNET_SET(TD_TO_VNET(td));
@@ -1203,6 +1253,9 @@ done:
 	return (error);
 }
 
+/*
+	kldload命令？
+*/
 int
 sys_kldload(struct thread *td, struct kldload_args *uap)
 {
@@ -1240,6 +1293,8 @@ kern_kldunload(struct thread *td, int fileid, int flags)
 
 	CURVNET_SET(TD_TO_VNET(td));
 	sx_xlock(&kld_sx);
+
+	/* 在linker file的全局队列中查找 */
 	lf = linker_find_file_by_id(fileid);
 	if (lf) {
 		KLD_DPF(FILE, ("kldunload: lf->userrefs=%d\n", lf->userrefs));
@@ -1254,6 +1309,8 @@ kern_kldunload(struct thread *td, int fileid, int flags)
 		} else {
 			lf->userrefs--;
 			error = linker_file_unload(lf, flags);
+
+			/* 如果unload出错，还需要执行refs++ */
 			if (error)
 				lf->userrefs++;
 		}
@@ -1265,6 +1322,7 @@ kern_kldunload(struct thread *td, int fileid, int flags)
 	return (error);
 }
 
+/* kldunload命令 */
 int
 sys_kldunload(struct thread *td, struct kldunload_args *uap)
 {
@@ -1272,6 +1330,7 @@ sys_kldunload(struct thread *td, struct kldunload_args *uap)
 	return (kern_kldunload(td, uap->fileid, LINKER_UNLOAD_NORMAL));
 }
 
+/* kldunload -f */
 int
 sys_kldunloadf(struct thread *td, struct kldunloadf_args *uap)
 {
@@ -1539,16 +1598,34 @@ modlist_lookup(const char *name, int ver)
 	return (NULL);
 }
 
+/*
+	name参数应该就只是文件名称，没有路径，也不包含扩展名，mod_depend是module所
+	支持的版本的信息
+*/
 static modlist_t
 modlist_lookup2(const char *name, const struct mod_depend *verinfo)
 {
 	modlist_t mod, bestmod;
 	int ver;
 
+	/*
+		如果没有版本信息，调用 modlist_lookup来进行处理；如果有版本信息的话，
+		找到最佳匹配的 module
+	*/
 	if (verinfo == NULL)
 		return (modlist_lookup(name, 0));
 
-	bestmod = NULL;		/* 找到最佳版本支持的module */
+	bestmod = NULL;
+
+	/*
+		首先要对名字进行匹配，然后比较参数中提供的版本信息和 module_list中保存的
+		最佳匹配版本是否一致。如果一致，就返回；如果不一致，接着判断参数提供的版本
+		是否在 module要求的最高版本和最低版本之间。如果仍然满足，那就再比较ver跟
+		当前 bestmod谁的版本信息更高，如果ver更高，那就更新bestmod，直到循环结束
+
+		其实就可以概括为如果参数给出的版本信息刚好是最佳版本，那就直接返回；如果没有
+		最佳匹配版本，那就找一个支持最新版本的module
+	*/
 	TAILQ_FOREACH(mod, &found_modules, link) {
 		if (strcmp(mod->name, name) != 0)
 			continue;
@@ -1885,11 +1962,16 @@ static char *linker_ext_list[] = {
  * the linker_ext_list. (probably should be generic for the rest of the
  * kernel)
  * 查找文件(可能会包含有linker_ext_list中的扩展名)是否存在
+ * 从上级函数调用情况来看，name指的是不包含路径的文件名
  */
 static char *
 linker_lookup_file(const char *path, int pathlen, const char *name,
     int namelen, struct vattr *vap)
 {
+	/*
+		vap和nd都是跟vnode相关，好像每一个每一个文件或者文件夹都会包含一些跟
+		vnode相关的属性
+	*/
 	struct nameidata nd;
 	struct thread *td = curthread;	/* XXX */
 	char *result, **cpp, *sep;
@@ -1902,12 +1984,15 @@ linker_lookup_file(const char *path, int pathlen, const char *name,
 		if (len > extlen)
 			extlen = len;
 	}
-	extlen++;		/* trailing '\0' */
+	extlen++;		/* trailing '\0' 最大的扩展名长度 + 1 */
 
 	/* 如果文件路径的最后不为"/",需要把"/"给加上 */
 	sep = (path[pathlen - 1] != '/') ? "/" : "";
 
-	/* 计算出路径+文件名+扩展名的长度，然后再+1(给末尾\0留一个位置) */
+	/* 
+		计算出路径+文件名+最大扩展名的长度，然后再 + 1(给末尾\0留一个位置)，
+		就是计算出了完整的路径
+	*/
 	reclen = pathlen + strlen(sep) + namelen + extlen + 1;
 	result = malloc(reclen, M_LINKER, M_WAITOK);
 	for (cpp = linker_ext_list; *cpp; cpp++) {
@@ -1916,6 +2001,7 @@ linker_lookup_file(const char *path, int pathlen, const char *name,
 		/*
 		 * Attempt to open the file, and return the path if
 		 * we succeed and it's a regular file.
+		 * 测试文件是否是普通文件并且可以成功打开
 		 */
 		NDINIT(&nd, LOOKUP, FOLLOW, UIO_SYSSPACE, result, td);
 		flags = FREAD;
@@ -2130,7 +2216,8 @@ linker_search_kld(const char *name)
 }
 
 /*
-	linker_search_path 函数获取到的路径
+	linker_search_path
+	提取文件名+扩展名
 */
 static const char *
 linker_basename(const char *path)
@@ -2202,8 +2289,8 @@ linker_load_module(const char *kldname, const char *modname,
 	int error;
 
 	/* 
-		编译的时候配置一些选项(SA_XLOCKED)，sx_assert 就是对这些配置进行检测，
-		如果不符合机会报错
+		好像是编译的时候配置一些选项(SA_XLOCKED)，sx_assert 就是对这些配置进行检测，
+		如果不符合就会报错
 	*/
 	sx_assert(&kld_sx, SA_XLOCKED);
 
@@ -2233,6 +2320,11 @@ linker_load_module(const char *kldname, const char *modname,
 			pathname = linker_search_module(modname,
 			    strlen(modname), verinfo);
 	}
+
+	/*
+		如果找到了相应的文件并且通过测试，函数就会返回文件的完整路径；
+		如果没有找到文件或者测试失败，那就返回NULL
+	*/
 	if (pathname == NULL)
 		return (ENOENT);
 

@@ -1428,6 +1428,9 @@ link_elf_lookup_set(linker_file_t lf, const char *name,
 	void **start, **stop;
 	int len, error = 0, count;
 
+	/*
+		参考 linker_set.h文件中 __MAKE_SET_QV 宏定义
+	*/
 	len = strlen(name) + sizeof("__start_set_"); /* sizeof includes \0 */
 	setsym = malloc(len, M_LINKER, M_WAITOK);
 
