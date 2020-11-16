@@ -62,7 +62,7 @@ typedef struct link_map {
 	caddr_t		l_offs;			/* Load Offset of library */
 #endif
 	const char	*l_name;		/* Absolute Path to Library */
-	const void	*l_ld;			/* Pointer to .dynamic in memory */
+	const void	*l_ld;			/* Pointer to .dynamic in memory ？？ */
 	struct link_map	*l_next, *l_prev;	/* linked list of of mapped libs */
 } Link_map;
 
@@ -80,9 +80,9 @@ struct r_debug {
 
 struct dl_phdr_info
 {
-	Elf_Addr dlpi_addr;			/* module relocation base */
+	Elf_Addr dlpi_addr;			/* module relocation base module重定位基地址 */
 	const char *dlpi_name;			/* module name */
-	const Elf_Phdr *dlpi_phdr;		/* pointer to module's phdr */
+	const Elf_Phdr *dlpi_phdr;		/* pointer to module's phdr 物理地址？？ */
 	Elf_Half dlpi_phnum;			/* number of entries in phdr */
 	unsigned long long int dlpi_adds;	/* total # of loads */
 	unsigned long long int dlpi_subs;	/* total # of unloads */

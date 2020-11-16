@@ -10,3 +10,13 @@ ELF header位于文件的开头，包含描述文件组织的“路线图”。s
 program header table（如果存在）告诉系统如何创建进程映像。用于构建进程映像（执行程序）的文件必须具有程序头表；可重定位的文件不需要程序头表
 section header table包含描述文件section的信息，每个section在table中都有一个entry，每一个entry都会提供诸如section名称、大小等信息。链接过程中使用的文件必须要有一个section header table，其他的目标文件可以有，也可以没有
 目标文件中的section header table、section、segment等存放的位置其实是不固定的，一般只有elf header有固定的位置
+
+符号表(symbol table)也是保存在一个section
+
+所有参与动态链接的目标文件都会包含有一个hash table section
+
+动态链接需要string，也就是说动态链接跟string table可能有某种关联
+
+有的section的名称前面是带有“.”这个符号，这种类型的section是为系统保留的，应用程序尽管也是可以进行访问，但是要满足具体的一些要求才可以。所以一般应用程序都会避开这些节，以免造成不必要的冲突。目标文件中可能会带有多个具有相同名称的section
+
+在每个符号表中，所有具有STB_LOCAL绑定的符号都在弱符号和全局符号之前

@@ -372,6 +372,9 @@ struct kld_file_stat_1 {
 };
 #endif /* _KERNEL */
 
+/*
+    应该是对应kldstat命令，保存需要打印出的linker file信息
+*/
 struct kld_file_stat {
     int		version;	/* set to sizeof(struct kld_file_stat) */
     char        name[MAXPATHLEN];
@@ -382,6 +385,9 @@ struct kld_file_stat {
     char        pathname[MAXPATHLEN];
 };
 
+/*
+    查找symbol时用到的结构体，包含有symbol name
+*/
 struct kld_sym_lookup {
     int		version;	/* set to sizeof(struct kld_sym_lookup) */
     char	*symname;	/* Symbol name we are looking up */

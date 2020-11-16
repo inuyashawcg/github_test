@@ -157,6 +157,11 @@ struct modlist {
 	int             version;
 };
 typedef struct modlist *modlist_t;
+
+/*
+	found_modules 是在 linker_preload()函数中初始化的，所以它应该是管理内核预加载的所有
+	模块
+*/
 static modlisthead_t found_modules;
 
 static int	linker_file_add_dependency(linker_file_t file,
@@ -290,7 +295,7 @@ linker_file_sysuninit(linker_file_t lf)
 	 *
 	 * Since some things care about execution order, this is the operation
 	 * which ensures continued function.
-	 * 有些事情需要关注执行的顺序
+	 * 有些操作需要关注执行的顺序
 	 */
 	for (sipp = start; sipp < stop; sipp++) {
 		for (xipp = sipp + 1; xipp < stop; xipp++) {
@@ -321,6 +326,9 @@ linker_file_sysuninit(linker_file_t lf)
 	sx_xlock(&kld_sx);
 }
 
+/*
+	注册sysctl
+*/
 static void
 linker_file_register_sysctls(linker_file_t lf, bool enable)
 {
@@ -332,11 +340,20 @@ linker_file_register_sysctls(linker_file_t lf, bool enable)
 
 	sx_assert(&kld_sx, SA_XLOCKED);
 
+	/*
+		sysctl是被放到以 sysctl_set 命名的section中，从代码逻辑可以验证之前的假设，
+		linker_file_lookup_set() 函数的功能就是查找某个文件中是否有某个section
+	*/
 	if (linker_file_lookup_set(lf, "sysctl_set", &start, &stop, NULL) != 0)
 		return;
 
 	sx_xunlock(&kld_sx);
 	sysctl_wlock();
+
+	/*
+		从代码逻辑反推，每个section中应该是连续存放一些函数或者结构体，然后我们就可以定义
+		对应的指针来逐个进行访问
+	*/
 	for (oidp = start; oidp < stop; oidp++) {
 		if (enable)
 			sysctl_register_oid(*oidp);
@@ -358,13 +375,14 @@ linker_file_enable_sysctls(linker_file_t lf)
 
 	sx_assert(&kld_sx, SA_XLOCKED);
 
+	/* 首先还是要判断是否有sysctl section */
 	if (linker_file_lookup_set(lf, "sysctl_set", &start, &stop, NULL) != 0)
 		return;
 
 	sx_xunlock(&kld_sx);
 	sysctl_wlock();
 	for (oidp = start; oidp < stop; oidp++)
-		sysctl_enable_oid(*oidp);
+		sysctl_enable_oid(*oidp);	/* 使能每一个sysctl iod */
 	sysctl_wunlock();
 	sx_xlock(&kld_sx);
 }
@@ -379,6 +397,9 @@ linker_file_unregister_sysctls(linker_file_t lf)
 
 	sx_assert(&kld_sx, SA_XLOCKED);
 
+	/*
+		逻辑同上，先查找相应的section，然后执行功能函数
+	*/
 	if (linker_file_lookup_set(lf, "sysctl_set", &start, &stop, NULL) != 0)
 		return;
 
@@ -402,6 +423,9 @@ linker_file_register_modules(linker_file_t lf)
 
 	sx_assert(&kld_sx, SA_XLOCKED);
 
+	/*
+		modmetadata_set 其实就是在 MODULE_DECLARE 宏定义中，所以driver
+	*/
 	if (linker_file_lookup_set(lf, "modmetadata_set", &start,
 	    &stop, NULL) != 0) {
 		/*
@@ -570,6 +594,7 @@ linker_reference_module(const char *modname, struct mod_depend *verinfo,
 	modlist_t mod;
 	int error;
 
+	/* 查找module是否存在 - found_modules */
 	sx_xlock(&kld_sx);
 	if ((mod = modlist_lookup2(modname, verinfo)) != NULL) {
 		*result = mod->container;
@@ -578,6 +603,7 @@ linker_reference_module(const char *modname, struct mod_depend *verinfo,
 		return (0);
 	}
 
+	/* 找到module之后加载 */
 	error = linker_load_module(NULL, modname, NULL, verinfo, result);
 	sx_xunlock(&kld_sx);
 	return (error);
@@ -591,6 +617,8 @@ linker_release_module(const char *modname, struct mod_depend *verinfo,
 	int error;
 
 	sx_xlock(&kld_sx);
+	
+	/* 首先要判断linker_file是否存在 */
 	if (lf == NULL) {
 		KASSERT(modname != NULL,
 		    ("linker_release_module: no file or name"));
@@ -650,6 +678,7 @@ linker_find_file_by_id(int fileid)
 	return (lf);
 }
 
+/* 遍历 linker_files */
 int
 linker_file_foreach(linker_predicate_t *predicate, void *context)
 {
@@ -813,6 +842,7 @@ linker_file_unload(linker_file_t file, int flags)
 
 	/*
 		linker_file 结构体中的 deps中的元素也是 struct linker_file 类型
+		Q&A：当一个linker_file unload的时候，它依赖的linker_file也要被unload的？？
 	*/
 	if (file->deps) {
 		for (i = 0; i < file->ndeps; i++)
@@ -1027,6 +1057,7 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
  * optionally lock.
  *
  * linker_debug_lookup() is ifdef DDB as currently it's only used by DDB.
+ * 调试器相关
  */
 #ifdef DDB
 static int
@@ -1172,6 +1203,7 @@ linker_search_symbol_name(caddr_t value, char *buf, u_int buflen,
 	int error;
 
 	sx_slock(&kld_sx);
+	/* linker查找symbol name的时候还要借助调试器？？ */
 	error = linker_debug_search_symbol_name(value, buf, buflen, offset);
 	sx_sunlock(&kld_sx);
 	return (error);
@@ -1361,6 +1393,7 @@ sys_kldfind(struct thread *td, struct kldfind_args *uap)
 	if ((error = copyinstr(uap->file, pathname, MAXPATHLEN, NULL)) != 0)
 		goto out;
 
+	/* 可以考虑一下这里的filename带不带扩展名 */
 	filename = linker_basename(pathname);
 	sx_xlock(&kld_sx);
 	lf = linker_find_file_by_name(filename);
@@ -1398,7 +1431,7 @@ sys_kldnext(struct thread *td, struct kldnext_args *uap)
 		lf = TAILQ_NEXT(lf, link);
 	}
 
-	/* Skip partially loaded files. */
+	/* Skip partially loaded files. 跳过部分加载的文件 */
 	while (lf != NULL && !(lf->flags & LINKER_FILE_LINKED))
 		lf = TAILQ_NEXT(lf, link);
 
@@ -1411,6 +1444,7 @@ out:
 	return (error);
 }
 
+/* kldstat 命令 */
 int
 sys_kldstat(struct thread *td, struct kldstat_args *uap)
 {
@@ -1651,10 +1685,14 @@ modlist_newmodule(const char *modname, int version, linker_file_t container)
 	mod->container = container;
 	mod->name = modname;
 	mod->version = version;
-	TAILQ_INSERT_TAIL(&found_modules, mod, link);
+	TAILQ_INSERT_TAIL(&found_modules, mod, link);	/* 向found_modules中插入新的module */
 	return (mod);
 }
 
+/*
+	mod_metadata 应该是linker file中的一个section，我们通过定义这个section的start和stop来对该段
+	进行遍历，找到特定的元素
+*/
 static void
 linker_addmodules(linker_file_t lf, struct mod_metadata **start,
     struct mod_metadata **stop, int preload)
@@ -1663,12 +1701,27 @@ linker_addmodules(linker_file_t lf, struct mod_metadata **start,
 	const char *modname;
 	int ver;
 
+	/*
+		遍历linker file mod_metaata段中所有的元素，判断是否已经加载
+	*/
 	for (mdp = start; mdp < stop; mdp++) {
 		mp = *mdp;
+
+		/* 
+			首先判断modtype是不是 MDT_VERSION 类型。如果是，就继续执行；
+			如果不是，跳过，进行下一次循环
+		*/
 		if (mp->md_type != MDT_VERSION)
 			continue;
 		modname = mp->md_cval;
 		ver = ((const struct mod_version *)mp->md_data)->mv_version;
+
+		/*
+			modlist_lookup 是在 found_modules 中查找模块，而 found_modules 保存的应该是
+			内核需要预加载的所有模块，所以如果在 found_modules 中找到了这个模块的名称，可能就是
+			证明这个模块已经执行了预加载，或者说我们已经知道了它需要预加载；如果没有找到，那就将这个
+			mod添加到 found_modules 中
+		*/
 		if (modlist_lookup(modname, ver) != NULL) {
 			printf("module %s already present!\n", modname);
 			/* XXX what can we do? this is a build error. :-( */
@@ -1721,6 +1774,11 @@ linker_preload(void *arg)
 			printf("Preloaded %s \"%s\" at %p.\n", modtype, modname,
 			    modptr);
 		lf = NULL;
+
+		/* 
+			首先遍历classes进行一轮preload，将执行完操作获取到的linker file添加到
+			loaded_files 中
+		*/
 		TAILQ_FOREACH(lc, &classes, link) {
 			error = LINKER_LINK_PRELOAD(lc, modname, &lf);
 			if (!error)
@@ -1733,6 +1791,7 @@ linker_preload(void *arg)
 
 	/*
 	 * First get a list of stuff in the kernel.
+	 * 首先在内核中获取一个内容列表
 	 */
 	if (linker_file_lookup_set(linker_kernel_file, MDT_SETNAME, &start,
 	    &stop, NULL) == 0)
@@ -1741,6 +1800,7 @@ linker_preload(void *arg)
 	/*
 	 * This is a once-off kinky bubble sort to resolve relocation
 	 * dependency requirements.
+	 * 这是一种解决重定位依赖性需求的一次性古怪的冒泡排序，然后对loaded_files进行遍历
 	 */
 restart:
 	TAILQ_FOREACH(lf, &loaded_files, loaded) {
@@ -2028,6 +2088,11 @@ linker_lookup_file(const char *path, int pathlen, const char *name,
  * Lookup KLD which contains requested module in the "linker.hints" file. If
  * version specification is available, then try to find the best KLD.
  * Otherwise just find the latest one.
+ * 
+ * 查找“中包含请求的模块的KLD”链接器提示“文件。如果版本规范可用，那么尝试找到最好的KLD。否则就找最新的
+ * 
+ * 从该注释可以看出，hint机制所实现的功能就是给操作系统一个提示，说明一下这个地方倾向于使用某个函数
+ * 或者某个模块等
  */
 static char *
 linker_hints_lookup(const char *path, int pathlen, const char *modname,
@@ -2384,6 +2449,7 @@ linker_load_dependencies(linker_file_t lf)
 
 	/*
 	 * All files are dependent on /kernel.
+	 * 所有文件都依赖于/kernel
 	 */
 	sx_assert(&kld_sx, SA_XLOCKED);
 	if (linker_kernel_file) {

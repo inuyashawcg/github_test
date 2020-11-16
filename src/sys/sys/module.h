@@ -34,7 +34,7 @@
 /*
  * Module metadata types
  */
-#define	MDT_DEPEND	1		/* argument is a module name */
+#define	MDT_DEPEND	1		/* argument is a module name 参数是模块名 */
 #define	MDT_MODULE	2		/* module declaration */
 #define	MDT_VERSION	3		/* module version(s) */
 #define	MDT_PNP_INFO	4		/* Plug and play hints record */
@@ -113,6 +113,7 @@ struct mod_pnp_match_info
 #include <sys/linker_set.h>
 
 #define	MODULE_METADATA_CONCAT(uniquifier)	_mod_metadata##uniquifier
+
 #define	MODULE_METADATA(uniquifier, type, data, cval)			\
 	static struct mod_metadata MODULE_METADATA_CONCAT(uniquifier) = {	\
 		MDT_STRUCT_VERSION,					\

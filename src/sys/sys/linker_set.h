@@ -57,8 +57,7 @@
 
 /*
  * Private macros, not to be used outside this header file.
- * __CONCAT 是把两个元素组装成一个symbol的名称，再通过 __GLOBL 宏告诉汇编器这个symbol是要被
- * 链接器用到的
+ * __CONCAT 是把两个元素组装
  * 
  * 参考link_elf.c -> link_elf_lookup_set() 代码可以推测一下， __start_set_ 应该表示的是
  * section的起始位置；相应地，__stop_set_ 就表示 section的中止位置？？

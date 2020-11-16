@@ -132,7 +132,10 @@ typedef struct {
  * Relocation entries.
  */
 
-/* Relocations that don't need an addend field. */
+/* 
+	Relocations that don't need an addend field. 
+	不需要加数域的重定位
+*/
 typedef struct {
 	Elf32_Addr	r_offset;	/* Location to be relocated. */
 	Elf32_Word	r_info;		/* Relocation type and symbol index. */

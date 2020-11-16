@@ -76,9 +76,9 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/link_elf.c 339953 2018-10-31 14:03:48Z 
 #define MAXSEGS 4
 
 typedef struct elf_file {
-	struct linker_file lf;		/* Common fields */
-	int		preloaded;	/* Was file pre-loaded */
-	caddr_t		address;	/* Relocation address */
+	struct linker_file lf;		/* Common fields linker_file 相当于是一个基类 */
+	int		preloaded;	/* Was file pre-loaded 是否预加载的标志 */
+	caddr_t		address;	/* Relocation address 重定位的地址 */
 #ifdef SPARSE_MAPPING
 	vm_object_t	object;		/* VM object to hold file pages */
 #endif
