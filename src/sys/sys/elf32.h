@@ -118,6 +118,7 @@ typedef struct {
 
 /*
  * Dynamic structure.  The ".dynamic" section contains an array of them.
+ * .dynamic section中会包含有 Elf32_Dyn 类型的数组
  */
 
 typedef struct {
