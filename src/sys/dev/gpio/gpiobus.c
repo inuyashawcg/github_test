@@ -415,9 +415,6 @@ gpiobus_attach(device_t dev)
 	bus_generic_probe(dev);
 	bus_enumerate_hinted_children(dev);
 
-	/*
-		bus_generic_attach(dev) 作用的主要对象是dev的children，所以传入的参数一般都是bus device
-	*/
 	return (bus_generic_attach(dev));
 }
 
