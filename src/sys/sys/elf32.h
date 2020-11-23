@@ -103,17 +103,32 @@ typedef struct {
 
 /*
  * Program header.
+ * ELF文件中包含有 Program header Table，本质上是一个 Elf32_Phdr 类型的数组，它所描述的对象是segment，而不是section
+ * segment是将类型相同的section组合在一起形成的，方便链接
+ * 一些entry用来描述process segments，其他的entry给出了一些附加信息，但是对process image没有什么实质性的帮助
+ * 
+ * 可执行文件和共享对象文件有一个基址，它是与程序目标文件的内存映像关联的最低虚拟地址。基址的一个用途是在动态链接期间重新定位程序的内存映像；
+ * 一个可执行的文件或者共享文件在运行时的基地址通过三个值来计算：程序可加载段的内存加载地址、最大页大小和最低虚拟地址；要计算基址，需要确定
+ * 与PT_LOAD segment 的最低p_vaddr值相关联的内存地址。然后通过将内存地址截短为最大页面大小的最接近倍数来获得基址。根据加载到内存中的文件类型，
+ * 内存地址可能与p_vaddr值匹配，也可能不匹配
+ * 
+ * .bss section虽然在文件中不占用空间，但它有助于段的内存映像。通常，这些未初始化的数据驻留在段的末尾，
+ * 从而使相关程序头元素中的p_memsz大于p_filesz
  */
 
 typedef struct {
-	Elf32_Word	p_type;		/* Entry type. */
-	Elf32_Off	p_offset;	/* File offset of contents. */
-	Elf32_Addr	p_vaddr;	/* Virtual address in memory image. */
+	Elf32_Word	p_type;		/* Entry type. 描述segment或者解释该元素的相关信息，参考elf_common.h文件定义 */
+	Elf32_Off	p_offset;	/* File offset of contents. 描述从文件开头的偏移量，segment的第一个字节位于该位置处*/
+	Elf32_Addr	p_vaddr;	/* Virtual address in memory image. 该segment的第一个byte在虚拟内存中的地址 */
+	/*
+		在与物理寻址相关的系统上，此成员为段的物理地址保留。由于System V忽略应用程序的物理寻址，
+		此成员对可执行文件和共享对象具有未指定的内容
+	*/
 	Elf32_Addr	p_paddr;	/* Physical address (not used). */
-	Elf32_Word	p_filesz;	/* Size of contents in file. */
-	Elf32_Word	p_memsz;	/* Size of contents in memory. */
+	Elf32_Word	p_filesz;	/* Size of contents in file. 该segment在 file image中所占大小，bytes */
+	Elf32_Word	p_memsz;	/* Size of contents in memory. 该segment在 memory image中所占大小，bytes*/
 	Elf32_Word	p_flags;	/* Access permission flags. */
-	Elf32_Word	p_align;	/* Alignment in memory and file. */
+	Elf32_Word	p_align;	/* Alignment in memory and file. 对齐方式 */
 } Elf32_Phdr;
 
 /*

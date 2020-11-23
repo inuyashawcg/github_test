@@ -403,6 +403,11 @@ typedef struct {
 #define	SHT_RELA		4	/* relocation section with addends */
 #define	SHT_HASH		5	/* symbol hash table section */
 #define	SHT_DYNAMIC		6	/* dynamic section */
+/*
+	有时，供应商或系统构建者需要用特殊信息标记一个对象文件，其他程序将检查这些信息的一致性、兼容性等;
+	SHT_NOTE类型的section 和 PT_NOTE 类型的program header entry可用于此目的
+
+*/
 #define	SHT_NOTE		7	/* note section */
 #define	SHT_NOBITS		8	/* no space section */
 #define	SHT_REL			9	/* relocation section - no addends */
@@ -508,12 +513,36 @@ typedef struct {
 #define	VERSYM_HIDDEN	0x8000
 
 /* Values for p_type. */
-#define	PT_NULL		0	/* Unused entry. */
+#define	PT_NULL		0	/* Unused entry. 数组元素未使用；其他成员的值未定义。此类型允许程序头表忽略此entry */
+
+/*
+	数组元素指定一个可加载的段，由p_filesz和p_memsz描述。文件中的字节映射到内存段的开头;如果file size(p_filesz)
+	小于memory size(p_memsz),其他多出来的字节将会被置零并且紧邻segment初始化区域放置；程序头表中的可加载段条目按
+	升序显示，按p_vaddr成员排序。
+*/
 #define	PT_LOAD		1	/* Loadable segment. */
-#define	PT_DYNAMIC	2	/* Dynamic linking information segment. */
+#define	PT_DYNAMIC	2	/* Dynamic linking information segment. 重点关注 */
+
+/*
+	数组元素指定作为解释器调用的 null-terminated path name的位置和大小；该类型仅仅对于可执行文件来说是有意义的，即使
+	在shared object中也可能会出现；它在一个文件中不能出现多次；如果存在，则它必须位于任何可加载段条目之前。
+*/
 #define	PT_INTERP	3	/* Pathname of interpreter. */
-#define	PT_NOTE		4	/* Auxiliary information. */
+
+/*
+ 	节和程序头元素中的注释信息包含任意数量的条目，每个条目都是目标处理器格式的4字节字数组
+*/
+#define	PT_NOTE		4	/* Auxiliary information. 数组元素指定辅助信息的位置和大小 */
+
+/* 此段类型是保留的，但具有未指定的语义。包含此类型数组元素的程序不符合ABI */
 #define	PT_SHLIB	5	/* Reserved (not used). */
+
+/*
+	这个数组元素如果存在的话，就表示  program header table 自己的位置和大小，包括在程序文件和memory image；
+	该类型在文件中不能出现多次；此外，仅当 program header table是程序的memory image 的一部分时，才可能发生这种情况；
+	如果存在，则它必须位于任何可加载segment entry之前
+	可以看出 program header table 排序状况是什么样的
+*/
 #define	PT_PHDR		6	/* Location of program header itself. */
 #define	PT_TLS		7	/* Thread local storage segment */
 #define	PT_LOOS		0x60000000	/* First OS-specific. */
@@ -530,6 +559,8 @@ typedef struct {
 #define	PT_SUNWCAP	0x6ffffffd	/* hard/soft capabilities segment */
 #define	PT_HISUNW	0x6fffffff
 #define	PT_HIOS		0x6fffffff	/* Last OS-specific. */
+
+/* PT_LOPROC - PT_HIPROC： 此包含范围中的值是为特定于处理器的语义保留的 */
 #define	PT_LOPROC	0x70000000	/* First processor-specific type. */
 #define	PT_ARM_ARCHEXT	0x70000000	/* ARM arch compat information. */
 #define	PT_ARM_EXIDX	0x70000001	/* ARM exception unwind tables. */

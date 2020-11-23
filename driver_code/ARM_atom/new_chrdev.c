@@ -178,7 +178,7 @@ static int __init led_init(void)
 
     /* 初始化LED */
     /* 1、寄存器地址映射 */
-    IMX6U_CCM_CCGR1 = iormap(CCM_CCGR1_BASE, 4);
+    IMX6U_CCM_CCGR1 = ioremap(CCM_CCGR1_BASE, 4);
     SW_MUX_GPIO1_IO03 = ioremap(SW_MUX_GPIO1_IO03_BASE, 4);
     SW_PAD_GPIO1_IO03 = ioremap(SW_PAD_GPIO1_IO03_BASE, 4);
     GPIO1_DR = ioremap(GPIO1_DR_BASE, 4);
