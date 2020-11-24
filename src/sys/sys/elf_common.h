@@ -120,21 +120,24 @@ typedef struct {
 } Elf_GNU_Hash_Header;
 
 /* Indexes into the e_ident array.  Keep synced with
-   http://www.sco.com/developers/gabi/latest/ch4.eheader.html */
+   http://www.sco.com/developers/gabi/latest/ch4.eheader.html 
+   
+	MAG0 - MAG4表示一个魔数，作为文件标识符，貌似是跟下面 ELFMAG0-4 是对应的
+*/
 #define	EI_MAG0		0	/* Magic number, byte 0. */
 #define	EI_MAG1		1	/* Magic number, byte 1. */
 #define	EI_MAG2		2	/* Magic number, byte 2. */
 #define	EI_MAG3		3	/* Magic number, byte 3. */
-#define	EI_CLASS	4	/* Class of machine. */
+#define	EI_CLASS	4	/* Class of machine. 设备类型 */
 #define	EI_DATA		5	/* Data format. */
 #define	EI_VERSION	6	/* ELF format version. */
 #define	EI_OSABI	7	/* Operating system / ABI identification */
 #define	EI_ABIVERSION	8	/* ABI version */
 #define	OLD_EI_BRAND	8	/* Start of architecture identification. */
-#define	EI_PAD		9	/* Start of padding (per SVR4 ABI). */
-#define	EI_NIDENT	16	/* Size of e_ident array. */
+#define	EI_PAD		9	/* Start of padding (per SVR4 ABI). 数据填充的起始位置 */
+#define	EI_NIDENT	16	/* Size of e_ident array. e_ident 数组的大小 */
 
-/* Values for the magic number bytes. */
+/* Values for the magic number bytes. 对应 ELF Header 中的数组e_ident*/
 #define	ELFMAG0		0x7f
 #define	ELFMAG1		'E'
 #define	ELFMAG2		'L'
@@ -151,7 +154,7 @@ typedef struct {
 #define	ELFCLASS32	1	/* 32-bit architecture. */
 #define	ELFCLASS64	2	/* 64-bit architecture. */
 
-/* Values for e_ident[EI_DATA]. */
+/* Values for e_ident[EI_DATA]. 指明大端还是小端 */
 #define	ELFDATANONE	0	/* Unknown data format. */
 #define	ELFDATA2LSB	1	/* 2's complement little-endian. */
 #define	ELFDATA2MSB	2	/* 2's complement big-endian. */
@@ -183,20 +186,24 @@ typedef struct {
 #define	ELFOSABI_MONTEREY	ELFOSABI_AIX	/* Monterey */
 #define	ELFOSABI_GNU		ELFOSABI_LINUX
 
-/* e_ident */
+/* e_ident 判断是否是ELF格式的问价类型 */
 #define	IS_ELF(ehdr)	((ehdr).e_ident[EI_MAG0] == ELFMAG0 && \
 			 (ehdr).e_ident[EI_MAG1] == ELFMAG1 && \
 			 (ehdr).e_ident[EI_MAG2] == ELFMAG2 && \
 			 (ehdr).e_ident[EI_MAG3] == ELFMAG3)
 
 /* Values for e_type. */
-#define	ET_NONE		0	/* Unknown type. */
-#define	ET_REL		1	/* Relocatable. */
-#define	ET_EXEC		2	/* Executable. */
-#define	ET_DYN		3	/* Shared object. */
-#define	ET_CORE		4	/* Core file. */
+#define	ET_NONE		0	/* Unknown type. 空文件类型 */
+#define	ET_REL		1	/* Relocatable. 可重定位文件 */
+#define	ET_EXEC		2	/* Executable. 可执行文件 */
+#define	ET_DYN		3	/* Shared object. 共享对象文件 */
+#define	ET_CORE		4	/* Core file. 核心文件？ */
+
+/* 系统相关 */
 #define	ET_LOOS		0xfe00	/* First operating system specific. */
 #define	ET_HIOS		0xfeff	/* Last operating system-specific. */
+
+/* 处理器相关 */
 #define	ET_LOPROC	0xff00	/* First processor-specific. */
 #define	ET_HIPROC	0xffff	/* Last processor-specific. */
 
@@ -380,7 +387,10 @@ typedef struct {
 #define	EF_SPARCV9_PSO		0x00000001
 #define	EF_SPARCV9_RMO		0x00000002
 
-/* Special section indexes. */
+/* 
+	Special section indexes. 
+	一些section index目前还是保留的，目标文件中不会包含这些特殊索引的section
+*/
 #define	SHN_UNDEF	     0		/* Undefined, missing, irrelevant. */
 #define	SHN_LORESERVE	0xff00		/* First of reserved range. */
 #define	SHN_LOPROC	0xff00		/* First processor-specific. */
@@ -390,28 +400,91 @@ typedef struct {
 					   linker only: Cached global in local
 					   symtab. */
 #define	SHN_HIOS	0xff3f		/* Last operating system-specific. */
+
+/* symbol value 不会因为重定位而改变 */
 #define	SHN_ABS		0xfff1		/* Absolute values. */
+
+/*
+	符号标记尚未分配的公共块。symbol value提供对齐约束，类似于节的sh_addralign成员。
+	也就是说，链接编辑器将为符号分配存储空间，地址是st_value的倍数。符号的大小表示需要多少字节
+*/
 #define	SHN_COMMON	0xfff2		/* Common data. */
 #define	SHN_XINDEX	0xffff		/* Escape -- index stored elsewhere. */
 #define	SHN_HIRESERVE	0xffff		/* Last of reserved range. */
 
-/* sh_type */
+/* sh_type section的类型定义 */
+
+/*
+	表示section header的状态是inactive，它没有关联的section，其他section header也都
+	只有未定义的值
+*/
 #define	SHT_NULL		0	/* inactive */
+
+/*
+	program相关，它所表示的信息主要是有program指定的，可能跟program运行阶段的联系比较密切
+*/
 #define	SHT_PROGBITS		1	/* program defined information */
+
+/*
+	表明该section保存的是一个symbol table，这就可以解释为什么 ELF Header 中只保留了program 
+	header table和section header table的信息，因为这两个没有包含在section中，是独立出来的，
+	而其他的table则是包含在一个section中，所以就可以通过section table来进行管理
+
+	目前每个文件中仅仅包含了一个symbol table，未来可能会减弱这方面的限制；通常，SHT_SYMTAB提供
+	用于链接编辑的符号，但也可以用于动态链接。作为一个完整的符号表，它可能包含许多动态链接所不需要的符号。
+	因此，为了节省空间，对象文件还可以包含SHT_DYNSYM部分，该部分保存最小的动态链接符号集。
+
+	Q&A: 链接编辑(linker edit)指的是什么？
+*/
 #define	SHT_SYMTAB		2	/* symbol table section */
+
+/*
+	表明该section保存的是string table，一文件中可以保存多个string table section
+*/
 #define	SHT_STRTAB		3	/* string table section */
+
+/*
+	该section包含带显式加数的重定位项，并且一个文件中可以包含多个此种类型的section；这种类型的section
+	涉及到重定位，所以非常重要
+*/
 #define	SHT_RELA		4	/* relocation section with addends */
+
+/*
+	hash table 也是包含在一个section当中，所有参与到动态链接的对象都必须包含hash table。目前每个目标
+	文件都只包含一个hash table，未来有可能会放开限制
+*/
 #define	SHT_HASH		5	/* symbol hash table section */
+
+/*
+	包含有动态链接的信息，所以非常重要。目前也是每个目标文件中仅仅包含一个dynamic section，未来也可能
+	会放松限制
+*/
 #define	SHT_DYNAMIC		6	/* dynamic section */
+
 /*
 	有时，供应商或系统构建者需要用特殊信息标记一个对象文件，其他程序将检查这些信息的一致性、兼容性等;
 	SHT_NOTE类型的section 和 PT_NOTE 类型的program header entry可用于此目的
-
 */
 #define	SHT_NOTE		7	/* note section */
+
+/*
+	此类型的节在文件中不占用空间，但在其他方面类似于SHT_PROGBITS。尽管此部分不包含字节，但 sh_offset
+	成员包含概念文件偏移量。个人理解这个应该也是包含关于program相关信息的一个section，可能只是program
+	并没有向其中加入任何数据，所以才导致它是空的。但是尽管如此，sh_offset 还是会有一个值的
+*/
 #define	SHT_NOBITS		8	/* no space section */
+
+/*
+	类比SHT_RELA，属性是一致的，只是没有addends
+*/
 #define	SHT_REL			9	/* relocation section - no addends */
+
+/* 此节类型是保留的，但具有未指定的语义。包含此类型的节的程序不符合ABI */
 #define	SHT_SHLIB		10	/* reserved - purpose unknown */
+
+/*
+	参考上述关于symbol table的注释
+*/
 #define	SHT_DYNSYM		11	/* dynamic symbol table section */
 #define	SHT_INIT_ARRAY		14	/* Initialization function pointers. */
 #define	SHT_FINI_ARRAY		15	/* Termination function pointers. */
@@ -440,6 +513,10 @@ typedef struct {
 #define	SHT_GNU_versym		0x6fffffff	/* Symbol version table */
 #define	SHT_HISUNW		0x6fffffff
 #define	SHT_HIOS		0x6fffffff	/* Last of OS specific semantics */
+
+/*
+	SHT_LOPROC - SHT_HIPROC 区间范围内，都是平台相关的
+*/
 #define	SHT_LOPROC		0x70000000	/* reserved range for processor */
 #define	SHT_X86_64_UNWIND	0x70000001	/* unwind information */
 #define	SHT_AMD64_UNWIND	SHT_X86_64_UNWIND 
@@ -485,12 +562,33 @@ typedef struct {
 
 #define	SHTORDERED
 #define	SHT_HIPROC		0x7fffffff	/* specific section header types */
+
+/* 
+	此值指定为应用程序保留的索引范围的下限,此值指定为应用程序保留的索引范围的上限。
+	应用程序可以使用SHT_LOUSER和SHT_HIUSER之间的节类型，而不会与当前或将来系统
+	定义的节类型冲突
+*/
 #define	SHT_LOUSER		0x80000000	/* reserved range for application */
 #define	SHT_HIUSER		0xffffffff	/* specific indexes */
 
-/* Flags for sh_flags. */
+/* 
+	Flags for sh_flags. 
+	SHF: section header flags
+	节头的sh_flags成员包含描述节属性的1位标志。定义的值显示在下面；其他值保留
+	如果在sh_flags中设置了标志位，则该节的属性为“on”。否则，该属性为“off”或不适用；
+	未定义的属性设置为零
+*/
+
+/* 该节包含在进程执行期间应可写的数据 */
 #define	SHF_WRITE		0x1	/* Section contains writable data. */
+
+/*
+	进程执行期间占用内存段。某些控制节不位于对象文件的内存映像中；
+	对于这些部分，此属性处于禁用状态。
+*/
 #define	SHF_ALLOC		0x2	/* Section occupies memory. */
+
+/* 该部分包含可执行的机器指令 */
 #define	SHF_EXECINSTR		0x4	/* Section contains instructions. */
 #define	SHF_MERGE		0x10	/* Section may be merged. */
 #define	SHF_STRINGS		0x20	/* Section contains strings. */
@@ -501,6 +599,8 @@ typedef struct {
 #define	SHF_TLS			0x400	/* Section contains TLS data. */
 #define	SHF_COMPRESSED		0x800	/* Section contains compressed data. */
 #define	SHF_MASKOS	0x0ff00000	/* OS-specific semantics. */
+
+/* 此掩码中包含的所有位都是为特定于处理器的语义而保留的 */
 #define	SHF_MASKPROC	0xf0000000	/* Processor-specific semantics. */
 
 /* Flags for section groups. */
@@ -577,32 +677,110 @@ typedef struct {
 #define	PN_XNUM		0xffff
 
 /* Values for d_tag. */
-#define	DT_NULL		0	/* Terminating entry. */
+#define	DT_NULL		0	/* Terminating entry. .dynamic section中 array 的结尾标识 */
+
+/*
+	其实就是 string table 中的一个index，通过index可以确定section或者symbol的名字
+	当动态链接器为目标文件创建memory segment(应该像是.data/ .bss 这些保存数据的section组成的segment)
+	的时候，dependencies(DT_NEEDED element dynamic structure 记录)会告诉有哪些共享对象需要来支持
+	程序服务。当反复链接共享对象和它们的依赖之后，动态链接器就会创建一个完整的进程映像。
+	解析符号引用时，动态链接器使用宽度优先搜索检查符号表。也就是说，它首先查看可执行程序本身的符号表，然后
+	查看DT_NEEDED条目的符号表（按顺序），然后在第二级DT_NEEDED条目，依此类推。共享对象文件必须可由进程读取；
+	不需要其他权限。
+	即使在依赖项列表中多次引用共享对象，动态链接器也只将该对象连接到进程一次。
+*/
 #define	DT_NEEDED	1	/* String table offset of a needed shared
 				   library. */
+/*
+	跟 procedure linkage table 相关联的重定位 entries 的总大小(bytes)；
+	如果 DT_JMPREL 类型的entry存在的话，DT_PLTRELSZ 是必须要伴随它而存在的
+*/
 #define	DT_PLTRELSZ	2	/* Total size in bytes of PLT relocations. */
+
+/*
+	保存 procedure linkage table/global offset table 相关联的地址
+*/
 #define	DT_PLTGOT	3	/* Processor-dependent address. */
-#define	DT_HASH		4	/* Address of symbol hash table. */
+#define	DT_HASH		4	/* Address of symbol hash table. 此哈希表引用DT_SYMTAB元素引用的符号表 */
 #define	DT_STRTAB	5	/* Address of string table. */
 #define	DT_SYMTAB	6	/* Address of symbol table. */
+
+/*
+	一个对象文件可能会包含有多个重定位section，在为可执行文件或共享对象文件构建重定位表时，链接编辑器会将
+	这些部分连接起来形成一个表。尽管这些节在对象文件中保持独立，但动态链接器只看到一个表。(意思可能就是动态
+	链接器通过table来对各个独立的section进行操作，是它们看起来像是一个整体的样子)当动态链接器为可执行文件
+	创建进程映像或向进程映像添加共享对象时，它将读取重定位表并执行关联的操作。如果在数组中存在这个元素，那么
+	DT_RELASZ 和 DT_RELAENT 也一定会存在。(这里可以印证上面的假设，即dynamic array中包含有多种类型的
+	元素，其中一些还具有强关联性)
+*/
 #define	DT_RELA		7	/* Address of ElfNN_Rela relocations. */
-#define	DT_RELASZ	8	/* Total size of ElfNN_Rela relocations. */
-#define	DT_RELAENT	9	/* Size of each ElfNN_Rela relocation entry. */
-#define	DT_STRSZ	10	/* Size of string table. */
-#define	DT_SYMENT	11	/* Size of each symbol table entry. */
-#define	DT_INIT		12	/* Address of initialization function. */
-#define	DT_FINI		13	/* Address of finalization function. */
+#define	DT_RELASZ	8	/* Total size of ElfNN_Rela relocations. 此元素保存DT_RELA重新定位表的总大小(bytes)*/
+#define	DT_RELAENT	9	/* Size of each ElfNN_Rela relocation entry. 表示每个重定位 entry 的大小(bytes) */
+#define	DT_STRSZ	10	/* Size of string table. string table 总的大小(bytes) */
+#define	DT_SYMENT	11	/* Size of each symbol table entry. 每个 symbol table entry 的大小(bytes) */
+#define	DT_INIT		12	/* Address of initialization function. 初始函数地址 */
+#define	DT_FINI		13	/* Address of finalization function. 终止函数地址 */
+
+/*
+	保存string table的offset(本质上就是给出了shared object的名字)。offset就是记录在 DT_STRTAB entry中的表的索引
+	从这里可以看出，如果我们需要保存名字，就可以设置一个专门的元素来保存string table的index，通过index来获取name string
+
+	依赖项列表中的名称是 DT_SONAME 字符串的副本，或者是用于构建对象文件的共享对象的路径名。例如，如果链接编辑器使用一个
+	DT_SONAME entry 中的lib1的共享对象和路径名为 /usr/lib/lib2 的共享对象库构建可执行文件，则可执行文件的依赖项列表中将包含
+	lib1和/usr/lib/lib2
+
+	只要共享文件名的任何位置包含有/，/usr/lib/lib2或者directory/file，那么动态链接器就会直接使用该string作为路径名；如果不
+	包含/，例如lib1类型，那么就会去三个执行的路径下面查找，并且是有优先级的：
+	1、dynamic array中的 tag DT_RPATH 会给出以 : 作为分隔符的路径列表，例如 /home/dir/lib:/home/dir2/lib: 之类的string，
+	   这样其实就是告诉动态链接器首先到 /home/dir/lib 下去查找，然后去 /home/dir2/lib 下查找，最后在到当前路径下查找依赖项
+	2、进程环境变量可能包含 LD_LIBRARY_PATH，也会包含有上述类似的路径列表，或者用；隔开，再添加另外一个路径列表：
+		LD_LIBRARY_PATH=/home/dir/lib:/home/dir2/lib:
+		LD_LIBRARY_PATH=/home/dir/lib;/home/dir2/lib:
+		LD_LIBRARY_PATH=/home/dir/lib:/home/dir2/lib:; （后边可能还会有路径列表）
+	   所有LD_LIBRARY_PATH目录都将在DT_RPATH中的目录之后进行搜索。尽管有些程序（如链接编辑器）对分号前后的列表的处理方式不同，
+	   但动态链接器却没有。然而，动态链接器接受分号表示法，其语义如上所述
+	3、如果上述路径下均未找到相应的依赖项，那么就会在 /usr/lib 下去查找
+
+	为了安全起见，动态链接器忽略set user和set group ID程序的环境搜索规范（如LD_LIBRARY_PATH）。但是会搜索DT_RPATH目录和/usr/lib
+*/
 #define	DT_SONAME	14	/* String table offset of shared object
 				   name. */
+/*
+	string table 中还保存着搜索路径？
+*/
 #define	DT_RPATH	15	/* String table offset of library path. [sup] */
+
+/*
+	此元素在共享对象库中的存在会更改库中引用的动态链接器的符号解析算法。动态链接器并不是从可执行文件开始符号搜索，而是从
+	共享对象本身开始查找。如果没有找到，再去可执行文件或者其他共享对象查找
+*/
 #define	DT_SYMBOLIC	16	/* Indicates "symbolic" linking. [sup] */
+
+/*
+	对比 DT_RELA 的相关描述，只是在entry 类型上有所区别，rela多了一个added数据
+*/
 #define	DT_REL		17	/* Address of ElfNN_Rel relocations. */
 #define	DT_RELSZ	18	/* Total size of ElfNN_Rel relocations. */
 #define	DT_RELENT	19	/* Size of each ElfNN_Rel relocation. */
+
+/*
+	指定了 procedure linkage table 所引用的重定位 entry的类型，该类型分为REL和RELA两种，
+	procedure linkage table对应的类型一般都是一致的
+*/
 #define	DT_PLTREL	20	/* Type of relocation used for PLT. */
 #define	DT_DEBUG	21	/* Reserved (not used). */
+
+/*
+	此成员的不存在表示重定位项不应导致对不可写段的修改，如程序头表中的段权限所指定的那样。
+	如果存在此成员，则一个或多个重定位项可能会请求对不可写段进行修改，动态链接器可以相应地进行准备。
+*/
 #define	DT_TEXTREL	22	/* Indicates there may be relocations in
 				   non-writable segments. [sup] */
+/*
+	如果存在，这个entry的d_ptr成员保存只与 procedure linkage table 关联的重定位entry的地址。
+	如果启用了延迟绑定，则将这些重定位项分离可使动态链接器在进程初始化期间忽略它们。如果该元素存在，
+	那么 DT_PLTRELSZ 和 DT_PLTREL 也必须要存在
+*/
 #define	DT_JMPREL	23	/* Address of PLT relocations. */
 #define	DT_BIND_NOW	24	/* [sup] */
 #define	DT_INIT_ARRAY	25	/* Address of the array of pointers to
@@ -685,6 +863,9 @@ typedef struct {
 #define	DT_VERNEED	0x6ffffffe	/* Address of verneed section. */
 #define	DT_VERNEEDNUM	0x6fffffff	/* Number of elems in verneed section */
 
+/*
+	DT_LOPROC - DT_HIPROC 区间内的都是平台相关
+*/
 #define	DT_LOPROC	0x70000000	/* First processor-specific type. */
 
 #define	DT_ARM_SYMTABSZ			0x70000001
@@ -811,21 +992,58 @@ typedef struct {
 #define	NT_X86_XSTATE	0x202	/* x86 XSAVE extended state. */
 #define	NT_ARM_VFP	0x400	/* ARM VFP registers */
 
-/* Symbol Binding - ELFNN_ST_BIND - st_info */
+/* 
+	Symbol Binding - ELFNN_ST_BIND - st_info 符号绑定
+*/
+
+/*
+	局部符号在包含其定义的对象文件外部不可见。相同名称的本地符号可以存在于多个文件中，而不会相互干扰
+*/
 #define	STB_LOCAL	0	/* Local symbol */
+
+/*
+	全局符号对合并的所有对象文件可见。一个文件对全局符号的定义将满足另一个文件对同一全局符号的未定义引用
+	符号匹配的时候应该会用到
+*/
 #define	STB_GLOBAL	1	/* Global symbol */
+
+/*
+	弱符号类似于全局符号，但它们的定义优先级较低。应该就是全局符号的备用，两者区别：
+	当链接编辑器组合多个可重定位的对象文件时，它不允许对具有相同名称的 STB_GLOBAL 符号进行多个定义。
+	另一方面，如果存在已定义的全局符号，则出现具有相同名称的弱符号不会导致错误。链接编辑器尊重全局定义而
+	忽略弱定义。类似地，如果存在公共符号（即，其st_shndx字段包含SHN_COMMON的符号），则具有相同名称的
+	弱符号的出现不会导致错误。链接编辑器尊重常见的定义，忽略弱定义
+	当链接编辑器搜索存档库时，它将提取包含未定义全局符号定义的存档成员。成员的定义可以是全局的，也可以是
+	弱符号。链接编辑器不会提取存档成员来解析未定义的弱符号。未解析的弱符号的值为零
+*/
 #define	STB_WEAK	2	/* like global - lower precedence */
 #define	STB_LOOS	10	/* Start of operating system reserved range. */
 #define	STB_GNU_UNIQUE	10	/* Unique symbol (GNU) */
 #define	STB_HIOS	12	/* End of operating system reserved range. */
+
+/* STB_LOPROC - STB_HIPROC: 架构相关 */
 #define	STB_LOPROC	13	/* reserved range for processor */
 #define	STB_HIPROC	15	/*   specific semantics. */
 
-/* Symbol type - ELFNN_ST_TYPE - st_info */
+/* Symbol type - ELFNN_ST_TYPE - st_info  符号类型 */
 #define	STT_NOTYPE	0	/* Unspecified type. */
-#define	STT_OBJECT	1	/* Data object. */
-#define	STT_FUNC	2	/* Function. */
+#define	STT_OBJECT	1	/* Data object. 符号关联到变量或者数组等类型 */
+
+/*
+	function symbol 在共享文件中有着特殊的意义，当另外一个目标文件引用共享文件中的function时，
+	link editor会自动的为引用的符号创建 procedure linkage table entry，不是function类型的
+	符号不会通过 procedure linkage table 实现自动引用(procedure linkage table的作用是函数
+	symbol的自动引用？)
+*/
+#define	STT_FUNC	2	/* Function. 符号关联到函数类型 */
+
+/* 符号与section相关联。这种类型的符号表entry主要用于重定位，通常具有STB_LOCAL绑定 */
 #define	STT_SECTION	3	/* Section. */
+
+/*
+ * 通常，符号的名称给出与目标文件关联的源文件的名称。一个文件符号具有STB_本地绑定，它的
+ * section index是 SHN_ABS，并且它位于该文件的其他STB_LOCAL符号之前（如果存在的话）
+ */
 #define	STT_FILE	4	/* Source file. */
 #define	STT_COMMON	5	/* Uninitialized common block. */
 #define	STT_TLS		6	/* TLS object. */

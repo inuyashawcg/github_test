@@ -52,22 +52,48 @@ typedef Elf32_Sword	Elf32_Ssize;
 
 /*
  * ELF header.
+ * 包含了program header table和section header table的相关信息
  */
 
 typedef struct {
+	/*
+		初始字节将文件标记为目标文件，并提供与机器无关的数据，用于解码和解释文件的内容
+	*/
 	unsigned char	e_ident[EI_NIDENT];	/* File identification. */
-	Elf32_Half	e_type;		/* File type. */
-	Elf32_Half	e_machine;	/* Machine architecture. */
+	Elf32_Half	e_type;		/* File type. 文件类型 */
+	Elf32_Half	e_machine;	/* Machine architecture. 体系结构-Intel Mips... */
+
+	/*
+		值1表示原始文件格式；扩展名将创建具有更高数字的新版本。EV_CURRENT的值，尽管上面给出了1，但会根据需要改变以反映当前版本号
+	*/
 	Elf32_Word	e_version;	/* ELF format version. */
+
+	/*
+		此成员提供系统首先将控制传输到的虚拟地址，从而启动进程。如果文件没有关联的入口点，则此成员保留零
+		推测应该是系统将控制权交给program时的地址？
+	*/
 	Elf32_Addr	e_entry;	/* Entry point. */
+
+	/*
+		 program header table 的offset， program header table告诉操作系统如何构建一个进程映像，作用非常重要
+	*/
 	Elf32_Off	e_phoff;	/* Program header file offset. */
-	Elf32_Off	e_shoff;	/* Section header file offset. */
-	Elf32_Word	e_flags;	/* Architecture-specific flags. */
-	Elf32_Half	e_ehsize;	/* Size of ELF header in bytes. */
+	Elf32_Off	e_shoff;	/* Section header file offset. 从文件起始位置到section header table */
+	Elf32_Word	e_flags;	/* Architecture-specific flags. 体系架构相关 */
+	Elf32_Half	e_ehsize;	/* Size of ELF header in bytes. ELF Header的大小(bytes) */
+
+	/* program header table 中的entry的大小，每个entry的大小都是一致的 */
 	Elf32_Half	e_phentsize;	/* Size of program header entry. */
 	Elf32_Half	e_phnum;	/* Number of program header entries. */
+
+	/* section header table entry 的大小，类比上面 */
 	Elf32_Half	e_shentsize;	/* Size of section header entry. */
 	Elf32_Half	e_shnum;	/* Number of section header entries. */
+
+	/* 
+		此成员保存与section name string table关联的项的节标题表索引
+		指向保存section name strings的section，还是通过index获取名称？后者可能性大一些
+	*/
 	Elf32_Half	e_shstrndx;	/* Section name strings section. */
 } Elf32_Ehdr;
 
@@ -85,19 +111,58 @@ typedef struct {
 
 /*
  * Section header.
+ * Section header table用于查找所有的section(凡是涉及到table的，应该是都是对应类型的一个数组，
+ * 动态链接时肯定会涉及到对这些数组的操作)，array中的元素都是Elf32_Shdr类型，也就是对于每个section，
+ * section header都会采用 Elf32_Shdr 一个结构体来进行管理
  */
 
 typedef struct {
-	Elf32_Word	sh_name;	/* Section name (index into the
-					   section header string table). */
-	Elf32_Word	sh_type;	/* Section type. */
-	Elf32_Word	sh_flags;	/* Section flags. */
+	/*
+		可以注意到，结构体中有关name的，已知的都是保存一个string table中的index，而不会自己真正去
+		保存一个name string(string table 貌似是在一个section当中)
+		string table一般用于保存symbol和section的名称，字符串表索引可以引用节中的任何字节。一个字符串
+		可能出现多次；对子字符串的引用可能存在；一个字符串可能被多次引用。也允许使用未引用的字符串
+	*/
+	Elf32_Word	sh_name;	/* Section name (index into the section header string table). */
+	Elf32_Word	sh_type;	/* Section type. 参考elf_common.h中的定义 */
+	Elf32_Word	sh_flags;	/* Section flags. section支持描述各种属性的1位标志 */
+
+	/*
+		当这个section出现在进程映像当中的时候，这个成员会给出该section的第一个byte所处的位置，否则值为0
+	*/
 	Elf32_Addr	sh_addr;	/* Address in memory image. */
+
+	/*
+		描述了从文件起始位置到section第一个byte的偏移量。下面描述的一个节类型SHT_NOBITS不占用文件中的空间，
+		它的sh_offset成员定位文件中的概念位置。
+	*/
 	Elf32_Off	sh_offset;	/* Offset in file. */
+
+	/*
+		此成员以字节为单位给出节的大小。除非节类型是SHT_NOBITS，否则该节将占用文件中sh_size字节。SHT_NOBITS
+		类型的节的大小可能不为零，但它在文件中不占用任何空间。
+	*/
 	Elf32_Word	sh_size;	/* Size in bytes. */
+
+	/*
+		此成员持有一个节头表索引链接(section header table index link)，其解释取决于节类型
+		个人理解应该是这个section有关联的section，sh_link 就是它所关联的section在section header table中
+		的index？？ - 应该不是这样理解的，这里可以参考一下ELF_Format.pdf文档中19页的相关表述
+	*/
 	Elf32_Word	sh_link;	/* Index of a related section. */
 	Elf32_Word	sh_info;	/* Depends on section type. */
+
+	/*
+		有些部分有地址对齐限制。例如，如果节包含双字，则系统必须确保整个节的双字对齐。也就是说，sh_addr的值必须等于0，
+		与sh_addralign的值相模(取模/取余)。目前只允许0和2的正整数幂。值0和1表示section没有对齐约束
+	*/
 	Elf32_Word	sh_addralign;	/* Alignment in bytes. */
+
+	/*
+		有些部分包含固定大小的条目表，例如符号表。对于这样的节，该成员给出每个条目的大小（以字节为单位）。如果节不包含
+		固定大小条目的表，则成员包含0。因为一些section包含的是一个table，table的话基本上就是一个数组，数组元素的大小
+		一般是固定的，这个成员应该就是表示table element的大小
+	*/
 	Elf32_Word	sh_entsize;	/* Size of each entry in section. */
 } Elf32_Shdr;
 
@@ -133,11 +198,12 @@ typedef struct {
 
 /*
  * Dynamic structure.  The ".dynamic" section contains an array of them.
- * .dynamic section中会包含有 Elf32_Dyn 类型的数组
+ * .dynamic section中会包含有 Elf32_Dyn 类型的数组，其中应该会包含有多种类型结构体，
+ * 动态链接的过程中对数组遍历查找？
  */
 
 typedef struct {
-	Elf32_Sword	d_tag;		/* Entry type. */
+	Elf32_Sword	d_tag;		/* Entry type. 不同d_tag类型，union会有不同的值 */
 	union {
 		Elf32_Word	d_val;	/* Integer value. */
 		Elf32_Addr	d_ptr;	/* Address value. */
@@ -209,24 +275,54 @@ typedef struct {
 	} c_un;
 } Elf32_Cap;
 
+
 /*
  * Symbol table entries.
+ * 对象文件的符号表包含定位和重新定位程序的符号定义和引用所需的信息。符号表索引是此数组的下标。
+ * 索引0同时指定表中的第一个条目，并用作未定义的符号索引。印证上述所说的，table一般都是一个
+ * 数组。这里，一个 Elf32_Sym 对应着一个symbol
+ * 
+ * 在每个符号表中，所有具有 STB_LOCAL 绑定的符号都在弱符号和全局符号之前。如上所述，
+ * symbol table section的 sh_info成员保存第一个non_local符号表index。也就是sh_info不会
+ * 指向符号表的起始位置，除非没有local symbol
  */
-
 typedef struct {
+	/*
+		该成员保存string table中的index，进而获取symbol name；如果该值为非零，则表示给出符号
+		名称的字符串表索引。否则，符号表条目没有名称
+	*/
 	Elf32_Word	st_name;	/* String table index of name. */
+
+	/*
+		此成员给出关联符号的值。根据上下文，这可能是绝对值、地址等
+	*/
 	Elf32_Addr	st_value;	/* Symbol value. */
+
+	/*
+		许多符号都有关联的大小。例如，数据对象的大小是对象中包含的字节数。
+		如果符号没有大小或未知大小，则此成员保留0。
+	*/
 	Elf32_Word	st_size;	/* Size of associated object. */
-	unsigned char	st_info;	/* Type and binding information. */
-	unsigned char	st_other;	/* Reserved (not used). */
+	unsigned char	st_info;	/* Type and binding information. symbol类型和绑定的属性 */
+	unsigned char	st_other;	/* Reserved (not used). 目前的值是0，未被使用，也没有任何意义 */
+
+	/*
+		symbol table entry中的每一个entry都是跟某一个section相关联，该成员保存了相关联的section header
+		table index，也就是说symbol可以通过 st_shndx 找到相关联的section，其中一些index有着特殊的含义，
+		参考 STB_LOCAL-elf_common.h 等定义，符号的绑定决定了链接的可见性和行为
+
+		如果一个符号引用了一个section中的特定的位置，那么 st_shndx 成员就会保留一个section header table的
+		index；当这个section由于重定位移动的时候，symbol value也会跟着改变，对符号的引用仍然会指向程序中的同
+		一个位置？？
+	*/
 	Elf32_Half	st_shndx;	/* Section index of symbol. */
 } Elf32_Sym;
 
 /* Macros for accessing the fields of st_info. */
-#define ELF32_ST_BIND(info)		((info) >> 4)
-#define ELF32_ST_TYPE(info)		((info) & 0xf)
+#define ELF32_ST_BIND(info)		((info) >> 4)	/* 获取symbol绑定的属性 */
+#define ELF32_ST_TYPE(info)		((info) & 0xf)	/* 获取symbol的类型 */
 
-/* Macro for constructing st_info from field values. */
+/* Macro for constructing st_info from field values. 获取symbol info */
 #define ELF32_ST_INFO(bind, type)	(((bind) << 4) + ((type) & 0xf))
 
 /* Macro for accessing the fields of st_other. */
@@ -280,5 +376,85 @@ typedef struct {
 	Elf32_Word	ch_size;
 	Elf32_Word	ch_addralign;
 } Elf32_Chdr;
+
+//////////////////////////////// Special Sections /////////////////////////
+/* 
+	各个部分保存程序和控制信息。以下列表中的部分由系统使用，并具有指示的类型和属性 
+	|名称	|类型	|属性
+
+	.bss		SHT_NOBITS		SHF_ALLOC + SHF_WRITE
+	.comment 	SHT_PROGBITS 	none
+	.data 		SHT_PROGBITS 	SHF_ALLOC + SHF_WRITE
+	.data1 		SHT_PROGBITS 	SHF_ALLOC + SHF_WRITE
+	.debug 		SHT_PROGBITS 	none
+	.dynamic 	SHT_DYNAMIC 	see below
+	.dynstr 	SHT_STRTAB 		SHF_ALLOC
+	.dynsym 	SHT_DYNSYM 		SHF_ALLOC
+	.fini 		SHT_PROGBITS 	SHF_ALLOC + SHF_EXECINSTR
+	.got 		SHT_PROGBITS 	see below
+	.hash 		SHT_HASH 		SHF_ALLOC
+	.init 		SHT_PROGBITS	SHF_ALLOC + SHF_EXECINSTR
+	.interp 	SHT_PROGBITS 	see below
+	.line 		SHT_PROGBITS 	none
+	.note 		SHT_NOTE 		none
+	.plt 		SHT_PROGBITS 	see below
+	.relname 	SHT_REL 		see below
+	.relaname 	SHT_RELA 		see below
+	.rodata 	SHT_PROGBITS 	SHF_ALLOC
+	.rodata1 	SHT_PROGBITS 	SHF_ALLOC
+	.shstrtab 	SHT_STRTAB 		none
+	.strtab 	SHT_STRTAB 		see below
+	.symtab 	SHT_SYMTAB 		see below
+	.text 		SHT_PROGBITS 	SHF_ALLOC + SHF_EXECINSTR
+
+	.bss: 此部分保存有助于程序内存映像的未初始化数据。根据定义，当程序开始运行时，系统用零初始化数据。
+		  节不占用任何文件空间，如节类型SHT_NOBITS所示
+	
+	.comment: 本节保存版本控制信息
+
+	.data & .data1: 这些部分保存有助于程序内存映像的初始化数据
+
+	.debug: 此部分保存符号调试的信息。内容未指定
+
+	.dynamic: 此部分保存动态链接信息。该部分的属性将包括SHF_ALLOC位。是否设置SHF_写入位取决于处理器
+
+	.dynstr: 此部分包含动态链接所需的字符串，最常见的字符串表示与symbol table entry关联的名称
+
+	.dynsym: 此部分包含动态链接符号表
+
+	.fini: 本节包含可执行指令，这些指令有助于进程终止代码。也就是说，当程序正常退出时，系统会安排执行
+		   本节中的代码
+	
+	.hash: section保存hash table
+
+	.interp: 此部分保存程序解释器的路径名。如果文件有一个包含段的可加载段，则该段的属性将包括SHF_ALLOC位；
+			 否则，该位将off(解释器好像就是dynamic linker)
+	
+	.line: 本节保存用于符号调试的行号信息，用于描述源程序和机器代码之间的对应关系。内容未指定
+
+	.note: 参考note section
+
+	.relname & .relaname: 这些部分包含重新定位信息，如下所述。如果文件有包含重定位的可加载段，则节的属性将
+		   包括SHF_ALLOC位；否则，该位将关闭。按照惯例，名称由重新定位应用的部分提供。因此，.text的重定位节
+		   通常具有名称.rel.text 或者.rela.text
+
+	.rodata & .rodatal: 这些部分保存只读数据，这些数据通常有助于进程映像中的不可写段
+
+	.shstrtab: 该section保留section name（section header string table？）
+
+	.strtab: 此部分包含字符串，最常见的是表示与symbol table entry关联的名称的字符串。如果文件包含包含符号字符串表的
+		   可加载段，则该节的属性将包括SHF_ALLOC位；否则，该位将off
+
+	.symtab: 本节包含一个符号表，如本节中的“符号表”所述。如果文件包含包含符号表的可加载段，则该节的属性将包括SHF_ALLOC位；
+		   否则，该位将off
+
+	.text: 本节保存程序的“文本”或可执行指令
+
+	带有点.前缀的节名是为系统保留的，尽管应用程序可以使用这些节，前提是它们的现有含义令人满意。应用程序可以使用不带前缀的
+	名称，以避免与系统节冲突。对象文件格式允许定义不在上面列表中的部分。一个对象文件可以有多个同名的节
+	为处理器体系结构保留的节名称是通过在节名称前面放置体系结构名称的缩写来形成的。该名称应取自用于e_machine的体系结构名称。
+	例如。食品.psect是由FOO架构定义的psect部分。现有的扩展按其历史名称调用
+*/
+
 
 #endif /* !_SYS_ELF32_H_ */
