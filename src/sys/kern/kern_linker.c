@@ -103,11 +103,18 @@ static linker_file_t linker_find_file_by_name(const char* _filename);
  */
 static linker_file_t linker_find_file_by_id(int _fileid);
 
-/* Metadata from the static kernel */
+/* 
+	Metadata from the static kernel 
+	宏定义弱符号？？
+*/
 SET_DECLARE(modmetadata_set, struct mod_metadata);
 
+/* 自定义malloc类型 */
 MALLOC_DEFINE(M_LINKER, "linker", "kernel linker");
 
+/*
+	这个应该是最基本的kernel link file
+*/
 linker_file_t linker_kernel_file;
 
 static struct sx kld_sx;	/* kernel linker lock */
@@ -127,6 +134,9 @@ static linker_file_list_t linker_files;
 static int next_file_id = 1;
 static int linker_no_more_classes = 0;
 
+/*
+	获取下一个linker file的id，每个linker file都有一个唯一的id
+*/
 #define	LINKER_GET_NEXT_FILE_ID(a) do {					\
 	linker_file_t lftmp;						\
 									\
@@ -148,6 +158,7 @@ retry:									\
 	我们在这里看到的是版本配置标记，而不是模块
 	modlist 里边并没有包含 module元素，仅仅是保留了 module的相关信息，包括module名称、
 	版本和隶属于哪个linker file，所以这个链表仅仅是起到了管理 module信息的作用
+	进一步，通过该链表查找某个module
 */
 typedef TAILQ_HEAD(, modlist) modlisthead_t;
 struct modlist {
@@ -181,6 +192,8 @@ linker_init(void *arg)
 {
 	/*
 		Shared/exclusive lock 共享独占锁
+		linker_init初始化工作主要就是两部分：第一，初始化linker_class队列，用于管理所有的linker class；
+		第二，初始化linker_files队列，用于管理所有的linker file
 	*/
 	sx_init(&kld_sx, "kernel linker");
 	TAILQ_INIT(&classes);

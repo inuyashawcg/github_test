@@ -422,6 +422,10 @@ typedef struct {
 
 /*
 	program相关，它所表示的信息主要是有program指定的，可能跟program运行阶段的联系比较密切
+	SHT_PROGBITS 类型的section中的内容是程序的数据，如代码、全局变量等等。例如，
+	.interp section用于保存动态链接器的绝对地址，如/lib/ld-linux.so.2；
+	.comment section用于保存版本控制信息，如GCC: (GNU) 4.8.5 20150623 (Red Hat 4.8.5-39)；
+	.eh_frame_hdr和.eh_frame section用于保存异常处理信息，.eh_frame_hdr是对.eh_frame的补充
 */
 #define	SHT_PROGBITS		1	/* program defined information */
 
@@ -440,6 +444,7 @@ typedef struct {
 
 /*
 	表明该section保存的是string table，一文件中可以保存多个string table section
+	SHT_STRTAB类型的section用于保存字符串，应该可以认为认为它保存的就是string table吧？？
 */
 #define	SHT_STRTAB		3	/* string table section */
 
@@ -471,6 +476,9 @@ typedef struct {
 	此类型的节在文件中不占用空间，但在其他方面类似于SHT_PROGBITS。尽管此部分不包含字节，但 sh_offset
 	成员包含概念文件偏移量。个人理解这个应该也是包含关于program相关信息的一个section，可能只是program
 	并没有向其中加入任何数据，所以才导致它是空的。但是尽管如此，sh_offset 还是会有一个值的
+
+	NOBITS类型一般用于名叫.bss的section，该section也只有section header，没有实际的内容，不占用可执行
+	文件的空间
 */
 #define	SHT_NOBITS		8	/* no space section */
 
@@ -588,7 +596,7 @@ typedef struct {
 */
 #define	SHF_ALLOC		0x2	/* Section occupies memory. */
 
-/* 该部分包含可执行的机器指令 */
+/* 该部分包含可执行的机器指令，可执行 */
 #define	SHF_EXECINSTR		0x4	/* Section contains instructions. */
 #define	SHF_MERGE		0x10	/* Section may be merged. */
 #define	SHF_STRINGS		0x20	/* Section contains strings. */

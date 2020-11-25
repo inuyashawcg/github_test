@@ -51,18 +51,18 @@
  */
 #define	LA_SER_ORIG	0x01	/* original (needed) name */
 #define	LA_SER_LIBPATH	0x02	/* LD_LIBRARY_PATH entry prepended */
-#define	LA_SER_RUNPATH	0x04	/* runpath entry prepended */
+#define	LA_SER_RUNPATH	0x04	/* runpath entry prepended 预先添加了运行路径entry */
 #define	LA_SER_CONFIG	0x08	/* configuration entry prepended */
 #define	LA_SER_DEFAULT	0x40	/* default path prepended */
 #define	LA_SER_SECURE	0x80	/* default (secure) path prepended */
 
 typedef struct link_map {
-	caddr_t		l_addr;			/* Base Address of library */
+	caddr_t		l_addr;			/* Base Address of library 库的基地址 */
 #ifdef __mips__
 	caddr_t		l_offs;			/* Load Offset of library */
 #endif
-	const char	*l_name;		/* Absolute Path to Library */
-	const void	*l_ld;			/* Pointer to .dynamic in memory ？？ */
+	const char	*l_name;		/* Absolute Path to Library 库的绝对路径 */
+	const void	*l_ld;			/* Pointer to .dynamic in memory ？？ 指向.dynamic section 的指针 */
 	struct link_map	*l_next, *l_prev;	/* linked list of of mapped libs */
 } Link_map;
 
@@ -82,7 +82,7 @@ struct dl_phdr_info
 {
 	Elf_Addr dlpi_addr;			/* module relocation base module重定位基地址 */
 	const char *dlpi_name;			/* module name */
-	const Elf_Phdr *dlpi_phdr;		/* pointer to module's phdr 物理地址？？ */
+	const Elf_Phdr *dlpi_phdr;		/* pointer to module's phdr 物理地址 */
 	Elf_Half dlpi_phnum;			/* number of entries in phdr */
 	unsigned long long int dlpi_adds;	/* total # of loads */
 	unsigned long long int dlpi_subs;	/* total # of unloads */

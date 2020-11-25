@@ -67,18 +67,25 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/link_elf_obj.c 339953 2018-10-31 14:03:
 
 #include "linker_if.h"
 
+/*
+	用于表示 SHT_PROGBITS 类型的 section 在section table 中的entry？？
+	下面 SHT_REL 和 SHT_RELA 类似
+*/
 typedef struct {
 	void		*addr;
 	Elf_Off		size;
 	int		flags;
+	/*
+		参考下文代码实现，sec保存的是该section在原有文件的section header中的index
+	*/
 	int		sec;	/* Original section */
 	char		*name;
 } Elf_progent;
 
 typedef struct {
-	Elf_Rel		*rel;
-	int		nrel;
-	int		sec;
+	Elf_Rel		*rel;	/* 推断应该是 REL table 的地址(section table) */
+	int		nrel;	/* REL table中entry的数量 */
+	int		sec;	/* Elf32_Shdr->sh_info */
 } Elf_relent;
 
 typedef struct {
@@ -87,12 +94,18 @@ typedef struct {
 	int		sec;
 } Elf_relaent;
 
-
+/*
+	结构体中的元素主要是各种类型的table，link_elf.c文件中的结构体元素类型更多一些，
+	要关注一下两者之间的具体差异在哪里
+*/
 typedef struct elf_file {
 	struct linker_file lf;		/* Common fields */
 
+	/* 
+		预加载标识，在link_elf.c文件中同样有一个该类型的结构体，这里专门用来处理预加载？？
+	*/
 	int		preloaded;
-	caddr_t		address;	/* Relocation address */
+	caddr_t		address;	/* Relocation address 重定位的基地址 */
 	vm_object_t	object;		/* VM object to hold file pages */
 	Elf_Shdr	*e_shdr;
 
@@ -100,15 +113,18 @@ typedef struct elf_file {
 	u_int		nprogtab;
 
 	Elf_relaent	*relatab;
-	u_int		nrelatab;
+	/* 
+		根据下面的代码逻辑推断，该成员表示未被loader加载的 RELA section的数量
+	*/
+	u_int		nrelatab;	
 
 	Elf_relent	*reltab;
 	int		nreltab;
 
-	Elf_Sym		*ddbsymtab;	/* The symbol table we are using */
-	long		ddbsymcnt;	/* Number of symbols */
-	caddr_t		ddbstrtab;	/* String table */
-	long		ddbstrcnt;	/* number of bytes in string table */
+	Elf_Sym		*ddbsymtab;	/* The symbol table we are using 我们要使用的符号表 */
+	long		ddbsymcnt;	/* Number of symbols 符号的数量 */
+	caddr_t		ddbstrtab;	/* String table 我们要使用的字符串表 */
+	long		ddbstrcnt;	/* number of bytes in string table 字符串表的大小 */
 
 	caddr_t		shstrtab;	/* Section name string table */
 	long		shstrcnt;	/* number of bytes in string table */
@@ -116,6 +132,8 @@ typedef struct elf_file {
 	caddr_t		ctftab;		/* CTF table */
 	long		ctfcnt;		/* number of bytes in CTF table */
 	caddr_t		ctfoff;		/* CTF offset table */
+
+	/* 类型表？？ */
 	caddr_t		typoff;		/* Type offset table */
 	long		typlen;		/* Number of type entries. */
 
@@ -149,6 +167,21 @@ static long	link_elf_strtab_get(linker_file_t, caddr_t *);
 static int	elf_obj_lookup(linker_file_t lf, Elf_Size symidx, int deps,
 		    Elf_Addr *);
 
+/*
+	对比两个elf文件中的方法表，可以观察到该文件中注册了一个 link_elf_link_preload 函数，
+	但是另外一个文件中是没有的，所以这里的作用很可能是跟预加载相关
+
+	linux动态链接库预加载机制
+		在linux操作系统的动态链接库加载过程中，动态链接器会读取LD_PRELOAD环境变量的值和默认配置文件/etc/ld.so.preload的
+		文件内容，并将读取到的动态链接库进行预加载，即使程序不依赖这些动态链接库，LD_PRELOAD环境变量和/etc/ld.so.preload
+		配置文件中指定的动态链接库依然会被装载,它们的优先级比LD_LIBRARY_PATH环境变量所定义的链接库查找路径的文件优先级要高，
+		所以能够提前于用户调用的动态库载入
+	
+	全局符号介入
+		全局符号介入指的是应用程序调用库函数时，调用的库函数如果在多个动态链接库中都存在，即存在同名函数，那么链接器只会保留第一个
+		链接的函数，而忽略后面链接进来的函数，所以只要预加载的全局符号中有和后加载的普通共享库中全局符号重名，那么就会覆盖后装载的
+		共享库以及目标文件里的全局符号
+*/
 static kobj_method_t link_elf_methods[] = {
 	KOBJMETHOD(linker_lookup_symbol,	link_elf_lookup_symbol),
 	KOBJMETHOD(linker_symbol_values,	link_elf_symbol_values),
@@ -166,6 +199,11 @@ static kobj_method_t link_elf_methods[] = {
 	{ 0, 0 }
 };
 
+/*
+	ELFCLASS32表示的是32位架构，ELF header中的 e_ident[EI_CLASS] 也是通过它来设置；
+	这个非常类似driver代码结构， link_elf_methods 其实就是 kobj_method_t类型，也就
+	相当于driver中的driver method
+*/
 static struct linker_class link_elf_class = {
 #if ELF_TARG_CLASS == ELFCLASS32
 	"elf32_obj",
@@ -200,9 +238,9 @@ static int
 link_elf_link_preload(linker_class_t cls, const char *filename,
     linker_file_t *result)
 {
-	Elf_Ehdr *hdr;
-	Elf_Shdr *shdr;
-	Elf_Sym *es;
+	Elf_Ehdr *hdr;		/* ELF header */
+	Elf_Shdr *shdr;		/* Section header */
+	Elf_Sym *es;		/* symbol table entry  */
 	void *modptr, *baseptr, *sizeptr;
 	char *type;
 	elf_file_t ef;
@@ -215,6 +253,10 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 	if (modptr == NULL)
 		return ENOENT;
 
+	/*
+		preload_search_info 用于获取预加载文件的属性，例如 MODINFO_TYPE 就指明了我们所要获取
+		的属性的类型是type，还有address、ELF header、section header等
+	*/
 	type = (char *)preload_search_info(modptr, MODINFO_TYPE);
 	baseptr = preload_search_info(modptr, MODINFO_ADDR);
 	sizeptr = preload_search_info(modptr, MODINFO_SIZE);
@@ -222,25 +264,36 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 	    MODINFOMD_ELFHDR);
 	shdr = (Elf_Shdr *)preload_search_info(modptr, MODINFO_METADATA |
 	    MODINFOMD_SHDR);
+
+	/* 判断文件类型是不是我们所需要的 */
 	if (type == NULL || (strcmp(type, "elf" __XSTRING(__ELF_WORD_SIZE)
 	    " obj module") != 0 &&
 	    strcmp(type, "elf obj module") != 0)) {
 		return (EFTYPE);
 	}
+
+	/* 判断ELF header、section header等是否存在 */
 	if (baseptr == NULL || sizeptr == NULL || hdr == NULL ||
 	    shdr == NULL)
 		return (EINVAL);
 
+	/*
+		上述条件都满足之后，我们就创建一个linker file(kernel)，并指定一个linker class
+	*/
 	lf = linker_make_file(filename, &link_elf_class);
 	if (lf == NULL)
 		return (ENOMEM);
 
+	/* 对lf强制类型转换，其实对ef的操作就是对lf的操作 */
 	ef = (elf_file_t)lf;
 	ef->preloaded = 1;
 	ef->address = *(caddr_t *)baseptr;
 	lf->address = *(caddr_t *)baseptr;
 	lf->size = *(size_t *)sizeptr;
 
+	/* 
+		检查ELF Header中所包含的信息是否正确 
+	*/
 	if (hdr->e_ident[EI_CLASS] != ELF_TARG_CLASS ||
 	    hdr->e_ident[EI_DATA] != ELF_TARG_DATA ||
 	    hdr->e_ident[EI_VERSION] != EV_CURRENT ||
@@ -252,9 +305,19 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 	}
 	ef->e_shdr = shdr;
 
-	/* Scan the section header for information and table sizing. */
+	/* 
+		Scan the section header for information and table sizing.
+		开始对 section header 做相关处理，
+		初始化 symbol table index 和 string table index 为-1
+		e_shnum 表示section header entry的数量，也就是表示有多少个section
+	*/
 	symtabindex = -1;
 	symstrindex = -1;
+
+	/*
+		通过for循环扫描section header中所有的entry，主要就是为了统计未被加载的
+		section的数量和symbol table/string index 
+	*/
 	for (i = 0; i < hdr->e_shnum; i++) {
 		switch (shdr[i].sh_type) {
 		case SHT_PROGBITS:
@@ -262,19 +325,32 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 #ifdef __amd64__
 		case SHT_X86_64_UNWIND:
 #endif
-			/* Ignore sections not loaded by the loader. */
+			/* 
+				Ignore sections not loaded by the loader.
+				Q&A：sh_addr == 0就表示loader不会加载？？
+				参考一下symbol table建立的过程，对于file自身包含的变量或者函数的定义，我们会为其分配一个符号，
+				并且可以通过一些方法(需要进一步思考)获取到它的地址(运行时地址还是相对地址？)，但是如果我们是引用
+				外部模块的变量或者函数，那么我们将无法获取到它的地址的，这个就需要链接的时候再进一步确定，应该是
+				编译器会给其分配一个0地址，然后生成一条提示(好像是保存在.rel.text段)，告诉链接器这个变量的地址
+				需要修改，链接器链接的时候再通过一些步骤得到对应的地址，然后对这些0地址再进行修改
+			*/
 			if (shdr[i].sh_addr == 0)
 				break;
 			ef->nprogtab++;
 			break;
 		case SHT_SYMTAB:
+			/* 
+				如果section的类型是SHT_SYMTAB，那么sh_link就表示section header entry在
+				string table中的index
+			*/
 			symtabindex = i;
 			symstrindex = shdr[i].sh_link;
 			break;
 		case SHT_REL:
 			/*
 			 * Ignore relocation tables for sections not
-			 * loaded by the loader.
+			 * loaded by the loader. 
+			 * 与上边的处理方式是一致的
 			 */
 			if (shdr[shdr[i].sh_info].sh_addr == 0)
 				break;
@@ -299,7 +375,11 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 		goto out;
 	}
 
-	/* Allocate space for tracking the load chunks */
+	/* 
+		Allocate space for tracking the load chunks 
+		注意：malloc中的参数是 nprogtab nreltab nrelatab，这里是为那些地址为0的entry
+		来分配空间
+	*/
 	if (ef->nprogtab != 0)
 		ef->progtab = malloc(ef->nprogtab * sizeof(*ef->progtab),
 		    M_LINKER, M_WAITOK | M_ZERO);
@@ -318,27 +398,44 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 
 	/* XXX, relocate the sh_addr fields saved by the loader. */
 	off = 0;
+
+	/*
+		遍历所有的section并且sh_addr，找到其中最小的 sh_addr 作为 offset
+	*/
 	for (i = 0; i < hdr->e_shnum; i++) {
 		if (shdr[i].sh_addr != 0 && (off == 0 || shdr[i].sh_addr < off))
 			off = shdr[i].sh_addr;
 	}
+
+	/*
+		sh_addr最小的section可以看到是放在第一个位置的，然后每一个section根据与第一个
+		section的距离来进行加载，说明这个时候它们之间的位置关系是已经计算好了的(计算的话
+		就必须要知道每个section的大小，可能还需要经过其他的一些处理，然后确定sh_addr，
+		要不然感觉不能这么简单的进行排列，所以这一步是在哪个阶段完成的？)。ef->address就相当
+		与是section加载的基地址，第一个section的第一个byte应该就是就是位于该地址
+		考虑一下多个section entry 的 sh_addr 都为0的情况？？
+	*/
 	for (i = 0; i < hdr->e_shnum; i++) {
 		if (shdr[i].sh_addr != 0)
 			shdr[i].sh_addr = shdr[i].sh_addr - off +
 			    (Elf_Addr)ef->address;
 	}
 
-	ef->ddbsymcnt = shdr[symtabindex].sh_size / sizeof(Elf_Sym);
+	/*
+		计算symbol数量，获取symbol table在内存中的地址
+		获取string table大小和内存地址(ddb)
+	*/
+	ef->ddbsymcnt = shdr[symtabindex].sh_size / sizeof(Elf_Sym);	
 	ef->ddbsymtab = (Elf_Sym *)shdr[symtabindex].sh_addr;
 	ef->ddbstrcnt = shdr[symstrindex].sh_size;
 	ef->ddbstrtab = (char *)shdr[symstrindex].sh_addr;
 	ef->shstrcnt = shdr[shstrindex].sh_size;
 	ef->shstrtab = (char *)shdr[shstrindex].sh_addr;
 
-	/* Now fill out progtab and the relocation tables. */
-	pb = 0;
-	rl = 0;
-	ra = 0;
+	/* Now fill out progtab and the relocation tables. 填充progtab和重定位表*/
+	pb = 0;		/* progtab index */
+	rl = 0;		/* REL section index */
+	ra = 0;		/* RELA section index */
 	for (i = 0; i < hdr->e_shnum; i++) {
 		switch (shdr[i].sh_type) {
 		case SHT_PROGBITS:
@@ -347,7 +444,7 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 		case SHT_X86_64_UNWIND:
 #endif
 			if (shdr[i].sh_addr == 0)
-				break;
+				break;	/* 对于 sh_addr 为0的 section，不做处理  */
 			ef->progtab[pb].addr = (void *)shdr[i].sh_addr;
 			if (shdr[i].sh_type == SHT_PROGBITS)
 				ef->progtab[pb].name = "<<PROGBITS>>";
@@ -358,14 +455,16 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 			else
 				ef->progtab[pb].name = "<<NOBITS>>";
 			ef->progtab[pb].size = shdr[i].sh_size;
-			ef->progtab[pb].sec = i;
+			ef->progtab[pb].sec = i;	/* 把该section在原有文件的section header中的index赋值给sec */
 			if (ef->shstrtab && shdr[i].sh_name != 0)
 				ef->progtab[pb].name =
 				    ef->shstrtab + shdr[i].sh_name;
+
 			if (ef->progtab[pb].name != NULL && 
 			    !strcmp(ef->progtab[pb].name, DPCPU_SETNAME)) {
 				void *dpcpu;
 
+				/* 多CPU操作 */
 				dpcpu = dpcpu_alloc(shdr[i].sh_size);
 				if (dpcpu == NULL) {
 					printf("%s: pcpu module space is out "
@@ -434,6 +533,12 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 			break;
 		}
 	}
+
+	/* 
+		从代码逻辑可以看到，ef(elf_file_t)主要的工作就是收集，填充结构体内的各个成员，
+		应该是一个管理者。下面再判断一下这些section是否都是存在的，如果不存在，直接go out，
+		说明这些section是实现预加载必不可少的，要重点关注
+	*/
 	if (pb != ef->nprogtab) {
 		printf("%s: lost progbits\n", filename);
 		error = ENOEXEC;
@@ -450,7 +555,10 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 		goto out;
 	}
 
-	/* Local intra-module relocations */
+	/* Local intra-module relocations 本地模块内重定位 */
+	/*
+		说明还有别的地方也需要重定位，这里要确认该操作是属于哪个阶段的步骤？？
+	*/
 	error = link_elf_reloc_local(lf, false);
 	if (error != 0)
 		goto out;
@@ -1474,19 +1582,41 @@ link_elf_fix_link_set(elf_file_t ef)
 	Elf_Sym *sym;
 	const char *sym_name, *linkset_name;
 	Elf_Addr startp, stopp;
-	Elf_Size symidx;
+	Elf_Size symidx;	/* symbol index */
 	int start, i;
 
 	startp = stopp = 0;
+
+	/* 
+		对符号表进行遍历 
+	*/
 	for (symidx = 1 /* zero entry is special */;
 		symidx < ef->ddbsymcnt; symidx++) {
 		sym = ef->ddbsymtab + symidx;
+		/*
+			SHN_UNDEF:
+				此节表索引表示符号未定义。当链接编辑器将此对象文件与另一个定义指定符号的文件组合时，
+				此文件对符号的引用将链接到实际定义
+			下面的逻辑是当symbol的 st_shndx 不是 SHN_UNDEF 类型的时候，执行continue，说明后边
+			要处理的类型都是 SHN_UNDEF 类型的，再根据上述解释可以看到，SHN_UNDEF 表示的应该就是外部
+			引用，所以才会说当与外部的文件链接的时候，我们才会将对符号的引用链接到实际的定义
+
+			再进一步看，这个函数是嵌套在 link_elf_reloc_local 函数当中的，从函数名字看是进行本地重定位，
+			可能不涉及对外部引用，所以这里利用这个函数做一些操作，使外部引用不会影响到本地重定位？？
+		*/
 		if (sym->st_shndx != SHN_UNDEF)
 			continue;
 
+		/* 
+			所以下面的操作都是针对 SHN_UNDEF 类型的symbol (引用的外部的量？？)
+			sym->st_name 其实是一个index，ef->ddbstrtab 加上这个index就可以获得相应的symbol name
+		*/
 		sym_name = ef->ddbstrtab + sym->st_name;
 		if (strncmp(sym_name, startn, sizeof(startn) - 1) == 0) {
 			start = 1;
+			/* 
+				相当于是把前面 __start_ 给过滤掉，这就跟linker_set.h文件中的一些宏定义对照上 
+			*/
 			linkset_name = sym_name + sizeof(startn) - 1;
 		}
 		else if (strncmp(sym_name, stopn, sizeof(stopn) - 1) == 0) {
@@ -1511,6 +1641,9 @@ link_elf_fix_link_set(elf_file_t ef)
 	}
 }
 
+/*
+	本地重定位？？
+*/
 static int
 link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 {
@@ -1524,6 +1657,9 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 	int i;
 	Elf_Size symidx;
 
+	/*
+		首先是对所有的外部符号引用进行了处理
+	*/
 	link_elf_fix_link_set(ef);
 
 	/* Perform relocations without addend if there are any: */

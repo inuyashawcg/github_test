@@ -88,14 +88,25 @@ typedef struct elf_file {
 	const Elf_Hashelt *buckets;
 	const Elf_Hashelt *chains;
 	caddr_t		hash;
-	caddr_t		strtab;		/* DT_STRTAB */
-	int		strsz;		/* DT_STRSZ */
-	const Elf_Sym	*symtab;		/* DT_SYMTAB */
+	caddr_t		strtab;		/* DT_STRTAB 保存string table的地址 */
+	int		strsz;		/* DT_STRSZ 应该是表示string table 的大小*/
+	const Elf_Sym	*symtab;		/* DT_SYMTAB 指向符号表的指针 */
 	Elf_Addr	*got;		/* DT_PLTGOT */
+
+	/* 
+		指向跟procedure linkage table 相关的重定位entry(位于dynamic section)，类型是REL；
+		后边的 DT_PLTRELSZ 用于表示 DT_JMPREL 的大小
+	*/
 	const Elf_Rel	*pltrel;	/* DT_JMPREL */
 	int		pltrelsize;	/* DT_PLTRELSZ */
+
+	/* 与上边作用类似，只不过这个是RELA类型 */
 	const Elf_Rela	*pltrela;	/* DT_JMPREL */
 	int		pltrelasize;	/* DT_PLTRELSZ */
+
+	/*
+		REL & RELA 都是关于重定位的，只不过两者的结构体定义有所差异
+	*/
 	const Elf_Rel	*rel;		/* DT_REL */
 	int		relsize;	/* DT_RELSZ */
 	const Elf_Rela	*rela;		/* DT_RELA */
@@ -105,9 +116,9 @@ typedef struct elf_file {
 	long		ddbsymcnt;	/* Number of symbols */
 	caddr_t		ddbstrtab;	/* String table */
 	long		ddbstrcnt;	/* number of bytes in string table */
-	caddr_t		symbase;	/* malloc'ed symbold base */
+	caddr_t		symbase;	/* malloc'ed symbold base 已经被分配空间的符号表的基地址？？ */
 	caddr_t		strbase;	/* malloc'ed string base */
-	caddr_t		ctftab;		/* CTF table */
+	caddr_t		ctftab;		/* CTF table - C type format，参考linker.h */
 	long		ctfcnt;		/* number of bytes in CTF table */
 	caddr_t		ctfoff;		/* CTF offset table */
 	caddr_t		typoff;		/* Type offset table */
@@ -702,7 +713,11 @@ link_elf_link_preload(linker_class_t cls,
 	int error;
 	vm_offset_t dp;
 
-	/* Look to see if we have the file preloaded */
+	/* 
+		Look to see if we have the file preloaded 
+		从riscv/machdep.c 文件中可以看到，我们是需要预加载kernel文件？？
+		preload_search_by_name 函数会返回一个指向filename的一个指针
+	*/
 	modptr = preload_search_by_name(filename);
 	if (modptr == NULL)
 		return (ENOENT);

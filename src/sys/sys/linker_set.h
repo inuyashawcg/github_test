@@ -86,7 +86,7 @@
 
 /*
  * Initialize before referring to a given linker set.
- * 弱符号
+ * 弱符号，作用类似与全局符号，只不过优先级要低一些
  */
 #define SET_DECLARE(set, ptype)					\
 	extern ptype __weak_symbol *__CONCAT(__start_set_,set);	\

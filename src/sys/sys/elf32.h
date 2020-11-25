@@ -50,11 +50,11 @@ typedef Elf32_Word	Elf32_Hashelt;
 typedef Elf32_Word	Elf32_Size;
 typedef Elf32_Sword	Elf32_Ssize;
 
+
 /*
  * ELF header.
  * 包含了program header table和section header table的相关信息
  */
-
 typedef struct {
 	/*
 		初始字节将文件标记为目标文件，并提供与机器无关的数据，用于解码和解释文件的内容
@@ -84,9 +84,19 @@ typedef struct {
 
 	/* program header table 中的entry的大小，每个entry的大小都是一致的 */
 	Elf32_Half	e_phentsize;	/* Size of program header entry. */
+
+	/*
+		如果e_phnum的值为PN_XNUM（即0xffff），则表示program header的数量超过了它所能存储的最大值，因此它的值
+		另外保存在索引号为SHN_UNDEF（即0）的section的Elf32_Shdr. sh_info的位置
+	*/
 	Elf32_Half	e_phnum;	/* Number of program header entries. */
 
-	/* section header table entry 的大小，类比上面 */
+	/* 
+		section header table entry 的大小，类比上面；由于每个section header的大小是固定的，而它们的名字和属性
+		不可能是一样长的，所以需要一个专门的string section来保存它们的名称属性，而用来描述这个string section的
+		section header在section表中的位置就由 e_shstrndx 来确定，实现快速查找
+		位置 = e_shoff + e_shentsize * e_shstrndx
+	*/
 	Elf32_Half	e_shentsize;	/* Size of section header entry. */
 	Elf32_Half	e_shnum;	/* Number of section header entries. */
 
@@ -97,10 +107,10 @@ typedef struct {
 	Elf32_Half	e_shstrndx;	/* Section name strings section. */
 } Elf32_Ehdr;
 
+
 /*
  * Shared object information, found in SHT_MIPS_LIBLIST.
  */
-
 typedef struct {
 	Elf32_Word l_name;		/* The name of a shared object. */
 	Elf32_Word l_time_stamp;	/* 32-bit timestamp. */
@@ -109,19 +119,31 @@ typedef struct {
 	Elf32_Word l_flags;		/* Flags (LL_*). */
 } Elf32_Lib;
 
+
 /*
  * Section header.
  * Section header table用于查找所有的section(凡是涉及到table的，应该是都是对应类型的一个数组，
  * 动态链接时肯定会涉及到对这些数组的操作)，array中的元素都是Elf32_Shdr类型，也就是对于每个section，
  * section header都会采用 Elf32_Shdr 一个结构体来进行管理
+ * 
+ * 在ELF文件中，每个section header都要一个索引号，从1开始，依次递增。不过section header表的开头必须
+ * 定义一个SHT_NULL类型的表项，它的索引号为SHN_UNDEF(也就是0)。由于section header使用相同的数据结构
+ * 来定义，并且它们的大小相同，所以所有的section header依次存储在一起看起来就是一个表，因此可以叫它section header表。
+ * 类似的，所有program header看起来也是一个表。
  */
-
 typedef struct {
 	/*
 		可以注意到，结构体中有关name的，已知的都是保存一个string table中的index，而不会自己真正去
 		保存一个name string(string table 貌似是在一个section当中)
 		string table一般用于保存symbol和section的名称，字符串表索引可以引用节中的任何字节。一个字符串
 		可能出现多次；对子字符串的引用可能存在；一个字符串可能被多次引用。也允许使用未引用的字符串
+
+		sh_name 表示section的名称。由于每个section名称长度都是不一样的，为了节约空间，就把所有的section的
+		名称都放在了一个特定的名叫 .shstrtab 的section(ELF header中的 Elf32_Ehdr. e_shstrndx 就是用来
+		快速查找它的)中，所以这里的 sh_name 的值就表示在这个特定section中的偏移量，通过它可以获取一个字符串，
+		也就是我们所需要的section的名称。0的话表示无名称，一般用在类型为 SHT_NULL 的section当中
+		每个ELF文件中都有一个 SHT_NULL 类型的section，它只有section header，没有相应的section数据，并且
+		section header中的数据都为0，没有意义
 	*/
 	Elf32_Word	sh_name;	/* Section name (index into the section header string table). */
 	Elf32_Word	sh_type;	/* Section type. 参考elf_common.h中的定义 */
@@ -129,6 +151,7 @@ typedef struct {
 
 	/*
 		当这个section出现在进程映像当中的时候，这个成员会给出该section的第一个byte所处的位置，否则值为0
+		表示该section在进程空间中的虚拟地址(首地址)，如果该成员为0，就表示该section不会出现在进程空间中
 	*/
 	Elf32_Addr	sh_addr;	/* Address in memory image. */
 
@@ -147,7 +170,11 @@ typedef struct {
 	/*
 		此成员持有一个节头表索引链接(section header table index link)，其解释取决于节类型
 		个人理解应该是这个section有关联的section，sh_link 就是它所关联的section在section header table中
-		的index？？ - 应该不是这样理解的，这里可以参考一下ELF_Format.pdf文档中19页的相关表述
+		的index？？ - 应该不是这样理解的，这里可以参考一下ELF_Format.pdf文档中19页的相关表述，不同类型的section
+		中 sh_link 所表示的内容是不一样的，sh_info也是同样的机制
+
+		sh_link表示链接到其他section header的索引号，sh_info表示附加的段信息。这两个成员的值只对一些类型有效，
+		其他类型的section则都为0。
 	*/
 	Elf32_Word	sh_link;	/* Index of a related section. */
 	Elf32_Word	sh_info;	/* Depends on section type. */
@@ -165,6 +192,7 @@ typedef struct {
 	*/
 	Elf32_Word	sh_entsize;	/* Size of each entry in section. */
 } Elf32_Shdr;
+
 
 /*
  * Program header.
@@ -196,12 +224,12 @@ typedef struct {
 	Elf32_Word	p_align;	/* Alignment in memory and file. 对齐方式 */
 } Elf32_Phdr;
 
+
 /*
  * Dynamic structure.  The ".dynamic" section contains an array of them.
  * .dynamic section中会包含有 Elf32_Dyn 类型的数组，其中应该会包含有多种类型结构体，
  * 动态链接的过程中对数组遍历查找？
  */
-
 typedef struct {
 	Elf32_Sword	d_tag;		/* Entry type. 不同d_tag类型，union会有不同的值 */
 	union {
@@ -210,10 +238,10 @@ typedef struct {
 	} d_un;
 } Elf32_Dyn;
 
+
 /*
  * Relocation entries.
  */
-
 /* 
 	Relocations that don't need an addend field. 
 	不需要加数域的重定位
@@ -222,6 +250,7 @@ typedef struct {
 	Elf32_Addr	r_offset;	/* Location to be relocated. */
 	Elf32_Word	r_info;		/* Relocation type and symbol index. */
 } Elf32_Rel;
+
 
 /* Relocations that need an addend field. */
 typedef struct {
