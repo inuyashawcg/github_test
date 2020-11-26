@@ -114,7 +114,7 @@ struct linker_file {
     */
     linker_file_t*	deps;		/* list of dependencies 依赖对象链表 */
  
-    STAILQ_HEAD(, common_symbol) common; /* list of common symbols 模块的符号表？？ */
+    STAILQ_HEAD(, common_symbol) common; /* list of common symbols 管理公共符号 */
     TAILQ_HEAD(, module) modules;	/* modules in this file 此文件中所包含的module */
     TAILQ_ENTRY(linker_file) loaded;	/* preload dependency support 预加载依赖项支持 */
     int			loadcnt;	/* load counter value */

@@ -274,6 +274,7 @@ elf_is_ifunc_reloc(Elf_Size r_info __unused)
  * modules are built in non-PIC.
  *
  * FIXME: only RISCV64 is supported.
+ * 目前RISCV的内核可加载模块是用-fPIC选项编译的
  */
 static int
 elf_reloc_internal(linker_file_t lf, Elf_Addr relocbase, const void *data,
@@ -317,6 +318,10 @@ elf_reloc_internal(linker_file_t lf, Elf_Addr relocbase, const void *data,
 			return -1;
 
 		val = addr;
+		/*
+			重定位的时候，可能有些symbol位置没有发生变动，这里就做了一次判断；
+			如果位置不一样了，就更新一下
+		*/
 		before64 = *where;
 		if (*where != val)
 			*where = val;

@@ -391,6 +391,10 @@ typedef struct {
 	Special section indexes. 
 	一些section index目前还是保留的，目标文件中不会包含这些特殊索引的section
 */
+/*
+	SHN_UNDEF表示该符号是未定义的，也就是说它可能定义在其他目标文件中，只有在程序执行时
+	才能实际确定。对于索引值为STN_UNDEF的表项，st_shndx的值也是SHN_UNDEF
+*/
 #define	SHN_UNDEF	     0		/* Undefined, missing, irrelevant. */
 #define	SHN_LORESERVE	0xff00		/* First of reserved range. */
 #define	SHN_LOPROC	0xff00		/* First processor-specific. */
@@ -401,11 +405,11 @@ typedef struct {
 					   symtab. */
 #define	SHN_HIOS	0xff3f		/* Last operating system-specific. */
 
-/* symbol value 不会因为重定位而改变 */
+/* SHN_ABS表示该符号的值在重定位时不会改变 */
 #define	SHN_ABS		0xfff1		/* Absolute values. */
 
 /*
-	符号标记尚未分配的公共块。symbol value提供对齐约束，类似于节的sh_addralign成员。
+	SHN_COMMON表示该符号尚未被分配空间，它的值st_value为地址对齐字节数，类似于节的sh_addralign成员。
 	也就是说，链接编辑器将为符号分配存储空间，地址是st_value的倍数。符号的大小表示需要多少字节
 */
 #define	SHN_COMMON	0xfff2		/* Common data. */
@@ -440,7 +444,7 @@ typedef struct {
 
 	Q&A: 链接编辑(linker edit)指的是什么？
 */
-#define	SHT_SYMTAB		2	/* symbol table section */
+#define	SHT_SYMTAB		2	/* symbol table section 动态链接相关 */
 
 /*
 	表明该section保存的是string table，一文件中可以保存多个string table section
@@ -458,7 +462,7 @@ typedef struct {
 	hash table 也是包含在一个section当中，所有参与到动态链接的对象都必须包含hash table。目前每个目标
 	文件都只包含一个hash table，未来有可能会放开限制
 */
-#define	SHT_HASH		5	/* symbol hash table section */
+#define	SHT_HASH		5	/* symbol hash table section 跟动态链接相关 */
 
 /*
 	包含有动态链接的信息，所以非常重要。目前也是每个目标文件中仅仅包含一个dynamic section，未来也可能
@@ -491,7 +495,7 @@ typedef struct {
 #define	SHT_SHLIB		10	/* reserved - purpose unknown */
 
 /*
-	参考上述关于symbol table的注释
+	参考上述关于symbol table的注释，动态链接符号表
 */
 #define	SHT_DYNSYM		11	/* dynamic symbol table section */
 #define	SHT_INIT_ARRAY		14	/* Initialization function pointers. */
@@ -514,11 +518,11 @@ typedef struct {
 #define	SHT_SUNW_COMDAT		0x6ffffffb
 #define	SHT_SUNW_syminfo	0x6ffffffc
 #define	SHT_SUNW_verdef		0x6ffffffd
-#define	SHT_GNU_verdef		0x6ffffffd	/* Symbol versions provided */
+#define	SHT_GNU_verdef		0x6ffffffd	/* Symbol versions provided 动态链接符号版本控制信息 */
 #define	SHT_SUNW_verneed	0x6ffffffe
-#define	SHT_GNU_verneed		0x6ffffffe	/* Symbol versions required */
+#define	SHT_GNU_verneed		0x6ffffffe	/* Symbol versions required 同上，动态链接相关 */
 #define	SHT_SUNW_versym		0x6fffffff
-#define	SHT_GNU_versym		0x6fffffff	/* Symbol version table */
+#define	SHT_GNU_versym		0x6fffffff	/* Symbol version table 同上，动态链接相关 */
 #define	SHT_HISUNW		0x6fffffff
 #define	SHT_HIOS		0x6fffffff	/* Last of OS specific semantics */
 
@@ -578,7 +582,6 @@ typedef struct {
 */
 #define	SHT_LOUSER		0x80000000	/* reserved range for application */
 #define	SHT_HIUSER		0xffffffff	/* specific indexes */
-
 /* 
 	Flags for sh_flags. 
 	SHF: section header flags
@@ -1005,7 +1008,10 @@ typedef struct {
 */
 
 /*
-	局部符号在包含其定义的对象文件外部不可见。相同名称的本地符号可以存在于多个文件中，而不会相互干扰
+	局部符号在包含其定义的对象文件外部不可见。相同名称的本地符号可以存在于多个文件中，而不会相互干扰；
+	局部符号，顾名思义，它只被局限在定义它的目标文件之内，多个目标文件定义的同名局部符号互不影响，全局符号则与之相反；
+	相对弱符号，其它的就是强符号。两个同名的强符号会导致重复定义的错误，但如果同名的是一个强符号和多个弱符号，则不报错，
+	链接器会选择其中的强符号
 */
 #define	STB_LOCAL	0	/* Local symbol */
 
@@ -1033,24 +1039,24 @@ typedef struct {
 #define	STB_LOPROC	13	/* reserved range for processor */
 #define	STB_HIPROC	15	/*   specific semantics. */
 
-/* Symbol type - ELFNN_ST_TYPE - st_info  符号类型 */
-#define	STT_NOTYPE	0	/* Unspecified type. */
-#define	STT_OBJECT	1	/* Data object. 符号关联到变量或者数组等类型 */
 
+/* Symbol type - ELFNN_ST_TYPE - st_info  符号类型 */
+#define	STT_NOTYPE	0	/* Unspecified type. 每一个符号表的开头都会有一个该类型的表项 */
+#define	STT_OBJECT	1	/* Data object. 表示数据，符号关联到变量或者数组等类型 */
 /*
 	function symbol 在共享文件中有着特殊的意义，当另外一个目标文件引用共享文件中的function时，
 	link editor会自动的为引用的符号创建 procedure linkage table entry，不是function类型的
 	符号不会通过 procedure linkage table 实现自动引用(procedure linkage table的作用是函数
 	symbol的自动引用？)
 */
-#define	STT_FUNC	2	/* Function. 符号关联到函数类型 */
+#define	STT_FUNC	2	/* Function. 符号关联到函数类型或者可执行代码 */
 
 /* 符号与section相关联。这种类型的符号表entry主要用于重定位，通常具有STB_LOCAL绑定 */
 #define	STT_SECTION	3	/* Section. */
 
 /*
- * 通常，符号的名称给出与目标文件关联的源文件的名称。一个文件符号具有STB_本地绑定，它的
- * section index是 SHN_ABS，并且它位于该文件的其他STB_LOCAL符号之前（如果存在的话）
+ * 通常，符号的名称给出与目标文件关联的源文件的名称。一个文件符号具有STB_LOCAL绑定，它的
+ * section index(st_shndx)是 SHN_ABS，并且它位于该文件的其他STB_LOCAL符号之前（如果存在的话）
  */
 #define	STT_FILE	4	/* Source file. */
 #define	STT_COMMON	5	/* Uninitialized common block. */

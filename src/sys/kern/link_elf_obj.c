@@ -1224,12 +1224,20 @@ symbol_name(elf_file_t ef, Elf_Size r_info)
 		return NULL;
 }
 
+/*
+	函数功能应该就是找到elf文件中的指定的 PROGBITS类型的section，获取到程序运行所需要的数据
+*/
 static Elf_Addr
 findbase(elf_file_t ef, int sec)
 {
 	int i;
 	Elf_Addr base = 0;
 
+	/*
+		prog table应该是位于 PROGBITS 类型的section当中，它里边保存的是跟程序运行相关的代码或者数据；
+		这里就是通过遍历elf文件中的progtab(也就是所有PROGBITS类型的section)来找到我们所需要的那个，
+		然后把地址赋值给base，然后返回base
+	*/
 	for (i = 0; i < ef->nprogtab; i++) {
 		if (sec == ef->progtab[i].sec) {
 			base = (Elf_Addr)ef->progtab[i].addr;
@@ -1329,11 +1337,15 @@ relocate_file(elf_file_t ef)
 static int
 link_elf_lookup_symbol(linker_file_t lf, const char *name, c_linker_sym_t *sym)
 {
+	/* 都是上来先做一个类型强转 */
 	elf_file_t ef = (elf_file_t) lf;
 	const Elf_Sym *symp;
 	const char *strp;
 	int i;
 
+	/*
+		遍历symbol table，根据传入的name来查找对应的symbol
+	*/
 	for (i = 0, symp = ef->ddbsymtab; i < ef->ddbsymcnt; i++, symp++) {
 		strp = ef->ddbstrtab + symp->st_name;
 		if (symp->st_shndx != SHN_UNDEF && strcmp(name, strp) == 0) {
@@ -1344,6 +1356,9 @@ link_elf_lookup_symbol(linker_file_t lf, const char *name, c_linker_sym_t *sym)
 	return ENOENT;
 }
 
+/*
+	获取已知symbol的symbol value
+*/
 static int
 link_elf_symbol_values(linker_file_t lf, c_linker_sym_t sym,
     linker_symval_t *symval)
@@ -1352,9 +1367,14 @@ link_elf_symbol_values(linker_file_t lf, c_linker_sym_t sym,
 	const Elf_Sym *es;
 	caddr_t val;
 
-	ef = (elf_file_t) lf;
+	ef = (elf_file_t) lf;	/* 类型强转 */
 	es = (const Elf_Sym*) sym;
 	val = (caddr_t)es->st_value;
+
+	/*
+		当es位于ddbsymtab区间范围之内，比较的是指针的大小
+		symval获取三个参数：name、value和size，然后返回
+	*/
 	if (es >= ef->ddbsymtab && es < (ef->ddbsymtab + ef->ddbsymcnt)) {
 		symval->name = ef->ddbstrtab + es->st_name;
 		val = (caddr_t)es->st_value;
@@ -1502,6 +1522,8 @@ elf_obj_cleanup_globals_cache(elf_file_t ef)
  * hash table based lookup when such is valid. For example for local symbols.
  * This is not only more efficient, it's also more correct. It's not always
  * the case that the symbol can be found through the hash table.
+ * 查找symbol的功能函数，这里只包含了已知symbol index的情况，不包括通过hash table查找。采用直接
+ * 查找的方法效率跟准确性都会比较高，所以一般local symbol查找最好是采用这种方式
  */
 static int
 elf_obj_lookup(linker_file_t lf, Elf_Size symidx, int deps, Elf_Addr *res)
@@ -1517,18 +1539,24 @@ elf_obj_lookup(linker_file_t lf, Elf_Size symidx, int deps, Elf_Addr *res)
 		return (EINVAL);
 	}
 
+	/* 通过传入的symidx找到要使用的符号 */
 	sym = ef->ddbsymtab + symidx;
 
-	/* Quick answer if there is a definition included. */
+	/* Quick answer if there is a definition included. 
+		如果我们查找的这个symbol不是 SHN_UNDEF 属性，仅仅做了一些类型判断，然后获取
+		symbol的虚拟地址，返回。
+	*/
 	if (sym->st_shndx != SHN_UNDEF) {
-		res1 = (Elf_Addr)sym->st_value;
+		res1 = (Elf_Addr)sym->st_value;	/* st_value 一般保存的是虚拟地址 */
 		if (ELF_ST_TYPE(sym->st_info) == STT_GNU_IFUNC)
 			res1 = ((Elf_Addr (*)(void))res1)();
 		*res = res1;
 		return (0);
 	}
 
-	/* If we get here, then it is undefined and needs a lookup. */
+	/* If we get here, then it is undefined and needs a lookup. 
+		处理 SHN_UNDEF 属性的symbol
+	*/
 	switch (ELF_ST_BIND(sym->st_info)) {
 	case STB_LOCAL:
 		/* Local, but undefined? huh? */
@@ -1537,7 +1565,9 @@ elf_obj_lookup(linker_file_t lf, Elf_Size symidx, int deps, Elf_Addr *res)
 
 	case STB_GLOBAL:
 	case STB_WEAK:
-		/* Relative to Data or Function name */
+		/* Relative to Data or Function name 
+			从ddbstrtab中找到symbol的名字
+		*/
 		symbol = ef->ddbstrtab + sym->st_name;
 
 		/* Force a lookup failure if the symbol name is bogus. */
@@ -1545,7 +1575,7 @@ elf_obj_lookup(linker_file_t lf, Elf_Size symidx, int deps, Elf_Addr *res)
 			*res = 0;
 			return (EINVAL);
 		}
-		res1 = (Elf_Addr)linker_file_lookup_symbol(lf, symbol, deps);
+		res1 = (Elf_Addr)linker_file_lookup_symbol(lf, symbol, deps);	/* 获取symbol地址 */
 
 		/*
 		 * Cache global lookups during module relocation. The failure
@@ -1556,6 +1586,10 @@ elf_obj_lookup(linker_file_t lf, Elf_Size symidx, int deps, Elf_Addr *res)
 		 * After relocation is complete, undefined globals will be
 		 * restored to SHN_UNDEF in elf_obj_cleanup_globals_cache(),
 		 * above.
+		 * 
+		 * 在模块重定位期间缓存全局查找。对于调用方来说，失败的情况尤其昂贵，因为调用方
+		 * 必须执行strcmp（）扫描整个globals表。缓存以避免重复执行此类工作
+		 * 重新定位完成后，未定义的全局项将恢复到上面elf_obj_cleanup_globals_cache（）中的SHN_UNDEF
 		 */
 		if (res1 != 0) {
 			sym->st_shndx = SHN_FBSD_CACHED;
@@ -1602,7 +1636,7 @@ link_elf_fix_link_set(elf_file_t ef)
 			引用，所以才会说当与外部的文件链接的时候，我们才会将对符号的引用链接到实际的定义
 
 			再进一步看，这个函数是嵌套在 link_elf_reloc_local 函数当中的，从函数名字看是进行本地重定位，
-			可能不涉及对外部引用，所以这里利用这个函数做一些操作，使外部引用不会影响到本地重定位？？
+			可能不涉及外部引用，所以这里利用这个函数做一些操作，使外部引用不会影响到本地重定位？？
 		*/
 		if (sym->st_shndx != SHN_UNDEF)
 			continue;
@@ -1642,7 +1676,9 @@ link_elf_fix_link_set(elf_file_t ef)
 }
 
 /*
-	本地重定位？？
+	本地重定位，从代码逻辑可以看出，我们遍历REL和RELA类型的section中的entry，但是真正用来处理
+	的却是entry中 r_info(r_info：重定位的类型+符号索引)所指向的symbol。所以，重定位最重要的
+	一个环节其实是符号解析
 */
 static int
 link_elf_reloc_local(linker_file_t lf, bool ifuncs)
@@ -1658,7 +1694,8 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 	Elf_Size symidx;
 
 	/*
-		首先是对所有的外部符号引用进行了处理
+		首先是对所有的外部符号引用进行了处理？？
+		然后是RLE 和 RELA 两种类型的重定位表
 	*/
 	link_elf_fix_link_set(ef);
 
@@ -1669,6 +1706,7 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 			link_elf_error(ef->lf.filename, "lost a reltab");
 			return (ENOEXEC);
 		}
+		/* rel limit，意思就是该指针指向table结尾的entry */
 		rellim = rel + ef->reltab[i].nrel;
 		base = findbase(ef, ef->reltab[i].sec);
 		if (base == 0) {
@@ -1676,19 +1714,38 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 			return (ENOEXEC);
 		}
 		for ( ; rel < rellim; rel++) {
+			/*
+				ELF_R_SYM 宏主要实现了拼接的功能，形式为 ELF32/64_R_SYM(rel->r_info),
+				就是为了获取重定位以后需要指向的符号，再从结果来看，这里获取到的是一个index
+			*/
 			symidx = ELF_R_SYM(rel->r_info);
 			if (symidx >= ef->ddbsymcnt)
 				continue;
-			sym = ef->ddbsymtab + symidx;
-			/* Only do local relocs */
+
+			/* 获取到重定位后需要指向的符号 */
+			sym = ef->ddbsymtab + symidx;	
+
+			/* 
+				Only do local relocs 本地重定位，所以要判断symbol的属性
+				ELF32_ST_BIND: 获取symbol绑定属性，这个函数是要处理local重定位，所以要判断一下symbol绑定的属性
+				是不是 STB_LOCAL(属性就表示是本地的，还是外部的)
+			*/
 			if (ELF_ST_BIND(sym->st_info) != STB_LOCAL)
 				continue;
+			
+			/*
+				再判断symbol的类型，symbol表示的是函数、变量等等
+			*/
 			if ((ELF_ST_TYPE(sym->st_info) == STT_GNU_IFUNC ||
 			    elf_is_ifunc_reloc(rel->r_info)) == ifuncs)
 				elf_reloc_local(lf, base, rel, ELF_RELOC_REL,
 				    elf_obj_lookup);
 		}
-	}
+		/*
+			从上述代码可以看到，REL/RELA section中的entry其实存储就是关于symbol的信息，所以这两个表
+			可以理解为有哪些symbol需要重定位，然后我就把它放到里边，然后我们重定位的时候遍历这些表就行了
+		*/
+	}	//end RLE
 
 	/* Perform relocations with addend if there are any: */
 	for (i = 0; i < ef->nrelatab; i++) {
@@ -1716,7 +1773,7 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 				elf_reloc_local(lf, base, rela, ELF_RELOC_RELA,
 				    elf_obj_lookup);
 		}
-	}
+	}	// end RELA
 	return (0);
 }
 

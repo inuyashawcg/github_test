@@ -977,6 +977,10 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 	KLD_DPF(SYM, ("linker_file_lookup_symbol: file=%p, name=%s, deps=%d\n",
 	    file, name, deps));
 
+	/*
+		sym: 用来保存获取到的symbol，通过传入的name参数进行查找
+		symval：保存symbol value，包含有name、value和size
+	*/
 	if (LINKER_LOOKUP_SYMBOL(file, name, &sym) == 0) {
 		LINKER_SYMBOL_VALUES(file, sym, &symval);
 		if (symval.value == 0)
@@ -984,7 +988,6 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 			 * For commons, first look them up in the
 			 * dependencies and only allocate space if not found
 			 * there.
-			 * 对于commons，首先在依赖项中查找它们，如果没有找到就只分配空间
 			 */
 			common_size = symval.size;
 		else {
@@ -1004,8 +1007,7 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 		/*
 			ndeps 表示linker file依赖项的总数，执行递归查找。这个应该就是对应
 			符号决议的执行过程。在当前的目标文件中涉及到一些外部变量的引用，这个时候就要
-			去查找依赖项中是否含有这个符号；如果有，就证明可以找到对应变量的定义，编译就
-			可以继续执行，如果没有找到，编译就会报错
+			去查找依赖项中是否含有这个符号；
 		*/
 		for (i = 0; i < file->ndeps; i++) {
 			address = linker_file_lookup_symbol_internal(
@@ -1020,9 +1022,9 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 
 	/*
 		在依赖项中仍然没有找到symbol，接着执行下面的代码。common_size > 0其实就表示前面已经赋值过，
-		推测：这种情况可能是我在当前文件表中找到了这个符号，但是该符号表示的是一个外部引用，然后在所有
-		的依赖项中还是没有找到对应的符号，最后就把这个符号放到了common队列中，所以common队列很可能是
-		用于管理找不到具体定义的这些符号
+		推测：这种情况可能是我在当前文件中找到了这个符号，但是该符号表示的是一个外部引用，然后在所有
+		的依赖项中还是没有找到对应的符号，最后在common队列中查找(common应该是保存的已知公共符号)；如果
+		还是没有找到，那就新创建一个以name命名的common_symbol，然后插入到common队列末尾
 	*/
 	if (common_size > 0) {
 		/*
