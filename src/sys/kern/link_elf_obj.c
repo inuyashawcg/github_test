@@ -78,14 +78,14 @@ typedef struct {
 	/*
 		参考下文代码实现，sec保存的是该section在原有文件的section header中的index
 	*/
-	int		sec;	/* Original section */
+	int		sec;	/* Original section - section header table index */
 	char		*name;
 } Elf_progent;
 
 typedef struct {
 	Elf_Rel		*rel;	/* 推断应该是 REL table 的地址(section table) */
 	int		nrel;	/* REL table中entry的数量 */
-	int		sec;	/* Elf32_Shdr->sh_info */
+	int		sec;	/* Elf32_Shdr->sh_info：REL和RELA类型，sh_info表示section header index */
 } Elf_relent;
 
 typedef struct {
@@ -110,7 +110,7 @@ typedef struct elf_file {
 	Elf_Shdr	*e_shdr;
 
 	Elf_progent	*progtab;
-	u_int		nprogtab;
+	u_int		nprogtab;	/* number of prog table?? */
 
 	Elf_relaent	*relatab;
 	/* 
@@ -234,12 +234,16 @@ link_elf_init(void *arg)
 
 SYSINIT(link_elf_obj, SI_SUB_KLD, SI_ORDER_SECOND, link_elf_init, NULL);
 
+/* 
+	好像是系统环境变量中会包含一个预加载项的，当我们在某个阶段获取环境变量的时候，
+	如果检测到有这个，就会执行相应的preload操作
+*/
 static int
 link_elf_link_preload(linker_class_t cls, const char *filename,
     linker_file_t *result)
 {
 	Elf_Ehdr *hdr;		/* ELF header */
-	Elf_Shdr *shdr;		/* Section header */
+	Elf_Shdr *shdr;		/* Section header table entry */
 	Elf_Sym *es;		/* symbol table entry  */
 	void *modptr, *baseptr, *sizeptr;
 	char *type;
@@ -248,7 +252,10 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 	Elf_Addr off;
 	int error, i, j, pb, ra, rl, shstrindex, symstrindex, symtabindex;
 
-	/* Look to see if we have the file preloaded */
+	/* Look to see if we have the file preloaded
+		以riscv为例，在initriscv函数中会插入一个参数让linker来判断是否有需要进行预加载的模块。
+		所以，这里在preload之前要先判断一下该操作是否需要
+	*/
 	modptr = preload_search_by_name(filename);
 	if (modptr == NULL)
 		return ENOENT;
@@ -279,14 +286,19 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 
 	/*
 		上述条件都满足之后，我们就创建一个linker file(kernel)，并指定一个linker class
+		创建一个linker_file结构体来管理这个preloaded_file
 	*/
 	lf = linker_make_file(filename, &link_elf_class);
 	if (lf == NULL)
 		return (ENOMEM);
 
-	/* 对lf强制类型转换，其实对ef的操作就是对lf的操作 */
+	/* 
+		对lf强制类型转换，其实对ef的操作就是对lf的操作;用从init过程获取的参数填充这个结构体
+	*/
 	ef = (elf_file_t)lf;
 	ef->preloaded = 1;
+
+	/* ef->address：表示重定位的基地址，也是通过init函数返回值获取到的 */
 	ef->address = *(caddr_t *)baseptr;
 	lf->address = *(caddr_t *)baseptr;
 	lf->size = *(size_t *)sizeptr;
@@ -315,8 +327,8 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 	symstrindex = -1;
 
 	/*
-		通过for循环扫描section header中所有的entry，主要就是为了统计未被加载的
-		section的数量和symbol table/string index 
+		通过for循环扫描section header中所有的entry，主要就是为了统计需要被加载的
+		section的数量和symbol table/string index
 	*/
 	for (i = 0; i < hdr->e_shnum; i++) {
 		switch (shdr[i].sh_type) {
@@ -333,6 +345,8 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 				外部模块的变量或者函数，那么我们将无法获取到它的地址的，这个就需要链接的时候再进一步确定，应该是
 				编译器会给其分配一个0地址，然后生成一条提示(好像是保存在.rel.text段)，告诉链接器这个变量的地址
 				需要修改，链接器链接的时候再通过一些步骤得到对应的地址，然后对这些0地址再进行修改
+
+				通过查阅资料发现，如果一个section sh_addr为0，那么就表示这个section是不会被加载的
 			*/
 			if (shdr[i].sh_addr == 0)
 				break;
@@ -342,6 +356,8 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 			/* 
 				如果section的类型是SHT_SYMTAB，那么sh_link就表示section header entry在
 				string table中的index
+
+				目前规定每个文件中的 symbol section 只能包含一个，那么它的index也只有一个，所以这里就可以直接赋值
 			*/
 			symtabindex = i;
 			symstrindex = shdr[i].sh_link;
@@ -377,8 +393,8 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 
 	/* 
 		Allocate space for tracking the load chunks 
-		注意：malloc中的参数是 nprogtab nreltab nrelatab，这里是为那些地址为0的entry
-		来分配空间
+		注意：malloc中的参数是 nprogtab nreltab nrelatab，上面的步骤已经是把所有需要加载的section都统计
+		出来了，所以这里的话就需要为用于管理的结构体来分配空间，保存每个section的管理信息
 	*/
 	if (ef->nprogtab != 0)
 		ef->progtab = malloc(ef->nprogtab * sizeof(*ef->progtab),
@@ -416,26 +432,43 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 		考虑一下多个section entry 的 sh_addr 都为0的情况？？
 	*/
 	for (i = 0; i < hdr->e_shnum; i++) {
+		/* 这里也是需要判断 sh_addr 是否为0 */
 		if (shdr[i].sh_addr != 0)
 			shdr[i].sh_addr = shdr[i].sh_addr - off +
 			    (Elf_Addr)ef->address;
+		/* 
+			offset + base address，获取到的应该是每个需要加载的section的虚拟地址？？
+			这里需要考虑一下这个 base address 代表的是什么意义，是文件的起始地址，还是section的起始地址？？
+			感觉应该是文件的起始地址，off表示的是最小的section的offset，应该表示的是section到文件起始位置的
+			offset；但是如果这么理解的话，offset肯定是不为0的，因为前面肯定有ELF Header，那么上面for循环中
+			判断off为0就感觉没有必要了；另外一种情况就是把这个off理解为section的起始地址，这也那个就可以解释了
+		*/
 	}
 
 	/*
-		计算symbol数量，获取symbol table在内存中的地址
-		获取string table大小和内存地址(ddb)
+		上面处理完了section table，下面开始计算symbol数量，获取symbol table在内存中的地址
+		获取string table大小和内存地址(ddb)； symtabindex 在前面遍历section table的时候已经获取到了
 	*/
-	ef->ddbsymcnt = shdr[symtabindex].sh_size / sizeof(Elf_Sym);	
+	ef->ddbsymcnt = shdr[symtabindex].sh_size / sizeof(Elf_Sym);
+	/* sh_addr 也已经更新完毕，下面的操作类似 */	
 	ef->ddbsymtab = (Elf_Sym *)shdr[symtabindex].sh_addr;
+
 	ef->ddbstrcnt = shdr[symstrindex].sh_size;
 	ef->ddbstrtab = (char *)shdr[symstrindex].sh_addr;
+
 	ef->shstrcnt = shdr[shstrindex].sh_size;
 	ef->shstrtab = (char *)shdr[shstrindex].sh_addr;
 
-	/* Now fill out progtab and the relocation tables. 填充progtab和重定位表*/
+	/* Now fill out progtab and the relocation tables. 
+		前面已经把section table / smybol table 相关的内容做完了，这里就开始填充progtab和重定位表(管理)
+	*/
 	pb = 0;		/* progtab index */
 	rl = 0;		/* REL section index */
 	ra = 0;		/* RELA section index */
+
+	/* 
+		还是对整个section header table遍历，筛选其中的prog，rel和rela类型的section
+	*/
 	for (i = 0; i < hdr->e_shnum; i++) {
 		switch (shdr[i].sh_type) {
 		case SHT_PROGBITS:
@@ -444,8 +477,8 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 		case SHT_X86_64_UNWIND:
 #endif
 			if (shdr[i].sh_addr == 0)
-				break;	/* 对于 sh_addr 为0的 section，不做处理  */
-			ef->progtab[pb].addr = (void *)shdr[i].sh_addr;
+				break;	/* 对于 sh_addr 为0的 section，不做处理，表明section不会被load  */
+			ef->progtab[pb].addr = (void *)shdr[i].sh_addr;	/* 筛选prog类型section */
 			if (shdr[i].sh_type == SHT_PROGBITS)
 				ef->progtab[pb].name = "<<PROGBITS>>";
 #ifdef __amd64__
@@ -455,16 +488,22 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 			else
 				ef->progtab[pb].name = "<<NOBITS>>";
 			ef->progtab[pb].size = shdr[i].sh_size;
-			ef->progtab[pb].sec = i;	/* 把该section在原有文件的section header中的index赋值给sec */
+			ef->progtab[pb].sec = i;	/* 把该section在文件的section header中的index赋值给sec */
+
+			/* 
+				sh_name 其实是一个index，通过整个index可以查找到该section的真实名称；这里就是判断如果有
+				shstrtab，就从 shstrtab 中获取，没有的话就按照上面的逻辑给name赋值
+			*/
 			if (ef->shstrtab && shdr[i].sh_name != 0)
 				ef->progtab[pb].name =
 				    ef->shstrtab + shdr[i].sh_name;
 
+			/* 如果section名称诶set_pcpu，即设置多cpu，那就执行一下操作 */
 			if (ef->progtab[pb].name != NULL && 
 			    !strcmp(ef->progtab[pb].name, DPCPU_SETNAME)) {
 				void *dpcpu;
 
-				/* 多CPU操作 */
+				/* 首先分配一块内存区域 */
 				dpcpu = dpcpu_alloc(shdr[i].sh_size);
 				if (dpcpu == NULL) {
 					printf("%s: pcpu module space is out "
@@ -475,8 +514,11 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 					error = ENOSPC;
 					goto out;
 				}
+				/* 把整个prog section数据拷贝到dpcpu指向的内存区域 */
 				memcpy(dpcpu, ef->progtab[pb].addr,
 				    ef->progtab[pb].size);
+
+				/* linker set 区域分配给每一个cpu，然后初始化操作 */
 				dpcpu_copy(dpcpu, shdr[i].sh_size);
 				ef->progtab[pb].addr = dpcpu;
 #ifdef VIMAGE
@@ -505,7 +547,16 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 				lf->ctors_size = shdr[i].sh_size;
 			}
 
-			/* Update all symbol values with the offset. */
+			/* Update all symbol values with the offset. 
+				因为前面可以看到，通过initriscv函数已经知道了基地址，所以前面把每个section的地址都进行了更新；
+				progtab 数组保存的就是每个prog类型的section的信息，所以entry的addr都已经更新了，也就是说每个section的
+				地址已经更新了；
+				st_value在不同类型的section中表示的含义也是不一样的，查阅ELF_Format文档可以看到，在可重定位的文件中，
+				SHN_COMMON 类型symbol的value表示数据对齐要求，其他类型就表示st_shndx所指定的symbol entry距离section
+				起始位置的offset；
+				所以，这里其实就是section addr + symbol st_value 计算出symbol的虚拟地址；感觉像是文件已经知道了symbol
+				所在的位置，猜测这里处理的symbol应该是local symbol(因为需要重定位的都是外部的symbol)？？
+			*/
 			for (j = 0; j < ef->ddbsymcnt; j++) {
 				es = &ef->ddbsymtab[j];
 				if (es->st_shndx != i)
@@ -514,6 +565,7 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 			}
 			pb++;
 			break;
+		/* 后边这两种情况应该就是对外部引用的符号进行处理 */
 		case SHT_REL:
 			if (shdr[shdr[i].sh_info].sh_addr == 0)
 				break;
@@ -532,7 +584,7 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 			ra++;
 			break;
 		}
-	}
+	} /* end section header table loop */ 
 
 	/* 
 		从代码逻辑可以看到，ef(elf_file_t)主要的工作就是收集，填充结构体内的各个成员，
@@ -555,7 +607,7 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 		goto out;
 	}
 
-	/* Local intra-module relocations 本地模块内重定位 */
+	/* Local intra-module relocations */
 	/*
 		说明还有别的地方也需要重定位，这里要确认该操作是属于哪个阶段的步骤？？
 	*/
@@ -619,13 +671,14 @@ static int
 link_elf_load_file(linker_class_t cls, const char *filename,
     linker_file_t *result)
 {
+	/* 文件名称和查找相关 */
 	struct nameidata *nd;
 	struct thread *td = curthread;	/* XXX */
 	Elf_Ehdr *hdr;
 	Elf_Shdr *shdr;
 	Elf_Sym *es;
 	int nbytes, i, j;
-	vm_offset_t mapbase;
+	vm_offset_t mapbase;	/* 内存映射相关 */
 	size_t mapsize;
 	int error = 0;
 	ssize_t resid;
@@ -645,8 +698,8 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 	hdr = NULL;
 
 	nd = malloc(sizeof(struct nameidata), M_TEMP, M_WAITOK);
-	NDINIT(nd, LOOKUP, FOLLOW, UIO_SYSSPACE, filename, td);
-	flags = FREAD;
+	NDINIT(nd, LOOKUP, FOLLOW, UIO_SYSSPACE, filename, td);	/* 初始化nameidata */
+	flags = FREAD;	/* 设置读权限 */
 	error = vn_open(nd, &flags, 0, NULL);
 	if (error) {
 		free(nd, M_TEMP);
@@ -666,6 +719,8 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 
 	/* Read the elf header from the file. */
 	hdr = malloc(sizeof(*hdr), M_LINKER, M_WAITOK);
+
+	/* 读取该文件，获取ELF header数据 */
 	error = vn_rdwr(UIO_READ, nd->ni_vp, (void *)hdr, sizeof(*hdr), 0,
 	    UIO_SYSSPACE, IO_NODELOCKED, td->td_ucred, NOCRED,
 	    &resid, td);
@@ -681,6 +736,7 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 		goto out;
 	}
 
+	/* 对文件属性做一系列的判断 */
 	if (hdr->e_ident[EI_CLASS] != ELF_TARG_CLASS
 	    || hdr->e_ident[EI_DATA] != ELF_TARG_DATA) {
 		link_elf_error(filename, "Unsupported file layout");
@@ -703,6 +759,7 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 		goto out;
 	}
 
+	/* 创建linker file */
 	lf = linker_make_file(filename, &link_elf_class);
 	if (!lf) {
 		error = ENOMEM;
@@ -714,7 +771,9 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 	ef->nreltab = 0;
 	ef->nrelatab = 0;
 
-	/* Allocate and read in the section header */
+	/* Allocate and read in the section header 
+		为section header 分配空间并读取其内容
+	*/
 	nbytes = hdr->e_shnum * hdr->e_shentsize;
 	if (nbytes == 0 || hdr->e_shoff == 0 ||
 	    hdr->e_shentsize != sizeof(Elf_Shdr)) {
@@ -723,6 +782,8 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 	}
 	shdr = malloc(nbytes, M_LINKER, M_WAITOK);
 	ef->e_shdr = shdr;
+
+	/* 读取section header并将地址赋值给shdr */
 	error = vn_rdwr(UIO_READ, nd->ni_vp, (caddr_t)shdr, nbytes,
 	    hdr->e_shoff, UIO_SYSSPACE, IO_NODELOCKED, td->td_ucred,
 	    NOCRED, &resid, td);
@@ -748,12 +809,12 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 #endif
 			if ((shdr[i].sh_flags & SHF_ALLOC) == 0)
 				break;
-			ef->nprogtab++;
+			ef->nprogtab++;	/* 程序运行相关section */
 			break;
 		case SHT_SYMTAB:
 			nsym++;
-			symtabindex = i;
-			symstrindex = shdr[i].sh_link;
+			symtabindex = i;	/* 目前一个文件只允许有一个symbol table */
+			symstrindex = shdr[i].sh_link;	/* SHT_SYMTAB类型应该表示的是名字 */
 			break;
 		case SHT_REL:
 			/*
@@ -772,7 +833,8 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 		case SHT_STRTAB:
 			break;
 		}
-	}
+	}	/* end section header loop scan */
+
 	if (ef->nprogtab == 0) {
 		link_elf_error(filename, "file has no contents");
 		error = ENOEXEC;
@@ -1225,7 +1287,8 @@ symbol_name(elf_file_t ef, Elf_Size r_info)
 }
 
 /*
-	函数功能应该就是找到elf文件中的指定的 PROGBITS类型的section，获取到程序运行所需要的数据
+	函数功能应该就是找到elf文件中的指定的 PROGBITS类型的section，获取到程序运行所需要的数据？？
+	从代码逻辑来看，这里传入的是REL类型的section，这里要再确认一下
 */
 static Elf_Addr
 findbase(elf_file_t ef, int sec)
@@ -1237,6 +1300,8 @@ findbase(elf_file_t ef, int sec)
 		prog table应该是位于 PROGBITS 类型的section当中，它里边保存的是跟程序运行相关的代码或者数据；
 		这里就是通过遍历elf文件中的progtab(也就是所有PROGBITS类型的section)来找到我们所需要的那个，
 		然后把地址赋值给base，然后返回base
+		从上级函数代码可以看到，sec = ef->reltab[i].sec，也就是REL重定位表中的元素的sec，sec保存的是
+		sh_info，REL类型的也就表示section header index，也就是说sec是一个index
 	*/
 	for (i = 0; i < ef->nprogtab; i++) {
 		if (sec == ef->progtab[i].sec) {
@@ -1261,7 +1326,10 @@ relocate_file(elf_file_t ef)
 	Elf_Addr base;
 
 
-	/* Perform relocations without addend if there are any: */
+	/* Perform relocations without addend if there are any: 
+		SHT_PROGBITS类型的section里边的数据都是由程序本身来决定的，所以它里边存放的可能就是
+		符号相关信息，REL和RELA里边本质上也是保存的符号信息
+	*/
 	for (i = 0; i < ef->nreltab; i++) {
 		rel = ef->reltab[i].rel;
 		if (rel == NULL) {
@@ -1282,6 +1350,8 @@ relocate_file(elf_file_t ef)
 			/* Local relocs are already done */
 			if (ELF_ST_BIND(sym->st_info) == STB_LOCAL)
 				continue;
+				
+			/* 平台相关 */
 			if (elf_reloc(&ef->lf, base, rel, ELF_RELOC_REL,
 			    elf_obj_lookup)) {
 				symname = symbol_name(ef, rel->r_info);
@@ -1622,7 +1692,7 @@ link_elf_fix_link_set(elf_file_t ef)
 	startp = stopp = 0;
 
 	/* 
-		对符号表进行遍历 
+		对symbol table进行遍历，说明linker set是用一个symbol表示的？？
 	*/
 	for (symidx = 1 /* zero entry is special */;
 		symidx < ef->ddbsymcnt; symidx++) {
@@ -1646,6 +1716,8 @@ link_elf_fix_link_set(elf_file_t ef)
 			sym->st_name 其实是一个index，ef->ddbstrtab 加上这个index就可以获得相应的symbol name
 		*/
 		sym_name = ef->ddbstrtab + sym->st_name;
+
+		/* symbol name 前面的字符跟startn/stopn进行比较 */
 		if (strncmp(sym_name, startn, sizeof(startn) - 1) == 0) {
 			start = 1;
 			/* 
@@ -1694,19 +1766,23 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 	Elf_Size symidx;
 
 	/*
-		首先是对所有的外部符号引用进行了处理？？
+		首先是从symbol表中找到 linker set，并且修改相应的symbol table entry的数据；
+		linker set到底是干什么用的？？
 		然后是RLE 和 RELA 两种类型的重定位表
 	*/
 	link_elf_fix_link_set(ef);
 
-	/* Perform relocations without addend if there are any: */
+	/* Perform relocations without addend if there are any: 
+		对每一个REL类型的section进行处理
+	*/
 	for (i = 0; i < ef->nreltab; i++) {
+		/* rel这时候应该表示的是指定的section的虚拟地址 */
 		rel = ef->reltab[i].rel;
 		if (rel == NULL) {
 			link_elf_error(ef->lf.filename, "lost a reltab");
 			return (ENOEXEC);
 		}
-		/* rel limit，意思就是该指针指向table结尾的entry */
+		/* rel limit，意思就是该指针指向table结尾的entry，它表示的应该也是一个虚拟地址 */
 		rellim = rel + ef->reltab[i].nrel;
 		base = findbase(ef, ef->reltab[i].sec);
 		if (base == 0) {
@@ -1777,6 +1853,7 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 	return (0);
 }
 
+/* 获取symbol table */
 static long
 link_elf_symtab_get(linker_file_t lf, const Elf_Sym **symtab)
 {
@@ -1789,7 +1866,8 @@ link_elf_symtab_get(linker_file_t lf, const Elf_Sym **symtab)
 
     return (ef->ddbsymcnt);
 }
-    
+
+/* 获取string table */
 static long
 link_elf_strtab_get(linker_file_t lf, caddr_t *strtab)
 {

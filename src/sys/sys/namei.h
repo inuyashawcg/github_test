@@ -61,14 +61,14 @@ struct nameicap_tracker;
 TAILQ_HEAD(nameicap_tracker_head, nameicap_tracker);
 
 /*
- * Encapsulation of namei parameters.
+ * Encapsulation of namei parameters. namei参数的封装
  */
 struct nameidata {
 	/*
 	 * Arguments to namei/lookup.
 	 */
-	const	char *ni_dirp;		/* pathname pointer */
-	enum	uio_seg ni_segflg;	/* location of pathname */
+	const	char *ni_dirp;		/* pathname pointer 指向路径名指针，查找文件？？ */
+	enum	uio_seg ni_segflg;	/* location of pathname 标定指向的是用户空间还是内核空间 */
 	cap_rights_t ni_rightsneeded;	/* rights required to look up vnode */
 	/*
 	 * Arguments to lookup.

@@ -513,6 +513,7 @@ sequential_heuristic(struct uio *uio, struct file *fp)
 
 /*
  * Package up an I/O request on a vnode into a uio and do it.
+ * 将vnode上的I/O请求打包到uio中并执行此操作
  */
 int
 vn_rdwr(enum uio_rw rw, struct vnode *vp, void *base, int len, off_t offset,

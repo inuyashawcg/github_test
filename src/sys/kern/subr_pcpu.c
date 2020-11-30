@@ -157,6 +157,8 @@ SYSINIT(pcpu_zones, SI_SUB_VM, SI_ORDER_ANY, pcpu_zones_startup, NULL);
  * First-fit extent based allocator for allocating space in the per-cpu
  * region reserved for modules.  This is only intended for use by the
  * kernel linkers to place module linker sets.
+ * 注意其中的表述，module、linker set，这些都是跟驱动相关的，也就是说明 linker set
+ * 会跟多cpu操作有联系
  */
 void *
 dpcpu_alloc(int size)
@@ -242,6 +244,7 @@ dpcpu_free(void *s, int size)
 
 /*
  * Initialize the per-cpu storage from an updated linker-set region.
+ * 执行的操纵应该是把linker set区域分配给每个cpu，然后执行初始化操作
  */
 void
 dpcpu_copy(void *s, int size)
