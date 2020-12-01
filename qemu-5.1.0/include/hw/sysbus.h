@@ -27,6 +27,7 @@ typedef struct SysBusDevice SysBusDevice;
  *
  * SysBusDeviceClass is not overriding #DeviceClass.realize, so derived
  * classes overriding it are not required to invoke its implementation.
+ * SysBusDeviceClass未重写#设备类实现，因此不需要重写它的派生类来调用它的实现
  */
 
 #define SYSBUS_DEVICE_GPIO_IRQ "sysbus-irq"

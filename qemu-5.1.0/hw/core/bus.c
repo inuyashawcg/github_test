@@ -147,6 +147,12 @@ static void bus_unparent(Object *obj)
     bus->parent = NULL;
 }
 
+/*
+    qbus_create_inplace 和 qbus_create 总线的创建。qbus_create_inplace 用于已经分配
+    BusState内存的情况下完成初始化，qbus_create则完整的创建一个新的bus。 最后两者都调用了
+    qbus_realize 来执行一些初始化操作。（其实object_new里面也执行了object_initialize）。 
+    创建过程中还执行了 bus_class_init和qbus_initfn
+*/
 void qbus_create_inplace(void *bus, size_t size, const char *typename,
                          DeviceState *parent, const char *name)
 {
@@ -206,6 +212,7 @@ static void bus_set_realized(Object *obj, bool value, Error **errp)
     bus->realized = value;
 }
 
+/* 实例的初始化 */
 static void qbus_initfn(Object *obj)
 {
     BusState *bus = BUS(obj);
@@ -276,6 +283,7 @@ static ResettableTrFunction bus_get_transitional_reset(Object *obj)
     return NULL;
 }
 
+/* 完成类的初始化 */
 static void bus_class_init(ObjectClass *class, void *data)
 {
     BusClass *bc = BUS_CLASS(class);
@@ -304,6 +312,7 @@ static void bus_class_init(ObjectClass *class, void *data)
     rc->get_transitional_function = bus_get_transitional_reset;
 }
 
+/* 实例的析构 */
 static void qbus_finalize(Object *obj)
 {
     BusState *bus = BUS(obj);

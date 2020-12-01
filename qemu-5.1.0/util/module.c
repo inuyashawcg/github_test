@@ -25,13 +25,14 @@
 
 typedef struct ModuleEntry
 {
-    void (*init)(void);
-    QTAILQ_ENTRY(ModuleEntry) node;
-    module_init_type type;
+    void (*init)(void); /* module初始化函数 */
+    QTAILQ_ENTRY(ModuleEntry) node; /* 链表node */
+    module_init_type type;  /* module type */
 } ModuleEntry;
 
 typedef QTAILQ_HEAD(, ModuleEntry) ModuleTypeList;
 
+/* 声明一个静态数组，管理所有类型的module */
 static ModuleTypeList init_type_list[MODULE_INIT_MAX];
 static bool modules_init_done[MODULE_INIT_MAX];
 
@@ -55,7 +56,9 @@ static void init_lists(void)
     inited = 1;
 }
 
-
+/* 
+    在 init_type_list 数组找到对应类型的module list element，返回element 首地址 
+*/
 static ModuleTypeList *find_type(module_init_type type)
 {
     init_lists();
@@ -63,6 +66,9 @@ static ModuleTypeList *find_type(module_init_type type)
     return &init_type_list[type];
 }
 
+/*
+    将某种类型的 module 插入到 init_type_list 对应的 module list element中
+*/
 void register_module_init(void (*fn)(void), module_init_type type)
 {
     ModuleEntry *e;
@@ -77,6 +83,7 @@ void register_module_init(void (*fn)(void), module_init_type type)
     QTAILQ_INSERT_TAIL(l, e, node);
 }
 
+/* dso module 动态加载模块？ */
 void register_dso_module_init(void (*fn)(void), module_init_type type)
 {
     ModuleEntry *e;
@@ -87,9 +94,13 @@ void register_dso_module_init(void (*fn)(void), module_init_type type)
     e->init = fn;
     e->type = type;
 
+    /* 插入 dso_init_list 链表中 */
     QTAILQ_INSERT_TAIL(&dso_init_list, e, node);
 }
 
+/*
+    对某种类型的module list遍历，完成初始化
+*/
 void module_call_init(module_init_type type)
 {
     ModuleTypeList *l;

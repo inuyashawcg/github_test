@@ -16,6 +16,7 @@ enum {
 #define DEVICE_CLASS(klass) OBJECT_CLASS_CHECK(DeviceClass, (klass), TYPE_DEVICE)
 #define DEVICE_GET_CLASS(obj) OBJECT_GET_CLASS(DeviceClass, (obj), TYPE_DEVICE)
 
+/* category: 类别 */
 typedef enum DeviceCategory {
     DEVICE_CATEGORY_BRIDGE,
     DEVICE_CATEGORY_USB,
@@ -39,11 +40,12 @@ typedef void (*BusUnrealize)(BusState *bus);
  * DeviceClass:
  * @props: Properties accessing state fields.
  * @realize: Callback function invoked when the #DeviceState:realized
- * property is changed to %true.
+ * property is changed to %true. 回调
  * @unrealize: Callback function invoked when the #DeviceState:realized
- * property is changed to %false.
+ * property is changed to %false. 回调
  * @hotpluggable: indicates if #DeviceClass is hotpluggable, available
  * as readonly "hotpluggable" property of #DeviceState instance
+ * 指示设备类是否可热插拔，可作为设备状态实例的只读“热插拔”属性使用
  *
  * # Realization #
  * Devices are constructed in two stages,
@@ -55,11 +57,15 @@ typedef void (*BusUnrealize)(BusState *bus);
  * Trivial field initializations should go into #TypeInfo.instance_init.
  * Operations depending on @props static properties should go into @realize.
  * After successful realization, setting static properties will fail.
+ * 琐碎的字段初始化应该进入#TypeInfo.instance_init类型信息.  依赖于@props静态属性的
+ * 操作应该进入@realize。成功实现后，设置静态属性将失败。
  *
  * As an interim step, the #DeviceState:realized property can also be
  * set with qdev_realize().
  * In the future, devices will propagate this state change to their children
- * and along busses they expose.
+ * and along busses they expose. 
+ * 将来，设备会将这种状态更改传播到它们的子代以及它们暴露的总线上
+ * 
  * The point in time will be deferred to machine creation, so that values
  * set in @realize will not be introspectable beforehand. Therefore devices
  * must not create children during @realize; they should initialize them via
@@ -90,21 +96,23 @@ typedef void (*BusUnrealize)(BusState *bus);
  * shall not be hidden it will be added in qdev_device_add() and
  * realized as any other device. Otherwise qdev_device_add() will return early
  * without adding the device. The guest will not see a "hidden" device
- * until it was marked don't hide and qdev_device_add called again.
+ * until it was marked don't hide and qdev_device_add called again. 设备向用于隐藏
+ * 并且可以取消隐藏
  *
  */
 typedef struct DeviceClass {
     /*< private >*/
-    ObjectClass parent_class;
+    ObjectClass parent_class;   /* ObjectClass 放到起始位置，强制类型转换-派生 */
     /*< public >*/
 
     DECLARE_BITMAP(categories, DEVICE_CATEGORY_MAX);
-    const char *fw_name;
-    const char *desc;
+    const char *fw_name;    
+    const char *desc;   /* 设备描述 */
 
     /*
      * The underscore at the end ensures a compile-time error if someone
      * assigns to dc->props instead of using device_class_set_props.
+     * 设备属性
      */
     Property *props_;
 
@@ -117,10 +125,14 @@ typedef struct DeviceClass {
      * behavior would be cruel; clearing this flag will protect them.
      * It should never be cleared without a comment explaining why it
      * is cleared.
+     * 所有设备都应支持使用device\u add进行实例化，此标志不应存在。但我们还没到那儿。
+     * 有些设备无法实例化，并显示神秘的错误消息。其他的实例化，但不起作用。将用户暴露
+     * 在这种行为下是残忍的；清除此标志将保护他们。在没有解释清除原因的注释的情况下，
+     * 绝对不能清除它。
      * TODO remove once we're there
      */
-    bool user_creatable;
-    bool hotpluggable;
+    bool user_creatable;    /* 用户可以创建的标志？ */
+    bool hotpluggable;  /* 热插拔 */
 
     /* callbacks */
     /*
@@ -146,6 +158,8 @@ struct NamedGPIOList {
     qemu_irq *in;
     int num_in;
     int num_out;
+
+    /* GPIO也是统一管理？ */
     QLIST_ENTRY(NamedGPIOList) node;
 };
 
@@ -167,20 +181,21 @@ struct NamedClockList {
  *
  * This structure should not be accessed directly.  We declare it here
  * so that it can be embedded in individual device state structures.
+ * 不应直接访问此结构。我们在这里声明它，以便它可以嵌入到单个设备状态结构中？
  */
 struct DeviceState {
     /*< private >*/
-    Object parent_obj;
+    Object parent_obj;  /* object/state 应该都是用于表示实例 */
     /*< public >*/
 
     const char *id;
-    char *canonical_path;
+    char *canonical_path;   /* 规范路径 */
     bool realized;
-    bool pending_deleted_event;
-    QemuOpts *opts;
+    bool pending_deleted_event; /* 挂起的已删除事件 */
+    QemuOpts *opts; /* 开启命令选项？？ */
     int hotplugged;
-    bool allow_unplug_during_migration;
-    BusState *parent_bus;
+    bool allow_unplug_during_migration; /* 允许在迁移期间拔出? */
+    BusState *parent_bus;   /* 父总线 */
     QLIST_HEAD(, NamedGPIOList) gpios;
     QLIST_HEAD(, NamedClockList) clocks;
     QLIST_HEAD(, BusState) child_bus;
@@ -197,9 +212,11 @@ struct DeviceListener {
      * This callback is called upon init of the DeviceState and allows to
      * inform qdev that a device should be hidden, depending on the device
      * opts, for example, to hide a standby device.
+     * 此回调在DeviceState的init时调用，并允许通知qdev应该隐藏一个设备，这取决于设备
+     * 的选择，例如，隐藏一个备用设备
      */
     int (*should_be_hidden)(DeviceListener *listener, QemuOpts *device_opts);
-    QTAILQ_ENTRY(DeviceListener) link;
+    QTAILQ_ENTRY(DeviceListener) link;  /* 也是通过链表来维护 */
 };
 
 #define TYPE_BUS "bus"
@@ -207,51 +224,55 @@ struct DeviceListener {
 #define BUS_CLASS(klass) OBJECT_CLASS_CHECK(BusClass, (klass), TYPE_BUS)
 #define BUS_GET_CLASS(obj) OBJECT_GET_CLASS(BusClass, (obj), TYPE_BUS)
 
+/*
+    BusClass 和BusState分别代表bus的基类和对象
+*/
 struct BusClass {
     ObjectClass parent_class;
 
     /* FIXME first arg should be BusState */
-    void (*print_dev)(Monitor *mon, DeviceState *dev, int indent);
-    char *(*get_dev_path)(DeviceState *dev);
+    void (*print_dev)(Monitor *mon, DeviceState *dev, int indent);  /* 用于monitor监控调试使用 */
+    char *(*get_dev_path)(DeviceState *dev);    /* 用户获取总线上设备的路径 */
     /*
      * This callback is used to create Open Firmware device path in accordance
      * with OF spec http://forthworks.com/standards/of1275.pdf. Individual bus
      * bindings can be found at http://playground.sun.com/1275/bindings/.
      */
-    char *(*get_fw_dev_path)(DeviceState *dev);
-    void (*reset)(BusState *bus);
+    char *(*get_fw_dev_path)(DeviceState *dev);     /* 用于支持of规范 */
+    void (*reset)(BusState *bus);   /* 用于重置bus */
     BusRealize realize;
     BusUnrealize unrealize;
 
-    /* maximum devices allowed on the bus, 0: no limit. */
+    /* maximum devices allowed on the bus, 0: no limit. 总线上最大支持的设备数 */
     int max_dev;
-    /* number of automatically allocated bus ids (e.g. ide.0) */
+    /* number of automatically allocated bus ids (e.g. ide.0) 用于给子设备命名 */
     int automatic_ids;
 };
 
+/* BusChild用于描述总线上的一个设备 */
 typedef struct BusChild {
-    DeviceState *child;
-    int index;
-    QTAILQ_ENTRY(BusChild) sibling;
+    DeviceState *child; /* 设备实例 */
+    int index;  /* 表示是第几个设备 */
+    QTAILQ_ENTRY(BusChild) sibling; /* 用于管理挂载到总线的children节点 */
 } BusChild;
 
 #define QDEV_HOTPLUG_HANDLER_PROPERTY "hotplug-handler"
 
 /**
- * BusState:
+ * BusState: BusState为总线的实例，obj为基类
  * @hotplug_handler: link to a hotplug handler associated with bus.
  * @reset: ResettableState for the bus; handled by Resettable interface.
  */
 struct BusState {
     Object obj;
-    DeviceState *parent;
-    char *name;
-    HotplugHandler *hotplug_handler;
-    int max_index;
-    bool realized;
-    int num_children;
+    DeviceState *parent;    /* 表示总线的父设备，一般为总线桥设备 */
+    char *name; /* 总线名称 */
+    HotplugHandler *hotplug_handler;    /* 热插拔处理接口 */
+    int max_index;  /* 当前设备最大索引 */
+    bool realized;  /* 是否初始化完成 */
+    int num_children;   /*  用于存放总线上的子设备 */
     QTAILQ_HEAD(, BusChild) children;
-    QLIST_ENTRY(BusState) sibling;
+    QLIST_ENTRY(BusState) sibling;  /* 用于挂载到父节点上 */
     ResettableState reset;
 };
 
@@ -274,7 +295,7 @@ struct Property {
         int64_t i;
         uint64_t u;
     } defval;
-    int          arrayoffset;
+    int          arrayoffset;   /* Property为数组中的entry？？ */
     const PropertyInfo *arrayinfo;
     int          arrayfieldsize;
     const char   *link_type;
@@ -287,6 +308,8 @@ struct PropertyInfo {
     int (*print)(DeviceState *dev, Property *prop, char *dest, size_t len);
     void (*set_default_value)(ObjectProperty *op, const Property *prop);
     void (*create)(ObjectClass *oc, Property *prop);
+
+    /* 三个回调函数，用于获取/设置/释放属性信息 */
     ObjectPropertyAccessor *get;
     ObjectPropertyAccessor *set;
     ObjectPropertyRelease *release;
@@ -304,7 +327,7 @@ typedef struct GlobalProperty {
     const char *driver;
     const char *property;
     const char *value;
-    bool used;
+    bool used;  /* 表示已经应用到了某个设备的属性设置 */
     bool optional;
 } GlobalProperty;
 

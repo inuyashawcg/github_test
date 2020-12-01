@@ -25,6 +25,9 @@
 #include "qemu/module.h"
 #include "sysemu/kvm.h"
 
+/*
+    PCI 硬件设备抽象
+*/
 typedef struct PCITestDevHdr {
     uint8_t test;
     uint8_t width;
@@ -36,8 +39,16 @@ typedef struct PCITestDevHdr {
     uint8_t name[];
 } PCITestDevHdr;
 
+/* IO操作 */
 typedef struct IOTest {
+    /* 
+        memory相关 
+    */
     MemoryRegion *mr;
+
+    /*
+        事件触发机制？ 
+    */
     EventNotifier notifier;
     bool hasnotifier;
     unsigned size;
@@ -205,6 +216,10 @@ pci_testdev_read(void *opaque, hwaddr addr, unsigned size)
     return buf[addr];
 }
 
+/*
+    内存映射I/O（MMIO）【统一编址】和端口映射I/O(PMIO)【独立/单独编址】是两种互为补充的I/O方法，
+    用于设备驱动程序和设备通信，即在CPU和外部设备之间
+*/
 static void
 pci_testdev_mmio_write(void *opaque, hwaddr addr, uint64_t val,
                        unsigned size)
@@ -219,6 +234,10 @@ pci_testdev_pio_write(void *opaque, hwaddr addr, uint64_t val,
     pci_testdev_write(opaque, addr, val, size, 1);
 }
 
+/*
+    从代码逻辑可以看到，qemu对与设备的模拟本质上还是分配一块内存，然后对这块内存进行read/write或者其他
+    操作，这里的话是对 memory region 进行读写
+*/
 static const MemoryRegionOps pci_testdev_mmio_ops = {
     .read = pci_testdev_read,
     .write = pci_testdev_mmio_write,
@@ -314,6 +333,9 @@ pci_testdev_uninit(PCIDevice *dev)
     g_free(d->tests);
 }
 
+/*
+    从函数传参可以看出，DeviceState 就是表示的device
+*/
 static void qdev_pci_testdev_reset(DeviceState *dev)
 {
     PCITestDevState *d = PCI_TEST_DEV(dev);
@@ -327,6 +349,11 @@ static Property pci_testdev_properties[] = {
 
 static void pci_testdev_class_init(ObjectClass *klass, void *data)
 {
+    /*
+        对传进来的基类ObjectClass进行强制类型转换，对象类的派生关系是
+        ObjectClass->DeviceClass->PCIDeviceClass，这里对DeviceClass和
+        PCIDeviceClass 都进行了相应的处理
+    */
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
 
@@ -336,12 +363,17 @@ static void pci_testdev_class_init(ObjectClass *klass, void *data)
     k->device_id = PCI_DEVICE_ID_REDHAT_TEST;
     k->revision = 0x00;
     k->class_id = PCI_CLASS_OTHERS;
+    
     dc->desc = "PCI Test Device";
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
     dc->reset = qdev_pci_testdev_reset;
     device_class_set_props(dc, pci_testdev_properties);
 }
 
+/*
+    定义了一个静态的 TypeInfo 来描述整个设备，然后调用 type_register_static 函数进行
+    设备注册
+*/
 static const TypeInfo pci_testdev_info = {
     .name          = TYPE_PCI_TEST_DEV,
     .parent        = TYPE_PCI_DEVICE,

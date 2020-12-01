@@ -279,7 +279,12 @@ typedef struct {
 	不需要加数域的重定位
 */
 typedef struct {
-	Elf32_Addr	r_offset;	/* Location to be relocated. 需要进行重定位的地址，基地址+r_offset */
+	/* Location to be relocated. 需要进行重定位的地址，base address + r_offset 
+		另外一种说法，offset指的是需要被重定位的引用在其节中的偏移。symbol也是存放在某个section当中的，所以我们要找到
+		某个symbol，首先是要找到这个symbol所在的section，然后再根据这个offset确定其具体位置，上述公式就可以表示为：
+		section begging address + offset
+	*/
+	Elf32_Addr	r_offset;	
 	/*
 		SYMBOL << 8 + TYPE & 0xff，其中 SYMBOL是重定位以后需要指向的符号；TYPE是重定位的类型
 	*/
@@ -384,7 +389,7 @@ typedef struct {
 		index；当这个section由于重定位移动的时候，symbol value也会跟着改变，对符号的引用仍然会指向程序中的同
 		一个位置？？
 
-		st_shndx 表示符号所在的section对应的section header的索引号
+		st_shndx 表示符号所在的section对应的section header的索引号,它表示的应该是这个符号位于哪个section中
 	*/
 	Elf32_Half	st_shndx;	/* Section index of symbol. */
 } Elf32_Sym;

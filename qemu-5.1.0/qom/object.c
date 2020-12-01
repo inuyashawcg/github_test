@@ -47,27 +47,32 @@ struct TypeImpl
 {
     const char *name;
 
+    /* 该数据类型所代表的类的大小 */
     size_t class_size;
 
+    /* 该数据类型产生的对象的大小 */
     size_t instance_size;
 
+    /* 类的 Constructor & Destructor */
     void (*class_init)(ObjectClass *klass, void *data);
     void (*class_base_init)(ObjectClass *klass, void *data);
 
     void *class_data;
 
+    /* 实例的Contructor & Destructor */
     void (*instance_init)(Object *obj);
     void (*instance_post_init)(Object *obj);
     void (*instance_finalize)(Object *obj);
 
+    /* 表示类是否是抽象类 */
     bool abstract;
 
-    const char *parent;
-    TypeImpl *parent_type;
+    const char *parent;     /* 父类的名字 */
+    TypeImpl *parent_type;  /* 指向父类TypeImpl的指针 */
 
-    ObjectClass *class;
+    ObjectClass *class;     /* 该类型对应的类的指针 */
 
-    int num_interfaces;
+    int num_interfaces;     /* 所实现的接口的数量 */
     InterfaceImpl interfaces[MAX_INTERFACES];
 };
 

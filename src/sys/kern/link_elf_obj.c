@@ -298,7 +298,7 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 	ef = (elf_file_t)lf;
 	ef->preloaded = 1;
 
-	/* ef->address：表示重定位的基地址，也是通过init函数返回值获取到的 */
+	/* lf->address：表示重定位的基地址，也是通过init函数返回值获取到的 */
 	ef->address = *(caddr_t *)baseptr;
 	lf->address = *(caddr_t *)baseptr;
 	lf->size = *(size_t *)sizeptr;
@@ -315,7 +315,7 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 		error = EFTYPE;
 		goto out;
 	}
-	ef->e_shdr = shdr;
+	ef->e_shdr = shdr;	/* 指定了section header */
 
 	/* 
 		Scan the section header for information and table sizing.
@@ -565,7 +565,6 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 			}
 			pb++;
 			break;
-		/* 后边这两种情况应该就是对外部引用的符号进行处理 */
 		case SHT_REL:
 			if (shdr[shdr[i].sh_info].sh_addr == 0)
 				break;
@@ -580,6 +579,7 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 			ef->relatab[ra].rela = (Elf_Rela *)shdr[i].sh_addr;
 			ef->relatab[ra].nrela =
 			    shdr[i].sh_size / sizeof(Elf_Rela);
+			/* 重定位section的sh_info可能表示这个符号在哪个section中 */
 			ef->relatab[ra].sec = shdr[i].sh_info;
 			ra++;
 			break;
@@ -1302,6 +1302,8 @@ findbase(elf_file_t ef, int sec)
 		然后把地址赋值给base，然后返回base
 		从上级函数代码可以看到，sec = ef->reltab[i].sec，也就是REL重定位表中的元素的sec，sec保存的是
 		sh_info，REL类型的也就表示section header index，也就是说sec是一个index
+		因为 SHT_PROGBITS 类型的section中保存的数据是由程序决定的，所以里边保存的有可能就是symbol的相关
+		信息，而REL表中保存的信息也是用来描述symbol的，所以它们的sec(index)可能是一致的
 	*/
 	for (i = 0; i < ef->nprogtab; i++) {
 		if (sec == ef->progtab[i].sec) {
@@ -1784,6 +1786,11 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 		}
 		/* rel limit，意思就是该指针指向table结尾的entry，它表示的应该也是一个虚拟地址 */
 		rellim = rel + ef->reltab[i].nrel;
+		/* 
+			找到了重定位的base address(对应的prog section的地址)？？
+			这里可能就是symbol所在的section的address，后边 elf_reloc_local 函数中的处理是将base
+			address 加上 REL中的 offset，这样就可以得到symbol的位置
+		*/
 		base = findbase(ef, ef->reltab[i].sec);
 		if (base == 0) {
 			link_elf_error(ef->lf.filename, "lost base for reltab");
@@ -1792,7 +1799,8 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 		for ( ; rel < rellim; rel++) {
 			/*
 				ELF_R_SYM 宏主要实现了拼接的功能，形式为 ELF32/64_R_SYM(rel->r_info),
-				就是为了获取重定位以后需要指向的符号，再从结果来看，这里获取到的是一个index
+				就是为了获取重定位以后需要指向的符号，再从结果来看，这里获取到的是一个index，
+				符号表目前一个文件只有一个，所以知道获取到了index就相当于找到了symbol
 			*/
 			symidx = ELF_R_SYM(rel->r_info);
 			if (symidx >= ef->ddbsymcnt)

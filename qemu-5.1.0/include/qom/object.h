@@ -385,6 +385,21 @@ struct ObjectProperty
  *
  * Called when an object is being removed from the QOM composition tree.
  * The function should remove any backlinks from children objects to @obj.
+ * 
+ * QEMU提供了一套面向对象编程的模型——QOM，即QEMU Object Module，几乎所有的设备如CPU、
+ * 内存、总线等都是利用这一面向对象的模型来实现的。QOM模型的实现代码位于qom/文件夹下的文
+ * 件中;对于开发者而言，只要知道如何利用QOM模型创建类和对象就可以了，但是开发者只有理解了
+ * QOM的相关数据结构，才能清楚如何利用QOM模型
+ * 
+ * 各种架构CPU的模拟和实现
+        QEMU中要实现对各种CPU架构的模拟，而且对于一种架构的CPU，比如X86_64架构的CPU，由于
+        包含的特性不同，也会有不同的CPU模型。任何CPU中都有CPU通用的属性，同时也包含各自特有
+        的属性。为了便于模拟这些CPU模型，面向对象的变成模型是必不可少的。
+   模拟device与bus的关系
+        在主板上，一个device会通过bus与其他的device相连接，一个device上可以通过不同的bus
+        端口连接到其他的device，而其他的device也可以进一步通过bus与其他的设备连接，同时一个
+        bus上也可以连接多个device，这种device连bus、bus连device的关系，qemu是需要模拟出
+        来的。为了方便模拟设备的这种特性，面向对象的编程模型也是必不可少的。
  */
 typedef void (ObjectUnparent)(Object *obj);
 
@@ -402,7 +417,7 @@ typedef void (ObjectFree)(void *obj);
  * ObjectClass:
  *
  * The base for all classes.  The only thing that #ObjectClass contains is an
- * integer type handle.
+ * integer type handle. 所有class的基类，ObjectClass只包含一个整型handler。
  */
 struct ObjectClass
 {
@@ -434,14 +449,23 @@ struct Object
 {
     /*< private >*/
     ObjectClass *class;
-    ObjectFree *free;
-    GHashTable *properties;
-    uint32_t ref;
+    ObjectFree *free;       /* 当对象的引用为0时，清理垃圾的回调函数 */
+    GHashTable *properties;     /* Hash表记录Object的属性 */
+    uint32_t ref;       /* 该对象的引用计数 */
     Object *parent;
 };
 
 /**
  * TypeInfo:
+ *  TypeInfo：是用户用来定义一个Type的工具型的数据结构，用户定义了一个TypeInfo，然后调用
+ * type_register(TypeInfo )或者type_register_static(TypeInfo )函数，就会生成相应的
+ * TypeImpl实例，将这个TypeInfo注册到全局的TypeImpl的hash表中
+ * 
+ * 类型Type，QOM中所有的模型都是通过类型Type注册的，具体实现过程就是从类型信息TypeInfo注册
+ * 为类型实现TypeImpl，并把所有类型实现添加到全局的GHashTable表中，hash表以类型Type的名字
+ * 作为key键值。类型Type有父子的概念，QOM有对象(TYPE_OBJECT)和接口(TYPE_INTERFACE)两种
+ * 根父类型
+ * 
  * @name: The name of the type.
  * @parent: The name of the parent type.
  * @instance_size: The size of the object (derivative of #Object).  If
@@ -458,7 +482,7 @@ struct Object
  *   function.
  * @abstract: If this field is true, then the class is considered abstract and
  *   cannot be directly instantiated.
- * @class_size: The size of the class object (derivative of #ObjectClass)
+ * @class_size: The size of the class object (derivative(派生) of #ObjectClass)
  *   for this object.  If @class_size is 0, then the size of the class will be
  *   assumed to be the size of the parent class.  This allows a type to avoid
  *   implementing an explicit class type if they are not adding additional
@@ -478,24 +502,33 @@ struct Object
  *   should point to a static array that's terminated with a zero filled
  *   element.
  */
+
+/*
+    每个QOM设备模型类型包括设备，总线，接口等都会定义一个类型信息TypeInfo。类型信息TypeInfo是用于
+    注册类型实现TypeImpl的结构模板。TypeInfo通过name定义类型名称，通过parernt指定父类型名称
+    也就是说每种类型的设备都是通过 TypeInfo 来进行区分和注册，可以参考一些实例，比如 pci_testdev_info；
+    而且 TypeInfo 一般是静态定义的，有时候也会动态生成
+*/
 struct TypeInfo
 {
-    const char *name;
-    const char *parent;
+    const char *name;   //类型名称
+    const char *parent; //父类型名称，TYPE_OBJECT 和 TYPE_INTERFACE 是两个根类型的名称
 
-    size_t instance_size;
-    void (*instance_init)(Object *obj);
-    void (*instance_post_init)(Object *obj);
-    void (*instance_finalize)(Object *obj);
+    size_t instance_size;   //对象实例的大小
+    void (*instance_init)(Object *obj);  //对象实例的init函数，父类型的init已被执行过了，只需要负责本类型的
+    void (*instance_post_init)(Object *obj);    //对象实例的post_init函数，在init执行完后执行
+    void (*instance_finalize)(Object *obj); //对象实例销毁时执行，释放动态资源
 
-    bool abstract;
-    size_t class_size;
+    bool abstract;  //如为true则是抽象的类型，不能直接实例
+    size_t class_size;  //类对象实例的大小
 
-    void (*class_init)(ObjectClass *klass, void *data);
-    void (*class_base_init)(ObjectClass *klass, void *data);
-    void *class_data;
+    void (*class_init)(ObjectClass *klass, void *data); //类对象实例的init函数，初始化自己的方法指针，也可覆盖父类的方法指针
 
-    InterfaceInfo *interfaces;
+    //在父类的class_init执行完，自己的class_init执行之前执行，做一些清理工作
+    void (*class_base_init)(ObjectClass *klass, void *data);    
+    void *class_data;   //传递给类对象实例各个方法的数据
+
+    InterfaceInfo *interfaces;  //类型定义的接口信息名称数组
 };
 
 /**
