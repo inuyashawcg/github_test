@@ -199,6 +199,10 @@ elf_reloc_internal(linker_file_t lf, Elf_Addr relocbase, const void *data,
 	switch (type) {
 	case ELF_RELOC_REL:
 		rel = (const Elf_Rel *)data;
+		/*
+			relocbase 表示的是符号所在的section的address，然后再加上REL table entry
+			中的offset，就可以定位到symbol所在的位置
+		*/
 		where = (Elf_Addr *) (relocbase + rel->r_offset);
 		rtype = ELF_R_TYPE(rel->r_info);
 		symidx = ELF_R_SYM(rel->r_info);

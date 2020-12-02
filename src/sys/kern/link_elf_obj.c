@@ -554,8 +554,10 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 				st_value在不同类型的section中表示的含义也是不一样的，查阅ELF_Format文档可以看到，在可重定位的文件中，
 				SHN_COMMON 类型symbol的value表示数据对齐要求，其他类型就表示st_shndx所指定的symbol entry距离section
 				起始位置的offset；
-				所以，这里其实就是section addr + symbol st_value 计算出symbol的虚拟地址；感觉像是文件已经知道了symbol
-				所在的位置，猜测这里处理的symbol应该是local symbol(因为需要重定位的都是外部的symbol)？？
+				所以，这里其实就是section addr + symbol st_value 计算出symbol的虚拟地址(因为st_shndx表示的是symbol
+				所在section的 section header index，所以这个if判断其实就是判断symbol是不是在当前的section当中，这个
+				时候已经知道了section的虚拟内存起始地址，st_value又表示symbol在这个section中的offset，其实就相当于计算出
+				了symbol的虚拟地址)？？
 			*/
 			for (j = 0; j < ef->ddbsymcnt; j++) {
 				es = &ef->ddbsymtab[j];
@@ -566,6 +568,11 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 			pb++;
 			break;
 		case SHT_REL:
+			/*
+				从代码逻辑来看，SHT_REL 类型 shdr[i].sh_info 里边存放的信息是section header table index，也就是说
+				SHT_REL 类型的section的 sh_info 成员保存的是需要进行重定位操作的section在 section header table中的
+				index；SHT_REL section中的entry表示的应该就是需要重定位的symbol在相应的section中的offset
+			*/
 			if (shdr[shdr[i].sh_info].sh_addr == 0)
 				break;
 			ef->reltab[rl].rel = (Elf_Rel *)shdr[i].sh_addr;
@@ -579,7 +586,11 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 			ef->relatab[ra].rela = (Elf_Rela *)shdr[i].sh_addr;
 			ef->relatab[ra].nrela =
 			    shdr[i].sh_size / sizeof(Elf_Rela);
-			/* 重定位section的sh_info可能表示这个符号在哪个section中 */
+			/* 
+				重定位section的sh_info可能表示这个符号在哪个section中,info中保存的只是
+				这个section在section header中的index，所以这个sec中保存的也是对应section
+				的index，上同
+			*/
 			ef->relatab[ra].sec = shdr[i].sh_info;
 			ra++;
 			break;
@@ -650,7 +661,7 @@ link_elf_link_preload_finish(linker_file_t lf)
 	if (error)
 		return (error);
 
-	/* Notify MD code that a module is being loaded. */
+	/* Notify MD code that a module is being loaded. - MD: machine dependent */
 	error = elf_cpu_load_file(lf);
 	if (error)
 		return (error);
@@ -1768,9 +1779,9 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 	Elf_Size symidx;
 
 	/*
-		首先是从symbol表中找到 linker set，并且修改相应的symbol table entry的数据；
-		linker set到底是干什么用的？？
-		然后是RLE 和 RELA 两种类型的重定位表
+		首先是从symbol表中找到 linker set，并且修改相应的symbol table entry的数据(用的是ef->progtab[i]中的成员
+		来进行赋值)
+		linker set到底是干什么用的？？(驱动中DRIVER_MODULE宏会涉及到linker set)
 	*/
 	link_elf_fix_link_set(ef);
 
@@ -1784,7 +1795,10 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 			link_elf_error(ef->lf.filename, "lost a reltab");
 			return (ENOEXEC);
 		}
-		/* rel limit，意思就是该指针指向table结尾的entry，它表示的应该也是一个虚拟地址 */
+		/* 
+			rel limit，意思就是该指针指向table结尾的entry，它表示的应该也是一个虚拟地址，我们就可以
+			在这个范围内访问该REL类型的section中的所有entry 
+		*/
 		rellim = rel + ef->reltab[i].nrel;
 		/* 
 			找到了重定位的base address(对应的prog section的地址)？？
@@ -1806,7 +1820,6 @@ link_elf_reloc_local(linker_file_t lf, bool ifuncs)
 			if (symidx >= ef->ddbsymcnt)
 				continue;
 
-			/* 获取到重定位后需要指向的符号 */
 			sym = ef->ddbsymtab + symidx;	
 
 			/* 

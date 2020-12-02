@@ -16,7 +16,7 @@ enum {
 #define DEVICE_CLASS(klass) OBJECT_CLASS_CHECK(DeviceClass, (klass), TYPE_DEVICE)
 #define DEVICE_GET_CLASS(obj) OBJECT_GET_CLASS(DeviceClass, (obj), TYPE_DEVICE)
 
-/* category: 类别 */
+/* device category: 设备类别 */
 typedef enum DeviceCategory {
     DEVICE_CATEGORY_BRIDGE,
     DEVICE_CATEGORY_USB,
@@ -105,6 +105,7 @@ typedef struct DeviceClass {
     ObjectClass parent_class;   /* ObjectClass 放到起始位置，强制类型转换-派生 */
     /*< public >*/
 
+    /* 一个数组对应一个设备类别 */
     DECLARE_BITMAP(categories, DEVICE_CATEGORY_MAX);
     const char *fw_name;    
     const char *desc;   /* 设备描述 */
@@ -112,7 +113,7 @@ typedef struct DeviceClass {
     /*
      * The underscore at the end ensures a compile-time error if someone
      * assigns to dc->props instead of using device_class_set_props.
-     * 设备属性
+     * 管理 Property 的数组，说明一个设备可以包含多种属性？
      */
     Property *props_;
 
@@ -125,7 +126,7 @@ typedef struct DeviceClass {
      * behavior would be cruel; clearing this flag will protect them.
      * It should never be cleared without a comment explaining why it
      * is cleared.
-     * 所有设备都应支持使用device\u add进行实例化，此标志不应存在。但我们还没到那儿。
+     * 所有设备都应支持使用device_add进行实例化，此标志不应存在。但我们还没到那儿。
      * 有些设备无法实例化，并显示神秘的错误消息。其他的实例化，但不起作用。将用户暴露
      * 在这种行为下是残忍的；清除此标志将保护他们。在没有解释清除原因的注释的情况下，
      * 绝对不能清除它。
@@ -138,6 +139,8 @@ typedef struct DeviceClass {
     /*
      * Reset method here is deprecated and replaced by methods in the
      * resettable class interface to implement a multi-phase reset.
+     * 这里的Reset方法已弃用，并被resetable类接口中的方法替换，以实现多阶段重置(函数重载？？)
+     * 
      * TODO: remove once every reset callback is unused
      */
     DeviceReset reset;
@@ -155,11 +158,13 @@ typedef struct NamedGPIOList NamedGPIOList;
 
 struct NamedGPIOList {
     char *name;
-    qemu_irq *in;
+    qemu_irq *in;   /* 中断 */
+
+    /* 输入/输出引脚数量？？ */
     int num_in;
     int num_out;
 
-    /* GPIO也是统一管理？ */
+    /* GPIO也是统一管理？ - struct DeviceState 中有相应的队列 */
     QLIST_ENTRY(NamedGPIOList) node;
 };
 
@@ -190,19 +195,21 @@ struct DeviceState {
 
     const char *id;
     char *canonical_path;   /* 规范路径 */
-    bool realized;
+    bool realized;  /* 是否已完成初始化 */
     bool pending_deleted_event; /* 挂起的已删除事件 */
     QemuOpts *opts; /* 开启命令选项？？ */
     int hotplugged;
     bool allow_unplug_during_migration; /* 允许在迁移期间拔出? */
     BusState *parent_bus;   /* 父总线 */
+
+    /* 三种不同类型的队列管理不同的设备 */
     QLIST_HEAD(, NamedGPIOList) gpios;
     QLIST_HEAD(, NamedClockList) clocks;
     QLIST_HEAD(, BusState) child_bus;
     int num_child_bus;
     int instance_id_alias;
     int alias_required_for_version;
-    ResettableState reset;
+    ResettableState reset;  /* 复位操作相关 */
 };
 
 struct DeviceListener {
@@ -225,7 +232,7 @@ struct DeviceListener {
 #define BUS_GET_CLASS(obj) OBJECT_GET_CLASS(BusClass, (obj), TYPE_BUS)
 
 /*
-    BusClass 和BusState分别代表bus的基类和对象
+    BusClass和 BusState分别代表bus的基类和对象
 */
 struct BusClass {
     ObjectClass parent_class;
@@ -249,7 +256,7 @@ struct BusClass {
     int automatic_ids;
 };
 
-/* BusChild用于描述总线上的一个设备 */
+/* BusChild用于描述总线上的一个设备实例 */
 typedef struct BusChild {
     DeviceState *child; /* 设备实例 */
     int index;  /* 表示是第几个设备 */
@@ -270,10 +277,10 @@ struct BusState {
     HotplugHandler *hotplug_handler;    /* 热插拔处理接口 */
     int max_index;  /* 当前设备最大索引 */
     bool realized;  /* 是否初始化完成 */
-    int num_children;   /*  用于存放总线上的子设备 */
-    QTAILQ_HEAD(, BusChild) children;
+    int num_children;   /* 子设备数量 */
+    QTAILQ_HEAD(, BusChild) children;   /* 用于存放总线上的子设备 */
     QLIST_ENTRY(BusState) sibling;  /* 用于挂载到父节点上 */
-    ResettableState reset;
+    ResettableState reset;  /* device实例相关结构体大概率会有这个 */
 };
 
 /**
@@ -286,26 +293,37 @@ struct BusState {
  *     is true.
  */
 struct Property {
-    const char   *name;
-    const PropertyInfo *info;
+    const char   *name; /* 属性名称 */
+    const PropertyInfo *info;   /* 属性信息 */
     ptrdiff_t    offset;
     uint8_t      bitnr;
+    /*
+        如果要把 defval 设置为默认值，那么 set_default 要设置为true，并且 set_default_value
+        函数不能为NULL
+    */
     bool         set_default;
     union {
         int64_t i;
         uint64_t u;
     } defval;
-    int          arrayoffset;   /* Property为数组中的entry？？ */
+
+    /* 
+        Property为数组中的entry？？ 
+        DeviceClass中包含有一个 *props_ 成员，表示的应该是Property数组
+    */
+    int          arrayoffset;   
     const PropertyInfo *arrayinfo;
     int          arrayfieldsize;
     const char   *link_type;
 };
 
 struct PropertyInfo {
-    const char *name;
+    const char *name;   /* 为了跟 Property->name 对应？？*/
     const char *description;
     const QEnumLookup *enum_table;
     int (*print)(DeviceState *dev, Property *prop, char *dest, size_t len);
+
+    /* 该函数关联 Property 属性初始值的设置 */
     void (*set_default_value)(ObjectProperty *op, const Property *prop);
     void (*create)(ObjectClass *oc, Property *prop);
 
@@ -342,10 +360,11 @@ compat_props_add(GPtrArray *arr,
 }
 
 /*** Board API.  This should go away once we have a machine config file.  ***/
-
+/* 当我们拥有机器配置文件的时候，这个就会走开；意思是我们也可以通过配置文件来提供API？ */
 /**
  * qdev_new: Create a device on the heap
  * @name: device type to create (we assert() that this type exists)
+ * 参数-name 用来表示设备类型？？并且如果已经拥有这个类型的话，要报警？？
  *
  * This only allocates the memory and initializes the device state
  * structure, ready for the caller to set properties if they wish.
@@ -692,7 +711,7 @@ BusState *qdev_get_parent_bus(DeviceState *dev);
 
 DeviceState *qdev_find_recursive(BusState *bus, const char *id);
 
-/* Returns 0 to walk children, > 0 to skip walk, < 0 to terminate walk. */
+/* Returns 0 to walk children, > 0 to skip walk, < 0 to terminate(终止) walk. */
 typedef int (qbus_walkerfn)(BusState *bus, void *opaque);
 typedef int (qdev_walkerfn)(DeviceState *dev, void *opaque);
 

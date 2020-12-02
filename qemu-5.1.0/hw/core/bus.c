@@ -34,6 +34,10 @@ void qbus_set_bus_hotplug_handler(BusState *bus)
     qbus_set_hotplug_handler(bus, OBJECT(bus));
 }
 
+/*
+    用于遍历总线。如果dev的child_bus不为空，说明它是一个总线桥设备，下面挂在的是总线设备，
+    所以整个函数采用深度优先算法来遍历这一颗总线树
+*/
 int qbus_walk_children(BusState *bus,
                        qdev_walkerfn *pre_devfn, qbus_walkerfn *pre_busfn,
                        qdev_walkerfn *post_devfn, qbus_walkerfn *post_busfn,
@@ -68,22 +72,26 @@ int qbus_walk_children(BusState *bus,
     return 0;
 }
 
+/* 总线冷复位 */
 void bus_cold_reset(BusState *bus)
 {
     resettable_reset(OBJECT(bus), RESET_TYPE_COLD);
 }
 
+/* 总线处于复位状态？？ */
 bool bus_is_in_reset(BusState *bus)
 {
     return resettable_is_in_reset(OBJECT(bus));
 }
 
+/* 获取bus设备reset状态 */
 static ResettableState *bus_get_reset_state(Object *obj)
 {
     BusState *bus = BUS(obj);
     return &bus->reset;
 }
 
+/* 遍历obj的所有子设备， 然后执行相应的操作opaque(reset??) */
 static void bus_reset_child_foreach(Object *obj, ResettableChildCallback cb,
                                     void *opaque, ResetType type)
 {
@@ -106,11 +114,15 @@ static void qbus_init(BusState *bus, DeviceState *parent, const char *name)
     if (name) {
         bus->name = g_strdup(name);
     } else if (bus->parent && bus->parent->id) {
-        /* parent device has id -> use it plus parent-bus-id for bus name */
+        /* parent device has id -> use it plus parent-bus-id for bus name 
+            如果创建的时候没有给出总线的名称，那就按照 parent-bus-id 来给新总线命名
+        */
         bus_id = bus->parent->num_child_bus;
         bus->name = g_strdup_printf("%s.%d", bus->parent->id, bus_id);
     } else {
-        /* no id -> use lowercase bus type plus global bus-id for bus name */
+        /* no id -> use lowercase bus type plus global bus-id for bus name 
+            没有id，则使用小写总线类型加上全局总线id作为总线名称
+        */
         bc = BUS_GET_CLASS(bus);
         bus_id = bc->automatic_ids++;
         bus->name = g_strdup_printf("%s.%d", typename, bus_id);
@@ -119,6 +131,7 @@ static void qbus_init(BusState *bus, DeviceState *parent, const char *name)
         }
     }
 
+    /* device有三个不同的链表管理不同类型的设备 */
     if (bus->parent) {
         QLIST_INSERT_HEAD(&bus->parent->child_bus, bus, sibling);
         bus->parent->num_child_bus++;
@@ -130,6 +143,11 @@ static void qbus_init(BusState *bus, DeviceState *parent, const char *name)
     }
 }
 
+/* 
+    把obj从父设备中移除 
+    首先将子设备卸载，对于非根总线再从父设备中删除自己。根总线则需要删除注册的reset函数(这个在目前
+    当前代码中好像没有体现，或者是在别的地方)
+*/
 static void bus_unparent(Object *obj)
 {
     BusState *bus = BUS(obj);
@@ -138,11 +156,12 @@ static void bus_unparent(Object *obj)
     /* Only the main system bus has no parent, and that bus is never freed */
     assert(bus->parent);
 
+    /* 遍历children数组 */
     while ((kid = QTAILQ_FIRST(&bus->children)) != NULL) {
-        DeviceState *dev = kid->child;
+        DeviceState *dev = kid->child;  /* 表示子设备实例，每个实例都执行object_unparent */
         object_unparent(OBJECT(dev));
     }
-    QLIST_REMOVE(bus, sibling);
+    QLIST_REMOVE(bus, sibling); /* 把自己从父设备的链表中移除 */
     bus->parent->num_child_bus--;
     bus->parent = NULL;
 }
@@ -180,6 +199,7 @@ void qbus_unrealize(BusState *bus)
     object_property_set_bool(OBJECT(bus), "realized", false, &error_abort);
 }
 
+/* 读取realized成员 */
 static bool bus_get_realized(Object *obj, Error **errp)
 {
     BusState *bus = BUS(obj);
@@ -193,13 +213,23 @@ static void bus_set_realized(Object *obj, bool value, Error **errp)
     BusClass *bc = BUS_GET_CLASS(bus);
     BusChild *kid;
 
+    /*
+        对于realized从false变为true的情况如果需要调用BusClass的realized方法来完成
+        初始化BusClass,因为在ObjectClass中所有该方法只对系统中第一个bus调用一次
+    */
     if (value && !bus->realized) {
         if (bc->realize) {
             bc->realize(bus, errp);
         }
 
-        /* TODO: recursive realization */
+        /* TODO: recursive realization - 递归实现 
+            所有子设备的状态都要改变
+        */
     } else if (!value && bus->realized) {
+        /*
+            对于realized从true变为false的情况则遍历bus来设置子设备的realized属性。还会调用
+            BusClass的unrealize函数。这里看起来有点奇怪，所以才有TODO里面的注释
+        */
         QTAILQ_FOREACH(kid, &bus->children, sibling) {
             DeviceState *dev = kid->child;
             qdev_unrealize(dev);
@@ -217,18 +247,27 @@ static void qbus_initfn(Object *obj)
 {
     BusState *bus = BUS(obj);
 
-    QTAILQ_INIT(&bus->children);
+    QTAILQ_INIT(&bus->children);    /* 初始化children队列 */
+
+    /* 推测是添加热插拔属性 */
     object_property_add_link(obj, QDEV_HOTPLUG_HANDLER_PROPERTY,
                              TYPE_HOTPLUG_HANDLER,
                              (Object **)&bus->hotplug_handler,
                              object_property_allow_set_link,
                              0);
+
+    /* 
+        推测是设置该总线状态为realized(已经完成初始化)，设置release的回调函数为bus_set_realized函数，
+        在bus初始化完成调用object_property_set_qobject函数的时候会回调该函数
+    */
     object_property_add_bool(obj, "realized",
                              bus_get_realized, bus_set_realized);
 }
 
+/* 获取device路径，猜测格式应该是 sysbus/..../dev */
 static char *default_bus_get_fw_dev_path(DeviceState *dev)
 {
+    /* 调用glib中提供的接口函数 */
     return g_strdup(object_get_typename(OBJECT(dev)));
 }
 
@@ -236,6 +275,8 @@ static char *default_bus_get_fw_dev_path(DeviceState *dev)
  * bus_phases_reset:
  * Transition reset method for buses to allow moving
  * smoothly from legacy reset method to multi-phases
+ * 总线的过渡复位方法，允许从传统复位方法平稳地过渡到多阶段；新旧版本之间reset函数机制转换
+ * 的过渡方案？？
  */
 static void bus_phases_reset(BusState *bus)
 {
@@ -252,14 +293,17 @@ static void bus_phases_reset(BusState *bus)
     }
 }
 
+/* transitional: 过渡性的 */
 static void bus_transitional_reset(Object *obj)
 {
-    BusClass *bc = BUS_GET_CLASS(obj);
+    BusClass *bc = BUS_GET_CLASS(obj);  /* 获取bus class */
 
     /*
      * This will call either @bus_phases_reset (for multi-phases transitioned
      * buses) or a bus's specific method for not-yet transitioned buses.
      * In both case, it does not reset children.
+     * 这将调用@bus_phases_reset（对于多阶段转换的总线）或对于尚未转换的总线调用总线的特定方法；
+     * 在这两种情况下，它都不会重置子级。
      */
     if (bc->reset) {
         bc->reset(BUS(obj));
@@ -283,13 +327,13 @@ static ResettableTrFunction bus_get_transitional_reset(Object *obj)
     return NULL;
 }
 
-/* 完成类的初始化 */
+/* 完成bus class的初始化 */
 static void bus_class_init(ObjectClass *class, void *data)
 {
     BusClass *bc = BUS_CLASS(class);
     ResettableClass *rc = RESETTABLE_CLASS(class);
 
-    class->unparent = bus_unparent;
+    class->unparent = bus_unparent; /* 从父设备脱离 */
     bc->get_fw_dev_path = default_bus_get_fw_dev_path;
 
     rc->get_state = bus_get_reset_state;
@@ -300,13 +344,20 @@ static void bus_class_init(ObjectClass *class, void *data)
      * to do the multi-phase transition from base classes to leaf classes. It
      * allows a legacy-reset Bus class to extend a multi-phases-reset
      * Bus class for the following reason:
+     * @bus_phases_reset作为下面的默认重置方法，允许从基类到叶类进行多阶段转换。它允许旧式
+     * 重置总线类扩展多阶段重置总线类，原因如下：
+     * 
      * + If a base class B has been moved to multi-phase, then it does not
      *   override this default reset method and may have defined phase methods.
+     *   如果基类B已移动到多阶段，则它不会覆盖此默认重置方法，并且可能已定义阶段方法
+     * 
      * + A child class C (extending class B) which uses
      *   bus_class_set_parent_reset() (or similar means) to override the
      *   reset method will still work as expected. @bus_phases_reset function
      *   will be registered as the parent reset method and effectively call
      *   parent reset phases.
+     *   子类C（扩展类B）使用bus_class_set_parent_reset（）（或类似方法）重写reset方法，
+     *   它仍将按预期工作。@总线相位复位功能将注册为父级复位方法，并有效地调用父级复位相
      */
     bc->reset = bus_phases_reset;
     rc->get_transitional_function = bus_get_transitional_reset;
@@ -335,6 +386,18 @@ static const TypeInfo bus_info = {
     },
 };
 
+/*
+总线的基本框架：
+    1 创建总线
+        qbus_create_inplace
+        qbus_create
+        
+    2 遍历总线
+        qbus_walk_children  
+
+    3 总线基础TypeInfo
+        #define TYPE_BUS “bus”
+*/
 static void bus_register_types(void)
 {
     type_register_static(&bus_info);

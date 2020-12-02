@@ -32,7 +32,9 @@ typedef struct SysBusFind {
     FindSysbusDeviceFunc *func;
 } SysBusFind;
 
-/* Run func() for every sysbus device, traverse the tree for everything else */
+/* Run func() for every sysbus device, traverse the tree for everything else 
+    对每个sysbus设备运行func（），对其他所有设备遍历树
+*/
 static int find_sysbus_device(Object *obj, void *opaque)
 {
     SysBusFind *find = opaque;
@@ -64,14 +66,16 @@ void foreach_dynamic_sysbus_device(FindSysbusDeviceFunc *func, void *opaque)
         .opaque = opaque,
     };
 
-    /* Loop through all sysbus devices that were spawened outside the machine */
+    /* Loop through all sysbus devices that were spawened outside the machine 
+        循环访问机器外部的所有sysbus设备
+    */
     container = container_get(qdev_get_machine(), "/peripheral");
     find_sysbus_device(container, &find);
     container = container_get(qdev_get_machine(), "/peripheral-anon");
     find_sysbus_device(container, &find);
 }
 
-
+/* 初始化sysbus class */
 static void system_bus_class_init(ObjectClass *klass, void *data)
 {
     BusClass *k = BUS_CLASS(klass);
@@ -87,7 +91,9 @@ static const TypeInfo system_bus_info = {
     .class_init = system_bus_class_init,
 };
 
-/* Check whether an IRQ source exists */
+/* Check whether an IRQ source exists 
+    检查是否存在中断资源
+*/
 bool sysbus_has_irq(SysBusDevice *dev, int n)
 {
     char *prop = g_strdup_printf("%s[%d]", SYSBUS_DEVICE_GPIO_IRQ, n);
@@ -99,6 +105,7 @@ bool sysbus_has_irq(SysBusDevice *dev, int n)
     return (r != NULL);
 }
 
+/* 检查sysbus中断的状态 */
 bool sysbus_is_irq_connected(SysBusDevice *dev, int n)
 {
     return !!sysbus_get_connected_irq(dev, n);
@@ -181,12 +188,16 @@ void sysbus_init_irq(SysBusDevice *dev, qemu_irq *p)
     qdev_init_gpio_out_named(DEVICE(dev), p, SYSBUS_DEVICE_GPIO_IRQ, 1);
 }
 
-/* Pass IRQs from a target device.  */
+/* Pass IRQs from a target device. 从目标设备传递IRQ */
 void sysbus_pass_irq(SysBusDevice *dev, SysBusDevice *target)
 {
     qdev_pass_gpios(DEVICE(target), DEVICE(dev), SYSBUS_DEVICE_GPIO_IRQ);
 }
 
+/*
+    用于设置设备的mmio;最多32段，addr为hwaddr也就是gpa，暂时设置为-1.
+    在 sysbus_mmio_map 或者 sysbus_mmio_map_overlap 函数设置
+*/
 void sysbus_init_mmio(SysBusDevice *dev, MemoryRegion *memory)
 {
     int n;
@@ -202,6 +213,10 @@ MemoryRegion *sysbus_mmio_get_region(SysBusDevice *dev, int n)
     return dev->mmio[n].memory;
 }
 
+/*
+    设置一段连续的io端口。x86里面io端口有65535个,每个设备做多占用32个端口，
+    将端口信息保存在pio数组里面。个数信息保存在num_pio中
+*/
 void sysbus_init_ioports(SysBusDevice *dev, uint32_t ioport, uint32_t size)
 {
     uint32_t i;
@@ -221,6 +236,7 @@ static void sysbus_device_realize(DeviceState *dev, Error **errp)
 {
 }
 
+/* varargs: 可变参数 */
 DeviceState *sysbus_create_varargs(const char *name,
                                    hwaddr addr, ...)
 {
@@ -252,6 +268,7 @@ DeviceState *sysbus_create_varargs(const char *name,
 
 bool sysbus_realize(SysBusDevice *dev, Error **errp)
 {
+    /* bus本质上来说就是一个设备，所以就直接调用qdev初始化函数 */
     return qdev_realize(DEVICE(dev), sysbus_get_default(), errp);
 }
 
@@ -335,18 +352,24 @@ static const TypeInfo sysbus_device_type_info = {
     .class_init = sysbus_device_class_init,
 };
 
+/* 系统总线 */
 static BusState *main_system_bus;
 
 static void main_system_bus_create(void)
 {
     /* assign main_system_bus before qbus_create_inplace()
-     * in order to make "if (bus != sysbus_get_default())" work */
+     * in order to make "if (bus != sysbus_get_default())" work 
+     * qbus_create_inplace 是在总线对象已经分配内存的情况下来执行初始化操作
+     * */
     main_system_bus = g_malloc0(system_bus_info.instance_size);
     qbus_create_inplace(main_system_bus, system_bus_info.instance_size,
                         TYPE_SYSTEM_BUS, NULL, "main-system-bus");
-    OBJECT(main_system_bus)->free = g_free;
+    OBJECT(main_system_bus)->free = g_free; /* 垃圾回收函数 */
 }
 
+/*
+    类似与单例模式，sysbus_get_default 函数会在多个地方被调用到，但是实例只有一个
+*/
 BusState *sysbus_get_default(void)
 {
     if (!main_system_bus) {

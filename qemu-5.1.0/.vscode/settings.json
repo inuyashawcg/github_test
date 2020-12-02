@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "array": "cpp",
+        "atomic": "cpp",
+        "*.tcc": "cpp",
+        "cstddef": "cpp",
+        "string_view": "cpp",
+        "algorithm": "cpp",
+        "memory": "cpp"
+    }
+}
