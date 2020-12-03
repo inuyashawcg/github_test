@@ -388,7 +388,7 @@ DeviceState *qdev_try_new(const char *name);
  *
  * "Realize" the device, i.e. perform the second phase of device
  * initialization.
- * @dev must not be plugged into a bus already.
+ * @dev must not be plugged into a bus already. @dev不能已经插入总线
  * If @bus, plug @dev into @bus.  This takes a reference to @dev.
  * If @dev has no QOM parent, make one up, taking another reference.
  * On success, return true.
@@ -468,9 +468,12 @@ bool qdev_machine_modified(void);
 
 /**
  * qdev_get_gpio_in: Get one of a device's anonymous input GPIO lines
+ * 获取设备的匿名输入GPIO line之一
+ * 
  * @dev: Device whose GPIO we want
  * @n: Number of the anonymous GPIO line (which must be in range)
- *
+ * n 应该就相当于是gpio引脚的index
+ * 
  * Returns the qemu_irq corresponding to an anonymous input GPIO line
  * (which the device has set up with qdev_init_gpio_in()). The index
  * @n of the GPIO line must be valid (i.e. be at least 0 and less than
@@ -481,6 +484,8 @@ bool qdev_machine_modified(void);
  * device models to wire up the GPIO lines; usually the return value
  * will be passed to qdev_connect_gpio_out() or a similar function to
  * connect another device's output GPIO line to this input.
+ * 此函数用于板代码或SoC“容器”设备模型连接GPIO线；通常返回值将传递给
+ * qdev_connect_GPIO_out（）或类似函数，以将另一个设备的输出GPIO线连接到此输入
  *
  * For named input GPIO lines, use qdev_get_gpio_in_named().
  */
@@ -511,6 +516,9 @@ qemu_irq qdev_get_gpio_in_named(DeviceState *dev, const char *name, int n);
  * This function connects an anonymous output GPIO line on a device
  * up to an arbitrary qemu_irq, so that when the device asserts that
  * output GPIO line, the qemu_irq's callback is invoked.
+ * 此函数将设备上的匿名输出GPIO线连接到任意qemu_irq，以便当设备中断该输出GPIO线时，
+ * 将调用qemu_irq的回调
+ * 
  * The index @n of the GPIO line must be valid (i.e. be at least 0 and
  * less than the total number of anonymous output GPIOs the device has
  * created with qdev_init_gpio_out()); otherwise this function will assert().
@@ -685,6 +693,8 @@ static inline void qdev_init_gpio_in_named(DeviceState *dev,
 
 /**
  * qdev_pass_gpios: create GPIO lines on container which pass through to device
+ * 在通过设备的容器上创建GPIO行
+ * 
  * @dev: Device which has GPIO lines
  * @container: Container device which needs to expose them
  * @name: Name of GPIO array to pass through (NULL for the anonymous GPIO array)

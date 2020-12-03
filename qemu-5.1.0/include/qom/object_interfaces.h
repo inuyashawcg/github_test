@@ -22,18 +22,23 @@ typedef struct UserCreatable UserCreatable;
  * UserCreatableClass:
  * @parent_class: the base class
  * @complete: callback to be called after @obj's properties are set.
+ * 设置@obj属性后调用的回调
+ * 
  * @can_be_deleted: callback to be called before an object is removed
  * to check if @obj can be removed safely.
+ * 在删除对象之前调用的回调，以检查是否可以安全地删除@obj
  *
  * Interface is designed to work with -object/object-add/object_add
  * commands.
  * Interface is mandatory for objects that are designed to be user
  * creatable (i.e. -object/object-add/object_add, will accept only
  * objects that inherit this interface).
- *
+ * 对于设计为可由用户创建的对象，接口是必需的
+ * 
  * Interface also provides an optional ability to do the second
  * stage * initialization of the object after its properties were
  * set.
+ * 接口还提供了一个可选功能，可以在设置对象的属性后对其进行第二阶段*初始化
  *
  * For objects created without using -object/object-add/object_add,
  * @user_creatable_complete() wrapper should be called manually if

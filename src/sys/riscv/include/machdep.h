@@ -40,7 +40,7 @@
 struct riscv_bootparams {
 
 	/* vm_offset_t: unsigned long */
-	vm_offset_t	kern_l1pt;	/* Kernel L1 base */
+	vm_offset_t	kern_l1pt;	/* Kernel L1 base - L1 好像是kernel启动的一个阶段 */
 	vm_offset_t	kern_phys;	/* Kernel base (physical) addr */
 	vm_offset_t	kern_stack;
 	vm_offset_t	dtbp_virt;	/* Device tree blob virtual addr */

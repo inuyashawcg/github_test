@@ -126,10 +126,17 @@ static struct sx kld_sx;	/* kernel linker lock */
  */
 static int loadcnt;
 
-/* 应该是用于管理所有的linker file class */
+/* 
+	应该是用于管理所有的linker class，linker_class 其实就是kobj_class，它也是包含一个kobj_methods，
+	link_elf和link_elf_obj其实都是先往linker_class中注册方法，然后添加linker_class到classes，然后
+	kern_linker就可以根据不同的应用场景调用注册进来的的方法
+*/
 static linker_class_list_t classes;
 
-/* 应该是管理所有的linker file */
+/* 
+	应该是管理所有的linker file，linker_file其实并不是目标文件实体，他只是对文件的一个描述，我们可以通过
+	该结构体获取目标文件的名称，位置等等信息，然后就可以对目标文件进行链接操作
+*/
 static linker_file_list_t linker_files;
 static int next_file_id = 1;
 static int linker_no_more_classes = 0;
@@ -165,7 +172,7 @@ struct modlist {
 	TAILQ_ENTRY(modlist) link;	/* chain together all modules */
 	linker_file_t   container;
 	const char 	*name;
-	int             version;
+	int             version;	/* 驱动模块注册的时候也会添加一个版本信息 */
 };
 typedef struct modlist *modlist_t;
 
@@ -1689,6 +1696,7 @@ modlist_lookup2(const char *name, const struct mod_depend *verinfo)
 	return (bestmod);
 }
 
+/*  */
 static modlist_t
 modlist_newmodule(const char *modname, int version, linker_file_t container)
 {
@@ -1706,7 +1714,7 @@ modlist_newmodule(const char *modname, int version, linker_file_t container)
 
 /*
 	mod_metadata 应该是linker file中的一个section，我们通过定义这个section的start和stop来对该段
-	进行遍历，找到特定的元素
+	进行遍历，找到特定的元素(参考driver)
 */
 static void
 linker_addmodules(linker_file_t lf, struct mod_metadata **start,
@@ -1718,6 +1726,9 @@ linker_addmodules(linker_file_t lf, struct mod_metadata **start,
 
 	/*
 		遍历linker file mod_metaata段中所有的元素，判断是否已经加载
+		推测: 所有的driver module应该都是添加到 linker_kernel_file 关联文件的同一个section当中，然后通过这个
+		函数把所有的driver module提取出来，放到 found_modules 当中。其他module可能也是以同样的方式添加的，所以
+		found_modules中可能不仅仅只有driver，应该还包含有别的module
 	*/
 	for (mdp = start; mdp < stop; mdp++) {
 		mp = *mdp;
@@ -1793,6 +1804,7 @@ linker_preload(void *arg)
 		/* 
 			首先遍历classes进行一轮preload，将执行完操作获取到的linker file添加到
 			loaded_files 中
+			classes中包含了两种类型，link_elf和link_elf_obj,所以说它会执行两次preload？
 		*/
 		TAILQ_FOREACH(lc, &classes, link) {
 			error = LINKER_LINK_PRELOAD(lc, modname, &lf);
@@ -1807,6 +1819,9 @@ linker_preload(void *arg)
 	/*
 	 * First get a list of stuff in the kernel.
 	 * 首先在内核中获取一个内容列表
+	 * 可以参考link_elf_obj和link_elf文件中对应函数的逻辑，其实就是在 linker_kernel_file 关联的文件的
+	 * prog类型的section中找到以 "modmetadata_set" 命名的link_set(驱动模块貌似就是以这个命名的，然后经
+	 * link_set中代码的处理，添加到某一个section中，很可能是.data section)
 	 */
 	if (linker_file_lookup_set(linker_kernel_file, MDT_SETNAME, &start,
 	    &stop, NULL) == 0)

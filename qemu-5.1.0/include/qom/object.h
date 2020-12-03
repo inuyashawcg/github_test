@@ -37,8 +37,8 @@ typedef struct InterfaceInfo InterfaceInfo;
  * features:
  *
  *  - System for dynamically registering types
- *  - Support for single-inheritance of types
- *  - Multiple inheritance of stateless interfaces
+ *  - Support for single-inheritance of types 支持类型的单一继承
+ *  - Multiple inheritance of stateless interfaces 无状态接口的多重继承
  *
  * <example>
  *   <title>Creating a minimal type</title>
@@ -75,6 +75,7 @@ typedef struct InterfaceInfo InterfaceInfo;
  * In the above example, we create a simple type that is described by #TypeInfo.
  * #TypeInfo describes information about the type including what it inherits
  * from, the instance and class size, and constructor/destructor hooks.
+ * TypeInfo描述有关类型的信息，包括它继承的内容、实例和类大小以及构造函数/析构函数挂钩
  *
  * Alternatively several static types could be registered using helper macro
  * DEFINE_TYPES()
@@ -102,12 +103,17 @@ typedef struct InterfaceInfo InterfaceInfo;
  * are instantiated dynamically but there is only ever one instance for any
  * given type.  The #ObjectClass typically holds a table of function pointers
  * for the virtual methods implemented by this type.
+ * 每种类型都有一个与其关联的ObjectClass。#ObjectClass派生是动态实例化的，但对于任何给定类型，
+ * 都只有一个实例。ObjectClass通常保存由该类型实现的虚拟方法的函数指针表
  *
  * Using object_new(), a new #Object derivative will be instantiated.  You can
  * cast an #Object to a subclass (or base-class) type using
  * object_dynamic_cast().  You typically want to define macro wrappers around
  * OBJECT_CHECK() and OBJECT_CLASS_CHECK() to make it easier to convert to a
  * specific type:
+ * 使用object_new（），将实例化一个新的#对象派生。可以使用Object_dynamic_cast（）将对象
+ * 强制转换为子类（或基类）类型。您通常希望在OBJECT_CHECK（）和OBJECT_CLASS_CHECK（）
+ * 周围定义宏包装器，以便更容易地转换为特定类型：
  *
  * <example>
  *   <title>Typecasting macros</title>
@@ -126,20 +132,26 @@ typedef struct InterfaceInfo InterfaceInfo;
  * Before an object is initialized, the class for the object must be
  * initialized.  There is only one class object for all instance objects
  * that is created lazily.
+ * 在初始化对象之前，必须初始化该对象的类。对于延迟创建的所有实例对象，只有一个类对象
  *
  * Classes are initialized by first initializing any parent classes (if
  * necessary).  After the parent class object has initialized, it will be
  * copied into the current class object and any additional storage in the
  * class object is zero filled.
+ * 初始化类的方法是首先初始化任何父类（如果需要）。初始化父类对象后，它将被复制到当前类
+ * 对象中，并且类对象中的任何附加存储都将被零填充
  *
  * The effect of this is that classes automatically inherit any virtual
  * function pointers that the parent class has already initialized.  All
  * other fields will be zero filled.
+ * 这样做的效果是类自动继承父类已经初始化的任何虚函数指针。所有其他字段将为零填充
  *
  * Once all of the parent classes have been initialized, #TypeInfo::class_init
  * is called to let the class being instantiated provide default initialize for
  * its virtual functions.  Here is how the above example might be modified
  * to introduce an overridden virtual function:
+ * 初始化所有父类后，将调用#TypeInfo:：class_init，让正在实例化的类为其虚拟函数提供默认初始化；
+ * 下面是如何修改上面的示例以引入重写的虚函数
  *
  * <example>
  *   <title>Overriding a virtual function</title>
@@ -164,6 +176,8 @@ typedef struct InterfaceInfo InterfaceInfo;
  * Introducing new virtual methods requires a class to define its own
  * struct and to add a .class_size member to the #TypeInfo.  Each method
  * will also have a wrapper function to call it easily:
+ * 引入新的虚拟方法需要一个类来定义它自己的结构，并向#TypeInfo添加一个.class_size成员。
+ * 每个方法还将有一个包装器函数以方便调用：
  *
  * <example>
  *   <title>Defining an abstract class</title>
@@ -206,6 +220,11 @@ typedef struct InterfaceInfo InterfaceInfo;
  * The only things you can validly do with a 'SomethingIf *' are to pass it as
  * an argument to a method on its corresponding SomethingIfClass, or to
  * dynamically cast it to an object that implements the interface.
+ * 接口允许有限形式的多重继承。实例与普通类型相似，只是实例只由它们的类定义，从不携带任何状态。
+ * 因此，指向接口实例的指针应始终为不完整类型，以确保它不能被取消引用。也就是说，应该定义
+ * “typedef struct SomethingIf SomethingIf”，这样就可以传递“SomethingIf*si”参数，
+ * 但不能定义“struct SomethingIf{。。。}'. 对“SomethingIf*”唯一有效的操作是将其作为
+ * 参数传递给其对应的SomethingIf类上的方法，或将其动态转换为实现接口的对象
  *
  * # Methods #
  *
@@ -218,6 +237,8 @@ typedef struct InterfaceInfo InterfaceInfo;
  * Methods cannot be overloaded. That is, the #ObjectClass and method name
  * uniquely identity the function to be called; the signature does not vary
  * except for trailing varargs.
+ * 方法不能重载。也就是说，#ObjectClass和方法名唯一标识要调用的函数；除了后面的varargs外，
+ * 签名没有变化。
  *
  * Methods are always <emphasis>virtual</emphasis>. Overriding a method in
  * #TypeInfo.class_init of a subclass leads to any user of the class obtained
@@ -318,6 +339,7 @@ typedef struct ObjectProperty ObjectProperty;
  * @errp: a pointer to an Error that is filled if getting/setting fails.
  *
  * Called when trying to get/set a property.
+ * 当想要获取属性的时候，可以调用这个函数
  */
 typedef void (ObjectPropertyAccessor)(Object *obj,
                                       Visitor *v,
@@ -332,9 +354,11 @@ typedef void (ObjectPropertyAccessor)(Object *obj,
  * @part: the name of the property
  *
  * Resolves the #Object corresponding to property @part.
+ * 解析与属性 @part对应的 #object
  *
  * The returned object can also be used as a starting point
  * to resolve a relative path starting with "@part".
+ * 返回的对象也可以用作解析以“@part”开头的相对路径的起点
  *
  * Returns: If @path is the path that led to @obj, the function
  * returns the #Object corresponding to "@path/@part".
@@ -351,6 +375,7 @@ typedef Object *(ObjectPropertyResolve)(Object *obj,
  * @opaque: the opaque registered with the property
  *
  * Called when a property is removed from a object.
+ * 当属性从一个object移除的时候，调用这个函数
  */
 typedef void (ObjectPropertyRelease)(Object *obj,
                                      const char *name,
@@ -362,9 +387,11 @@ typedef void (ObjectPropertyRelease)(Object *obj,
  * @prop: the property to set
  *
  * Called when a property is initialized.
+ * 初始化属性
  */
 typedef void (ObjectPropertyInit)(Object *obj, ObjectProperty *prop);
 
+/* 简单理解为名称、类型等基本属性+功能函数 */
 struct ObjectProperty
 {
     char *name;
@@ -382,9 +409,11 @@ struct ObjectProperty
 /**
  * ObjectUnparent:
  * @obj: the object that is being removed from the composition tree
+ * 正在从合成树中删除的对象
  *
  * Called when an object is being removed from the QOM composition tree.
  * The function should remove any backlinks from children objects to @obj.
+ * 从QOM组合树中移除对象时调用。函数应该删除子对象到@obj的所有反向链接
  * 
  * QEMU提供了一套面向对象编程的模型——QOM，即QEMU Object Module，几乎所有的设备如CPU、
  * 内存、总线等都是利用这一面向对象的模型来实现的。QOM模型的实现代码位于qom/文件夹下的文
@@ -440,10 +469,14 @@ struct ObjectClass
  * a #ObjectClass.  Since C guarantees that the first member of a structure
  * always begins at byte 0 of that structure, as long as any sub-object places
  * its parent as the first member, we can cast directly to a #Object.
+ * 由于C保证结构的第一个成员总是从该结构的字节0开始，只要任何子对象将其父对象作为第一个成员，
+ * 我们就可以直接转换为一个#object
  *
  * As a result, #Object contains a reference to the objects type as its
  * first member.  This allows identification of the real type of the object at
  * run time.
+ * 因此，#Object包含对objects类型的引用作为其第一个成员。这允许在运行时标识对象的实际类型；
+ * 应该指的就是 ObjectClass 用来指示实际的object类型
  */
 struct Object
 {
@@ -471,36 +504,59 @@ struct Object
  * @instance_size: The size of the object (derivative of #Object).  If
  *   @instance_size is 0, then the size of the object will be the size of the
  *   parent object.
+ *   对象的大小（对象的派生）。如果@instance_size为0，则对象的大小将为父对象的大小
+ * 
  * @instance_init: This function is called to initialize an object.  The parent
  *   class will have already been initialized so the type is only responsible
  *   for initializing its own members.
+ *   初始化调用的时候调用。这个时候可能父类已经初始化过了，所以这里仅仅初始化它自己的成员
+ * 
  * @instance_post_init: This function is called to finish initialization of
  *   an object, after all @instance_init functions were called.
+ *   当一个object的所有初始化动作完成之后，调用这个函数
+ * 
  * @instance_finalize: This function is called during object destruction.  This
  *   is called before the parent @instance_finalize function has been called.
  *   An object should only free the members that are unique to its type in this
  *   function.
+ *   当一个object销毁的时候调用这个函数，而且这个要在parent instance_finalize 函数调用
+ *   之前调用。在这个函数中，对象只应释放其类型所特有的成员。从父类继承的成员在这里不做处理
+ * 
  * @abstract: If this field is true, then the class is considered abstract and
  *   cannot be directly instantiated.
+ *   如果此字段为true，则该类被认为是抽象的，不能直接实例化
+ * 
  * @class_size: The size of the class object (derivative(派生) of #ObjectClass)
  *   for this object.  If @class_size is 0, then the size of the class will be
  *   assumed to be the size of the parent class.  This allows a type to avoid
  *   implementing an explicit class type if they are not adding additional
  *   virtual functions.
+ *   此对象的类对象（ObjectClass的派生）的大小。如果@class_size为0，则类的大小将假定为父类
+ *   的大小。这允许类型在不添加额外的虚函数时避免实现显式类类型。
+ * 
  * @class_init: This function is called after all parent class initialization
  *   has occurred to allow a class to set its default virtual method pointers.
  *   This is also the function to use to override virtual methods from a parent
  *   class.
+ *   在所有父类初始化完成后调用此函数，以允许类设置其默认的虚拟方法指针。这也是用于重写父类中的
+ *   虚方法的函数
+ * 
  * @class_base_init: This function is called for all base classes after all
  *   parent class initialization has occurred, but before the class itself
  *   is initialized.  This is the function to use to undo the effects of
  *   memcpy from the parent class to the descendants.
+ *   在所有父类初始化发生之后，但在类本身初始化之前，将对所有基类调用此函数。此函数用于撤消
+ *   memcpy从父类到子类的效果
+ * 
  * @class_data: Data to pass to the @class_init,
  *   @class_base_init. This can be useful when building dynamic
  *   classes.
+ *   用于class_init 和 class_base_init 这两个函数，并且对于创建动态class是有帮助的
+ * 
  * @interfaces: The list of interfaces associated with this type.  This
  *   should point to a static array that's terminated with a zero filled
  *   element.
+ *   与此类型关联的接口列表。这应该指向一个以零填充元素结束的静态数组
  */
 
 /*
@@ -533,10 +589,11 @@ struct TypeInfo
 
 /**
  * OBJECT:
- * @obj: A derivative of #Object
+ * @obj: A derivative of #Object - object派生
  *
  * Converts an object to a #Object.  Since all objects are #Objects,
  * this function will always succeed.
+ * 应该就是将一种object派生出来的类型转换成object类型
  */
 #define OBJECT(obj) \
     ((Object *)(obj))
@@ -560,6 +617,9 @@ struct TypeInfo
  * A type safe version of @object_dynamic_cast_assert.  Typically each class
  * will define a macro based on this type to perform type safe dynamic_casts to
  * this object type.
+ * @object_dynamic_cast_assert的类型安全版本。通常每个类都将基于此类型定义一个宏，以对该
+ * 对象类型执行类型安全的动态转换。这个可能就是用来判断我们所要执行的类型转换是不是安全的，如果
+ * 不是安全操作，那么调用这个函数后就会报错；这里针对的是object
  *
  * If an invalid object is passed to this function, a run time assert will be
  * generated.
@@ -577,6 +637,7 @@ struct TypeInfo
  * A type safe version of @object_class_dynamic_cast_assert.  This macro is
  * typically wrapped by each type to perform type safe casts of a class to a
  * specific class type.
+ * 作用同上，只不过这里针对的类型是object_class
  */
 #define OBJECT_CLASS_CHECK(class_type, class, name) \
     ((class_type *)object_class_dynamic_cast_assert(OBJECT_CLASS(class), (name), \
@@ -591,6 +652,7 @@ struct TypeInfo
  * This function will return a specific class for a given object.  Its generally
  * used by each type to provide a type safe macro to get a specific class type
  * from an object.
+ * 此函数将返回给定对象的特定类。它通常被每个类型用来提供一个类型安全宏，以从对象中获取特定的类类型
  */
 #define OBJECT_GET_CLASS(class, obj, name) \
     OBJECT_CLASS_CHECK(class, object_get_class(OBJECT(obj)), name)
@@ -600,6 +662,7 @@ struct TypeInfo
  * @type: The name of the interface.
  *
  * The information associated with an interface.
+ * 仅仅显示了interface的名称，并且关联到一个interface
  */
 struct InterfaceInfo {
     const char *type;
@@ -610,13 +673,13 @@ struct InterfaceInfo {
  * @parent_class: the base class
  *
  * The class for all interfaces.  Subclasses of this class should only add
- * virtual methods.
+ * virtual methods. 所有接口的类。此类的子类只应添加虚拟方法。
  */
 struct InterfaceClass
 {
     ObjectClass parent_class;
     /*< private >*/
-    ObjectClass *concrete_class;
+    ObjectClass *concrete_class;    /* 可继承类？？ */
     Type interface_type;
 };
 
@@ -626,6 +689,7 @@ struct InterfaceClass
  * INTERFACE_CLASS:
  * @klass: class to cast from
  * Returns: An #InterfaceClass or raise an error if cast is invalid
+ * 检查类型转换的安全性(interface class)
  */
 #define INTERFACE_CLASS(klass) \
     OBJECT_CLASS_CHECK(InterfaceClass, klass, TYPE_INTERFACE)
@@ -649,6 +713,8 @@ struct InterfaceClass
  * This function will initialize a new object using heap allocated memory.
  * The returned object has a reference count of 1, and will be freed when
  * the last reference is dropped.
+ * 此函数将使用堆分配的内存初始化新对象。返回的对象的引用计数为1，将在删除最后一个引用
+ * 时释放该对象
  *
  * Returns: The newly allocated and instantiated object.
  */
@@ -657,6 +723,7 @@ Object *object_new_with_class(ObjectClass *klass);
 /**
  * object_new:
  * @typename: The name of the type of the object to instantiate.
+ * 要实例化的对象的类型的名称
  *
  * This function will initialize a new object using heap allocated memory.
  * The returned object has a reference count of 1, and will be freed when
@@ -673,6 +740,7 @@ Object *object_new(const char *typename);
  * @id: The unique ID of the object
  * @errp: pointer to error object
  * @...: list of property names and values
+ * 实例化带有属性信息的object
  *
  * This function will initialize a new object using heap allocated memory.
  * The returned object has a reference count of 1, and will be freed when
@@ -680,12 +748,16 @@ Object *object_new(const char *typename);
  *
  * The @id parameter will be used when registering the object as a
  * child of @parent in the composition tree.
+ * 在组合树中将对象注册为@parent的子对象时，将使用@id参数
  *
  * The variadic parameters are a list of pairs of (propname, propvalue)
  * strings. The propname of %NULL indicates the end of the property
  * list. If the object implements the user creatable interface, the
  * object will be marked complete once all the properties have been
  * processed.
+ * 可变参数是（propname，propvalue）字符串对的列表。propname%NULL表示属性列表
+ * 的结尾。如果对象实现了用户可创建的接口，那么在处理完所有属性之后，该对象将被标记
+ * 为完成
  *
  * <example>
  *   <title>Creating an object with properties</title>
@@ -711,6 +783,7 @@ Object *object_new(const char *typename);
  *
  * The returned object will have one stable reference maintained
  * for as long as it is present in the object hierarchy.
+ * 返回的对象将有一个稳定的引用，只要它存在于对象层次结构中
  *
  * Returns: The newly allocated, instantiated & initialized object.
  */
@@ -729,6 +802,7 @@ Object *object_new_with_props(const char *typename,
  * @vargs: list of property names and values
  *
  * See object_new_with_props() for documentation.
+ * 作用同上
  */
 Object *object_new_with_propv(const char *typename,
                               Object *parent,
@@ -750,11 +824,11 @@ void object_apply_compat_props(Object *obj);
  * @...: list of property names and values
  *
  * This function will set a list of properties on an existing object
- * instance.
+ * instance.    此函数用于设置现有对象实例的属性列表
  *
  * The variadic parameters are a list of pairs of (propname, propvalue)
  * strings. The propname of %NULL indicates the end of the property
- * list.
+ * list.    属性是按照map类型的格式出现的，以NULL作为结尾
  *
  * <example>
  *   <title>Update an object's properties</title>
@@ -790,6 +864,7 @@ bool object_set_props(Object *obj, Error **errp, ...) QEMU_SENTINEL;
  * See object_set_props() for documentation.
  *
  * Returns: %true on success, %false on error.
+ * 作用同上
  */
 bool object_set_propv(Object *obj, Error **errp, va_list vargs);
 
@@ -802,6 +877,7 @@ bool object_set_propv(Object *obj, Error **errp, va_list vargs);
  * This function will initialize an object.  The memory for the object should
  * have already been allocated.  The returned object has a reference count of 1,
  * and will be finalized when the last reference is dropped.
+ * 用于已经分配内存的object
  */
 void object_initialize(void *obj, size_t size, const char *typename);
 
@@ -820,6 +896,10 @@ void object_initialize(void *obj, size_t size, const char *typename);
  * to a parent with object_property_add_child() function. The returned object
  * has a reference count of 1 (for the "child<...>" property from the parent),
  * so the object will be finalized automatically when the parent gets removed.
+ * 
+ * 此函数将初始化一个对象。对象的内存应该已经分配了。然后，该对象将作为子属性添加到父级中，通过
+ * object_property_add_child（）函数。返回的对象的引用计数为1（对于父对象的“child<…>”属性），
+ * 因此当父对象被删除时，该对象将自动完成释放
  *
  * The variadic parameters are a list of pairs of (propname, propvalue)
  * strings. The propname of %NULL indicates the end of the property list.
@@ -844,7 +924,8 @@ bool object_initialize_child_with_props(Object *parentobj,
  * @vargs: list of property names and values
  *
  * See object_initialize_child() for documentation.
- *
+ * 作用同上
+ * 
  * Returns: %true on success, %false on failure.
  */
 bool object_initialize_child_with_propsv(Object *parentobj,
@@ -882,7 +963,7 @@ void object_initialize_child_internal(Object *parent, const char *propname,
  *
  * Returns: This function returns @obj on success or #NULL on failure.
  */
-Object *object_dynamic_cast(Object *obj, const char *typename);
+Object *object_dynamic_cast(Object *obj, const char *typename); /* 类型check */
 
 /**
  * object_dynamic_cast_assert:
@@ -898,7 +979,7 @@ Object *object_dynamic_cast_assert(Object *obj, const char *typename,
 
 /**
  * object_get_class:
- * @obj: A derivative of #Object
+ * @obj: A derivative of #Object - 派生类(获取派生类的ObjectClass)
  *
  * Returns: The #ObjectClass of the type associated with @obj.
  */
@@ -906,7 +987,7 @@ ObjectClass *object_get_class(Object *obj);
 
 /**
  * object_get_typename:
- * @obj: A derivative of #Object.
+ * @obj: A derivative of #Object. 也是针对派生类对象的
  *
  * Returns: The QOM typename of @obj.
  */
@@ -914,10 +995,11 @@ const char *object_get_typename(const Object *obj);
 
 /**
  * type_register_static:
- * @info: The #TypeInfo of the new type.
+ * @info: The #TypeInfo of the new type. 添加了新的TypeInfo
  *
  * @info and all of the strings it points to should exist for the life time
  * that the type is registered.
+ * @info及其指向的所有字符串应该在注册类型的生命周期内存在
  *
  * Returns: the new #Type.
  */
@@ -929,6 +1011,7 @@ Type type_register_static(const TypeInfo *info);
  *
  * Unlike type_register_static(), this call does not require @info or its
  * string members to continue to exist after the call returns.
+ * 与 type_register_static() 不同，此调用不需要@info或其字符串成员在调用返回后继续存在
  *
  * Returns: the new #Type.
  */
@@ -994,6 +1077,7 @@ ObjectClass *object_class_dynamic_cast(ObjectClass *klass,
 /**
  * object_class_get_parent:
  * @klass: The class to obtain the parent for.
+ * 要为其获取父级的类，文件中的结构体好像都是这种存在继承关系的
  *
  * Returns: The parent for @klass or %NULL if none.
  */
@@ -1010,7 +1094,7 @@ const char *object_class_get_name(ObjectClass *klass);
 /**
  * object_class_is_abstract:
  * @klass: The class to obtain the abstractness for.
- *
+ * 判断是不是抽象类型
  * Returns: %true if @klass is abstract, %false otherwise.
  */
 bool object_class_is_abstract(ObjectClass *klass);
@@ -1030,6 +1114,8 @@ ObjectClass *object_class_by_name(const char *typename);
  * For objects which might be provided by a module.  Behaves like
  * object_class_by_name, but additionally tries to load the module
  * needed in case the class is not available.
+ * 对于可能由模块提供的对象。其行为类似于object_class_by_name，但如果类不可用，
+ * 则会尝试加载所需的模块
  *
  * Returns: The class for @typename or %NULL if not found.
  */
@@ -1042,9 +1128,12 @@ void object_class_foreach(void (*fn)(ObjectClass *klass, void *opaque),
 /**
  * object_class_get_list:
  * @implements_type: The type to filter for, including its derivatives.
+ * 要筛选的类型，包括其派生类型
+ * 
  * @include_abstract: Whether to include abstract classes.
  *
  * Returns: A singly-linked list of the classes in reverse hashtable order.
+ * 按哈希表顺序反向排列的类的单链链表
  */
 GSList *object_class_get_list(const char *implements_type,
                               bool include_abstract);
@@ -1055,7 +1144,7 @@ GSList *object_class_get_list(const char *implements_type,
  * @include_abstract: Whether to include abstract classes.
  *
  * Returns: A singly-linked list of the classes in alphabetical
- * case-insensitive order.
+ * case-insensitive order. 按字母不区分大小写顺序排列的类的单链列表
  */
 GSList *object_class_get_list_sorted(const char *implements_type,
                               bool include_abstract);
@@ -1066,6 +1155,7 @@ GSList *object_class_get_list_sorted(const char *implements_type,
  *
  * Increase the reference count of a object.  A object cannot be freed as long
  * as its reference count is greater than zero.
+ * 添加object的引用值，只要不为0，就不能被释放
  * Returns: @obj
  */
 Object *object_ref(Object *obj);
@@ -1084,11 +1174,11 @@ void object_unref(Object *obj);
  * @obj: the object to add a property to
  * @name: the name of the property.  This can contain any character except for
  *  a forward slash.  In general, you should use hyphens '-' instead of
- *  underscores '_' when naming properties.
+ *  underscores '_' when naming properties. 属性的名称
  * @type: the type name of the property.  This namespace is pretty loosely
  *   defined.  Sub namespaces are constructed by using a prefix and then
  *   to angle brackets.  For instance, the type 'virtio-net-pci' in the
- *   'link' namespace would be 'link<virtio-net-pci>'.
+ *   'link' namespace would be 'link<virtio-net-pci>'. 属性的类型名称
  * @get: The getter to be called to read a property.  If this is NULL, then
  *   the property cannot be read.
  * @set: the setter to be called to write a property.  If this is NULL,
@@ -1097,6 +1187,7 @@ void object_unref(Object *obj);
  *   meant to allow a property to free its opaque upon object
  *   destruction.  This may be NULL.
  * @opaque: an opaque pointer to pass to the callbacks for the property
+ *          传递到属性的回调的不透明指针
  * @errp: pointer to error object
  *
  * Returns: The #ObjectProperty; this can be used to set the @resolve
@@ -1121,8 +1212,10 @@ ObjectProperty *object_property_add(Object *obj, const char *name,
                                     ObjectPropertyRelease *release,
                                     void *opaque);
 
+/* property delete */
 void object_property_del(Object *obj, const char *name);
 
+/* 前面是对object添加属性，这里是对object_class添加属性 */
 ObjectProperty *object_class_property_add(ObjectClass *klass, const char *name,
                                           const char *type,
                                           ObjectPropertyAccessor *get,
@@ -1135,7 +1228,7 @@ ObjectProperty *object_class_property_add(ObjectClass *klass, const char *name,
  * @prop: the property to set
  * @value: the value to be written to the property
  *
- * Set the property default value.
+ * Set the property default value. 将属性设置为默认值
  */
 void object_property_set_default_bool(ObjectProperty *prop, bool value);
 
@@ -1144,7 +1237,7 @@ void object_property_set_default_bool(ObjectProperty *prop, bool value);
  * @prop: the property to set
  * @value: the value to be written to the property
  *
- * Set the property default value.
+ * Set the property default value.  前面是bool类型，这里是string类型
  */
 void object_property_set_default_str(ObjectProperty *prop, const char *value);
 
@@ -1179,6 +1272,7 @@ ObjectProperty *object_property_find(Object *obj, const char *name,
 ObjectProperty *object_class_property_find(ObjectClass *klass, const char *name,
                                            Error **errp);
 
+/* 类似与C++迭代器 */
 typedef struct ObjectPropertyIterator {
     ObjectClass *nextclass;
     GHashTableIter iter;
@@ -1428,6 +1522,7 @@ bool object_property_set(Object *obj, const char *name, Visitor *v,
  * @errp: returns an error if this function fails
  *
  * Parses a string and writes the result into a property of an object.
+ * 解析字符串并将结果写入对象的属性
  *
  * Returns: %true on success, %false on failure.
  */
