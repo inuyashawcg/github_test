@@ -2558,6 +2558,7 @@ sysctl_kern_function_list_iterate(const char *name, void *opaque)
 /*
  * Export a nul-separated, double-nul-terminated list of all function names
  * in the kernel.
+ * 导出内核中所有以nul分隔、双nul结尾的函数名列表
  */
 static int
 sysctl_kern_function_list(SYSCTL_HANDLER_ARGS)

@@ -1325,6 +1325,9 @@ findbase(elf_file_t ef, int sec)
 	return base;
 }
 
+/*
+	外部或者全局symbol的重定位？？
+*/
 static int
 relocate_file(elf_file_t ef)
 {
@@ -1628,9 +1631,10 @@ elf_obj_lookup(linker_file_t lf, Elf_Size symidx, int deps, Elf_Addr *res)
 	/* Quick answer if there is a definition included. 
 		如果我们查找的这个symbol不是 SHN_UNDEF 属性，仅仅做了一些类型判断，然后获取
 		symbol的虚拟地址，返回。
+		local symbol应该不会是 SHN_UNDEF 类型的
 	*/
 	if (sym->st_shndx != SHN_UNDEF) {
-		res1 = (Elf_Addr)sym->st_value;	/* st_value 一般保存的是虚拟地址 */
+		res1 = (Elf_Addr)sym->st_value;	/* st_value 一般保存的是虚拟地址，或者是在section中的offset */
 		if (ELF_ST_TYPE(sym->st_info) == STT_GNU_IFUNC)
 			res1 = ((Elf_Addr (*)(void))res1)();
 		*res = res1;
@@ -1706,6 +1710,9 @@ link_elf_fix_link_set(elf_file_t ef)
 
 	/* 
 		对symbol table进行遍历，说明linker set是用一个symbol表示的？？
+		根据linker_set代码可以看到，涉及到 SYSINIT 宏定义的模块，最终都会生成一个symbol，封装的
+		数据也会被添加到以section中(推测属于PROG类型的一种)，symbol的名称经过一些处理就可以得到
+		section(linker_set)的名称，我们就可以通过symbol查找对应的section
 	*/
 	for (symidx = 1 /* zero entry is special */;
 		symidx < ef->ddbsymcnt; symidx++) {
@@ -1755,13 +1762,17 @@ link_elf_fix_link_set(elf_file_t ef)
 		if (i == ef->nprogtab)
 			continue;
 
+		/* 
+			通过symbol的名称找到对应的section；可重定位文件中，st_value 表示的是symbol在
+			st_shndx 所指定的 section 中的 offset
+		*/
 		sym->st_value = start ? startp : stopp;
-		sym->st_shndx = i;
+		sym->st_shndx = i;	//用i赋值？？
 	}
 }
 
 /*
-	本地重定位，从代码逻辑可以看出，我们遍历REL和RELA类型的section中的entry，但是真正用来处理
+	本地符号重定位，从代码逻辑可以看出，我们遍历REL和RELA类型的section中的entry，但是真正用来处理
 	的却是entry中 r_info(r_info：重定位的类型+符号索引)所指向的symbol。所以，重定位最重要的
 	一个环节其实是符号解析
 */

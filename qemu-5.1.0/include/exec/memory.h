@@ -59,7 +59,9 @@ struct ReservedRegion {
 
 typedef struct IOMMUTLBEntry IOMMUTLBEntry;
 
-/* See address_space_translate: bit 0 is read, bit 1 is write.  */
+/* See address_space_translate: bit 0 is read, bit 1 is write.  
+    IOMMU 读写权限标识
+*/
 typedef enum {
     IOMMU_NONE = 0,
     IOMMU_RO   = 1,
@@ -69,23 +71,29 @@ typedef enum {
 
 #define IOMMU_ACCESS_FLAG(r, w) (((r) ? IOMMU_RO : 0) | ((w) ? IOMMU_WO : 0))
 
+/*
+    TLB：快表，实现虚拟地址和物理地址的快速转换
+*/
 struct IOMMUTLBEntry {
     AddressSpace    *target_as;
     hwaddr           iova;
     hwaddr           translated_addr;
     hwaddr           addr_mask;  /* 0xfff = 4k translation */
-    IOMMUAccessFlags perm;
+    IOMMUAccessFlags perm;  
 };
 
 /*
  * Bitmap for different IOMMUNotifier capabilities. Each notifier can
  * register with one or multiple IOMMU Notifier capability bit(s).
+ * 不同IOMMUNotifier功能的位图。每个通知程序可以注册一个或多个IOMMU通知程序功能位
  */
 typedef enum {
     IOMMU_NOTIFIER_NONE = 0,
-    /* Notify cache invalidations */
+
+    /* Notify cache invalidations 通知缓存失效 */
     IOMMU_NOTIFIER_UNMAP = 0x1,
-    /* Notify entry changes (newly created entries) */
+
+    /* Notify entry changes (newly created entries) 通知entry更改（新创建的entry） */
     IOMMU_NOTIFIER_MAP = 0x2,
 } IOMMUNotifierFlag;
 
@@ -94,18 +102,18 @@ typedef enum {
 struct IOMMUNotifier;
 typedef void (*IOMMUNotify)(struct IOMMUNotifier *notifier,
                             IOMMUTLBEntry *data);
-
 struct IOMMUNotifier {
-    IOMMUNotify notify;
-    IOMMUNotifierFlag notifier_flags;
+    IOMMUNotify notify; /* 通知函数 */
+    IOMMUNotifierFlag notifier_flags;   /* 通知标识 */
     /* Notify for address space range start <= addr <= end */
     hwaddr start;
     hwaddr end;
     int iommu_idx;
-    QLIST_ENTRY(IOMMUNotifier) node;
+    QLIST_ENTRY(IOMMUNotifier) node;    /* notifrer也是通过队列来管理的 */
 };
 typedef struct IOMMUNotifier IOMMUNotifier;
 
+/* 下面这些宏都是对RAM属性的设置 */
 /* RAM is pre-allocated and passed into qemu_ram_alloc_from_ptr */
 #define RAM_PREALLOC   (1 << 0)
 
@@ -114,19 +122,21 @@ typedef struct IOMMUNotifier IOMMUNotifier;
 
 /* Only a portion of RAM (used_length) is actually used, and migrated.
  * This used_length size can change across reboots.
+ * 只有一部分RAM（已用长度）被实际使用和迁移。此已用长度大小可以在重新启动时更改
  */
 #define RAM_RESIZEABLE (1 << 2)
 
 /* UFFDIO_ZEROPAGE is available on this RAMBlock to atomically
  * zero the page and wake waiting processes.
  * (Set during postcopy)
- */
+ * UFFDIO_ZEROPAGE 在这个 RAMBlock 上可用，可以原子性地将页面和唤醒等待过程归零(在后期复制时设置)
+ */ 
 #define RAM_UF_ZEROPAGE (1 << 3)
 
-/* RAM can be migrated */
+/* RAM can be migrated RAM可以迁移 */
 #define RAM_MIGRATABLE (1 << 4)
 
-/* RAM is a persistent kind memory */
+/* RAM is a persistent kind memory RAM是一种持久性的记忆 */
 #define RAM_PMEM (1 << 5)
 
 static inline void iommu_notifier_init(IOMMUNotifier *n, IOMMUNotify fn,
@@ -143,6 +153,7 @@ static inline void iommu_notifier_init(IOMMUNotifier *n, IOMMUNotify fn,
 
 /*
  * Memory region callbacks
+ * 对内存区域的操作
  */
 struct MemoryRegionOps {
     /* Read from the memory region. @addr is relative to @mr; @size is
@@ -168,39 +179,46 @@ struct MemoryRegionOps {
                                     unsigned size,
                                     MemTxAttrs attrs);
 
-    enum device_endian endianness;
-    /* Guest-visible constraints: */
+    enum device_endian endianness;  /* 大端&小端 */
+    /* Guest-visible constraints: 用户可见的参数限制 */
     struct {
         /* If nonzero, specify bounds on access sizes beyond which a machine
-         * check is thrown.
+         * check is thrown. 如果不为零，请指定访问大小的界限，超出该界限将引发计算机检查
          */
         unsigned min_access_size;
         unsigned max_access_size;
         /* If true, unaligned accesses are supported.  Otherwise unaligned
-         * accesses throw machine checks.
+         * accesses throw machine checks. 如果为true，则支持未对齐的访问。否则，
+         * 未对齐的访问将引发计算机检查
          */
          bool unaligned;
         /*
          * If present, and returns #false, the transaction is not accepted
          * by the device (and results in machine dependent behaviour such
          * as a machine check exception).
+         * 如果存在并返回#false，则设备不接受事件（并导致机器相关行为，如机器检查异常）
          */
         bool (*accepts)(void *opaque, hwaddr addr,
                         unsigned size, bool is_write,
                         MemTxAttrs attrs);
     } valid;
-    /* Internal implementation constraints: */
+    /* Internal implementation constraints: 内部实现的限制 */
     struct {
         /* If nonzero, specifies the minimum size implemented.  Smaller sizes
          * will be rounded upwards and a partial result will be returned.
+         * 如果非零，则指定实现的最小size。较小的尺寸将向上取整，并返回部分结果
          */
         unsigned min_access_size;
+
         /* If nonzero, specifies the maximum size implemented.  Larger sizes
          * will be done as a series of accesses with smaller sizes.
+         * 如果非零，则指定实现的最大size。较大的尺寸将作为一系列较小尺寸的通道来完成
          */
         unsigned max_access_size;
+
         /* If true, unaligned accesses are supported.  Otherwise all accesses
          * are converted to (possibly multiple) naturally aligned accesses.
+         * 如果为true，则支持未对齐的访问。否则，所有访问将转换为（可能有多个）自然对齐的访问
          */
         bool unaligned;
     } impl;
@@ -208,10 +226,10 @@ struct MemoryRegionOps {
 
 typedef struct MemoryRegionClass {
     /* private */
-    ObjectClass parent_class;
+    ObjectClass parent_class;   /* ObjectClass 的派生类 */
 } MemoryRegionClass;
 
-
+/* IOMMU属性 */
 enum IOMMUMemoryRegionAttr {
     IOMMU_ATTR_SPAPR_TCE_FD
 };
@@ -222,11 +240,14 @@ enum IOMMUMemoryRegionAttr {
  * All IOMMU implementations need to subclass TYPE_IOMMU_MEMORY_REGION
  * and provide an implementation of at least the @translate method here
  * to handle requests to the memory region. Other methods are optional.
+ * 所有 IOMMU 的实现都需要子类 TYPE_IOMMU_MEMORY_REGION，并且至少要提供 @translate 方法的实现来
+ * 处理对于memory region的请求，其他方法则是可选择的
  *
  * The IOMMU implementation must use the IOMMU notifier infrastructure
  * to report whenever mappings are changed, by calling
  * memory_region_notify_iommu() (or, if necessary, by calling
  * memory_region_notify_one() for each registered notifier).
+ * 无论映射什么时候发生改变，IOMMU都必须要使用 IOMMU notifier 去通知，通过调用上述函数
  *
  * Conceptually an IOMMU provides a mapping from input address
  * to an output TLB entry. If the IOMMU is aware of memory transaction
@@ -237,14 +258,21 @@ enum IOMMUMemoryRegionAttr {
  *   @translate takes an input address and an IOMMU index
  * and the mapping returned can only depend on the input address and the
  * IOMMU index.
+ * 从概念上来说，一个IOMMU会提供一个从输入地址到输出TLB entry(translation lookaside buffer: 虚拟地址
+ * 到物理地址的快速转换)的映射。如果IOMMU知道内存事件属性，并且输出TLB entry依赖于事件属性，那么我们使用IOMMU
+ * index来表示它。每个index都会选择IOMMU拥有的一个专用转换表：
+ *  @attrs_to_index：返回一个事件属性集合的IOMMU index
+ *  @translate：接受输入地址和IOMMU index，返回的映射只能依赖于输入地址和IOMMU索引
  *
  * Most IOMMUs don't care about the transaction attributes and support
  * only a single IOMMU index. A more complex IOMMU might have one index
  * for secure transactions and one for non-secure transactions.
+ * 大多数IOMMU并不关心时间属性并且仅仅支持一个简单的IOMMU index。更复杂的IOMMU可能会有一个index用于安全事件，
+ * 一个index用于非安全事件
  */
 typedef struct IOMMUMemoryRegionClass {
     /* private */
-    MemoryRegionClass parent_class;
+    MemoryRegionClass parent_class; /* MemoryRegionClass 是它的父类 */
 
     /*
      * Return a TLB entry that contains a given address.
@@ -259,12 +287,20 @@ typedef struct IOMMUMemoryRegionClass {
      * full page table walk and report the permissions in the returned
      * IOMMUTLBEntry. (Note that this implies that an IOMMU may not
      * return different mappings for reads and writes.)
+     * 通过 @flag 所指定的 IOMMUAccessFlags 是可选的，可能会被指定为 IOMMU_NONE
+     * 来表明调用者对于读写操作需要完整的转换信息。如果指定了访问标志，那么IOMMU实现
+     * 可以将此用作优化，以便在知道请求的权限不被允许时立即停止执行页表遍历。如果传递
+     * 了IOMMU_NONE，则IOMMU必须执行整页表遍历，并报告在返回的 IOMMUTLBEntry 中的权限。
+     * 请注意，这意味着IOMMU可能不会为读和写返回不同的映射。
      *
      * The returned information remains valid while the caller is
      * holding the big QEMU lock or is inside an RCU critical section;
      * if the caller wishes to cache the mapping beyond that it must
      * register an IOMMU notifier so it can invalidate its cached
      * information when the IOMMU mapping changes.
+     * 当调用者持有大的QEMU锁或在RCU临界区内时，返回的信息仍然有效；如果调用方希望
+     * 缓存映射，那么它必须注册一个IOMMU通知程序，以便在IOMMU映射更改时使其缓存的
+     * 信息失效
      *
      * @iommu: the IOMMUMemoryRegion
      * @hwaddr: address to be translated within the memory region
@@ -273,17 +309,22 @@ typedef struct IOMMUMemoryRegionClass {
      */
     IOMMUTLBEntry (*translate)(IOMMUMemoryRegion *iommu, hwaddr addr,
                                IOMMUAccessFlags flag, int iommu_idx);
+    
     /* Returns minimum supported page size in bytes.
      * If this method is not provided then the minimum is assumed to
      * be TARGET_PAGE_SIZE.
-     *
+     * 返回支持的最小的page的大小(bytes)
+     * 
      * @iommu: the IOMMUMemoryRegion
      */
     uint64_t (*get_min_page_size)(IOMMUMemoryRegion *iommu);
+
     /* Called when IOMMU Notifier flag changes (ie when the set of
      * events which IOMMU users are requesting notification for changes).
      * Optional method -- need not be provided if the IOMMU does not
      * need to know exactly which events must be notified.
+     * 当IOMMU通知程序标志更改时调用（例如当IOMMU用户请求更改通知的事件集时）
+     * 方法是可选择的，如果 IOMMU 并不是特别确切的知道那些事件需要被通知，那么就不需要提供
      *
      * @iommu: the IOMMUMemoryRegion
      * @old_flags: events which previously needed to be notified
@@ -293,11 +334,14 @@ typedef struct IOMMUMemoryRegionClass {
      * returns -EINVAL if the new flag bitmap is not supported by the
      * IOMMU memory region. In case of failure, the error object
      * must be created
+     * 成功时返回0，或返回负错误号；如果IOMMU内存区域不支持新标志位图，则返回-EINVAL；
+     * 如果失败，必须创建错误对象
      */
     int (*notify_flag_changed)(IOMMUMemoryRegion *iommu,
                                IOMMUNotifierFlag old_flags,
                                IOMMUNotifierFlag new_flags,
                                Error **errp);
+
     /* Called to handle memory_region_iommu_replay().
      *
      * The default implementation of memory_region_iommu_replay() is to
@@ -307,11 +351,17 @@ typedef struct IOMMUMemoryRegionClass {
      * overrides the default behaviour, and must provide the full semantics
      * of memory_region_iommu_replay(), by calling @notifier for every
      * translation present in the IOMMU.
+     * memory_region_iommu_replay() 的默认实现是去调用地址空间中所有 flag == IOMMU_NONE 的
+     * 每一个page的 IOMMU 转换方法。如果返回一个可用的映射，那么就调用 notifier。如果这个方法已经
+     * 被实现了，那么它将覆盖默认的方法实现，并且对于每一个在 IOMMU 中存在的转换，一定要通过调用 @notifier
+     * 来提供 memory_region_iommu_replay() 的完整语义
      *
      * Optional method -- an IOMMU only needs to provide this method
      * if the default is inefficient or produces undesirable side effects.
+     * IOMMU只需要在默认值无效或产生不需要的副作用时提供此方法
      *
      * Note: this is not related to record-and-replay functionality.
+     * 这与记录-重播功能无关？？
      */
     void (*replay)(IOMMUMemoryRegion *iommu, IOMMUNotifier *notifier);
 
@@ -322,6 +372,10 @@ typedef struct IOMMUMemoryRegionClass {
      * the arbitrary data pointer for any IOMMUMemoryRegionAttr values that
      * the IOMMU supports. If the method is unimplemented then
      * memory_region_iommu_get_attr() will always return -EINVAL.
+     * 获取IOMMU其他属性。这是一种可选方法，可用于允许IOMMU的用户获取特定于实现的信息。
+     * IOMMU实现此方法来处理IOMMU用户对memory_region_IOMMU_get_attr（）的调用，
+     * 方法是为IOMMU支持的任何IomumMemoryRegionAttr值填充任意数据指针。如果该方法未实现，
+     * 则memory_region_iommu_get_attr（）将始终返回-EINVAL
      *
      * @iommu: the IOMMUMemoryRegion
      * @attr: attribute being queried
@@ -338,8 +392,11 @@ typedef struct IOMMUMemoryRegionClass {
      * Optional method: if an IOMMU only supports a single IOMMU index then
      * the default implementation of memory_region_iommu_attrs_to_index()
      * will return 0.
+     * 可选方法：如果一个IOMMU只支持一个IOMMU索引，则memory_region_IOMMU_attrs_to_index（）
+     * 的默认实现将返回0
      *
      * The indexes supported by an IOMMU must be contiguous, starting at 0.
+     * IOMMU 支持的 index 必须要是连续的，起始为0
      *
      * @iommu: the IOMMUMemoryRegion
      * @attrs: memory transaction attributes
@@ -351,18 +408,46 @@ typedef struct IOMMUMemoryRegionClass {
      * Optional method: if this method is not provided, then
      * memory_region_iommu_num_indexes() will return 1, indicating that
      * only a single IOMMU index is supported.
-     *
+     * 如果这个方法没有被提供，那么 memory_region_iommu_num_indexes 函数将会返回1，
+     * 表明仅仅一个简单的 IOMMU index 是被支持的
+     * 
      * @iommu: the IOMMUMemoryRegion
      */
     int (*num_indexes)(IOMMUMemoryRegion *iommu);
 } IOMMUMemoryRegionClass;
 
+/* Coalesced: 联合的，合并的 */
 typedef struct CoalescedMemoryRange CoalescedMemoryRange;
 typedef struct MemoryRegionIoeventfd MemoryRegionIoeventfd;
 
 /** MemoryRegion:
  *
  * A struct representing a memory region.
+ * QEMU通过MemoryRegion来管理虚拟机内存，通过内存属性，GUEST物理地址等特点对内存分类，
+ * 就形成了多个MemoryRegion，这些MemoryRegion 通过树状组织起来，挂接到根MemoryRegion
+ * 下。每个MemoryRegion树代表了一类作用的内存，如系统内存空间(system_memory)或IO内存
+ * 空间(system_io),这两个是qemu中的两个全局MemoryRegion
+ * 
+ * MemoryRegion 表示在 Guest memory layout 中的一段内存，可将 MemoryRegion 划分为以下三种类型：
+ * 根级 MemoryRegion: 直接通过 memory_region_init 初始化，没有自己的内存，用于管理 subregion。如 system_memory
+ * 
+ * 实体 MemoryRegion: 通过 memory_region_init_ram 初始化，有自己的内存 (从 QEMU 进程地址空间中分配)，大小为 size；
+ *      如 ram_memory(pc.ram) 、 pci_memory(pci) 等。 这种MemoryRegion中真正的分配物理内存，最主要的就是pc.ram和pci；
+ *      分配的物理内存的作用分别是内存、PCI地址空间以及fireware空间。QEMU是用户空间代码，分配的物理内存返回的是hva，hva保存
+ *      至RAMBlock的host域。通过实体MemoryRegion对应的RAMBlock可以管理HVA
+ * 
+ * 别名 MemoryRegion: 通过 memory_region_init_alias 初始化，没有自己的内存，表示实体 MemoryRegion(如 pc.ram) 的一部分，
+ *      通过 alias 成员指向实体 MemoryRegion，alias_offset 代表了该别名MemoryRegion所代表内存起始GPA相对于实体 MemoryRegion 
+ *      所代表内存起始GPA的偏移量。如 ram_below_4g 、ram_above_4g 等
+ * 
+ *      GVA - guest virtual addr
+ *      GPA - guest physical addr 
+ *      HVA - host virtual addr
+ *      HPA - host physical addr
+ * 
+ *      GVA -> GPA 由客户机负责(运行在QEMU上的系统)
+ *      GPA -> HVA 由QEMU负责
+ *      HVA -> HPA 由宿主机操作系统负责
  */
 struct MemoryRegion {
     Object parent_obj;
@@ -374,32 +459,32 @@ struct MemoryRegion {
     bool ram;
     bool subpage;
     bool readonly; /* For RAM regions */
-    bool nonvolatile;
+    bool nonvolatile;   /* 非易失的 */
     bool rom_device;
-    bool flush_coalesced_mmio;
+    bool flush_coalesced_mmio;  /* CoalescedMemoryRange 相关 */
     bool global_locking;
     uint8_t dirty_log_mask;
     bool is_iommu;
     RAMBlock *ram_block;
     Object *owner;
 
-    const MemoryRegionOps *ops;
+    const MemoryRegionOps *ops; /* callback */
     void *opaque;
-    MemoryRegion *container;
-    Int128 size;
-    hwaddr addr;
-    void (*destructor)(MemoryRegion *mr);
+    MemoryRegion *container;    /* 指向父级 MemoryRegion */
+    Int128 size;    /* 区域大小 */
+    hwaddr addr;    /* 在父级 MemoryRegion 中的偏移量 */
+    void (*destructor)(MemoryRegion *mr);   /* 析构函数 */
     uint64_t align;
     bool terminates;
     bool ram_device;
     bool enabled;
-    bool warning_printed; /* For reservations */
+    bool warning_printed; /* For reservations - 保留项？？ */
     uint8_t vga_logging_count;
-    MemoryRegion *alias;
-    hwaddr alias_offset;
+    MemoryRegion *alias;    /* alias: 别名，指向实体MemoryRegion */
+    hwaddr alias_offset;    /* 起始地址 (GPA) 在实体 MemoryRegion 中的偏移量 */
     int32_t priority;
-    QTAILQ_HEAD(, MemoryRegion) subregions;
-    QTAILQ_ENTRY(MemoryRegion) subregions_link;
+    QTAILQ_HEAD(, MemoryRegion) subregions; /* 子区域队列 */
+    QTAILQ_ENTRY(MemoryRegion) subregions_link; /* 子区域队列结点 */
     QTAILQ_HEAD(, CoalescedMemoryRange) coalesced;
     const char *name;
     unsigned ioeventfd_nb;
@@ -427,6 +512,8 @@ struct MemoryListener {
      * @begin:
      *
      * Called at the beginning of an address space update transaction.
+     * 在地址空间更新转换开始的时候调用
+     * 
      * Followed by calls to #MemoryListener.region_add(),
      * #MemoryListener.region_del(), #MemoryListener.region_nop(),
      * #MemoryListener.log_start() and #MemoryListener.log_stop() in
@@ -440,6 +527,8 @@ struct MemoryListener {
      * @commit:
      *
      * Called at the end of an address space update transaction,
+     * 在地址空间更新转换结束的时候调用
+     * 
      * after the last call to #MemoryListener.region_add(),
      * #MemoryListener.region_del() or #MemoryListener.region_nop(),
      * #MemoryListener.log_start() and #MemoryListener.log_stop().
@@ -454,7 +543,8 @@ struct MemoryListener {
      * Called during an address space update transaction,
      * for a section of the address space that is new in this address space
      * space since the last transaction.
-     *
+     * 对于自上一个事务以来在此地址空间中新出现的地址空间部分
+     * 
      * @listener: The #MemoryListener.
      * @section: The new #MemoryRegionSection.
      */
@@ -466,6 +556,7 @@ struct MemoryListener {
      * Called during an address space update transaction,
      * for a section of the address space that has disappeared in the address
      * space since the last transaction.
+     * 对于自上次事务后在地址空间中消失的地址空间部分
      *
      * @listener: The #MemoryListener.
      * @section: The old #MemoryRegionSection.
@@ -478,6 +569,7 @@ struct MemoryListener {
      * Called during an address space update transaction,
      * for a section of the address space that is in the same place in the address
      * space as in the last transaction.
+     * 地址空间中与上一个事务中位于同一位置的地址空间部分
      *
      * @listener: The #MemoryListener.
      * @section: The #MemoryRegionSection.
@@ -495,7 +587,7 @@ struct MemoryListener {
      * @listener: The #MemoryListener.
      * @section: The #MemoryRegionSection.
      * @old: A bitmap of dirty memory logging clients that were active in
-     * the previous transaction.
+     * the previous transaction. 在上一个事务中处于活动状态的脏内存日志记录客户端的位图
      * @new: A bitmap of dirty memory logging clients that are active in
      * the current transaction.
      */
@@ -552,6 +644,7 @@ struct MemoryListener {
      * the address space.  #MemoryListener.log_global_start() is also
      * called when a #MemoryListener is added, if global dirty logging is
      * active at that time.
+     * 使能地址空间中所有内存区域里的 %DIRTY_LOG_MIGRATION client
      *
      * @listener: The #MemoryListener.
      */
@@ -584,6 +677,7 @@ struct MemoryListener {
      * Called during an address space update transaction,
      * for a section of the address space that has had a new ioeventfd
      * registration since the last transaction.
+     * 在地址空间更新事务期间调用，用于自上一个事务以来已进行新ioeventfd注册的地址空间部分
      *
      * @listener: The #MemoryListener.
      * @section: The new #MemoryRegionSection.
@@ -616,6 +710,7 @@ struct MemoryListener {
      * Called during an address space update transaction,
      * for a section of the address space that has had a new coalesced
      * MMIO range registration since the last transaction.
+     * 在地址空间更新事务期间调用，用于自上一个事务以来具有新的合并MMIO范围注册的地址空间部分
      *
      * @listener: The #MemoryListener.
      * @section: The new #MemoryRegionSection.
@@ -645,6 +740,7 @@ struct MemoryListener {
      * Govern the order in which memory listeners are invoked. Lower priorities
      * are invoked earlier for "add" or "start" callbacks, and later for "delete"
      * or "stop" callbacks.
+     * 控制调用内存侦听器的顺序。较低的优先级在“添加”或“开始”回调时被调用，稍后对于“删除”或“停止”回调调用
      */
     unsigned priority;
 
@@ -656,10 +752,11 @@ struct MemoryListener {
 
 /**
  * AddressSpace: describes a mapping of addresses to #MemoryRegion objects
+ * 描述对 #MemoryRegion 类型 object 的一个地址映射
  */
 struct AddressSpace {
     /* private: */
-    struct rcu_head rcu;
+    struct rcu_head rcu;    /* RCU: 数据同步 */
     char *name;
     MemoryRegion *root;
 
@@ -677,6 +774,7 @@ typedef struct FlatRange FlatRange;
 
 /* Flattened global view of current active memory hierarchy.  Kept in sorted
  * order.
+ * 当前活动内存层次结构的展平全局视图。保持有序
  */
 struct FlatView {
     struct rcu_head rcu;

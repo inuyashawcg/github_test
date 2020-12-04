@@ -805,6 +805,25 @@ struct driver_module_data {
 	int		dmd_pass;
 };
 
+/*
+	宏所进行的步骤总共分成三步：
+		1、创建 driver_module_data，用来向总线添加driver(封装，添加到 moduledata_t )
+		2、创建 moduledata_t，主要用于sysinit来进行注册(封装，添加到 DECLARE_MODULE )
+		3、DECLARE_MODULE
+			- DECLARE_MODULE_WITH_MAXVER
+				- MODULE_DEPEND：将版本信息放到 .data section
+					- MODULE_METADATA：将版本信息做一个封装，然后执行DATA_SET
+
+				- MODULE_METADATA: 把之前封装的数据再封装
+					1、创建 mod_metadata
+					2、DATA_SET(modmetadata_set 相关)
+					前两步其实就相当于把实际的数据信息和版本信息都做了封装，声明编译的时候放到 .data section，
+					两者名字和类型都是不一样的，一个是 MDT_DEPEND 类型，一个是 MDT_MODULE 类型
+
+				- SYSINIT
+					1、创建 sysinit
+					2、DATA_WSET
+*/
 #define	EARLY_DRIVER_MODULE_ORDERED(name, busname, driver, devclass,	\
     evh, arg, order, pass)						\
 									\

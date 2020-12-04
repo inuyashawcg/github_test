@@ -60,7 +60,16 @@
  * __CONCAT 是把两个元素组装
  * 
  * 参考link_elf.c -> link_elf_lookup_set() 代码可以推测一下， __start_set_ 应该表示的是
- * section的起始位置；相应地，__stop_set_ 就表示 section的中止位置？？
+ * section的起始位置；相应地，__stop_set_ 就表示 section的中止位置？？声明了两个符号，感觉像
+ * 是查找linker set(可能代表的是某一个section或者某个section的一部分)
+ * 
+ * __GLOBL(__CONCAT(__start_set_,set)) 声明了一个全局的symbol，名字是  __start_set_***
+ * __section("set_" #set) 意思应该就是把 __set_##set##_sym_##sym 命名的数据放到 set_***
+ * 命名的section中；然后我们参考一下 link_elf_obj.c 文件中的 link_elf_fix_link_set 函数，
+ * 函数在处理 symbol name 的时候会把 __start_ 给过滤掉，就可以发现上面symbol跟linker set的名字
+ * 可以对应上了
+ * 通过以上分析，我们可以推测一下，driver最后会被放到某个section当中，然后还会生成一个对应的全局符号，
+ * 提供给linker去查找set
  */
 #ifdef __GNUCLIKE___SECTION
 #define __MAKE_SET_QV(set, sym, qv)			\
