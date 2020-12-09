@@ -139,10 +139,12 @@ typedef struct PhysPageMap {
     MemoryRegionSection *sections;
 } PhysPageMap;
 
+/* Address space dispatch: 地址空间调度 */
 struct AddressSpaceDispatch {
     MemoryRegionSection *mru_section;
     /* This is a multi-level map on the physical address space.
      * The bottom level has pointers to MemoryRegionSections.
+     * 这是一个在物理地址空间上的多级映射，最底层拥有一个指向 MemoryRegionSections 的指针
      */
     PhysPageEntry phys_map;
     PhysPageMap map;

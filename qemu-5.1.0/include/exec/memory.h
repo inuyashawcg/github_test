@@ -51,6 +51,10 @@ extern bool global_dirty_log;
 
 typedef struct MemoryRegionOps MemoryRegionOps;
 
+/*
+    需要保留的region，应该就是常驻内存(有些内存中的资源可能要一直被使用，不能从内存页中换出，
+    所以需要在内存中一直保留)
+*/
 struct ReservedRegion {
     hwaddr low;
     hwaddr high;
@@ -77,7 +81,7 @@ typedef enum {
 struct IOMMUTLBEntry {
     AddressSpace    *target_as;
     hwaddr           iova;
-    hwaddr           translated_addr;
+    hwaddr           translated_addr;   /* 已经转换的地址 */
     hwaddr           addr_mask;  /* 0xfff = 4k translation */
     IOMMUAccessFlags perm;  
 };
@@ -153,16 +157,16 @@ static inline void iommu_notifier_init(IOMMUNotifier *n, IOMMUNotify fn,
 
 /*
  * Memory region callbacks
- * 对内存区域的操作
+ * 对内存区域的操作，好像也就是读写
  */
 struct MemoryRegionOps {
     /* Read from the memory region. @addr is relative to @mr; @size is
-     * in bytes. */
+     * in bytes. 从memory region 读数据 */
     uint64_t (*read)(void *opaque,
                      hwaddr addr,
                      unsigned size);
     /* Write to the memory region. @addr is relative to @mr; @size is
-     * in bytes. */
+     * in bytes. 向memory region 写数据 */
     void (*write)(void *opaque,
                   hwaddr addr,
                   uint64_t data,
@@ -459,16 +463,16 @@ struct MemoryRegion {
     bool ram;
     bool subpage;
     bool readonly; /* For RAM regions */
-    bool nonvolatile;   /* 非易失的 */
+    bool nonvolatile;   /* 非易失的标识 */
     bool rom_device;
     bool flush_coalesced_mmio;  /* CoalescedMemoryRange 相关 */
-    bool global_locking;
+    bool global_locking;    /* 全局锁 */
     uint8_t dirty_log_mask;
     bool is_iommu;
     RAMBlock *ram_block;
-    Object *owner;
+    Object *owner;  /* 表示哪个Object实体拥有这个memory region？？ */
 
-    const MemoryRegionOps *ops; /* callback */
+    const MemoryRegionOps *ops; /* callback，对于memory region的操作函数 */
     void *opaque;
     MemoryRegion *container;    /* 指向父级 MemoryRegion */
     Int128 size;    /* 区域大小 */
@@ -485,7 +489,7 @@ struct MemoryRegion {
     int32_t priority;
     QTAILQ_HEAD(, MemoryRegion) subregions; /* 子区域队列 */
     QTAILQ_ENTRY(MemoryRegion) subregions_link; /* 子区域队列结点 */
-    QTAILQ_HEAD(, CoalescedMemoryRange) coalesced;
+    QTAILQ_HEAD(, CoalescedMemoryRange) coalesced;  /* 联合的memory range */
     const char *name;
     unsigned ioeventfd_nb;
     MemoryRegionIoeventfd *ioeventfds;
@@ -503,6 +507,7 @@ struct IOMMUMemoryRegion {
 
 /**
  * MemoryListener: callbacks structure for updates to the physical memory map
+ * 当物理内存映射更新的时候，调用回调函数
  *
  * Allows a component to adjust to changes in the guest-visible memory map.
  * Use with memory_listener_register() and memory_listener_unregister().
@@ -758,15 +763,15 @@ struct AddressSpace {
     /* private: */
     struct rcu_head rcu;    /* RCU: 数据同步 */
     char *name;
-    MemoryRegion *root;
+    MemoryRegion *root; /* 地址空间所在的memory region？？ */
 
-    /* Accessed via RCU.  */
+    /* Accessed via RCU. 通过RCU进行数据访问 */
     struct FlatView *current_map;
 
-    int ioeventfd_nb;
+    int ioeventfd_nb;   /* nb: number？表示IO event数量？ */
     struct MemoryRegionIoeventfd *ioeventfds;
     QTAILQ_HEAD(, MemoryListener) listeners;
-    QTAILQ_ENTRY(AddressSpace) address_spaces_link;
+    QTAILQ_ENTRY(AddressSpace) address_spaces_link; /* 通过队列管理 */
 };
 
 typedef struct AddressSpaceDispatch AddressSpaceDispatch;
@@ -775,25 +780,34 @@ typedef struct FlatRange FlatRange;
 /* Flattened global view of current active memory hierarchy.  Kept in sorted
  * order.
  * 当前活动内存层次结构的展平全局视图。保持有序
+ * 这个可能就是把整个memory区域类比成了一个区块图形(帮助开发者理解？？)，它对应的应该就是FlatRange，
  */
 struct FlatView {
-    struct rcu_head rcu;
+    struct rcu_head rcu;    /* rcu队列，每个结点都会对应一个function */
     unsigned ref;
-    FlatRange *ranges;
+    /* 
+        FlatRange数组，一个flat view对应多个FlatRange？
+    */
+    FlatRange *ranges;  
     unsigned nr;
     unsigned nr_allocated;
-    struct AddressSpaceDispatch *dispatch;
-    MemoryRegion *root;
+    struct AddressSpaceDispatch *dispatch;  /* diapatch: 调度 */
+    /*
+        跟FlatRange中的memory region的关系是什么？
+    */
+    MemoryRegion *root; 
 };
 
 static inline FlatView *address_space_to_flatview(AddressSpace *as)
 {
+    /* 原子操作 */
     return atomic_rcu_read(&as->current_map);
 }
 
 
 /**
  * MemoryRegionSection: describes a fragment of a #MemoryRegion
+ * 该结构体描述的应该是某个memory region中的一段(section),类比ELF文件中section定义
  *
  * @mr: the region, or %NULL if empty
  * @fv: the flat view of the address space the region is mapped in
@@ -807,13 +821,14 @@ static inline FlatView *address_space_to_flatview(AddressSpace *as)
 struct MemoryRegionSection {
     Int128 size;
     MemoryRegion *mr;
-    FlatView *fv;
-    hwaddr offset_within_region;
+    FlatView *fv;   /* memory region映射的地址空间的flat view */
+    hwaddr offset_within_region;    /* 相对于mr起始位置的offset */
     hwaddr offset_within_address_space;
     bool readonly;
-    bool nonvolatile;
+    bool nonvolatile;   /* 非易失性的 */
 };
 
+/* 类似与C++中类赋值操作 */
 static inline bool MemoryRegionSection_eq(MemoryRegionSection *a,
                                           MemoryRegionSection *b)
 {
@@ -831,9 +846,10 @@ static inline bool MemoryRegionSection_eq(MemoryRegionSection *a,
  *
  * The region typically acts as a container for other memory regions.  Use
  * memory_region_add_subregion() to add subregions.
+ * 一个region可以作为其他region的拥有者，通过调用 memory_region_add_subregion 函数来添加子区域
  *
  * @mr: the #MemoryRegion to be initialized
- * @owner: the object that tracks the region's reference count
+ * @owner: the object that tracks the region's reference count 跟踪region引用计数变化的object
  * @name: used for debugging; not visible to the user or ABI
  * @size: size of the region; any subregions beyond this size will be clipped
  */

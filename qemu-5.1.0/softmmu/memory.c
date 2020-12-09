@@ -168,6 +168,7 @@ struct MemoryRegionIoeventfd {
     AddrRange addr;
     bool match_data;
     uint64_t data;
+    /* 包含read write两个int标识符 */
     EventNotifier *e;
 };
 
@@ -208,15 +209,25 @@ static bool memory_region_ioeventfd_equal(MemoryRegionIoeventfd *a,
         && !memory_region_ioeventfd_before(b, a);
 }
 
-/* Range of memory in the global map.  Addresses are absolute. */
+/* Range of memory in the global map.  Addresses are absolute. 
+    全局映射上的memory的区域的范围，地址是绝对的？？
+*/
 struct FlatRange {
-    MemoryRegion *mr;
-    hwaddr offset_in_region;
-    AddrRange addr;
-    uint8_t dirty_log_mask;
-    bool romd_mode;
+    MemoryRegion *mr;   /* 应该表示的是FlatRange所描述的那个memory region */
+    /* 
+        它所描述的那个region在父级region中的offset？？
+        推测：整个memory应该也是分成了不同的section，每一个section对应一个设备或者进程等等，
+        也可能是一个设备对应多个section(类似与linux分页分段机制)，然后这个FlatRange可能就是
+        对这些section的描述，描述一下它们在父级region中的offset，地址，读写权限等等属性；
+        从一些代码逻辑可以看到，每个memory region貌似还要进一步的分段(section)，还是说仅仅是
+        通过FlatRange来模拟出来多个section，而不是真正的memory region要分段？
+    */
+    hwaddr offset_in_region;   
+    AddrRange addr; /* 包含两个成员：start和size */
+    uint8_t dirty_log_mask; /* 脏页？？ */
+    bool romd_mode; /* 某种模式？？ */
     bool readonly;
-    bool nonvolatile;
+    bool nonvolatile;   /* 非易失性，所以上面的模式表示的是判断这个region是否为ROM？？ */
 };
 
 #define FOR_EACH_FLAT_RANGE(var, view)          \

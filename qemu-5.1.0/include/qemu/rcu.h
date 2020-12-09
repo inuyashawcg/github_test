@@ -127,6 +127,9 @@ extern void rcu_disable_atfork(void);
 struct rcu_head;
 typedef void RCUCBFunc(struct rcu_head *head);
 
+/*
+    rcu 队列，每个结点会有一个对应的function
+*/
 struct rcu_head {
     struct rcu_head *next;
     RCUCBFunc *func;
