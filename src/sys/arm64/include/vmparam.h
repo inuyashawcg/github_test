@@ -152,7 +152,11 @@
 #define	VM_MIN_ADDRESS		(0x0000000000000000UL)
 #define	VM_MAX_ADDRESS		(0xffffffffffffffffUL)
 
-/* 512 GiB of kernel addresses */
+/* 512 GiB of kernel addresses 
+	内核模块会加载到一段物理地址空间区域当中，然后这段物理地址空间会被映射到虚拟地址空间，
+	VM_MIN_KERNEL_ADDRESS 就表示内核在虚拟地址空间中的最小地址，规定内核可用的虚拟地址
+	空间是512G，但是实际上我们也就用了1G
+*/
 #define	VM_MIN_KERNEL_ADDRESS	(0xffff000000000000UL)
 #define	VM_MAX_KERNEL_ADDRESS	(0xffff008000000000UL)
 

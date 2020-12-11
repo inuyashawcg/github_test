@@ -462,21 +462,32 @@ struct MemoryRegion {
     bool romd_mode;
     bool ram;
     bool subpage;
-    bool readonly; /* For RAM regions */
+    bool readonly; /* For RAM regions，标记是否为ROM类型的MR */
     bool nonvolatile;   /* 非易失的标识 */
     bool rom_device;
     bool flush_coalesced_mmio;  /* CoalescedMemoryRange 相关 */
     bool global_locking;    /* 全局锁 */
     uint8_t dirty_log_mask;
     bool is_iommu;
-    RAMBlock *ram_block;
+    RAMBlock *ram_block;    /* 是否关联一段真实的虚拟内存 */
     Object *owner;  /* 表示哪个Object实体拥有这个memory region？？ */
-
-    const MemoryRegionOps *ops; /* callback，对于memory region的操作函数 */
+    /*
+        - callback，对于memory region的操作函数 
+        - 是否为MMIO类型的MR
+    */
+    const MemoryRegionOps *ops; 
     void *opaque;
-    MemoryRegion *container;    /* 指向父级 MemoryRegion */
-    Int128 size;    /* 区域大小 */
-    hwaddr addr;    /* 在父级 MemoryRegion 中的偏移量 */
+    /*
+        - 指向包含此MR的容器MR
+        - 指向父级 MemoryRegion
+    */
+    MemoryRegion *container;    
+    Int128 size;    /* 虚拟机内存的物理地址大小 */
+    /* 
+        - 在父级 MemoryRegion 中的偏移量 
+        - 虚拟机内存的绝对物理地址
+    */
+    hwaddr addr;    
     void (*destructor)(MemoryRegion *mr);   /* 析构函数 */
     uint64_t align;
     bool terminates;
@@ -485,14 +496,19 @@ struct MemoryRegion {
     bool warning_printed; /* For reservations - 保留项？？ */
     uint8_t vga_logging_count;
     MemoryRegion *alias;    /* alias: 别名，指向实体MemoryRegion */
-    hwaddr alias_offset;    /* 起始地址 (GPA) 在实体 MemoryRegion 中的偏移量 */
+
+    /*
+         - 起始地址 (GPA) 在实体 MemoryRegion 中的偏移量
+         - 别名MR在所属MR内的offset，alias_offset表示本MR在alias指向的MR的偏移
+    */
+    hwaddr alias_offset;    
     int32_t priority;
-    QTAILQ_HEAD(, MemoryRegion) subregions; /* 子区域队列 */
-    QTAILQ_ENTRY(MemoryRegion) subregions_link; /* 子区域队列结点 */
+    QTAILQ_HEAD(, MemoryRegion) subregions; /* 容器MR的子MR组成的链表header */
+    QTAILQ_ENTRY(MemoryRegion) subregions_link; /* 用于将子MR组织成链表的成员 */
     QTAILQ_HEAD(, CoalescedMemoryRange) coalesced;  /* 联合的memory range */
     const char *name;
-    unsigned ioeventfd_nb;
-    MemoryRegionIoeventfd *ioeventfds;
+    unsigned ioeventfd_nb;  /* MR包含的ioeventfd个数 */
+    MemoryRegionIoeventfd *ioeventfds;  /* MR包含的ioeventfd数组，用于和内核通信 */
 };
 
 struct IOMMUMemoryRegion {
@@ -511,6 +527,12 @@ struct IOMMUMemoryRegion {
  *
  * Allows a component to adjust to changes in the guest-visible memory map.
  * Use with memory_listener_register() and memory_listener_unregister().
+ * 
+ * 当qemu模拟的内存地址空间发生变化时，需要有机制通知到其它模块，对于kvm的模拟，内存地址空间变化后
+ * 要通知内核，从而保证内核与用户态内存信息一致。对于tcg的模拟，虽然不通知到内核，但在内存地址信息
+ * 变化时也有其它事情需要做，MemoryListener结构体就是为此而设计，每个地址空间都维护了这样一个结构
+ * 体的链表，当内存信息变化时，会触发相关的回调。同时还有一个全局的链表维护所有注册的Listener结构体，
+ * 这些结构体在链表内通过优先级排序
  */
 struct MemoryListener {
     /**
@@ -763,14 +785,19 @@ struct AddressSpace {
     /* private: */
     struct rcu_head rcu;    /* RCU: 数据同步 */
     char *name;
-    MemoryRegion *root; /* 地址空间所在的memory region？？ */
+    /*
+        关联的根MR，地址空间拥有了它，就拥有了整棵MR树的内存信息，结构体初始化时这一字段作为输入
+    */
+    MemoryRegion *root; 
 
-    /* Accessed via RCU. 通过RCU进行数据访问 */
+    /* Accessed via RCU. 通过RCU进行数据访问 
+        Root MR对应的扁平化内存视图
+    */
     struct FlatView *current_map;
 
     int ioeventfd_nb;   /* nb: number？表示IO event数量？ */
     struct MemoryRegionIoeventfd *ioeventfds;
-    QTAILQ_HEAD(, MemoryListener) listeners;
+    QTAILQ_HEAD(, MemoryListener) listeners;    /* 用于当地址空间发生变化时通知qemu其它模块或者内核 */
     QTAILQ_ENTRY(AddressSpace) address_spaces_link; /* 通过队列管理 */
 };
 
@@ -780,7 +807,11 @@ typedef struct FlatRange FlatRange;
 /* Flattened global view of current active memory hierarchy.  Kept in sorted
  * order.
  * 当前活动内存层次结构的展平全局视图。保持有序
- * 这个可能就是把整个memory区域类比成了一个区块图形(帮助开发者理解？？)，它对应的应该就是FlatRange，
+ * 这个可能就是把整个memory区域类比成了一个区块图形(帮助开发者理解？？)，它对应的应该就是 FlatRange;
+ * 
+ * 扁平化视图同样有两个元素，一是FlatView，cpu可访问地址空间的扁平化表示；一是FlatRange，逻辑内存区域
+ * 的扁平化描述，表示一段段内存区域。同样地，FlatView由许多FlatRange组成。扁平视图，用于展示和导出内存
+ * 视图，也方便传递给KVM
  */
 struct FlatView {
     struct rcu_head rcu;    /* rcu队列，每个结点都会对应一个function */
@@ -847,11 +878,13 @@ static inline bool MemoryRegionSection_eq(MemoryRegionSection *a,
  * The region typically acts as a container for other memory regions.  Use
  * memory_region_add_subregion() to add subregions.
  * 一个region可以作为其他region的拥有者，通过调用 memory_region_add_subregion 函数来添加子区域
+ * 根级memory region通过这个函数初始化，没有自己的内存，只是用于管理，比如 system memory
  *
  * @mr: the #MemoryRegion to be initialized
  * @owner: the object that tracks the region's reference count 跟踪region引用计数变化的object
  * @name: used for debugging; not visible to the user or ABI
  * @size: size of the region; any subregions beyond this size will be clipped
+ *          任何超出此大小的分区域都将被剪裁
  */
 void memory_region_init(MemoryRegion *mr,
                         struct Object *owner,
@@ -865,11 +898,15 @@ void memory_region_init(MemoryRegion *mr,
  * preserved against hot-unplug.  MemoryRegions actually do not have their
  * own reference count; they piggyback on a QOM object, their "owner".
  * This function adds a reference to the owner.
+ * 无论何时在BQL外部访问内存区域，都需要保存它们以防热插拔。 MemoryRegions 实际上没有
+ * 自己的引用计数；它们依赖于QOM对象，即它们的“所有者”。此函数用于添加对所有者的引用
  *
  * All MemoryRegions must have an owner if they can disappear, even if the
  * device they belong to operates exclusively under the BQL.  This is because
  * the region could be returned at any time by memory_region_find, and this
  * is usually under guest control.
+ * 所有的内存区域都必须有一个所有者，如果它们可以消失，即使它们所属的设备在BQL下专门运行。
+ * 这是因为该区域可以在任何时候由memory_region_find返回，并且通常由guest控制。
  *
  * @mr: the #MemoryRegion
  */
@@ -877,11 +914,12 @@ void memory_region_ref(MemoryRegion *mr);
 
 /**
  * memory_region_unref: Remove 1 to a memory region's reference count
- *
+ * BQL：锁操作相关
  * Whenever memory regions are accessed outside the BQL, they need to be
  * preserved against hot-unplug.  MemoryRegions actually do not have their
  * own reference count; they piggyback on a QOM object, their "owner".
  * This function removes a reference to the owner and possibly destroys it.
+ * 此函数删除对所有者的引用，并可能销毁它
  *
  * @mr: the #MemoryRegion
  */
@@ -892,12 +930,15 @@ void memory_region_unref(MemoryRegion *mr);
  *
  * Accesses into the region will cause the callbacks in @ops to be called.
  * if @size is nonzero, subregions will be clipped to @size.
+ * 对区域的访问将导致调用 @ops 中的回调。如果 @size 非零，subregion 将被剪裁为 @size。
  *
  * @mr: the #MemoryRegion to be initialized.
  * @owner: the object that tracks the region's reference count
  * @ops: a structure containing read and write callbacks to be used when
  *       I/O is performed on the region.
  * @opaque: passed to the read and write callbacks of the @ops structure.
+ *          传递给@ops结构的读写回调
+ * 
  * @name: used for debugging; not visible to the user or ABI
  * @size: size of the region.
  */
@@ -912,16 +953,20 @@ void memory_region_init_io(MemoryRegion *mr,
  * memory_region_init_ram_nomigrate:  Initialize RAM memory region.  Accesses
  *                                    into the region will modify memory
  *                                    directly.
+ * 初始化RAM内存区域。对该区域的访问将直接修改内存
  *
  * @mr: the #MemoryRegion to be initialized.
  * @owner: the object that tracks the region's reference count
  * @name: Region name, becomes part of RAMBlock name used in migration stream
  *        must be unique within any device
+ *        区域名称，成为RAMBlock名称的一部分，在迁移流中使用的名称在任何设备中都必须是唯一的
+ * 
  * @size: size of the region.
  * @errp: pointer to Error*, to store an error if it happens.
  *
  * Note that this function does not do anything to cause the data in the
  * RAM memory region to be migrated; that is the responsibility of the caller.
+ * 请注意，此函数不会导致RAM内存区域中的数据被迁移；这是调用者的责任
  */
 void memory_region_init_ram_nomigrate(MemoryRegion *mr,
                                       struct Object *owner,
@@ -939,11 +984,12 @@ void memory_region_init_ram_nomigrate(MemoryRegion *mr,
  * @name: Region name, becomes part of RAMBlock name used in migration stream
  *        must be unique within any device
  * @size: size of the region.
- * @share: allow remapping RAM to different addresses
+ * @share: allow remapping RAM to different addresses 允许映射到不同的地址
  * @errp: pointer to Error*, to store an error if it happens.
  *
  * Note that this function is similar to memory_region_init_ram_nomigrate.
  * The only difference is part of the RAM region can be remapped.
+ * 跟上面的区域的区别就是这里的部分memory可以remap
  */
 void memory_region_init_ram_shared_nomigrate(MemoryRegion *mr,
                                              struct Object *owner,
@@ -959,6 +1005,9 @@ void memory_region_init_ram_shared_nomigrate(MemoryRegion *mr,
  *                                     portion of this RAM is actually used.
  *                                     The used size can change across reboots.
  *
+ * 使用可调整内存大小初始化内存区域。对该区域的访问将直接修改内存。实际上只使用了这个RAM的初始部分；
+ * 使用的大小可以在重新启动时更改
+ * 
  * @mr: the #MemoryRegion to be initialized.
  * @owner: the object that tracks the region's reference count
  * @name: Region name, becomes part of RAMBlock name used in migration stream
@@ -1040,6 +1089,7 @@ void memory_region_init_ram_from_fd(MemoryRegion *mr,
  * memory_region_init_ram_ptr:  Initialize RAM memory region from a
  *                              user-provided pointer.  Accesses into the
  *                              region will modify memory directly.
+ * 从用户提供的指针初始化RAM内存区域
  *
  * @mr: the #MemoryRegion to be initialized.
  * @owner: the object that tracks the region's reference count
@@ -1047,6 +1097,7 @@ void memory_region_init_ram_from_fd(MemoryRegion *mr,
  *        must be unique within any device
  * @size: size of the region.
  * @ptr: memory to be mapped; must contain at least @size bytes.
+ *      表示需要被映射的区域，必须至少包含 @size byte
  *
  * Note that this function does not do anything to cause the data in the
  * RAM memory region to be migrated; that is the responsibility of the caller.
@@ -1068,7 +1119,10 @@ void memory_region_init_ram_ptr(MemoryRegion *mr,
  * dump (device may not be enabled/mapped at the time of the dump), and
  * operations incompatible with manipulating MMIO should be avoided.  Replaces
  * skip_dump flag.
- *
+ * RAM设备表示到物理设备的映射，例如vfio-PCI分配设备的PCI MMIO条。内存区域可以映射到虚拟机
+ * 地址空间，对该区域的访问将直接修改内存。但是，内存区域不应该包括在内存转储中（设备在转储时
+ * 可能没有被启用/映射），并且应该避免与操作MMIO不兼容的操作。替换 skip_dump 标志
+ * 
  * @mr: the #MemoryRegion to be initialized.
  * @owner: the object that tracks the region's reference count
  * @name: the name of the region.
@@ -1078,6 +1132,7 @@ void memory_region_init_ram_ptr(MemoryRegion *mr,
  * Note that this function does not do anything to cause the data in the
  * RAM memory region to be migrated; that is the responsibility of the caller.
  * (For RAM device memory regions, migrating the contents rarely makes sense.)
+ * 对于RAM设备内存区域，迁移内容很少有意义
  */
 void memory_region_init_ram_device_ptr(MemoryRegion *mr,
                                        struct Object *owner,
@@ -1088,6 +1143,7 @@ void memory_region_init_ram_device_ptr(MemoryRegion *mr,
 /**
  * memory_region_init_alias: Initialize a memory region that aliases all or a
  *                           part of another memory region.
+ * 初始化一个与另一个内存区域的全部或部分别名相同的内存区域
  *
  * @mr: the #MemoryRegion to be initialized.
  * @owner: the object that tracks the region's reference count
@@ -1135,6 +1191,7 @@ void memory_region_init_rom_nomigrate(MemoryRegion *mr,
  * Note that this function does not do anything to cause the data in the
  * RAM side of the memory region to be migrated; that is the responsibility
  * of the caller.
+ * 注意，这个函数不会导致内存区域的RAM端的数据被迁移；这是调用者的责任
  *
  * @mr: the #MemoryRegion to be initialized.
  * @owner: the object that tracks the region's reference count
@@ -1158,7 +1215,7 @@ void memory_region_init_rom_device_nomigrate(MemoryRegion *mr,
  * that translates addresses
  *
  * An IOMMU region translates addresses and forwards accesses to a target
- * memory region.
+ * memory region. IOMMU区域转换地址并将访问转发到目标内存区域
  *
  * The IOMMU implementation must define a subclass of TYPE_IOMMU_MEMORY_REGION.
  * @_iommu_mr should be a pointer to enough memory for an instance of
@@ -1167,6 +1224,10 @@ void memory_region_init_rom_device_nomigrate(MemoryRegion *mr,
  * instance of the subclass, and its methods will then be called to handle
  * accesses to the memory region. See the documentation of
  * #IOMMUMemoryRegionClass for further details.
+ * IOMMU的实现必须要定义一个 TYPE_IOMMU_MEMORY_REGION subclass，@_iommu_mr 应该是一个
+ * 指向有足够区域存放 subclass 实例的指针 @instance_size 表示实例的大小，@mrtypename 表示
+ * 它的名字。这个函数将初始化 @_iommu_mr 作为 subclass 的实例，它的方法将会在处理对内存区域访问
+ * 的时候被调用
  *
  * @_iommu_mr: the #IOMMUMemoryRegion to be initialized
  * @instance_size: the IOMMUMemoryRegion subclass instance size
@@ -1196,13 +1257,16 @@ void memory_region_init_iommu(void *_iommu_mr,
  * This function allocates RAM for a board model or device, and
  * arranges for it to be migrated (by calling vmstate_register_ram()
  * if @owner is a DeviceState, or vmstate_register_ram_global() if
- * @owner is NULL).
+ * @owner is NULL). 此函数为板型号或设备分配RAM，并安排迁移
  *
  * TODO: Currently we restrict @owner to being either NULL (for
  * global RAM regions with no owner) or devices, so that we can
  * give the RAM block a unique name for migration purposes.
  * We should lift this restriction and allow arbitrary Objects.
  * If you pass a non-NULL non-device @owner then we will assert.
+ * 目前，我们将@owner限制为NULL（对于没有所有者的全局RAM区域）或设备，这样我们就可以
+ * 为RAM块指定一个唯一的名称，以便于迁移。我们应该取消这一限制，允许任意的对象。如果您
+ * 传递一个非空的non-device@owner，那么我们将断言
  */
 void memory_region_init_ram(MemoryRegion *mr,
                             struct Object *owner,
@@ -1393,11 +1457,13 @@ void memory_region_notify_iommu(IOMMUMemoryRegion *iommu_mr,
  *
  * This works just like memory_region_notify_iommu(), but it only
  * notifies a specific notifier, not all of them.
+ * 作用跟上述方法类似，只不过这里是要处理一些特殊的情形
  *
  * @notifier: the notifier to be notified
  * @entry: the new entry in the IOMMU translation table.  The entry
  *         replaces all old entries for the same virtual I/O address range.
  *         Deleted entries have .@perm == 0.
+ * 该条目将替换相同虚拟I/O地址范围的所有旧条目。删除的条目有 .@perm == 0
  */
 void memory_region_notify_one(IOMMUNotifier *notifier,
                               IOMMUTLBEntry *entry);
@@ -1600,7 +1666,7 @@ void memory_region_msync(MemoryRegion *mr, hwaddr addr, hwaddr size);
 
 /**
  * memory_region_writeback: Trigger cache writeback for
- * selected address range
+ * selected address range 触发选定地址范围的缓存写回
  *
  * @mr: the memory region to be updated
  * @addr: the initial address of the range to be written back

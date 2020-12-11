@@ -118,9 +118,9 @@ struct nzlist {
  * “section_dispatch_table”结构包含对执行运行时重定位所需的各种数据结构的偏移量
  */
 struct section_dispatch_table {
-	struct so_map *sdt_loaded;	/* List of loaded objects */
-	long	sdt_sods;		/* List of shared objects descriptors */
-	long	sdt_paths;		/* Library search paths */
+	struct so_map *sdt_loaded;	/* List of loaded objects 管理被加载的对象(.so??) */
+	long	sdt_sods;		/* List of shared objects descriptors .so的数量？？ */
+	long	sdt_paths;		/* Library search paths 查找库的路径 */
 	long	sdt_got;		/* Global offset table */
 	long	sdt_plt;		/* Procedure linkage table */
 	long	sdt_rel;		/* Relocation table */
@@ -146,7 +146,7 @@ struct section_dispatch_table {
  * `rh_next'是哈希桶中的下一个符号（如果发生冲突）
  */
 struct rrs_hash {
-	int	rh_symbolnum;		/* Symbol number */
+	int	rh_symbolnum;		/* Symbol number 表示symbol的index */
 	int	rh_next;		/* Next hash entry */
 };
 
@@ -225,7 +225,7 @@ struct _dynamic {
 	union {
 		struct section_dispatch_table *d_sdt;
 	} d_un;
-	struct ld_entry *d_entry;	/* XXX */
+	struct ld_entry *d_entry;	/* XXX linker interpreter(ld-linux.so??)的接口*/
 };
 
 #define LD_VERSION_SUN		(3)

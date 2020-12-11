@@ -75,6 +75,17 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/link_elf.c 339953 2018-10-31 14:03:48Z 
 
 #define MAXSEGS 4
 
+/*
+	ELF Hash table:
+		Hash table 跟之前的section和symbol不太一样，hash table首先是保存了两个数量值，第一个是 nbucket，第二个是nchain，
+		后边会跟一个bucket数组和chain数组，nbucket和nchain则分别表示两个数组的entry的数量；这两个数组元素保存的都是symbol
+		在symbol table中的index；chain table 和 symbol table是平行关系，也就是说nchain等于symbol table中entry的数量；
+		hash function会接受symbol name作为输入，然后输出一个value用于计算bucket index。因此，如果hash function接受一个
+		name并且返回value x，bucket[x % nbucket] 就会返回一个index y，这个 y 就适用于symbol table和chain table；如果
+		symbol table entry 并不是我们想要找的那个，chain[y]会给出下一个具有相同hash值的symbol table entry。所以我们就可
+		以沿着chain link一直查找，直到找到包含指定name的 symbol table entry，或者chain entry 包含的数值是 STN_UNDEF。
+		所以，chain 不是数组，而是一个链表类似的组织形式，bucket估计也是类似的结构
+*/
 typedef struct elf_file {
 	struct linker_file lf;		/* Common fields linker_file 相当于是一个基类 */
 	int		preloaded;	/* Was file pre-loaded 是否预加载的标志 */
@@ -82,7 +93,7 @@ typedef struct elf_file {
 #ifdef SPARSE_MAPPING
 	vm_object_t	object;		/* VM object to hold file pages */
 #endif
-	Elf_Dyn		*dynamic;	/* Symbol table etc. */
+	Elf_Dyn		*dynamic;	/* Symbol table etc. 动态链接 symbol table */
 	Elf_Hashelt	nbuckets;	/* DT_HASH info */
 	Elf_Hashelt	nchains;
 	const Elf_Hashelt *buckets;
@@ -146,6 +157,21 @@ struct elf_set {
 TAILQ_HEAD(elf_set_head, elf_set);
 
 #include <kern/kern_ctf.c>
+
+/*
+  动态链接
+	exec 和 dynamic linker 合作创建程序的进程映像，这需要执行一下步骤：
+		1、添加可执行文件的 memory segments 到进程映像
+		2、添加共享对象的 memory segments 到进程映像
+		3、对共享对象和可执行文件执行重定位操作
+		4、如果一个可执行文件要被 dynamic linker 进行操作，那么就要关闭该文件用于read的文件描述符
+		5、将控制权交给 program，使得好像 program 是直接从 exec 获得了控制权
+	linker editor 还构造各种数据，以帮助动态链接器执行和共享对象文件。可以从ELF文档的描述中猜测一下 linker editor 作用是什么。
+	“当通过 dynamic linking 构建可执行文件的时候，linker editor 会向可执行文件添加一个 PT_INTERP 类型的 program header 
+	element，告诉系统引入 dynamic linker 作为 program interpreter”。从上述表述也可以看出，linker editor 的另外一个作用
+	就是引入 dynamic linker，有可能就是 /lib64/ld-linux_x86-64.so，通过 ld-linux_x86-64.so 来协助进行动态链接，内核不
+	知道会不会使用这个
+*/
 
 static int	link_elf_link_common_finish(linker_file_t);
 static int	link_elf_link_preload(linker_class_t cls,
@@ -213,6 +239,10 @@ static struct elf_set_head set_pcpu_list;
 static struct elf_set_head set_vnet_list;
 #endif
 
+/*
+	根据 es_start 和 es_stop 的排列顺序插入到 elf_set list当中
+	elf_set的作用是什么？？
+*/
 static void
 elf_set_add(struct elf_set_head *list, Elf_Addr start, Elf_Addr stop, Elf_Addr base)
 {
@@ -368,6 +398,7 @@ link_elf_invoke_ctors(caddr_t addr, size_t size)
 /*
  * Actions performed after linking/loading both the preloaded kernel and any
  * modules; whether preloaded or dynamicly loaded.
+ * linking/loading 预加载内核或者其他模块后执行；不论是预加载还是动态加载
  */
 static int
 link_elf_link_common_finish(linker_file_t lf)
@@ -413,14 +444,16 @@ link_elf_init(void* arg)
 
 	linker_add_class(&link_elf_class);
 
-	dp = (Elf_Dyn *)&_DYNAMIC;
+	dp = (Elf_Dyn *)&_DYNAMIC;	/* 指向dynamic section的指针？？ */
 	modname = NULL;
 	modptr = preload_search_by_type("elf" __XSTRING(__ELF_WORD_SIZE) " kernel");
 	if (modptr == NULL)
 		modptr = preload_search_by_type("elf kernel");
 	modname = (char *)preload_search_info(modptr, MODINFO_NAME);
 	if (modname == NULL)
-		modname = "kernel";
+		modname = "kernel";	/* 应该就是处理 /boot/kernel/kernel */
+
+	/* 创建一个 linker file 结构体用于管理 kernel file */
 	linker_kernel_file = linker_make_file(modname, &link_elf_class);
 	if (linker_kernel_file == NULL)
 		panic("%s: Can't create linker structures for kernel",
@@ -444,6 +477,7 @@ link_elf_init(void* arg)
 	linker_kernel_file->address = (caddr_t)__startkernel;
 	linker_kernel_file->size = (intptr_t)(__endkernel - __startkernel);
 #else
+	/* 确定了kernel加载的 virtual address 的 base address */
 	linker_kernel_file->address += KERNBASE;
 	linker_kernel_file->size = -(intptr_t)linker_kernel_file->address;
 #endif
@@ -500,15 +534,20 @@ link_elf_preload_parse_symbols(elf_file_t ef)
 	    MODINFO_METADATA | MODINFOMD_SSYM);
 	if (pointer == NULL)
 		return (0);
-	ssym = *(caddr_t *)pointer;
+	ssym = *(caddr_t *)pointer;	/* start of symbols */
 	pointer = preload_search_info(ef->modptr,
 	    MODINFO_METADATA | MODINFOMD_ESYM);
 	if (pointer == NULL)
 		return (0);
-	esym = *(caddr_t *)pointer;
+	esym = *(caddr_t *)pointer;	/* end of symbols */
 
 	base = ssym;
 
+	/*
+		经过上述步骤，我们已经获取到了symbol table的address，然后通过readelf命令发现，
+		symbol table 和 strtab是连续的两个section，所以在处理完symbol table之后，
+		紧接着就可以处理 strtab
+	*/
 	symcnt = *(long *)base;
 	base += sizeof(long);
 	symtab = (Elf_Sym *)base;
@@ -537,6 +576,7 @@ link_elf_preload_parse_symbols(elf_file_t ef)
 	return (0);
 }
 
+/* 对.dynamic section进行解析 */
 static int
 parse_dynamic(elf_file_t ef)
 {
@@ -547,7 +587,9 @@ parse_dynamic(elf_file_t ef)
 		switch (dp->d_tag) {
 		case DT_HASH:
 		{
-			/* From src/libexec/rtld-elf/rtld.c */
+			/* From src/libexec/rtld-elf/rtld.c
+				d_ptr表示address value，这里应该就是获取了hash table的虚拟地址
+			*/
 			const Elf_Hashelt *hashtab = (const Elf_Hashelt *)
 			    (ef->address + dp->d_un.d_ptr);
 			ef->nbuckets = hashtab[0];
@@ -626,6 +668,9 @@ parse_dynamic(elf_file_t ef)
 	return (0);
 }
 
+/*
+	处理多CPU的情况
+*/
 static int
 parse_dpcpu(elf_file_t ef)
 {
@@ -745,6 +790,7 @@ link_elf_link_preload(linker_class_t cls,
 #ifdef SPARSE_MAPPING
 	ef->object = 0;
 #endif
+	/* dp: dynamic pointer，应该就是计算 .dynamic section虚拟内存地址 */
 	dp = (vm_offset_t)ef->address + *(vm_offset_t *)dynptr;
 	ef->dynamic = (Elf_Dyn *)dp;
 	lf->address = ef->address;
@@ -1274,6 +1320,7 @@ relocate_file(elf_file_t ef)
 /*
  * Hash function for symbol table lookup.  Don't even think about changing
  * this.  It is specified by the System V ABI.
+ * 通过输入的name参数获取到一个bucket index
  */
 static unsigned long
 elf_hash(const char *name)
@@ -1301,14 +1348,23 @@ link_elf_lookup_symbol(linker_file_t lf, const char *name, c_linker_sym_t *sym)
 	unsigned long hash;
 	int i;
 
-	/* If we don't have a hash, bail. */
+	/* If we don't have a hash, bail. 
+		首先判断一下 file 是否有 hash table	
+	*/
 	if (ef->buckets == NULL || ef->nbuckets == 0) {
 		printf("link_elf_lookup_symbol: missing symbol hash table\n");
 		return (ENOENT);
 	}
 
-	/* First, search hashed global symbols */
+	/* First, search hashed global symbols 
+		hash其实是一个index
+	*/
 	hash = elf_hash(name);
+
+	/*
+		通过上述计算出的index，找到对应的buckets[]中的entry，bucket entry中的存放的是symbol 在 symbol table
+		中的symbol index，所以我们就可以找到对应的symbol
+	*/
 	symnum = ef->buckets[hash % ef->nbuckets];
 
 	while (symnum != STN_UNDEF) {
@@ -1317,14 +1373,15 @@ link_elf_lookup_symbol(linker_file_t lf, const char *name, c_linker_sym_t *sym)
 			return (ENOENT);
 		}
 
-		symp = ef->symtab + symnum;
+		symp = ef->symtab + symnum;	/* 找到了symbol */
 		if (symp->st_name == 0) {
 			printf("%s: corrupt symbol table\n", __func__);
 			return (ENOENT);
 		}
 
-		strp = ef->strtab + symp->st_name;
+		strp = ef->strtab + symp->st_name;	/* 找到了symbol name */
 
+		/* 比较传入的name跟我们找到的symbol name是否一致 */
 		if (strcmp(name, strp) == 0) {
 			if (symp->st_shndx != SHN_UNDEF ||
 			    (symp->st_value != 0 &&
@@ -1335,7 +1392,11 @@ link_elf_lookup_symbol(linker_file_t lf, const char *name, c_linker_sym_t *sym)
 			}
 			return (ENOENT);
 		}
-
+		/* 
+			如果没有找到，那就通过chain接着向后查找，从这里可以印证 ELF_Format.pdf 文档中的相关表述；
+			chain[] 中存放的也是 symbol index，只不过这个 index 是我们将要查找的下一个 symbol 在
+			symbol table 中的 index，而不是当前 symbol 的 index
+		*/
 		symnum = ef->chains[symnum];
 	}
 
@@ -1343,7 +1404,10 @@ link_elf_lookup_symbol(linker_file_t lf, const char *name, c_linker_sym_t *sym)
 	if (ef->symtab == ef->ddbsymtab)
 		return (ENOENT);
 
-	/* Exhaustive search */
+	/* Exhaustive search 彻底搜索 
+		之前是通过 hash 来进行查找，如果没有找到，那就直接遍历整个symbol table 来进行查找；
+		如果还是没有找到，那就报错
+	*/
 	for (i = 0, symp = ef->ddbsymtab; i < ef->ddbsymcnt; i++, symp++) {
 		strp = ef->ddbstrtab + symp->st_name;
 		if (strcmp(name, strp) == 0) {
@@ -1451,6 +1515,11 @@ link_elf_lookup_set(linker_file_t lf, const char *name,
 
 	/* get address of first entry */
 	snprintf(setsym, len, "%s%s", "__start_set_", name);
+
+	/*
+		- 学习一下代码逻辑，在C语言中如何将两个字符串拼接到一起
+		参考 linker_set 代码，setsym 其实就是一个全局符号的名称
+	*/
 	error = link_elf_lookup_symbol(lf, setsym, &sym);
 	if (error != 0)
 		goto out;
@@ -1459,7 +1528,7 @@ link_elf_lookup_set(linker_file_t lf, const char *name,
 		error = ESRCH;
 		goto out;
 	}
-	start = (void **)symval.value;
+	start = (void **)symval.value;	/* 获取虚拟地址 */
 
 	/* get address of last entry */
 	snprintf(setsym, len, "%s%s", "__stop_set_", name);
@@ -1473,7 +1542,9 @@ link_elf_lookup_set(linker_file_t lf, const char *name,
 	}
 	stop = (void **)symval.value;
 
-	/* and the number of entries */
+	/* and the number of entries 
+		start和stop已经变成了指向指针的指针，所以直接作差就可以求出来两者之间的距离(都是指针类型)
+	*/
 	count = stop - start;
 
 	/* and copy out */

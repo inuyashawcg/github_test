@@ -511,16 +511,23 @@ static void object_initialize_with_type(Object *obj, size_t size, TypeImpl *type
 
     memset(obj, 0, type->instance_size);
     obj->class = type->class;
-    object_ref(obj);
-    object_class_property_init_all(obj);
+    object_ref(obj);    /* object 引用计数+1 */
+    object_class_property_init_all(obj);    /* 初始化object class所有的属性 */
+
+    /* 创建hash表来保存object properties */
     obj->properties = g_hash_table_new_full(g_str_hash, g_str_equal,
                                             NULL, object_property_free);
+    /* object 初始化相关操作 */
     object_init_with_type(obj, type);
     object_post_init_with_type(obj, type);
 }
 
 void object_initialize(void *data, size_t size, const char *typename)
 {
+    /*
+        type应该是有一个table用来管理所有的type类型结构体，通过 type_get_by_name 
+        查找对应的 TypeImpl，如果找到就返回对应的指针，如果没有找到，就返回NULL
+    */
     TypeImpl *type = type_get_by_name(typename);
 
     if (!type) {

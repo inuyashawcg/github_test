@@ -629,7 +629,7 @@ typedef struct {
 /*
 	数组元素指定一个可加载的段，由p_filesz和p_memsz描述。文件中的字节映射到内存段的开头;如果file size(p_filesz)
 	小于memory size(p_memsz),其他多出来的字节将会被置零并且紧邻segment初始化区域放置；程序头表中的可加载段条目按
-	升序显示，按p_vaddr成员排序。
+	升序显示，根据p_vaddr成员的大小进行排序
 */
 #define	PT_LOAD		1	/* Loadable segment. */
 #define	PT_DYNAMIC	2	/* Dynamic linking information segment. 重点关注 */
@@ -641,15 +641,19 @@ typedef struct {
 #define	PT_INTERP	3	/* Pathname of interpreter. */
 
 /*
+	有时，供应商或系统构建者需要用特殊信息标记一个对象文件，其他程序将检查这些信息的一致性、兼容性等。SHT_NOTE 类型的 section
+	和 PT_NOTE 类型的 segment 都是用于保存这类信息。文件中会包含任意数量的这种类型的section和segment
+	文件加载和动态链接的过程可能需要通过额外的一些辅助信息来实现，PT_NOTE 类型的 segment 保存的就是这些信息，指定了这些信息
+	所在的位置和大小
  	节和程序头元素中的注释信息包含任意数量的条目，每个条目都是目标处理器格式的4字节字数组
 */
-#define	PT_NOTE		4	/* Auxiliary information. 数组元素指定辅助信息的位置和大小 */
+#define	PT_NOTE		4	/* Auxiliary information. 辅助信息 */
 
 /* 此段类型是保留的，但具有未指定的语义。包含此类型数组元素的程序不符合ABI */
 #define	PT_SHLIB	5	/* Reserved (not used). */
 
 /*
-	这个数组元素如果存在的话，就表示  program header table 自己的位置和大小，包括在程序文件和memory image；
+	这个数组元素如果存在的话，就表示  program header table 自身的位置和大小，包括在程序文件和memory image中；
 	该类型在文件中不能出现多次；此外，仅当 program header table是程序的memory image 的一部分时，才可能发生这种情况；
 	如果存在，则它必须位于任何可加载segment entry之前
 	可以看出 program header table 排序状况是什么样的
@@ -691,14 +695,18 @@ typedef struct {
 #define	DT_NULL		0	/* Terminating entry. .dynamic section中 array 的结尾标识 */
 
 /*
-	其实就是 string table 中的一个index，通过index可以确定section或者symbol的名字
+	其实就是 DT_STRTAB string table 中的一个index，通过index可以确定一些需要的库文件的名称；
+	dynamic array中可能会包含有多个这样的entry
+
 	当动态链接器为目标文件创建memory segment(应该像是.data/ .bss 这些保存数据的section组成的segment)
 	的时候，dependencies(DT_NEEDED element dynamic structure 记录)会告诉有哪些共享对象需要来支持
-	程序服务。当反复链接共享对象和它们的依赖之后，动态链接器就会创建一个完整的进程映像。
+	程序服务。当反复链接共享对象和它们的依赖之后，动态链接器就会创建一个完整的进程映像
+
 	解析符号引用时，动态链接器使用宽度优先搜索检查符号表。也就是说，它首先查看可执行程序本身的符号表，然后
 	查看DT_NEEDED条目的符号表（按顺序），然后在第二级DT_NEEDED条目，依此类推。共享对象文件必须可由进程读取；
 	不需要其他权限。
-	即使在依赖项列表中多次引用共享对象，动态链接器也只将该对象连接到进程一次。
+
+	即使在依赖项列表中多次引用共享对象，动态链接器也只将该对象连接到进程一次
 */
 #define	DT_NEEDED	1	/* String table offset of a needed shared
 				   library. */
@@ -709,7 +717,7 @@ typedef struct {
 #define	DT_PLTRELSZ	2	/* Total size in bytes of PLT relocations. */
 
 /*
-	保存 procedure linkage table/global offset table 相关联的地址
+	保存 procedure linkage table 或者 global offset table 相关联的地址
 */
 #define	DT_PLTGOT	3	/* Processor-dependent address. */
 #define	DT_HASH		4	/* Address of symbol hash table. 此哈希表引用DT_SYMTAB元素引用的符号表 */
@@ -733,7 +741,7 @@ typedef struct {
 #define	DT_FINI		13	/* Address of finalization function. 终止函数地址 */
 
 /*
-	保存string table的offset(本质上就是给出了shared object的名字)。offset就是记录在 DT_STRTAB entry中的表的索引
+	保存string table的offset(本质上就是给出了shared object [.so]的名字)。offset就是记录在 DT_STRTAB entry中的表的索引
 	从这里可以看出，如果我们需要保存名字，就可以设置一个专门的元素来保存string table的index，通过index来获取name string
 
 	依赖项列表中的名称是 DT_SONAME 字符串的副本，或者是用于构建对象文件的共享对象的路径名。例如，如果链接编辑器使用一个

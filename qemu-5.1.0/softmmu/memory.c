@@ -42,9 +42,13 @@ static bool memory_region_update_pending;
 static bool ioeventfd_update_pending;
 bool global_dirty_log;
 
+/* 管理所有的memory listener */
 static QTAILQ_HEAD(, MemoryListener) memory_listeners
     = QTAILQ_HEAD_INITIALIZER(memory_listeners);
 
+/*
+    全局链表初始化：qemu有链表将所有地址空间组织到一起，全局变量address_spaces指向这个链表的头部
+*/
 static QTAILQ_HEAD(, AddressSpace) address_spaces
     = QTAILQ_HEAD_INITIALIZER(address_spaces);
 
@@ -1172,6 +1176,9 @@ static void memory_region_do_init(MemoryRegion *mr,
     }
 }
 
+/*
+    memory region继承于object，所以首先要初始化object，然后再执行region相关的初始化
+*/
 void memory_region_init(MemoryRegion *mr,
                         Object *owner,
                         const char *name,
@@ -1224,11 +1231,16 @@ static void memory_region_get_size(Object *obj, Visitor *v, const char *name,
     visit_type_uint64(v, name, &value, errp);
 }
 
+/*
+    memory region 初始化函数，system_memory是一个纯容器,所以读写的回调参数
+    为 unassigned_mem_ops 表示这段地址空间没有分配
+*/
 static void memory_region_initfn(Object *obj)
 {
     MemoryRegion *mr = MEMORY_REGION(obj);
     ObjectProperty *op;
 
+    /* MemoryRegion 结构体成员赋值 */
     mr->ops = &unassigned_mem_ops;
     mr->enabled = true;
     mr->romd_mode = true;
@@ -1248,11 +1260,11 @@ static void memory_region_initfn(Object *obj)
                                    &mr->addr, OBJ_PROP_FLAG_READ);
     object_property_add(OBJECT(mr), "priority", "uint32",
                         memory_region_get_priority,
-                        NULL, /* memory_region_set_priority */
+                        NULL, /* memory_region_set_priority 设置优先级 */
                         NULL, NULL);
     object_property_add(OBJECT(mr), "size", "uint64",
                         memory_region_get_size,
-                        NULL, /* memory_region_set_size, */
+                        NULL, /* memory_region_set_size, 设置size */
                         NULL, NULL);
 }
 

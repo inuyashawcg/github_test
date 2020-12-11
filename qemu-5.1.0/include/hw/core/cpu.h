@@ -357,8 +357,11 @@ struct qemu_work_item;
  */
 struct CPUState {
     /*< private >*/
-    DeviceState parent_obj;
-    /*< public >*/
+    DeviceState parent_obj; /* 继承于DeviceState */
+    /*< public >
+        每个cpu都有自己可访问的地址空间，因此在cpu对象中有一个cpu_ases数组用来保存地址空间，
+        如果是kvm模拟的cpu，只允许拥有一个地址空间；如果是tcg模拟的cpu，允许有多个地址空间
+    */
 
     int nr_cores;
     int nr_threads;

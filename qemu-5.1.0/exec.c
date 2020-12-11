@@ -828,6 +828,10 @@ const VMStateDescription vmstate_cpu_common = {
     }
 };
 
+/*
+    system_memory 作为该cpu的地址空间的root MemoryRegion. 并且将该AddressSpace 
+    保存到了cpu->cpu_ases[asidx] 中方便索引
+*/
 void cpu_address_space_init(CPUState *cpu, int asidx,
                             const char *prefix, MemoryRegion *mr)
 {
@@ -3001,17 +3005,24 @@ static void tcg_commit(MemoryListener *listener)
     tlb_flush(cpuas->cpu);
 }
 
+/*
+    x86模拟器主要包含两种内存地址空间：
+        system_memory，内存地址空间
+        system_io，IO地址空间
+    UINT64_MAX：2^64，相当于是64位寻址
+
+    qemu准备cpu执行环境：将系统内存和IO内存的Root MR和地址空间都进行了初始化。Root MR作为地址空间初始化的输入
+*/
 static void memory_map_init(void)
 {
     system_memory = g_malloc(sizeof(*system_memory));
-
-    memory_region_init(system_memory, NULL, "system", UINT64_MAX);
-    address_space_init(&address_space_memory, system_memory, "memory");
+    memory_region_init(system_memory, NULL, "system", UINT64_MAX);  /* Root MemoryRegion */
+    address_space_init(&address_space_memory, system_memory, "memory"); /* 初始化系统地址空间并添加到全局链表中 */
 
     system_io = g_malloc(sizeof(*system_io));
     memory_region_init_io(system_io, NULL, &unassigned_io_ops, NULL, "io",
                           65536);
-    address_space_init(&address_space_io, system_io, "I/O");
+    address_space_init(&address_space_io, system_io, "I/O");    /* 初始化系统IO空间并添加到全局链表中 */
 }
 
 MemoryRegion *get_system_memory(void)

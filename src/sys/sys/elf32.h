@@ -189,22 +189,22 @@ typedef struct {
  * 一些entry用来描述process segments，其他的entry给出了一些附加信息，但是对process image没有什么实质性的帮助
  * 
  * 可执行文件和共享对象文件有一个基址，它是与程序目标文件的内存映像关联的最低虚拟地址。基址的一个用途是在动态链接期间重新定位程序的内存映像；
- * 一个可执行的文件或者共享文件在运行时的基地址通过三个值来计算：程序可加载段的内存加载地址、最大页大小和最低虚拟地址；要计算基址，需要确定
- * 与PT_LOAD segment 的最低p_vaddr值相关联的内存地址。然后通过将内存地址截短为最大页面大小的最接近倍数来获得基址。根据加载到内存中的文件类型，
- * 内存地址可能与p_vaddr值匹配，也可能不匹配
+ * 在 program header table 中的 virtual address 与程序内存映像真正的 virtual address 是不一样的；为了计算 base address，首先要
+ * 确定 PT_LOAD 类型的 segment 中 p_vaddr 的最小内存地址，然后通过将内存地址截短为最大内存页大小的最接近倍数来获得 base address。依赖
+ * 于需要加载到内存中的文件的类型，memory address 可能跟 p_vaddr 一致，也可能不一致
  * 
  * .bss section虽然在文件中不占用空间，但它有助于段的内存映像。通常，这些未初始化的数据驻留在段的末尾，从而使相关程序头元素中的p_memsz大于
  * p_filesz
  * setion header用于描述section的特性，而program header则是用于描述segment的特性。目标文件(.o结尾)不存在program header，因为它不能
  * 运行，也就是说只有可执行的文件才有program header。一个segment包含有一个或者多个现有的section，相当于是从程序运行的角度来看这些section，
- * 也就是说segment本质上还是section
+ * 也就是说segment本质上还是section；segment的保存顺序是不定的，除非有明确的说明
  */
 typedef struct {
 	Elf32_Word	p_type;		/* Entry type. 描述segment或者解释该元素的相关信息，参考elf_common.h文件定义 */
-	Elf32_Off	p_offset;	/* File offset of contents. 描述从文件开头的偏移量，segment的第一个字节位于该位置处*/
+	Elf32_Off	p_offset;	/* File offset of contents. 描述从文件开头的偏移量，segment 的第一个字节位于该位置处 */
 	Elf32_Addr	p_vaddr;	/* Virtual address in memory image. 该segment的第一个byte在虚拟内存中的地址 */
 	/*
-		在与物理寻址相关的系统上，此成员为段的物理地址保留。由于System V忽略应用程序的物理寻址，
+		在与物理寻址相关的系统上，此成员为 segment 物理地址保留。由于System V忽略应用程序的物理寻址，
 		此成员对可执行文件和共享对象具有未指定的内容
 
 		在现代常见的体系架构中，很少直接使用物理地址，所以这里p_paddr的值与p_vaddr相同
@@ -213,6 +213,7 @@ typedef struct {
 	/*
 		通过p_offset和p_filesz两个成员就可以获得相应segment中的所有内容，所以这里就不再需要section header的支持，但需要ELF文件头中的信息
 		来确定program header表（每个program header的大小相同）的开头位置，因此ELF文件头（它包含在第一个LOAD segment中）也要加载到内存中
+		filez和memsz大小应该是不一样的，因为涉及到一些内存页填充，或者一些segment不会加载到内存等等因素的影响？？
 	*/
 	Elf32_Word	p_filesz;	/* Size of contents in file. 该segment在 file image中所占大小，bytes */
 	Elf32_Word	p_memsz;	/* Size of contents in memory. 该segment在 memory image中所占大小，bytes*/
@@ -223,7 +224,7 @@ typedef struct {
 		segment需要针对所在操作系统的页对齐
 	*/
 	Elf32_Word	p_align;	/* Alignment in memory and file. 对齐方式 */
-} Elf32_Phdr;
+} Elf32_Phdr;	/* 针对可执行或者共享的文件 */
 
 
 /*

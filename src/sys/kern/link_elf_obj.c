@@ -728,7 +728,9 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 	}
 #endif
 
-	/* Read the elf header from the file. */
+	/* Read the elf header from the file. 
+		读取文件的 ELF Header
+	*/
 	hdr = malloc(sizeof(*hdr), M_LINKER, M_WAITOK);
 
 	/* 读取该文件，获取ELF header数据 */
@@ -742,6 +744,7 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 		goto out;
 	}
 
+	/* 判断是不是ELF类型文件 */
 	if (!IS_ELF(*hdr)) {
 		error = ENOEXEC;
 		goto out;

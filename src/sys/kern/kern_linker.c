@@ -104,8 +104,8 @@ static linker_file_t linker_find_file_by_name(const char* _filename);
 static linker_file_t linker_find_file_by_id(int _fileid);
 
 /* 
-	Metadata from the static kernel 
-	宏定义弱符号？？
+	Metadata from the static kernel - 静态内核中的元数据(driver？？)
+	首先声明了两个弱符号
 */
 SET_DECLARE(modmetadata_set, struct mod_metadata);
 
@@ -113,7 +113,9 @@ SET_DECLARE(modmetadata_set, struct mod_metadata);
 MALLOC_DEFINE(M_LINKER, "linker", "kernel linker");
 
 /*
-	这个应该是最基本的kernel link file
+	这个应该是最基本的kernel link file，在link_elf.c文件中进行初始化，具体的阶段是在
+	KLD - THIRD，主要完成的任务是解析 .dynamic section，获取动态链接相关信息；对符号表
+	也做了一些操作
 */
 linker_file_t linker_kernel_file;
 
@@ -121,7 +123,7 @@ static struct sx kld_sx;	/* kernel linker lock */
 
 /*
  * Load counter used by clients to determine if a linker file has been
- * re-loaded. This counter is incremented for each file load.
+ * re-loaded. This counter is incremented for each file load. 每次加载文件时，此计数器都会递增
  * loadcnt 应该是记录 linker file 被加载的次数
  */
 static int loadcnt;
@@ -134,7 +136,7 @@ static int loadcnt;
 static linker_class_list_t classes;
 
 /* 
-	应该是管理所有的linker file，linker_file其实并不是目标文件实体，他只是对文件的一个描述，我们可以通过
+	应该是管理所有的 linker file，linker_file 其实并不是目标文件实体，他只是对文件的一个描述，我们可以通过
 	该结构体获取目标文件的名称，位置等等信息，然后就可以对目标文件进行链接操作
 */
 static linker_file_list_t linker_files;
@@ -169,22 +171,23 @@ retry:									\
 */
 typedef TAILQ_HEAD(, modlist) modlisthead_t;
 struct modlist {
-	TAILQ_ENTRY(modlist) link;	/* chain together all modules */
-	linker_file_t   container;
+	TAILQ_ENTRY(modlist) link;	/* chain together all modules - 把所有的 module 连接在一起 */
+	linker_file_t   container;	/* 表示这个 modlist 隶属于哪个 linker file？？ */
 	const char 	*name;
 	int             version;	/* 驱动模块注册的时候也会添加一个版本信息 */
 };
 typedef struct modlist *modlist_t;
 
 /*
-	found_modules 是在 linker_preload()函数中初始化的，所以它应该是管理内核预加载的所有
-	模块
+	found_modules 是在 linker_preload()函数中初始化的，所以它应该是管理内核预加载的所有模块
 */
 static modlisthead_t found_modules;
 
+/* 向 linker file 增加依赖 */
 static int	linker_file_add_dependency(linker_file_t file,
 		    linker_file_t dep);
 
+/* 可能是查找本文件中的 symbol table 中的 symbol */
 static caddr_t	linker_file_lookup_symbol_internal(linker_file_t file,
 		    const char* name, int deps);
 
@@ -1757,6 +1760,10 @@ linker_addmodules(linker_file_t lf, struct mod_metadata **start,
 	}
 }
 
+/* 
+	执行的顺序是 middle，third之后进行的，这时候 symbol table 和 .dynamic section都已经
+	做了相应的处理，后边应该就可以使用其中的一些信息
+*/
 static void
 linker_preload(void *arg)
 {
@@ -1776,13 +1783,20 @@ linker_preload(void *arg)
 	modlist_t mod;
 	struct sysinit **si_start, **si_stop;
 
+	/* 初始化管理链表 */
 	TAILQ_INIT(&loaded_files);
 	TAILQ_INIT(&depended_files);
 	TAILQ_INIT(&found_modules);
 	error = 0;
 
 	modptr = NULL;
-	sx_xlock(&kld_sx);
+	sx_xlock(&kld_sx);	/* linker lock，只针对linker？？ */
+
+	/*
+		通过gdb调试发现，x86_64下需要预加载一共是两个文件：
+			/boot/kernel/kernel
+			/boot/entropy
+	*/
 	while ((modptr = preload_search_next_name(modptr)) != NULL) {
 		modname = (char *)preload_search_info(modptr, MODINFO_NAME);
 		modtype = (char *)preload_search_info(modptr, MODINFO_TYPE);
@@ -1802,9 +1816,12 @@ linker_preload(void *arg)
 		lf = NULL;
 
 		/* 
-			首先遍历classes进行一轮preload，将执行完操作获取到的linker file添加到
-			loaded_files 中
-			classes中包含了两种类型，link_elf和link_elf_obj,所以说它会执行两次preload？
+			首先遍历classes进行一轮preload，将执行完操作获取到的linker file添加到loaded_files 中；
+			classes中包含了两种类型，link_elf和link_elf_obj，所以说它会执行两次preload，要比较一下
+			两次 preload 的异同；second 步骤首先是对 ELF Header、section table和symbol table等等
+			做了一些判断，看看属性是否正确，table是否存在，然后就是做了一些重定位的操作；third 步骤目前看
+			主要是对动态链接相关的，比如 dynamic symbol table 处理和 .dynamic section 的解析等；但是
+			它们都涉及到了重定位，所以还是要比较一下两者流程上有什么异同 
 		*/
 		TAILQ_FOREACH(lc, &classes, link) {
 			error = LINKER_LINK_PRELOAD(lc, modname, &lf);
@@ -1812,6 +1829,7 @@ linker_preload(void *arg)
 				break;
 			lf = NULL;
 		}
+		/* 把两个派生出的 linker file 都放到 loaded_files */
 		if (lf)
 			TAILQ_INSERT_TAIL(&loaded_files, lf, loaded);
 	}
@@ -1822,6 +1840,10 @@ linker_preload(void *arg)
 	 * 可以参考link_elf_obj和link_elf文件中对应函数的逻辑，其实就是在 linker_kernel_file 关联的文件的
 	 * prog类型的section中找到以 "modmetadata_set" 命名的link_set(驱动模块貌似就是以这个命名的，然后经
 	 * link_set中代码的处理，添加到某一个section中，很可能是.data section)
+	 * 
+	 * 与 linker_kernel_file 关联的 link_elf_class 是 link_elf.c文件中的那个，可以参考 link_elf_init
+	 * 函数代码实现；lookup_set 其实就是查找以 modmetadata_set 命名的set，找到set的范围(会包含有很多module，
+	 * 目前来看都是通过 SYSINIT 宏加入的)。遍历整个set，把其中的 module 全部提取出来，放到 found_modules中
 	 */
 	if (linker_file_lookup_set(linker_kernel_file, MDT_SETNAME, &start,
 	    &stop, NULL) == 0)

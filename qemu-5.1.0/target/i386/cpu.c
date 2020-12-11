@@ -6731,6 +6731,13 @@ static void x86_cpu_realizefn(DeviceState *dev, Error **errp)
         memory_region_set_enabled(cpu->cpu_as_mem, true);
 
         cs->num_ases = 2;
+        /* 
+            cpu_address_space_init用于初始化cpu的地址空间，这里的cs->memory 其实就是system_memory
+            这个MemoryRegion
+            创建了一个纯容器 cpu_as_root , 一个别名 cpu_as_mem 作为 cpu_as_root的子region, 所以
+            cpu_as_mem作为system_memory的别名,添加到cpu_as_root 的子节点，所以cpu对内存地址空间的
+            该cpu地址空间的操作将转化到system_memory对应的MemoryRegion
+         */
         cpu_address_space_init(cs, 0, "cpu-memory", cs->memory);
         cpu_address_space_init(cs, 1, "cpu-smm", cpu->cpu_as_root);
 
