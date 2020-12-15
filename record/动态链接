@@ -308,3 +308,10 @@ COLOPHON
 
 GNU                                                                                                                              2019-08-02                                                                                                                        LD.SO(8)
 ////////////////////////////man ld-linux.so////////////////////////////////////
+
+mapbase = 0xf000ff53f000ff53
+ef->address = 0xfffffe0000000000
+lf->address = ef->address = 0xffffffff82819000
+mapsize = 9832 0x2668
+
+.text - 0xffffffff82819000

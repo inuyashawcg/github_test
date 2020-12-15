@@ -466,6 +466,7 @@ linker_file_register_modules(linker_file_t lf)
 	}
 	first_error = 0;
 	for (mdp = start; mdp < stop; mdp++) {
+		/* 如果不是 MDT_MODULE 类型，跳过 */
 		if ((*mdp)->md_type != MDT_MODULE)
 			continue;
 		moddata = (*mdp)->md_data;
@@ -510,6 +511,7 @@ linker_load_file(const char *filename, linker_file_t *result)
 
 	sx_assert(&kld_sx, SA_XLOCKED);
 	
+	/* 这里再检查一次该文件是否已经加载，即判断是否已经在 linker_files 中 */
 	lf = linker_find_file_by_name(filename);
 	if (lf) {
 		KLD_DPF(FILE, ("linker_load_file: file %s is already loaded,"
@@ -729,6 +731,8 @@ linker_make_file(const char *pathname, linker_class_t lc)
 
 	if (!cold)
 		sx_assert(&kld_sx, SA_XLOCKED);
+	
+	/* 获取basename，不包含路径信息 */
 	filename = linker_basename(pathname);
 
 	KLD_DPF(FILE, ("linker_make_file: new file, filename='%s' for pathname='%s'\n", filename, pathname));
@@ -1844,10 +1848,12 @@ linker_preload(void *arg)
 	 * 与 linker_kernel_file 关联的 link_elf_class 是 link_elf.c文件中的那个，可以参考 link_elf_init
 	 * 函数代码实现；lookup_set 其实就是查找以 modmetadata_set 命名的set，找到set的范围(会包含有很多module，
 	 * 目前来看都是通过 SYSINIT 宏加入的)。遍历整个set，把其中的 module 全部提取出来，放到 found_modules中
+	 * 
+	 * 该文件应该就是为了找到以 MDT_SETNAME 命名的 segment或者section，得到起始和终止地址
 	 */
 	if (linker_file_lookup_set(linker_kernel_file, MDT_SETNAME, &start,
 	    &stop, NULL) == 0)
-		linker_addmodules(linker_kernel_file, start, stop, 1);
+		linker_addmodules(linker_kernel_file, start, stop, 1);	// 填充found_modules
 
 	/*
 	 * This is a once-off kinky bubble sort to resolve relocation
@@ -1866,18 +1872,29 @@ restart:
 		if (!error) {
 			for (mdp = start; mdp < stop; mdp++) {
 				mp = *mdp;
+				/* 
+					当 module 的类型不是 MDT_DEPEND，继续执行下一个循环，也就是说这里要处理
+					MDT_DEPEND 类型的 module；前面 MODULE_DECLARE 的时候，会有另外一个宏定义,
+					MDT_DEPEND，通过注释可以看到，这个宏定义的 module 是依赖于 kernel module，
+					所以这里应该是对这一类的 module 进行处理 
+				*/
 				if (mp->md_type != MDT_DEPEND)
 					continue;
-				modname = mp->md_cval;
-				verinfo = mp->md_data;
+
+				/* 找到了MDT_DEPEND类型的module，执行下面的步骤 */
+				modname = mp->md_cval;	/* string label */
+				verinfo = mp->md_data;	/* specific data */
+
 				for (nmdp = start; nmdp < stop; nmdp++) {
 					nmp = *nmdp;
+					/* 逻辑同上，查找 MDT_VERSION 类型的 module */
 					if (nmp->md_type != MDT_VERSION)
 						continue;
 					nmodname = nmp->md_cval;
 					if (strcmp(modname, nmodname) == 0)
 						break;
-				}
+				}	// enf inside for
+
 				if (nmdp < stop)   /* it's a self reference */
 					continue;
 
@@ -1893,16 +1910,23 @@ restart:
 		 * OK, if we found our modules, we can link.  So, "provide"
 		 * the modules inside and add it to the end of the link order
 		 * list.
+		 * 如果通过上述步骤，还是没有找到相应的 module，那就再继续执行下面的步骤
 		 */
 		if (resolves) {
 			if (!error) {
 				for (mdp = start; mdp < stop; mdp++) {
 					mp = *mdp;
+					/* 
+						仍然查找 MDT_VERSION 类型的 module，把找到的 module 的 md_data 成员
+						强制类型转换为 mod_version，得到 version 信息，再通过 modname 和 version
+						查找
+					*/
 					if (mp->md_type != MDT_VERSION)
 						continue;
 					modname = mp->md_cval;
 					nver = ((const struct mod_version *)
 					    mp->md_data)->mv_version;
+
 					if (modlist_lookup(modname,
 					    nver) != NULL) {
 						printf("module %s already"
@@ -2400,6 +2424,13 @@ linker_load_module(const char *kldname, const char *modname,
     struct linker_file *parent, const struct mod_depend *verinfo,
     struct linker_file **lfpp)
 {
+	/* 
+		GDB调试传入的参数：
+			kldname: intpm.ko
+			modname: 0x0
+			parent: 0x0
+			verinfo: 0x0
+	*/
 	linker_file_t lfdep;
 	const char *filename;
 	char *pathname;
@@ -2457,8 +2488,10 @@ linker_load_module(const char *kldname, const char *modname,
 	filename = linker_basename(pathname);
 
 	/*
-		如果找到了，返回该文件已经存在；如果没有找到，就根据linker file的dependence来创建
+		如果找到了，返回该文件已经存在；如果没有找到，就根据 linker file 的 dependence 来创建
 		相应的module
+		从这里可以看出，其实我们所需要链接的文件都会保存到 linker_files 中统一管理，也方便以后对于
+		已经链接的文件的查找
 	*/
 	if (linker_find_file_by_name(filename))
 		error = EEXIST;
@@ -2501,7 +2534,7 @@ linker_load_dependencies(linker_file_t lf)
 
 	/*
 	 * All files are dependent on /kernel.
-	 * 所有文件都依赖于/kernel
+	 * 所有文件都依赖于 /kernel
 	 */
 	sx_assert(&kld_sx, SA_XLOCKED);
 	if (linker_kernel_file) {
@@ -2510,9 +2543,11 @@ linker_load_dependencies(linker_file_t lf)
 		if (error)
 			return (error);
 	}
+	/* 还是需要对linker_set进行解析，找到所有的module */
 	if (linker_file_lookup_set(lf, MDT_SETNAME, &start, &stop,
 	    NULL) != 0)
 		return (0);
+
 	for (mdp = start; mdp < stop; mdp++) {
 		mp = *mdp;
 		if (mp->md_type != MDT_VERSION)
@@ -2527,7 +2562,15 @@ linker_load_dependencies(linker_file_t lf)
 			return (EEXIST);
 		}
 	}
-
+	/*
+		对比所有这些关于module的操作，基本上都是涉及 MDT_DEPEND 和 MDT_VERSION；这里做一个推测，
+		linker file中的 module 有些可能是要依赖与其他模块的，所以才会有 module container；
+		当我们发现我们需要的 module 在另外一个 file 中出现了，这个时候就要把 module container 
+		加入到该文件的 dependencies 中。所以，我们需要建立一个全局的数组来管理所有的 module，这样
+		一个文件才能方便查找 它所需要的 module 和对应的 container。
+		另一方面也看出了加载顺序的重要性，假如加载顺序设计的不合理，一个file需要某个module，结果这个
+		module 还没有加载，这个时候就会出现错误
+	*/
 	for (mdp = start; mdp < stop; mdp++) {
 		mp = *mdp;
 		if (mp->md_type != MDT_DEPEND)

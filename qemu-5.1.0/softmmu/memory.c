@@ -59,45 +59,53 @@ typedef struct AddrRange AddrRange;
 /*
  * Note that signed integers are needed for negative offsetting in aliases
  * (large MemoryRegion::alias_offset).
+ * 表示的是一块内存的地址起始位置和大小
  */
 struct AddrRange {
     Int128 start;
     Int128 size;
 };
 
+/* 创建一块地址空间 */
 static AddrRange addrrange_make(Int128 start, Int128 size)
 {
     return (AddrRange) { start, size };
 }
 
+/* 判断两段地址空间是否一致 */
 static bool addrrange_equal(AddrRange r1, AddrRange r2)
 {
     return int128_eq(r1.start, r2.start) && int128_eq(r1.size, r2.size);
 }
 
+/* 地址空间结束部分 */
 static Int128 addrrange_end(AddrRange r)
 {
     return int128_add(r.start, r.size);
 }
 
+/* 地址空间转换 */
 static AddrRange addrrange_shift(AddrRange range, Int128 delta)
 {
     int128_addto(&range.start, delta);
     return range;
 }
 
+/* 判断地址空间的包含关系 */
 static bool addrrange_contains(AddrRange range, Int128 addr)
 {
     return int128_ge(addr, range.start)
         && int128_lt(addr, addrrange_end(range));
 }
 
+/* 判断两段地址空间是否有重叠 */
 static bool addrrange_intersects(AddrRange r1, AddrRange r2)
 {
     return addrrange_contains(r1, r2.start)
         || addrrange_contains(r2, r1.start);
 }
 
+/* 为两块空间的交叉区域创建一个地址空间，单独管理？？ */
 static AddrRange addrrange_intersection(AddrRange r1, AddrRange r2)
 {
     Int128 start = int128_max(r1.start, r2.start);
@@ -163,6 +171,7 @@ enum ListenerDirection { Forward, Reverse };
         MEMORY_LISTENER_CALL(as, callback, dir, &mrs, ##_args);         \
     } while(0)
 
+/* Coalesced: 联合的，合并的，多个memory组成的区域？？ */
 struct CoalescedMemoryRange {
     AddrRange addr;
     QTAILQ_ENTRY(CoalescedMemoryRange) link;
@@ -172,10 +181,15 @@ struct MemoryRegionIoeventfd {
     AddrRange addr;
     bool match_data;
     uint64_t data;
-    /* 包含read write两个int标识符 */
+
+    /* 
+        包含read write两个int标识符，这个可能是我们对某块memory进行读写操作的时候会有某种事件
+        发生，通过这个结构体对事件进行描述
+    */
     EventNotifier *e;
 };
 
+/* before?? 对结构体成员进行对比，判断是否满足相应的条件 */
 static bool memory_region_ioeventfd_before(MemoryRegionIoeventfd *a,
                                            MemoryRegionIoeventfd *b)
 {
@@ -206,6 +220,7 @@ static bool memory_region_ioeventfd_before(MemoryRegionIoeventfd *a,
     return false;
 }
 
+/* 比较 ioeventfd 是否相等 */
 static bool memory_region_ioeventfd_equal(MemoryRegionIoeventfd *a,
                                           MemoryRegionIoeventfd *b)
 {
@@ -215,6 +230,8 @@ static bool memory_region_ioeventfd_equal(MemoryRegionIoeventfd *a,
 
 /* Range of memory in the global map.  Addresses are absolute. 
     全局映射上的memory的区域的范围，地址是绝对的？？
+    从博客上的相关表述看到，Flatview 中会包含有 FlatRange 类型的数组，其中的每一个元素都是代表
+    GPA(guest physical address)的一块地址空间 
 */
 struct FlatRange {
     MemoryRegion *mr;   /* 应该表示的是FlatRange所描述的那个memory region */
@@ -237,6 +254,9 @@ struct FlatRange {
 #define FOR_EACH_FLAT_RANGE(var, view)          \
     for (var = (view)->ranges; var < (view)->ranges + (view)->nr; ++var)
 
+/*  
+    从对成员变量初始化的实现来看，MemoryRegionSection 跟 FlatRange 强关联
+*/
 static inline MemoryRegionSection
 section_from_flat_range(FlatRange *fr, FlatView *fv)
 {
@@ -251,6 +271,7 @@ section_from_flat_range(FlatRange *fr, FlatView *fv)
     };
 }
 
+/* 判断两个flatrange是否一致 */
 static bool flatrange_equal(FlatRange *a, FlatRange *b)
 {
     return a->mr == b->mr
@@ -261,6 +282,7 @@ static bool flatrange_equal(FlatRange *a, FlatRange *b)
         && a->nonvolatile == b->nonvolatile;
 }
 
+/* 创建一个新的flatview */
 static FlatView *flatview_new(MemoryRegion *mr_root)
 {
     FlatView *view;
@@ -276,6 +298,7 @@ static FlatView *flatview_new(MemoryRegion *mr_root)
 
 /* Insert a range into a given position.  Caller is responsible for maintaining
  * sorting order.
+ * 向 flatview 中插入一块新的region，有序
  */
 static void flatview_insert(FlatView *view, unsigned pos, FlatRange *range)
 {
@@ -307,6 +330,7 @@ static void flatview_destroy(FlatView *view)
     g_free(view);
 }
 
+/* 判断对 flatview 的引用是否为空 */
 static bool flatview_ref(FlatView *view)
 {
     return atomic_fetch_inc_nonzero(&view->ref) > 0;
@@ -321,6 +345,7 @@ void flatview_unref(FlatView *view)
     }
 }
 
+/* 判断两个FlatRange是否可以合并成一个 */
 static bool can_merge(FlatRange *r1, FlatRange *r2)
 {
     return int128_eq(addrrange_end(r1->addr), r2->addr.start)
@@ -334,7 +359,9 @@ static bool can_merge(FlatRange *r1, FlatRange *r2)
         && r1->nonvolatile == r2->nonvolatile;
 }
 
-/* Attempt to simplify a view by merging adjacent ranges */
+/* Attempt to simplify a view by merging adjacent ranges 
+    尝试通过合并相邻区域来简化视图，类似与FreeBSD总线对于resource的管理
+*/
 static void flatview_simplify(FlatView *view)
 {
     unsigned i, j, k;
@@ -414,6 +441,7 @@ static inline uint64_t memory_region_shift_write_access(uint64_t *value,
     return tmp;
 }
 
+/* memory region 映射到绝对地址，guest physical address？？ */
 static hwaddr memory_region_to_absolute_addr(MemoryRegion *mr, hwaddr offset)
 {
     MemoryRegion *root;
@@ -428,6 +456,7 @@ static hwaddr memory_region_to_absolute_addr(MemoryRegion *mr, hwaddr offset)
     return abs_addr;
 }
 
+/* 获取当前线程中的CPU的index */
 static int get_cpu_index(void)
 {
     if (current_cpu) {
@@ -436,6 +465,7 @@ static int get_cpu_index(void)
     return -1;
 }
 
+/* 对memory region的读取器 */
 static MemTxResult  memory_region_read_accessor(MemoryRegion *mr,
                                                 hwaddr addr,
                                                 uint64_t *value,
@@ -457,6 +487,7 @@ static MemTxResult  memory_region_read_accessor(MemoryRegion *mr,
     return MEMTX_OK;
 }
 
+/* 对memory region的读取器，带有属性，下同 */
 static MemTxResult memory_region_read_with_attrs_accessor(MemoryRegion *mr,
                                                           hwaddr addr,
                                                           uint64_t *value,
@@ -518,6 +549,7 @@ static MemTxResult memory_region_write_with_attrs_accessor(MemoryRegion *mr,
     return mr->ops->write_with_attrs(mr->opaque, addr, tmp, size, attrs);
 }
 
+/* adjusted: 调整，适应；应该是我们以某种指定的size访问 memory region */
 static MemTxResult access_with_adjusted_size(hwaddr addr,
                                       uint64_t *value,
                                       unsigned size,
@@ -563,6 +595,7 @@ static MemTxResult access_with_adjusted_size(hwaddr addr,
     return r;
 }
 
+/* 获取memory region关联的address space？？ */
 static AddressSpace *memory_region_to_address_space(MemoryRegion *mr)
 {
     AddressSpace *as;
@@ -580,6 +613,7 @@ static AddressSpace *memory_region_to_address_space(MemoryRegion *mr)
 
 /* Render a memory region into the global view.  Ranges in @view obscure
  * ranges in @mr.
+ * 将内存区域呈现到全局视图中。@view中的范围模糊了@mr中的范围
  */
 static void render_memory_region(FlatView *view,
                                  MemoryRegion *mr,
@@ -714,7 +748,9 @@ static MemoryRegion *memory_region_get_flatview_root(MemoryRegion *mr)
     return NULL;
 }
 
-/* Render a memory topology into a list of disjoint absolute ranges. */
+/* Render a memory topology into a list of disjoint absolute ranges. 
+    将内存拓扑渲染为不相交的绝对范围列表
+*/
 static FlatView *generate_memory_topology(MemoryRegion *mr)
 {
     int i;
@@ -741,6 +777,7 @@ static FlatView *generate_memory_topology(MemoryRegion *mr)
     return view;
 }
 
+/* 地址空间增加或删除ioeventfd，注册机制？？ */
 static void address_space_add_del_ioeventfds(AddressSpace *as,
                                              MemoryRegionIoeventfd *fds_new,
                                              unsigned fds_new_nb,
@@ -804,6 +841,7 @@ FlatView *address_space_get_flatview(AddressSpace *as)
     return view;
 }
 
+/* 更新address space的ioeventfd */
 static void address_space_update_ioeventfds(AddressSpace *as)
 {
     FlatView *view;
@@ -854,6 +892,7 @@ static void address_space_update_ioeventfds(AddressSpace *as)
  * Notify the memory listeners about the coalesced IO change events of
  * range `cmr'.  Only the part that has intersection of the specified
  * FlatRange will be sent.
+ * 向memory listener通知关于cmr区域的合并IO变化的事件，只发送与指定FlatRange相交的部分
  */
 static void flat_range_coalesced_io_notify(FlatRange *fr, AddressSpace *as,
                                            CoalescedMemoryRange *cmr, bool add)
@@ -971,6 +1010,7 @@ static void address_space_update_topology_pass(AddressSpace *as,
     }
 }
 
+/* flatview 初始化 */
 static void flatviews_init(void)
 {
     static FlatView *empty_view;
@@ -991,6 +1031,7 @@ static void flatviews_init(void)
     }
 }
 
+/* flatview 重置 */
 static void flatviews_reset(void)
 {
     AddressSpace *as;
@@ -1013,6 +1054,7 @@ static void flatviews_reset(void)
     }
 }
 
+/* 为address space 设置 flatview */
 static void address_space_set_flatview(AddressSpace *as)
 {
     FlatView *old_view = address_space_to_flatview(as);
@@ -1119,6 +1161,7 @@ static bool memory_region_need_escape(char c)
     return c == '/' || c == '[' || c == '\\' || c == ']';
 }
 
+/* escape: 逃跑，避免；对 memory region name的名称是否正确进行检测 */
 static char *memory_region_escape_name(const char *name)
 {
     const char *p;
@@ -1148,6 +1191,7 @@ static char *memory_region_escape_name(const char *name)
     return escaped;
 }
 
+/* memory region 初始化 */
 static void memory_region_do_init(MemoryRegion *mr,
                                   Object *owner,
                                   const char *name,
@@ -1188,6 +1232,7 @@ void memory_region_init(MemoryRegion *mr,
     memory_region_do_init(mr, owner, name, size);
 }
 
+/* memory_region_initfn 注册，下同 */
 static void memory_region_get_container(Object *obj, Visitor *v,
                                         const char *name, void *opaque,
                                         Error **errp)
@@ -1212,6 +1257,7 @@ static Object *memory_region_resolve_container(Object *obj, void *opaque,
     return OBJECT(mr->container);
 }
 
+/* 获取优先级 */
 static void memory_region_get_priority(Object *obj, Visitor *v,
                                        const char *name, void *opaque,
                                        Error **errp)
@@ -1222,6 +1268,7 @@ static void memory_region_get_priority(Object *obj, Visitor *v,
     visit_type_int32(v, name, &value, errp);
 }
 
+/* 获取memory region 大小 */
 static void memory_region_get_size(Object *obj, Visitor *v, const char *name,
                                    void *opaque, Error **errp)
 {
@@ -1234,6 +1281,7 @@ static void memory_region_get_size(Object *obj, Visitor *v, const char *name,
 /*
     memory region 初始化函数，system_memory是一个纯容器,所以读写的回调参数
     为 unassigned_mem_ops 表示这段地址空间没有分配
+    container 可能只是起到了管理作用，它本身并没有分配内存空间
 */
 static void memory_region_initfn(Object *obj)
 {
@@ -1304,6 +1352,7 @@ const MemoryRegionOps unassigned_mem_ops = {
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
+/* 对RAM device读取 */
 static uint64_t memory_region_ram_device_read(void *opaque,
                                               hwaddr addr, unsigned size)
 {

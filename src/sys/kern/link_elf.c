@@ -589,6 +589,8 @@ parse_dynamic(elf_file_t ef)
 		{
 			/* From src/libexec/rtld-elf/rtld.c
 				d_ptr表示address value，这里应该就是获取了hash table的虚拟地址
+				因为当时是以初始的 segment[0] 的地址作为基准得到的 d_ptr，但是现在
+				地址已经更新了(可以认为是加上了 ef->address)，所以也要做相应的操作
 			*/
 			const Elf_Hashelt *hashtab = (const Elf_Hashelt *)
 			    (ef->address + dp->d_un.d_ptr);
@@ -851,7 +853,7 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 	int nsegs;
 	Elf_Phdr *phdyn;
 	caddr_t mapbase;
-	size_t mapsize;
+	size_t mapsize;	/* 这里以elf_obj类似，都包含mapsize */
 	Elf_Addr base_vaddr;
 	Elf_Addr base_vlimit;
 	int error = 0;
@@ -892,16 +894,18 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 
 	/*
 	 * Read the elf header from the file.
+	 * 申请一块 4K 大小的空间，然后把指针赋值给 ELF Header
 	 */
 	firstpage = malloc(PAGE_SIZE, M_LINKER, M_WAITOK);
 	hdr = (Elf_Ehdr *)firstpage;
 	error = vn_rdwr(UIO_READ, nd.ni_vp, firstpage, PAGE_SIZE, 0,
 	    UIO_SYSSPACE, IO_NODELOCKED, td->td_ucred, NOCRED,
 	    &resid, td);
-	nbytes = PAGE_SIZE - resid;
+	nbytes = PAGE_SIZE - resid;	/* nbytes可能表示还剩page中还剩多少可用空间 */
 	if (error != 0)
 		goto out;
 
+	/* 与 elf_obj 类似，都是对 ELF Header 的属性进行判断，看是否是ELF格式文件 */
 	if (!IS_ELF(*hdr)) {
 		error = ENOEXEC;
 		goto out;
@@ -942,14 +946,20 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 
 	/*
 	 * Scan the program header entries, and save key information.
-	 *
+	 * 扫描程序头条目，并保存密钥信息
+	 * 
 	 * We rely on there being exactly two load segments, text and data,
-	 * in that order.
+	 * in that order. 我们依赖于有两个加载段，文本和数据，按顺序排列
+	 * 
+	 * e_phoff 表示 program header table 在文件中的 offset，应该是要定位到 program
+	 * header table，然后根据 e_phnum(表示 program header entry 的数量)获取终止位置
 	 */
 	phdr = (Elf_Phdr *) (firstpage + hdr->e_phoff);
 	phlimit = phdr + hdr->e_phnum;
-	nsegs = 0;
+	nsegs = 0;	/* 需要加载的segments */
 	phdyn = NULL;
+
+	/* 解析 program header table */
 	while (phdr < phlimit) {
 		switch (phdr->p_type) {
 		case PT_LOAD:
@@ -990,11 +1000,13 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 	/*
 	 * Allocate the entire address space of the object, to stake
 	 * out our contiguous region, and to establish the base
-	 * address for relocation.
+	 * address for relocation. 
+	 * 分配对象的整个地址空间，标出我们的相邻区域，并为重定位建立基址
+	 * 获取起始地址和终止地址，计算需要映射的区域的大小
 	 */
-	base_vaddr = trunc_page(segs[0]->p_vaddr);
+	base_vaddr = trunc_page(segs[0]->p_vaddr);	//计算offset的基准地址
 	base_vlimit = round_page(segs[nsegs - 1]->p_vaddr +
-	    segs[nsegs - 1]->p_memsz);
+	    segs[nsegs - 1]->p_memsz);	//结束地址
 	mapsize = base_vlimit - base_vaddr;
 
 	lf = linker_make_file(filename, &link_elf_class);
@@ -1020,14 +1032,20 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 		goto out;
 	}
 #else
+	/* 分配一块 mapsize 大小的内存区域，address 指向这块区域 */
 	ef->address = malloc(mapsize, M_LINKER, M_EXEC | M_WAITOK);
 #endif
-	mapbase = ef->address;
+	mapbase = ef->address;	/* 映射的基地址 */
 
 	/*
 	 * Read the text and data sections and zero the bss.
+	 * 读取text、data和已经初始化的bss segment，把这些segment置零？？
 	 */
 	for (i = 0; i < nsegs; i++) {
+		/* 
+			segbase: 映射基地址 + 每个segment的address - 基准地址，
+			相当于就是 base address + offset 
+		 */
 		caddr_t segbase = mapbase + segs[i]->p_vaddr - base_vaddr;
 		error = vn_rdwr(UIO_READ, nd.ni_vp,
 		    segbase, segs[i]->p_filesz, segs[i]->p_offset,
@@ -1035,6 +1053,10 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 		    &resid, td);
 		if (error != 0)
 			goto out;
+		/*
+			segment 在file中的大小跟在memory中的大小一般是不一样的，在memory中要大一些，
+			这一步的操作首先计算出memory和file中segment的大小差值，然后用0进行填充
+		*/
 		bzero(segbase + segs[i]->p_filesz,
 		    segs[i]->p_memsz - segs[i]->p_filesz);
 
@@ -1060,7 +1082,7 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 	    segs[0]->p_memsz));
 	mtx_unlock(&Giant);
 #endif
-
+	/* 应该是获取 dynamic section 加载的虚拟地址，上文注释写的是 symbol table？？ */
 	ef->dynamic = (Elf_Dyn *) (mapbase + phdyn->p_vaddr - base_vaddr);
 
 	lf->address = ef->address;
@@ -1513,7 +1535,9 @@ link_elf_lookup_set(linker_file_t lf, const char *name,
 	len = strlen(name) + sizeof("__start_set_"); /* sizeof includes \0 */
 	setsym = malloc(len, M_LINKER, M_WAITOK);
 
-	/* get address of first entry */
+	/* get address of first entry 
+		通过传入参数name获取symbol name
+	*/
 	snprintf(setsym, len, "%s%s", "__start_set_", name);
 
 	/*
@@ -1528,7 +1552,7 @@ link_elf_lookup_set(linker_file_t lf, const char *name,
 		error = ESRCH;
 		goto out;
 	}
-	start = (void **)symval.value;	/* 获取虚拟地址 */
+	start = (void **)symval.value;	/* 获取虚拟地址的起始地址 */
 
 	/* get address of last entry */
 	snprintf(setsym, len, "%s%s", "__stop_set_", name);
@@ -1540,6 +1564,10 @@ link_elf_lookup_set(linker_file_t lf, const char *name,
 		error = ESRCH;
 		goto out;
 	}
+	/* 
+		获取通过 kern_linker.c 文件中的函数调用逻辑，这里是获取 linker_set 的那个 segment 的
+		终止地址(虚拟地址) 
+	*/
 	stop = (void **)symval.value;
 
 	/* and the number of entries 

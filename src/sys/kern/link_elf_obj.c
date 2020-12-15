@@ -690,9 +690,9 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 	Elf_Sym *es;
 	int nbytes, i, j;
 	vm_offset_t mapbase;	/* 内存映射相关 */
-	size_t mapsize;
+	size_t mapsize;	/* 需要映射的region大小 */
 	int error = 0;
-	ssize_t resid;
+	ssize_t resid;	/* 残差 */
 	int flags;
 	elf_file_t ef;
 	linker_file_t lf;
@@ -736,7 +736,7 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 	/* 读取该文件，获取ELF header数据 */
 	error = vn_rdwr(UIO_READ, nd->ni_vp, (void *)hdr, sizeof(*hdr), 0,
 	    UIO_SYSSPACE, IO_NODELOCKED, td->td_ucred, NOCRED,
-	    &resid, td);
+	    &resid, td);	/* 注意这个resid的作用 */
 	if (error)
 		goto out;
 	if (resid != 0){
@@ -821,6 +821,10 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 #ifdef __amd64__
 		case SHT_X86_64_UNWIND:
 #endif
+			/* 
+				SHF_ALLOC: 表示这个section会加载到内存中，所以这里会判断哪些section会加载
+				到内存中
+			*/
 			if ((shdr[i].sh_flags & SHF_ALLOC) == 0)
 				break;
 			ef->nprogtab++;	/* 程序运行相关section */
@@ -937,7 +941,11 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 		}
 	}
 
-	/* Size up code/data(progbits) and bss(nobits). */
+	/* Size up code/data(progbits) and bss(nobits). 
+		还是对所有的section进行遍历，如果section的大小是0的话，直接跳过；
+		如果不是0，就通过 mapsize 对 section size做进一步处理；从后边的代码逻辑来看，这里应该是
+		计算需要映射的size大小
+	*/
 	alignmask = 0;
 	for (i = 0; i < hdr->e_shnum; i++) {
 		if (shdr[i].sh_size == 0)
@@ -962,6 +970,10 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 	 * We know how much space we need for the text/data/bss/etc.
 	 * This stuff needs to be in a single chunk so that profiling etc
 	 * can get the bounds and gdb can associate offsets with modules
+	 * 
+	 * 进程运行的时候会对应多个segment，object大致可以理解为对某个属性的segment进行管理；
+	 * 不同属性的segment会对应不同的object；object还会对应vm_page，这一步可能就已经完成了
+	 * memory page的分配？？
 	 */
 	ef->object = vm_object_allocate(OBJT_DEFAULT,
 	    round_page(mapsize) >> PAGE_SHIFT);
@@ -969,6 +981,7 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 		error = ENOMEM;
 		goto out;
 	}
+	/* 限定一下最小加载的地址(以kernel map作为基准) */
 	ef->address = (caddr_t) vm_map_min(kernel_map);
 
 	/*
@@ -981,6 +994,7 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 #else
 	mapbase = VM_MIN_KERNEL_ADDRESS;
 #endif
+	/* 查找一下 kernel_map 是不是在我们所管理的vm_map当中？？ */
 	error = vm_map_find(kernel_map, ef->object, 0, &mapbase,
 	    round_page(mapsize), 0, VMFS_OPTIMAL_SPACE, VM_PROT_ALL,
 	    VM_PROT_ALL, 0);
@@ -990,7 +1004,10 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 		goto out;
 	}
 
-	/* Wire the pages */
+	/* Wire the pages 
+		vm_map_wire：连接映射中起始和结束之间的页面，当wired的数量大于0的时候，wired page就会被锁定在
+		物理内存而不会被page out
+	*/
 	error = vm_map_wire(kernel_map, mapbase,
 	    mapbase + round_page(mapsize),
 	    VM_MAP_WIRE_SYSTEM|VM_MAP_WIRE_NOHOLES);
@@ -1006,6 +1023,7 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 	/*
 	 * Now load code/data(progbits), zero bss(nobits), allocate space for
 	 * and load relocs
+	 * 加载 code/data, bss,为其分配空间并且加载重定位
 	 */
 	pb = 0;
 	rl = 0;
@@ -1158,7 +1176,8 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 			ra++;
 			break;
 		}
-	}
+	}	// enf for
+
 	if (pb != ef->nprogtab) {
 		link_elf_error(filename, "lost progbits");
 		error = ENOEXEC;
@@ -1184,7 +1203,7 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 		goto out;
 	}
 
-	/* Local intra-module relocations */
+	/* Local intra-module relocations 本地模块内重定位(本地符号) */
 	error = link_elf_reloc_local(lf, false);
 	if (error != 0)
 		goto out;
@@ -1196,7 +1215,7 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 	if (error)
 		goto out;
 
-	/* External relocations */
+	/* External relocations 外部重定位 */
 	error = relocate_file(ef);
 	if (error)
 		goto out;

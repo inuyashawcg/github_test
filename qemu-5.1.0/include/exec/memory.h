@@ -812,6 +812,10 @@ typedef struct FlatRange FlatRange;
  * 扁平化视图同样有两个元素，一是FlatView，cpu可访问地址空间的扁平化表示；一是FlatRange，逻辑内存区域
  * 的扁平化描述，表示一段段内存区域。同样地，FlatView由许多FlatRange组成。扁平视图，用于展示和导出内存
  * 视图，也方便传递给KVM
+ * 
+ * 将树状的MemoryRegion展成平坦型的FlatView，用于内存映射；意思可能就是我们对于MemoryRegion的处理是以树状的
+ * 结构来进行组织的，而内存按照我们平常的理解，是一个长条状结构，FlatView的用意应该就是把树状结构跟条状结构对应
+ * 起来，把树状结构上的每一个结点映射到内存上的一块区域
  */
 struct FlatView {
     struct rcu_head rcu;    /* rcu队列，每个结点都会对应一个function */
