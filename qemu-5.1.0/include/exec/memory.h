@@ -157,7 +157,8 @@ static inline void iommu_notifier_init(IOMMUNotifier *n, IOMMUNotify fn,
 
 /*
  * Memory region callbacks
- * 对内存区域的操作，好像也就是读写
+ * 对内存区域的操作，好像也就是读写；其中包含了两个结构体，valid和impl，可能就是表示我能够获取到的region的
+ * 大小是多少，然后我真正能够进行操作(impl)的region又是多少
  */
 struct MemoryRegionOps {
     /* Read from the memory region. @addr is relative to @mr; @size is
@@ -464,15 +465,15 @@ struct MemoryRegion {
     bool subpage;
     bool readonly; /* For RAM regions，标记是否为ROM类型的MR */
     bool nonvolatile;   /* 非易失的标识 */
-    bool rom_device;
+    bool rom_device;    /* 判断是否为ROM device，是不是只读的内存 */
     bool flush_coalesced_mmio;  /* CoalescedMemoryRange 相关 */
     bool global_locking;    /* 全局锁 */
-    uint8_t dirty_log_mask;
+    uint8_t dirty_log_mask; /* 表示哪种dirty map被使用，共有三种 */
     bool is_iommu;
-    RAMBlock *ram_block;    /* 是否关联一段真实的虚拟内存 */
+    RAMBlock *ram_block;    /* 关联的RAMBlock */
     Object *owner;  /* 表示哪个Object实体拥有这个memory region？？ */
     /*
-        - callback，对于memory region的操作函数 
+        - callback，与MemoryRegion相关的操作
         - 是否为MMIO类型的MR
     */
     const MemoryRegionOps *ops; 
@@ -486,13 +487,14 @@ struct MemoryRegion {
     /* 
         - 在父级 MemoryRegion 中的偏移量 
         - 虚拟机内存的绝对物理地址
+        - 在AddressSpace中的地址
     */
     hwaddr addr;    
     void (*destructor)(MemoryRegion *mr);   /* 析构函数 */
     uint64_t align;
     bool terminates;
     bool ram_device;
-    bool enabled;
+    bool enabled;   /* 如果为true，表示已经通知kvm使用这段内存 */
     bool warning_printed; /* For reservations - 保留项？？ */
     uint8_t vga_logging_count;
     MemoryRegion *alias;    /* alias: 别名，指向实体MemoryRegion */
@@ -506,11 +508,18 @@ struct MemoryRegion {
     QTAILQ_HEAD(, MemoryRegion) subregions; /* 容器MR的子MR组成的链表header */
     QTAILQ_ENTRY(MemoryRegion) subregions_link; /* 用于将子MR组织成链表的成员 */
     QTAILQ_HEAD(, CoalescedMemoryRange) coalesced;  /* 联合的memory range */
-    const char *name;
-    unsigned ioeventfd_nb;  /* MR包含的ioeventfd个数 */
+    const char *name;   /* MemoryRegion的名字,调试时使用 */
+    /* 
+        - IOevent文件描述符的管理
+        - MR包含的ioeventfd个数 ??
+    */
+    unsigned ioeventfd_nb; 
     MemoryRegionIoeventfd *ioeventfds;  /* MR包含的ioeventfd数组，用于和内核通信 */
 };
 
+/*
+    推测可能是 IOMMU region 对某些操作的响应，我们可以注册一些响应的通知函数？？
+*/
 struct IOMMUMemoryRegion {
     MemoryRegion parent_obj;
 
@@ -780,6 +789,13 @@ struct MemoryListener {
 /**
  * AddressSpace: describes a mapping of addresses to #MemoryRegion objects
  * 描述对 #MemoryRegion 类型 object 的一个地址映射
+ * 
+ * AddressSpace是cpu可以看到的地址空间,一般就是cpu地址总线宽度的可寻址范围
+ * 
+ * 所有的CPU架构都有内存地址空间，有的CPU架构还会有一个IO地址空间，它们在QEMU中被表示为 AddressSpace 数据结构；
+ * 而每个地址空间都会包含有一个 MemoryRegion 的树状结构，之所以称之为树状结构，是因为每个 MemoryRegion 的内部
+ * 可以包含有 MemoryRegion，这样就形成了树状结构。所以它的成员变量 root 也就是树状结构的根节点，可以通过它获取到
+ * 整个树的内存信息
  */
 struct AddressSpace {
     /* private: */
@@ -792,6 +808,7 @@ struct AddressSpace {
 
     /* Accessed via RCU. 通过RCU进行数据访问 
         Root MR对应的扁平化内存视图
+        AddressSpace的一张平面视图，它是AddressSpace所有正在使用的MemoryRegion的集合，这是从CPU的视角来看到的
     */
     struct FlatView *current_map;
 
@@ -816,6 +833,12 @@ typedef struct FlatRange FlatRange;
  * 将树状的MemoryRegion展成平坦型的FlatView，用于内存映射；意思可能就是我们对于MemoryRegion的处理是以树状的
  * 结构来进行组织的，而内存按照我们平常的理解，是一个长条状结构，FlatView的用意应该就是把树状结构跟条状结构对应
  * 起来，把树状结构上的每一个结点映射到内存上的一块区域
+ * 
+ * MemoryRegion是联系客户机内存和包含这一部分内存的RAMBlock。每个MemoryRegion都包含一个在RAMBlock中ram_addr_t
+ * 类型的offset，每个RAMBlock也有一个MemoryRegion的指针
+ * 
+ * MemoryRegion不仅可以表示RAM，也可以表示I/O映射内存，在访问时可以调用read/write回调函数。这也是硬件从客户机CPU
+ * 注册的访问被分派到相应的模拟设备的方法
  */
 struct FlatView {
     struct rcu_head rcu;    /* rcu队列，每个结点都会对应一个function */

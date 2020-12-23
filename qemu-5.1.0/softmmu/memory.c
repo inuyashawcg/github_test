@@ -42,7 +42,12 @@ static bool memory_region_update_pending;
 static bool ioeventfd_update_pending;
 bool global_dirty_log;
 
-/* 管理所有的memory listener */
+/* 
+    管理所有的memory listener 
+    为了监控虚拟机的物理地址访问，对于每一个AddressSpace，会有一个MemoryListener与之对应。
+    每当物理映射（GPA->HVA)发生改变时，会回调这些函数。所有的MemoryListener都会挂在全局变量
+    memory_listeners链表上。同时，AddressSpace也会有一个链表连接器自己注册的MemoryListener
+*/
 static QTAILQ_HEAD(, MemoryListener) memory_listeners
     = QTAILQ_HEAD_INITIALIZER(memory_listeners);
 
@@ -639,7 +644,9 @@ static void render_memory_region(FlatView *view,
     nonvolatile |= mr->nonvolatile;
 
     tmp = addrrange_make(base, mr->size);
-
+    /*
+        判断两块区域是否有重叠，如果有的话，需要对重叠区域进行处理
+    */
     if (!addrrange_intersects(tmp, clip)) {
         return;
     }
@@ -1222,13 +1229,20 @@ static void memory_region_do_init(MemoryRegion *mr,
 
 /*
     memory region继承于object，所以首先要初始化object，然后再执行region相关的初始化
+    从这里可以看出，如果一个对象是继承得到的，初始化的时候应该是要先对父类型进行初始化，然后再执行
+    对象相关的特有的初始化操作
+    eg： 
+        memory_region_init(&s->container, obj, "armv7m-container", UINT64_MAX);
+
+    可以看到它的 owner 是 armv7m-container，说明在那里定义的 memory region 是整个 armv7 的
+    memory，又可以看到 container 应该是用于管理不同类型的 memory
 */
 void memory_region_init(MemoryRegion *mr,
                         Object *owner,
                         const char *name,
                         uint64_t size)
 {
-    object_initialize(mr, sizeof(*mr), TYPE_MEMORY_REGION);
+    object_initialize(mr, sizeof(*mr), TYPE_MEMORY_REGION); /* 定义成了 memory region */
     memory_region_do_init(mr, owner, name, size);
 }
 
@@ -1297,6 +1311,10 @@ static void memory_region_initfn(Object *obj)
     QTAILQ_INIT(&mr->subregions);
     QTAILQ_INIT(&mr->coalesced);
 
+    /* 
+        添加属性，应该就是添加完了之后，memory region 就可以使用这些功能函数，可以看到
+        主要是一些memory region属性的获取，包括container，address，priority，size
+    */
     op = object_property_add(OBJECT(mr), "container",
                              "link<" TYPE_MEMORY_REGION ">",
                              memory_region_get_container,
@@ -1316,6 +1334,9 @@ static void memory_region_initfn(Object *obj)
                         NULL, NULL);
 }
 
+/*
+    iommu memory region 的初始化操作，仅仅是设置了MemoryRegion中的一个标志位
+*/
 static void iommu_memory_region_initfn(Object *obj)
 {
     MemoryRegion *mr = MEMORY_REGION(obj);
@@ -1323,6 +1344,10 @@ static void iommu_memory_region_initfn(Object *obj)
     mr->is_iommu = true;
 }
 
+/* 
+    应该是某些操作没有定义的时候，就用这个函数来进行填充，参考下面的 unassigned_mem_ops
+
+*/
 static uint64_t unassigned_mem_read(void *opaque, hwaddr addr,
                                     unsigned size)
 {
@@ -1549,6 +1574,11 @@ MemTxResult memory_region_dispatch_write(MemoryRegion *mr,
     }
 }
 
+/*
+    mmio 这些空间对应于设备的地址空间映射到内存地址空间的空间(也就是mmio), 读写这些地址空间
+    都会触发对应模拟设备的回调操作 memory_region_init_io 初始化
+    所以这里的话应该是对应设备地址空间映射 
+*/
 void memory_region_init_io(MemoryRegion *mr,
                            Object *owner,
                            const MemoryRegionOps *ops,
@@ -2831,17 +2861,21 @@ void address_space_remove_listeners(AddressSpace *as)
     }
 }
 
+/*
+    exec.c 中我们可以看到，root 传入的是 system_memory / system_io，name传入的分别是
+    memory 和 io
+*/
 void address_space_init(AddressSpace *as, MemoryRegion *root, const char *name)
 {
-    memory_region_ref(root);
+    memory_region_ref(root);    /* 引用+1 */
     as->root = root;
     as->current_map = NULL;
     as->ioeventfd_nb = 0;
     as->ioeventfds = NULL;
     QTAILQ_INIT(&as->listeners);
-    QTAILQ_INSERT_TAIL(&address_spaces, as, address_spaces_link);
+    QTAILQ_INSERT_TAIL(&address_spaces, as, address_spaces_link);   /* 插入到管理队列 */
     as->name = g_strdup(name ? name : "anonymous");
-    address_space_update_topology(as);
+    address_space_update_topology(as);  /* topology: 拓扑 */
     address_space_update_ioeventfds(as);
 }
 
@@ -3244,6 +3278,12 @@ void memory_region_init_ram(MemoryRegion *mr,
     vmstate_register_ram(mr, owner_dev);
 }
 
+/* 
+    初始化ROM空间，ROM device 只是它的一个 subregion？？ 
+    eg：
+        memory_region_init_rom(flash, OBJECT(dev_soc), "STM32F205.flash",
+                           FLASH_SIZE, &error_fatal);
+*/
 void memory_region_init_rom(MemoryRegion *mr,
                             struct Object *owner,
                             const char *name,
@@ -3304,6 +3344,9 @@ static const TypeInfo memory_region_info = {
     .instance_finalize  = memory_region_finalize,
 };
 
+/* 
+    abstract = true，表明它是一个抽象类型，不能直接实例化，应该是具体设备iommu继承于它
+*/
 static const TypeInfo iommu_memory_region_info = {
     .parent             = TYPE_MEMORY_REGION,
     .name               = TYPE_IOMMU_MEMORY_REGION,
@@ -3315,6 +3358,7 @@ static const TypeInfo iommu_memory_region_info = {
 
 static void memory_register_types(void)
 {
+    /* memory region 应该是总体的一个概念，iommu 应该就是它的一个子集 */
     type_register_static(&memory_region_info);
     type_register_static(&iommu_memory_region_info);
 }

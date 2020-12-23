@@ -1,4 +1,5 @@
 设备查找: qemu-system-x86_64 -device ?
+无界面启动：qemu-system-x86_64 -nographic 退出是Ctrl A + x
 每个设备对应一个文件，源码中直接搜索
 
 

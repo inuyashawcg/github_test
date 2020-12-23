@@ -46,11 +46,14 @@ typedef struct {
 
 typedef struct RAMList {
     QemuMutex mutex;
-    RAMBlock *mru_block;
+    RAMBlock *mru_block;    /* 最近常用的RAMBlock，将其保存，从而能够迅速的访问 */
     /* RCU-enabled, writes protected by the ramlist lock. */
-    QLIST_HEAD(, RAMBlock) blocks;
+    QLIST_HEAD(, RAMBlock) blocks;  /* ram_list的链表 */
+    /*
+        用于保存脏页信息的bitmap，有三种bitmap，一种用于VGA，一种用于TCG编程中，一种用于热迁移中
+    */
     DirtyMemoryBlocks *dirty_memory[DIRTY_MEMORY_NUM];
-    uint32_t version;
+    uint32_t version;   /* 全局的ram_list，每更改一次，version+1 */
     QLIST_HEAD(, RAMBlockNotifier) ramblock_notifiers;
 } RAMList;
 extern RAMList ram_list;

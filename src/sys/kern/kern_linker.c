@@ -1731,30 +1731,12 @@ linker_addmodules(linker_file_t lf, struct mod_metadata **start,
 	const char *modname;
 	int ver;
 
-	/*
-		遍历linker file mod_metaata段中所有的元素，判断是否已经加载
-		推测: 所有的driver module应该都是添加到 linker_kernel_file 关联文件的同一个section当中，然后通过这个
-		函数把所有的driver module提取出来，放到 found_modules 当中。其他module可能也是以同样的方式添加的，所以
-		found_modules中可能不仅仅只有driver，应该还包含有别的module
-	*/
 	for (mdp = start; mdp < stop; mdp++) {
 		mp = *mdp;
-
-		/* 
-			首先判断modtype是不是 MDT_VERSION 类型。如果是，就继续执行；
-			如果不是，跳过，进行下一次循环
-		*/
 		if (mp->md_type != MDT_VERSION)
 			continue;
 		modname = mp->md_cval;
 		ver = ((const struct mod_version *)mp->md_data)->mv_version;
-
-		/*
-			modlist_lookup 是在 found_modules 中查找模块，而 found_modules 保存的应该是
-			内核需要预加载的所有模块，所以如果在 found_modules 中找到了这个模块的名称，可能就是
-			证明这个模块已经执行了预加载，或者说我们已经知道了它需要预加载；如果没有找到，那就将这个
-			mod添加到 found_modules 中
-		*/
 		if (modlist_lookup(modname, ver) != NULL) {
 			printf("module %s already present!\n", modname);
 			/* XXX what can we do? this is a build error. :-( */
@@ -2570,6 +2552,17 @@ linker_load_dependencies(linker_file_t lf)
 		一个文件才能方便查找 它所需要的 module 和对应的 container。
 		另一方面也看出了加载顺序的重要性，假如加载顺序设计的不合理，一个file需要某个module，结果这个
 		module 还没有加载，这个时候就会出现错误
+
+		补充说明一下，MDT_VERSION 可能就表示 linker file 所依赖的 module 的版本信息，下面的操作可能
+		就是对比 DEPEND 和 VERSION 所对应的 module name 是不是一致，如果是一致的话，就说明 linker
+		file 依赖某一个版本的、以modname命名的 module，然后去 module_list 中进行查找；如果找到了，
+		获取这个 module 的 container，然后把这个 container 添加到 linker file 的依赖项中
+
+		再进一步推测，之前 linker_set 中定义的那些宏，作用可能就是声明一个全局符号，说明我依赖那些版本的
+		module，然后我们对symbol进行解析的时候就可以知道我们需要那些依赖项，然后重定位之前加载它们；跟
+		MDT_DEPEND 在一起的还有 MDT_MODULE 这个宏，这样可以进一步推测一下：如果以 MDT_DEPEND 作为
+		标识符，那么它声明的全局符号就表示我依赖这个module；如果是以 MDT_MODULE 作为标识符的，那么它声明
+		的全局符号就表示我提供这个module
 	*/
 	for (mdp = start; mdp < stop; mdp++) {
 		mp = *mdp;

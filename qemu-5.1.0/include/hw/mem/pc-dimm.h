@@ -43,15 +43,24 @@
  * @slot: slot number into which @PCDIMMDevice is plugged in.
  *        Default value: -1, means that slot is auto-allocated.
  * @hostmem: host memory backend providing memory for @PCDIMMDevice
+ * 
+ * QEMU可以指定客户机初始运行时的内存大小以及客户机最大内存大小，以及内存芯片槽的数量（DIMM），之所以QEMU
+ * 可以指定最大内存、槽等参数，是因为QEMU可以模拟DIMM的热插拔，客户机操作系统可以和在真实的系统上一样，检测
+ * 新内存被插入或者拔出。也就是说，内存热插拔的粒度是DIMM槽（或者说DIMM集合），而不是最小的byte
+ * 
+ * PCDIMMDevice数据结构是使用QEMU中的面向对象编程模型QOM定义的，对应的对象和类的数据结构如下。通过在QEMU
+ * 进程中创建一个新的PCDIMMDevice对象，就可以实现内存的热插拔
+ * 值得注意的是，客户机启动时的初始化内存，可能不会被模拟成PCDIMMDevice设备，也就是说，这部分初始化内存不能进行热插拔
+ * 
  */
 typedef struct PCDIMMDevice {
     /* private */
-    DeviceState parent_obj;
+    DeviceState parent_obj; /* 创建实例 */
 
     /* public */
     uint64_t addr;
-    uint32_t node;
-    int32_t slot;
+    uint32_t node;  /* numa node 多个CPU如何访问内存的机制 */
+    int32_t slot;   /* slot: 狭槽、卡槽，表示slot编号 */
     HostMemoryBackend *hostmem;
 } PCDIMMDevice;
 
@@ -65,7 +74,7 @@ typedef struct PCDIMMDevice {
  */
 typedef struct PCDIMMDeviceClass {
     /* private */
-    DeviceClass parent_class;
+    DeviceClass parent_class;   /* 实例所对应的class */
 
     /* public */
     void (*realize)(PCDIMMDevice *dimm, Error **errp);

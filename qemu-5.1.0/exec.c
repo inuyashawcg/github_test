@@ -129,13 +129,14 @@ struct PhysPageEntry {
 typedef PhysPageEntry Node[P_L2_SIZE];
 
 typedef struct PhysPageMap {
-    struct rcu_head rcu;
+    struct rcu_head rcu;    /* RCU 机制保护 */
 
     unsigned sections_nb;
     unsigned sections_nb_alloc;
     unsigned nodes_nb;
     unsigned nodes_nb_alloc;
     Node *nodes;
+    /* 物理页跟 memory region section 对应？？ */
     MemoryRegionSection *sections;
 } PhysPageMap;
 
@@ -145,6 +146,9 @@ struct AddressSpaceDispatch {
     /* This is a multi-level map on the physical address space.
      * The bottom level has pointers to MemoryRegionSections.
      * 这是一个在物理地址空间上的多级映射，最底层拥有一个指向 MemoryRegionSections 的指针
+     * 
+     * PhysPageMap 保存了一个 GPA->HVA 的一个映射，通过多层页表实现；当kvm exit退到qemu之后，
+     * 通过这个AddressSpaceDispatch里面的map查找对应的MemoryRegionSection，继而找到对应的主机HVA
      */
     PhysPageEntry phys_map;
     PhysPageMap map;
@@ -171,6 +175,8 @@ static void tcg_commit(MemoryListener *listener);
  * @as: the AddressSpace itself
  * @memory_dispatch: its dispatch pointer (cached, RCU protected)
  * @tcg_as_listener: listener for tracking changes to the AddressSpace
+ * 
+ * 对于 CPU 相关的 address space 的描述
  */
 struct CPUAddressSpace {
     CPUState *cpu;
@@ -179,6 +185,7 @@ struct CPUAddressSpace {
     MemoryListener tcg_as_listener;
 };
 
+/* 脏页相关 */
 struct DirtyBitmapSnapshot {
     ram_addr_t start;
     ram_addr_t end;
@@ -257,6 +264,7 @@ static void phys_page_set(AddressSpaceDispatch *d,
 
 /* Compact a non leaf page entry. Simply detect that the entry has a single child,
  * and update our entry so we can skip it and go directly to the destination.
+ * 压缩非叶页项。只需检测到条目只有一个子条目，并更新条目，这样我们就可以跳过它直接转到目的地
  */
 static void phys_page_compact(PhysPageEntry *lp, Node *nodes)
 {
@@ -841,7 +849,7 @@ void cpu_address_space_init(CPUState *cpu, int asidx,
 
     assert(mr);
     as_name = g_strdup_printf("%s-%d", prefix, cpu->cpu_index);
-    address_space_init(as, mr, as_name);
+    address_space_init(as, mr, as_name);    /* 地址空间初始化 */
     g_free(as_name);
 
     /* Target code should have set num_ases before calling us */
@@ -865,6 +873,7 @@ void cpu_address_space_init(CPUState *cpu, int asidx,
     if (tcg_enabled()) {
         newas->tcg_as_listener.log_global_after_sync = tcg_log_global_after_sync;
         newas->tcg_as_listener.commit = tcg_commit;
+        /* 注册一个回调，当memory映射或者取消映射的时候，调用 tcg_as_listener 中的 callback 函数 */
         memory_listener_register(&newas->tcg_as_listener, as);
     }
 }
@@ -3015,7 +3024,7 @@ static void tcg_commit(MemoryListener *listener)
 */
 static void memory_map_init(void)
 {
-    system_memory = g_malloc(sizeof(*system_memory));
+    system_memory = g_malloc(sizeof(*system_memory));   /* system memory address */
     memory_region_init(system_memory, NULL, "system", UINT64_MAX);  /* Root MemoryRegion */
     address_space_init(&address_space_memory, system_memory, "memory"); /* 初始化系统地址空间并添加到全局链表中 */
 

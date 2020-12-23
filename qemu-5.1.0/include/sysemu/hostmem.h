@@ -52,16 +52,24 @@ typedef struct HostMemoryBackendClass HostMemoryBackendClass;
 struct HostMemoryBackendClass {
     ObjectClass parent_class;
 
+    /* 分配内存使用？？ */
     void (*alloc)(HostMemoryBackend *backend, Error **errp);
 };
 
 /**
- * @HostMemoryBackend
+ * @HostMemoryBackend  backend：后端
  *
  * @parent: opaque parent object container
  * @size: amount of memory backend provides
  * @mr: MemoryRegion representing host memory belonging to backend
+ *      MemoryRegion表示属于后端的主机内存
+ * 
  * @prealloc_threads: number of threads to be used for preallocatining RAM
+ *                    用于预分配RAM的线程数
+ * 
+ * HostMemoryBackend对象包含了客户机内存对应的真正的主机内存，这些内存可以是匿名映射的内存，
+ * 也可以是文件映射内存。文件映射的客户机内存允许Linux在物理主机上透明大页机制的使用（hugetlbfs），
+ * 并且能够共享内存，从而使其他进程可以访问客户机内存
  */
 struct HostMemoryBackend {
     /* private */
@@ -69,7 +77,7 @@ struct HostMemoryBackend {
 
     /* protected */
     uint64_t size;
-    bool merge, dump, use_canonical_path;
+    bool merge, dump, use_canonical_path;   /* canonical: 典型的，经典的 */
     bool prealloc, is_mapped, share;
     uint32_t prealloc_threads;
     DECLARE_BITMAP(host_nodes, MAX_NODES + 1);

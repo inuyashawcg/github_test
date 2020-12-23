@@ -45,7 +45,9 @@ typedef struct DisplayChangeListener DisplayChangeListener;
 typedef struct DriveInfo DriveInfo;
 typedef struct Error Error;
 typedef struct EventNotifier EventNotifier;
-typedef struct FlatView FlatView;
+
+typedef struct FlatView FlatView;   /* memory相关 */
+
 typedef struct FWCfgEntry FWCfgEntry;
 typedef struct FWCfgIoState FWCfgIoState;
 typedef struct FWCfgMemState FWCfgMemState;
@@ -53,19 +55,23 @@ typedef struct FWCfgState FWCfgState;
 typedef struct HostMemoryBackend HostMemoryBackend;
 typedef struct I2CBus I2CBus;
 typedef struct I2SCodec I2SCodec;
-typedef struct IOMMUMemoryRegion IOMMUMemoryRegion;
+
+typedef struct IOMMUMemoryRegion IOMMUMemoryRegion; /* memory相关 */
 typedef struct ISABus ISABus;
+
 typedef struct ISADevice ISADevice;
 typedef struct IsaDma IsaDma;
 typedef struct MACAddr MACAddr;
 typedef struct ReservedRegion ReservedRegion;
-typedef struct MachineClass MachineClass;
+typedef struct MachineClass MachineClass;   
 typedef struct MachineState MachineState;
-typedef struct MemoryListener MemoryListener;
-typedef struct MemoryMappingList MemoryMappingList;
-typedef struct MemoryRegion MemoryRegion;
-typedef struct MemoryRegionCache MemoryRegionCache;
-typedef struct MemoryRegionSection MemoryRegionSection;
+
+typedef struct MemoryListener MemoryListener;   /* memory相关 */
+typedef struct MemoryMappingList MemoryMappingList; /* memory相关 */
+typedef struct MemoryRegion MemoryRegion;   /* memory相关 */
+typedef struct MemoryRegionCache MemoryRegionCache; /* memory相关 */
+typedef struct MemoryRegionSection MemoryRegionSection; /* memory相关 */
+
 typedef struct MigrationIncomingState MigrationIncomingState;
 typedef struct MigrationState MigrationState;
 typedef struct Monitor Monitor;
@@ -114,7 +120,9 @@ typedef struct QNull QNull;
 typedef struct QNum QNum;
 typedef struct QObject QObject;
 typedef struct QString QString;
-typedef struct RAMBlock RAMBlock;
+
+typedef struct RAMBlock RAMBlock;   /* memory相关 */
+
 typedef struct Range Range;
 typedef struct SavedIOTLB SavedIOTLB;
 typedef struct SHPCDevice SHPCDevice;
