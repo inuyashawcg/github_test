@@ -42,6 +42,9 @@
 #define	MDT_STRUCT_VERSION	1	/* version of metadata structure */
 #define	MDT_SETNAME	"modmetadata_set"
 
+/*
+	module 感觉像是针对内核模块专门设计的结构体
+*/
 typedef enum modeventtype {
 	MOD_LOAD,		// 模块加载时用到这个值
 	MOD_UNLOAD,
@@ -76,7 +79,7 @@ typedef union modspecific {
 
 /*
  * Module dependency declaration
- * 用来说明module所支持的版本
+ * module 的依赖项
  */
 struct mod_depend {
 	int	md_ver_minimum;

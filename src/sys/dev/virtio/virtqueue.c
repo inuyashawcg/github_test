@@ -55,30 +55,56 @@ __FBSDID("$FreeBSD: releng/12.0/sys/dev/virtio/virtqueue.c 329602 2018-02-19 19:
 
 #include "virtio_bus_if.h"
 
+/*
+	参考linux中的注释：
+		* virtqueue - a queue to register buffers for sending or receiving.
+		* @list: the chain of virtqueues for this device
+		* @callback: the function to call when buffers are consumed (can be NULL).
+		* @name: the name of this virtqueue (mainly for debugging)
+		* @vdev: the virtio device this queue was created for.
+		* @priv: a pointer for the virtqueue implementation to use.
+*/
 struct virtqueue {
-	device_t		 vq_dev;
-	char			 vq_name[VIRTQUEUE_MAX_NAME_SZ];
-	uint16_t		 vq_queue_index;
-	uint16_t		 vq_nentries;
-	uint32_t		 vq_flags;
+	device_t		 vq_dev;	// virtqueue 所关联的设备
+	char			 vq_name[VIRTQUEUE_MAX_NAME_SZ];	// 主要用于调试
+	uint16_t		 vq_queue_index;	// queue 的索引，用于区分一个设备中的多个queue？
+
+	// 从实际代码逻辑可以看出，该成员表示的应该是 vq_desc_extra 的数量
+	uint16_t		 vq_nentries;	
+	uint32_t		 vq_flags;	// features标识
 #define	VIRTQUEUE_FLAG_INDIRECT	 0x0001
-#define	VIRTQUEUE_FLAG_EVENT_IDX 0x0002
+#define	VIRTQUEUE_FLAG_EVENT_IDX 0x0002	// 貌似是用来触发中断
 
-	int			 vq_alignment;
-	int			 vq_ring_size;
-	void			*vq_ring_mem;
-	int			 vq_max_indirect_size;
-	int			 vq_indirect_mem_size;
-	virtqueue_intr_t	*vq_intrhand;
-	void			*vq_intrhand_arg;
+	int			 vq_alignment;	// 字节对齐要求
+	int			 vq_ring_size;	// ring的大小？
+	void			*vq_ring_mem;	// 指向 ring 分配的内存的起始地址？？
+	int			 vq_max_indirect_size;	// 应该表示的是数量信息
+	int			 vq_indirect_mem_size;	// indirect 内存空间大小
+	virtqueue_intr_t	*vq_intrhand;	// 回调函数
+	void			*vq_intrhand_arg;	// 传递给回调函数的参数？？
 
+	/*
+		在linux的定义中也有类似的成员变量，参考其注释：
+			Actual memory layout for this queue：此队列中的实际内存布局
+	*/
 	struct vring		 vq_ring;
+
+	/* vring desc 里面还剩余的free buffer个数，free buffer是free_head开头的一个list - linux-仅参考 */
 	uint16_t		 vq_free_cnt;
+
+	/* 从上次sync到现在增加的次数，注意这里是次数，不是增加的buffer个数 - linux-仅参考 */
 	uint16_t		 vq_queued_cnt;
 	/*
 	 * Head of the free chain in the descriptor table. If
 	 * there are no free descriptors, this will be set to
-	 * VQ_RING_DESC_CHAIN_END.
+	 * VQ_RING_DESC_CHAIN_END. (free chain 应该就是表示空闲的
+	 * 描述符)
+	 * 
+	 * desc 用于存储一些关联的描述符，每个描述符记录一个对 buffer 的描述，
+	 * available ring 则用于 guest 端表示当前有哪些描述符是可用的，而 
+	 * used ring 则表示 host 端哪些描述符已经被使用
+	 * 
+	 * chain 是一个环形队列，肯定是要有头尾元素的索引
 	 */
 	uint16_t		 vq_desc_head_idx;
 	/*
@@ -87,11 +113,19 @@ struct virtqueue {
 	 */
 	uint16_t		 vq_used_cons_idx;
 
+	/* 
+		indirect: 间接的，迂回的，回环的，其实就是表示回环队列，该结构体感觉像是对回环队列的
+		一些补充描述；在linux下有一个 void* data[] 数组跟它类似，个数同vring desc；这里应该
+		也是处于同样的目的来设计的
+		indirect 表示的是一个类似单链表的数据结构，而 vring_desc 只是链表中的单个元素，从定义
+		来看应该就表示一块内存区域，整个链表表示的应该就是一段内存区域(连续/物理？？)；进一步推测，
+		indirect_paddr 很可能就表示这段内存地址的起始地址
+	 */
 	struct vq_desc_extra {
 		void		  *cookie;
-		struct vring_desc *indirect;
-		vm_paddr_t	   indirect_paddr;
-		uint16_t	   ndescs;
+		struct vring_desc *indirect;	//对于ring的描述，地址、名称等等
+		vm_paddr_t	   indirect_paddr;	// 物理地址？？
+		uint16_t	   ndescs;	// 描述的数量？？
 	} vq_descx[0];
 };
 
@@ -100,6 +134,8 @@ struct virtqueue {
  * descriptor chain terminator since it will never be a valid index
  * in the descriptor table. This is used to verify we are correctly
  * handling vq_free_cnt.
+ * 最大virtqueue大小为2^15。使用该值作为描述符链结束符，因为它永远不会是描述符表
+ * 中的有效索引；这是用来验证我们是否正确处理vq_free_cnt
  */
 #define VQ_RING_DESC_CHAIN_END 32768
 
@@ -146,6 +182,7 @@ virtqueue_filter_features(uint64_t features)
 	return (features & mask);
 }
 
+/* 为 virtqueue 分配空间 */
 int
 virtqueue_alloc(device_t dev, uint16_t queue, uint16_t size, int align,
     vm_paddr_t highaddr, struct vq_alloc_info *info, struct virtqueue **vqp)
@@ -174,6 +211,9 @@ virtqueue_alloc(device_t dev, uint16_t queue, uint16_t size, int align,
 		return (EINVAL);
 	}
 
+	/*
+		从代码逻辑来看，size 表示的应该是 vring_desc 的数量信息，也就是表示有多少个vring？？
+	*/ 
 	vq = malloc(sizeof(struct virtqueue) +
 	    size * sizeof(struct vq_desc_extra), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (vq == NULL) {
@@ -185,23 +225,36 @@ virtqueue_alloc(device_t dev, uint16_t queue, uint16_t size, int align,
 	strlcpy(vq->vq_name, info->vqai_name, sizeof(vq->vq_name));
 	vq->vq_queue_index = queue;
 	vq->vq_alignment = align;
-	vq->vq_nentries = size;
-	vq->vq_free_cnt = size;
-	vq->vq_intrhand = info->vqai_intr;
-	vq->vq_intrhand_arg = info->vqai_intr_arg;
+	vq->vq_nentries = size;	// 指定了我们所要创建的 vq_desc_extra 的数量(用于分配内存空间)
+	vq->vq_free_cnt = size;	// 一开始所有的vring都是可用的，所有也就等于 vq_nentries
+	vq->vq_intrhand = info->vqai_intr;	// 注册回调函数
+	vq->vq_intrhand_arg = info->vqai_intr_arg;	// 回调参数赋值
 
+	/*
+		关于 VIRTIO_RING_F_EVENT_IDX， 在linux下有这么一个表述：
+			是否通过event idx来触发中断时间
+		所以可以推断一下，features应该就是表示某一种特殊的操作，如果某个dev包含这个features，那么就表示
+		它可以执行这个操作
+		VIRTIO_BUS_WITH_FEATURE 宏的作用就是判断bus是不是含有某个feature，如果有这个特征的话，queue
+		的flag就要包含这个特征
+	*/
 	if (VIRTIO_BUS_WITH_FEATURE(dev, VIRTIO_RING_F_EVENT_IDX) != 0)
 		vq->vq_flags |= VIRTQUEUE_FLAG_EVENT_IDX;
 
+	/* info->vqai_maxindirsz 指定了 vq_desc_extra 中的 vring_desc 元素的
+		数量上限，也是用于空间分配
+	 */
 	if (info->vqai_maxindirsz > 1) {
 		error = virtqueue_init_indirect(vq, info->vqai_maxindirsz);
 		if (error)
 			goto fail;
 	}
 
+	/* 这里也用到了size，说明ring的数量跟vq_desc_extra数量是一样的？？ */
 	vq->vq_ring_size = round_page(vring_size(size, align));
 	vq->vq_ring_mem = contigmalloc(vq->vq_ring_size, M_DEVBUF,
-	    M_NOWAIT | M_ZERO, 0, highaddr, PAGE_SIZE, 0);
+	    M_NOWAIT | M_ZERO, 0, highaddr, PAGE_SIZE, 0);	// 分配连续的物理地址
+
 	if (vq->vq_ring_mem == NULL) {
 		device_printf(dev,
 		    "cannot allocate memory for virtqueue ring\n");
@@ -221,15 +274,20 @@ fail:
 	return (error);
 }
 
+/* 初始化 virtqueue，其中比较重要的一个步骤就是生成 vq_desc_extra 数组 */
 static int
 virtqueue_init_indirect(struct virtqueue *vq, int indirect_size)
 {
 	device_t dev;
 	struct vq_desc_extra *dxp;
-	int i, size;
+	int i, size;	// 表示所占空间的大小
 
 	dev = vq->vq_dev;
 
+	/* 
+		首先判断一下该设备是否具有 VIRTIO_RING_F_INDIRECT_DESC 特征，linux下该宏表示
+		是否支持 indirect buffer，这里的作用应该也是类似的
+	*/
 	if (VIRTIO_BUS_WITH_FEATURE(dev, VIRTIO_RING_F_INDIRECT_DESC) == 0) {
 		/*
 		 * Indirect descriptors requested by the driver but not
@@ -243,21 +301,39 @@ virtqueue_init_indirect(struct virtqueue *vq, int indirect_size)
 		return (0);
 	}
 
+	/*
+		从这里可以的代码逻辑可以看出，indirect_size 表示的应该是 ring_desc 的数量，
+		memory size表示的就是其真正的大小
+	*/ 
 	size = indirect_size * sizeof(struct vring_desc);
-	vq->vq_max_indirect_size = indirect_size;
-	vq->vq_indirect_mem_size = size;
+	vq->vq_max_indirect_size = indirect_size;	// 更新virtqueue成员变量
+	vq->vq_indirect_mem_size = size;	// 更新virtqueue成员变量
 	vq->vq_flags |= VIRTQUEUE_FLAG_INDIRECT;
 
+	/*
+		从这里可以看出，在virtqueue中会有 vq_nentries 数量的 vq_desc_extra，然后为
+		每一个 vq_desc_extra 中的 indirect 分配空间；空间大小为size，而这个size则是由
+		alloc_info中的 vqai_maxindirsz 来确定的
+	*/
 	for (i = 0; i < vq->vq_nentries; i++) {
 		dxp = &vq->vq_descx[i];
 
+		/*
+			为 vring_desc 来分配空间用于对vring的管理
+		*/
 		dxp->indirect = malloc(size, M_DEVBUF, M_NOWAIT);
 		if (dxp->indirect == NULL) {
 			device_printf(dev, "cannot allocate indirect list\n");
 			return (ENOMEM);
 		}
 
+		/* 从函数命名来看，应该是分配物理地址，与qemu有关联？？ */
 		dxp->indirect_paddr = vtophys(dxp->indirect);
+
+		/* 
+			dxp是vq->vq_descx[i]的一个引用，所以这里其实是对 vq_descx[] 数组的填充，
+			所以可以推断 vring_desc[] 会形成一个数组
+		*/
 		virtqueue_init_indirect_list(vq, dxp->indirect);
 	}
 
@@ -285,17 +361,25 @@ virtqueue_free_indirect(struct virtqueue *vq)
 	vq->vq_indirect_mem_size = 0;
 }
 
+/* 
+	从代码逻辑可以看出，其实现的功能是生成一个元素全部置零的一个类似链表，
+	本质上看还是一个数组，只不过每个元素中会包含一个next成员指向下一个元素
+*/
 static void
 virtqueue_init_indirect_list(struct virtqueue *vq,
     struct vring_desc *indirect)
 {
 	int i;
 
-	bzero(indirect, vq->vq_indirect_mem_size);
+	bzero(indirect, vq->vq_indirect_mem_size);	// 所有元素置零
 
 	for (i = 0; i < vq->vq_max_indirect_size - 1; i++)
 		indirect[i].next = i + 1;
-	indirect[i].next = VQ_RING_DESC_CHAIN_END;
+	/* 
+		修改每个元素的next的指向，这里也给我们提供了一个思路：如何在一个数组中对元素进行分类管理？
+		可以在每个元素中添加一个next指针，指向同一类型的下一个元素所在位置的数组索引 
+	*/
+	indirect[i].next = VQ_RING_DESC_CHAIN_END;	
 }
 
 int
@@ -304,6 +388,7 @@ virtqueue_reinit(struct virtqueue *vq, uint16_t size)
 	struct vq_desc_extra *dxp;
 	int i;
 
+	/* 重置操作要满足条件 vq->vq_nentries == size */
 	if (vq->vq_nentries != size) {
 		device_printf(vq->vq_dev,
 		    "%s: '%s' changed size; old=%hu, new=%hu\n",
@@ -311,7 +396,9 @@ virtqueue_reinit(struct virtqueue *vq, uint16_t size)
 		return (EINVAL);
 	}
 
-	/* Warn if the virtqueue was not properly cleaned up. */
+	/* Warn if the virtqueue was not properly cleaned up. 
+		重置操作未将数据清理完毕
+	*/
 	if (vq->vq_free_cnt != vq->vq_nentries) {
 		device_printf(vq->vq_dev,
 		    "%s: warning '%s' virtqueue not empty, "
@@ -324,7 +411,9 @@ virtqueue_reinit(struct virtqueue *vq, uint16_t size)
 	vq->vq_queued_cnt = 0;
 	vq->vq_free_cnt = vq->vq_nentries;
 
-	/* To be safe, reset all our allocated memory. */
+	/* To be safe, reset all our allocated memory. 
+		为确保操作正确，当数据清理完毕之后，在执行一次初始化操作
+	*/
 	bzero(vq->vq_ring_mem, vq->vq_ring_size);
 	for (i = 0; i < vq->vq_nentries; i++) {
 		dxp = &vq->vq_descx[i];
@@ -436,6 +525,7 @@ virtqueue_notify(struct virtqueue *vq)
 	vq->vq_queued_cnt = 0;
 }
 
+/* nused: number used?? */
 int
 virtqueue_nused(struct virtqueue *vq)
 {
@@ -475,6 +565,7 @@ virtqueue_enable_intr(struct virtqueue *vq)
 	return (vq_ring_enable_interrupt(vq, 0));
 }
 
+/* postpone: 推迟 */
 int
 virtqueue_postpone_intr(struct virtqueue *vq, vq_postpone_t hint)
 {
@@ -519,7 +610,7 @@ virtqueue_enqueue(struct virtqueue *vq, void *cookie, struct sglist *sg,
 	int needed;
 	uint16_t head_idx, idx;
 
-	needed = readable + writable;
+	needed = readable + writable;	// 可读可写标识
 
 	VQASSERT(vq, cookie != NULL, "enqueuing with no cookie");
 	VQASSERT(vq, needed == sg->sg_nseg,
@@ -654,12 +745,14 @@ vq_ring_init(struct virtqueue *vq)
 	char *ring_mem;
 	int i, size;
 
-	ring_mem = vq->vq_ring_mem;
+	ring_mem = vq->vq_ring_mem;	// ring memory的起始地址
 	size = vq->vq_nentries;
 	vr = &vq->vq_ring;
 
+	/* 初始化desc、avail和used指针 */
 	vring_init(vr, size, ring_mem, vq->vq_alignment);
 
+	/* 初始化vring的描述符表 */
 	for (i = 0; i < size - 1; i++)
 		vr->desc[i].next = i + 1;
 	vr->desc[i].next = VQ_RING_DESC_CHAIN_END;
@@ -747,8 +840,11 @@ vq_ring_enqueue_indirect(struct virtqueue *vq, void *cookie,
 	VQASSERT(vq, needed <= vq->vq_max_indirect_size,
 	    "enqueuing too many indirect descriptors");
 
+	/* 描述符表中 free chain 的起始位置的index */
 	head_idx = vq->vq_desc_head_idx;
 	VQ_RING_ASSERT_VALID_IDX(vq, head_idx);
+
+	/* vq_ring和vq_descx */
 	dp = &vq->vq_ring.desc[head_idx];
 	dxp = &vq->vq_descx[head_idx];
 

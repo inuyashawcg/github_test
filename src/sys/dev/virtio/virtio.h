@@ -43,6 +43,9 @@ struct vq_alloc_info;
  * of 256 descriptors. If there is ever a need for more, we can switch to
  * contigmalloc(9) for the larger allocations, similar to what
  * bus_dmamem_alloc(9) does.
+ * 
+ * 每个virtqueue间接描述符列表必须在物理上连续，为了允许我们单独地malloc（9）每个列表，
+ * 请将支持的数量限制在一个页面中。对于4KB页面，这是256个描述符的限制
  *
  * Note the sizeof(struct vring_desc) is 16 bytes.
  */
@@ -50,6 +53,7 @@ struct vq_alloc_info;
 
 /*
  * VirtIO instance variables indices.
+ * VirtIO实例变量索引
  */
 #define VIRTIO_IVAR_DEVTYPE		1
 #define VIRTIO_IVAR_FEATURE_DESC	2
@@ -86,6 +90,9 @@ void	 virtio_reinit_complete(device_t dev);
  * Read/write a variable amount from the device specific (ie, network)
  * configuration region. This region is encoded in the same endian as
  * the guest.
+ * 从设备特定（例如网络）配置区域读取/写入可变量。此区域与guest使用相同的endian进行编码；
+ * 从命名来看，应该是读写配置信息，配置信息应该是存储到某一个区域，然后通过基地址+偏移的方式
+ * 获取到？？
  */
 void	 virtio_read_device_config(device_t dev, bus_size_t offset,
 	     void *dst, int length);

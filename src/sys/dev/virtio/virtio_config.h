@@ -49,16 +49,21 @@
 /*
  * Generate interrupt when the virtqueue ring is
  * completely used, even if we've suppressed them.
+ * 当virtqueue环被完全使用时生成中断，即使我们已经抑制了它们
  */
 #define VIRTIO_F_NOTIFY_ON_EMPTY	(1UL << 24)
 
 /* Can the device handle any descriptor layout? */
 #define VIRTIO_F_ANY_LAYOUT		(1UL << 27)
 
-/* Support for indirect buffer descriptors. */
+/* Support for indirect buffer descriptors. 
+    有些设备可能需要同时完成大量数据传输的大量请求，设备 VIRTIO_RING_F_INDIRECT_DESC 特性能够满足这种需求
+*/
 #define VIRTIO_RING_F_INDIRECT_DESC	(1UL << 28)
 
-/* Support to suppress interrupt until specific index is reached. */
+/* Support to suppress interrupt until specific index is reached. 
+    支持在达到特定索引之前抑制中断
+*/
 #define VIRTIO_RING_F_EVENT_IDX		(1UL << 29)
 
 /*
@@ -83,6 +88,8 @@
  * Some VirtIO feature bits (currently bits 28 through 34) are
  * reserved for the transport being used (eg. virtio_ring), the
  * rest are per-device feature bits.
+ * 一些VirtIO特征位（目前是位28到34）是为所使用的传输保留的（例如 virtio_ring），
+ * 其余是每个设备的特征位
  */
 #define VIRTIO_TRANSPORT_F_START	28
 #define VIRTIO_TRANSPORT_F_END		34

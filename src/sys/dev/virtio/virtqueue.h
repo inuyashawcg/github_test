@@ -34,12 +34,15 @@
 struct virtqueue;
 struct sglist;
 
-/* Device callback for a virtqueue interrupt. */
+/* Device callback for a virtqueue interrupt. 
+	virtqueue中断的设备回调
+*/
 typedef void virtqueue_intr_t(void *);
 
 /*
  * Hint on how long the next interrupt should be postponed. This is
  * only used when the EVENT_IDX feature is negotiated.
+ * 下一个中断应该推迟多长时间的提示。这仅在协商事件IDX功能时使用
  */
 typedef enum {
 	VQ_POSTPONE_SHORT,
@@ -49,13 +52,16 @@ typedef enum {
 
 #define VIRTQUEUE_MAX_NAME_SZ	32
 
-/* One for each virtqueue the device wishes to allocate. */
+/* One for each virtqueue the device wishes to allocate. 
+	每个设备都会有一个或者多个 virtqueue，这个结构体反应的应该是virtqueue
+	内存分配、回调等信息。命名中含有vq说明还是跟virtqueue相关，而不是ring
+*/
 struct vq_alloc_info {
 	char		   vqai_name[VIRTQUEUE_MAX_NAME_SZ];
-	int		   vqai_maxindirsz;
-	virtqueue_intr_t  *vqai_intr;
-	void		  *vqai_intr_arg;
-	struct virtqueue **vqai_vq;
+	int		   vqai_maxindirsz;	// 最大size，表示的可能是ring的数量？？
+	virtqueue_intr_t  *vqai_intr;	// 回调函数
+	void		  *vqai_intr_arg;	// 回调函数的参数
+	struct virtqueue **vqai_vq;	// 指向的 virtqueue 二维数组
 };
 
 #define VQ_ALLOC_INFO_INIT(_i,_nsegs,_intr,_arg,_vqp,_str,...) do {	\

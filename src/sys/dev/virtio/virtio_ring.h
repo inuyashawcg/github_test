@@ -35,33 +35,46 @@
 #ifndef VIRTIO_RING_H
 #define	VIRTIO_RING_H
 
-/* This marks a buffer as continuing via the next field. */
+/* This marks a buffer as continuing via the next field. 
+    用于表明当前 buffer 的下一个域是否有效，也间接表明当前 buffer 是否是 buffers list 的最后一个
+*/
 #define VRING_DESC_F_NEXT       1
+
 /* This marks a buffer as write-only (otherwise read-only). */
 #define VRING_DESC_F_WRITE      2
-/* This means the buffer contains a list of buffer descriptors. */
+
+/* This means the buffer contains a list of buffer descriptors. 
+    表明这个 buffer 中包含一个 buffer 描述符的 list
+*/
 #define VRING_DESC_F_INDIRECT	4
 
 /* The Host uses this in used->flags to advise the Guest: don't kick me
  * when you add a buffer.  It's unreliable, so it's simply an
  * optimization.  Guest will still kick if it's out of buffers. */
 #define VRING_USED_F_NO_NOTIFY  1
+
 /* The Guest uses this in avail->flags to advise the Host: don't
  * interrupt me when you consume a buffer.  It's unreliable, so it's
  * simply an optimization.  */
 #define VRING_AVAIL_F_NO_INTERRUPT      1
 
 /* VirtIO ring descriptors: 16 bytes.
- * These can chain together via "next". */
+ * These can chain together via "next". 
+ * 用于管理所有的ring，要注意仅仅起到管理作用，
+ * 里边包含的仅仅是管理信息，而不是真正的 ring */
 struct vring_desc {
-        /* Address (guest-physical). */
+        /* Address (guest-physical). guest物理地址 */
         uint64_t addr;
         /* Length. */
         uint32_t len;
         /* The flags as indicated above. */
         uint16_t flags;
-        /* We chain unused descriptors via this, too. */
-        uint16_t next;
+        /* We chain unused descriptors via this, too. 
+            - 通过该成员将未使用到的描述符串联起来
+            - 所有的 buffers 通过 next 串联起来组成 descriptor table
+            约定俗成，每个 list 中，read-only buffers 放置在 write-only buffers 前面
+        */
+        uint16_t next; 
 };
 
 struct vring_avail {
@@ -70,11 +83,11 @@ struct vring_avail {
         uint16_t ring[0];
 };
 
-/* uint32_t is used here for ids for padding reasons. */
+/* uint32_t is used here for ids for padding reasons. uint32_t在这里用于填充id */
 struct vring_used_elem {
-        /* Index of start of used descriptor chain. */
+        /* Index of start of used descriptor chain. 已使用描述符列表的起始索引 */
         uint32_t id;
-        /* Total length of the descriptor chain which was written to. */
+        /* Total length of the descriptor chain which was written to. 需要写入的描述符列表的总长度 */
         uint32_t len;
 };
 
@@ -84,12 +97,29 @@ struct vring_used {
         struct vring_used_elem ring[0];
 };
 
+/* 可以看到其中包含有三个数组成员，分别对应描述符列表，已使用的描述符和可用的描述符 
+    https://www.ibm.com/developerworks/cn/linux/1402_caobb_virtio/index.html
+*/
 struct vring {
-	unsigned int num;
-
-	struct vring_desc *desc;
-	struct vring_avail *avail;
-	struct vring_used *used;
+        unsigned int num;
+        /*
+            描述符数组（descriptor table）用于存储一些关联的描述符，每个描述符都是一个对 buffer 的描述，
+            包含一个 address/length 的配对
+        */
+        struct vring_desc *desc;
+        /* 
+            可用的 ring(available ring)用于 guest 端表示那些描述符链当前是可用的
+            - Available ring 指向 guest 提供给设备的描述符,它指向一个 descriptor 链表的头,
+            flags 值为 0 或者 1，1 表明 Guest 不需要 device 使用完这些 descriptor 时上报中断,
+            idx 指向我们下一个 descriptor 入口处，idx 从 0 开始，一直增加，使用时需要取模
+        */
+        struct vring_avail *avail;
+        /* 使用过的 ring(used ring)用于表示 Host 端表示那些描述符已经使用 
+            Used ring 指向 device(host)使用过的 buffers。Used ring 和 Available ring 之间在内存中的
+            分布会有一定间隙，从而避免了 host 和 guest 两端由于 cache 的影响而会写入到 virtqueue 结构体的
+            同一部分的情况
+        */
+        struct vring_used *used;
 };
 
 /* Alignment requirements for vring elements.
@@ -146,6 +176,10 @@ vring_size(unsigned int num, unsigned long align)
 	return (size);
 }
 
+/*
+    从virtqueue.c - virtqueue_alloc 函数代码逻辑来看，virtqueue会分配一块连续的物理内存，
+    起始地址赋值给 vq->vq_ring_mem(最终会传递给参数p)
+*/
 static inline void
 vring_init(struct vring *vr, unsigned int num, uint8_t *p,
     unsigned long align)

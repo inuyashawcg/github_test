@@ -85,8 +85,10 @@ modevent_nop(module_t mod, int what, void *arg)
 static void
 module_init(void *arg)
 {
-
 	sx_init(&modules_sx, "module subsystem sx lock");
+	/*
+		管理所有的modules，应该是 subsystem 强相关
+	*/
 	TAILQ_INIT(&modules);
 	EVENTHANDLER_REGISTER(shutdown_final, module_shutdown, NULL,
 	    SHUTDOWN_PRI_DEFAULT);
@@ -112,12 +114,19 @@ module_shutdown(void *arg1, int arg2)
 void
 module_register_init(const void *arg)
 {
+	/* moduledata_t 中会包含一个函数，用于处理 module 的 UNLOAD/UNLOAD */
 	const moduledata_t *data = (const moduledata_t *)arg;
 	int error;
 	module_t mod;
 
 	mtx_lock(&Giant);
 	MOD_SLOCK;
+
+	/*
+		在 modules 队列中进行查找，moduledata 中所包含的信心应该就是用来显示某个 module 模块的
+		相关信息，比如说 name，就是对应 module 结构体中的 name，所以可以用来进行对 module 的查找；
+		modeventhand_t 就是用来指示 module 模块指定的事件处理函数
+	*/
 	mod = module_lookupbyname(data->name);
 	if (mod == NULL)
 		panic("module_register_init: module named %s not found\n",
@@ -142,6 +151,9 @@ module_register_init(const void *arg)
 			 * when the kernel linker iterates over the
 			 * modules to unload them, it will unload them
 			 * in the reverse order they were loaded.
+			 * 当 module 成功加载之后，我们就将这个 modules 插入到 linker file 管理队列的头部，这种方式可以
+			 * 使得当我们需要卸载它们的时候，就能够按照注册顺序相反的顺序进行。也就是说明模块之间的加载肯定是存在
+			 * 依赖关系的，所以对加载和卸载的顺序比较敏感
 			 */
 			TAILQ_REMOVE(&mod->file->modules, mod, flink);
 			TAILQ_INSERT_HEAD(&mod->file->modules, mod, flink);
@@ -158,6 +170,11 @@ module_register(const moduledata_t *data, linker_file_t container)
 	module_t newmod;
 
 	MOD_XLOCK;
+
+	/*
+		查找 module 的时候貌似都是通过 moduledata，这个是我们在通过 DRIVER_MODULE，DRIVER_DECLARE 这些
+		宏注册的时候传入的，两者强相关
+	*/ 
 	newmod = module_lookupbyname(data->name);
 	if (newmod != NULL) {
 		MOD_XUNLOCK;
@@ -166,16 +183,28 @@ module_register(const moduledata_t *data, linker_file_t container)
 		return (EEXIST);
 	}
 	namelen = strlen(data->name) + 1;
+
+	/* 
+		如果没有找到相应的 module 的话，就创建一个新的结构体，从这里也可以看到设计的思路，比如说对于文件的处理，
+		我们就可以根据文件中所包含的内容创建相应的结构体，里边成员变量要能够准确的文件中的数据；顶层就可以再创建
+		一些只用于管理的结构体，用于对相对底层的结构体的统一管理，然后层层叠加；所以，我们在软件层面的主体其实是
+		这些用于管理的结构体，而不是说要我们去真正的操作那些实例
+	*/
 	newmod = malloc(sizeof(struct module) + namelen, M_MODULE, M_WAITOK);
 	newmod->refs = 1;
 	newmod->id = nextid++;
 	newmod->name = (char *)(newmod + 1);
 	strcpy(newmod->name, data->name);
+	/* 
+		这里将 moduledata 中的 handler 函数传递给了 module，而 moduledata 中注册的handler
+		函数应该都是 driver_module_handler
+	*/
 	newmod->handler = data->evhand ? data->evhand : modevent_nop;
 	newmod->arg = data->priv;
 	bzero(&newmod->data, sizeof(newmod->data));
 	TAILQ_INSERT_TAIL(&modules, newmod, link);
 
+	/* module 跟链接器强相关 */
 	if (container)
 		TAILQ_INSERT_TAIL(&container->modules, newmod, flink);
 	newmod->file = container;
@@ -213,6 +242,7 @@ module_release(module_t mod)
 	}
 }
 
+// 在 modules 中查找
 module_t
 module_lookupbyname(const char *name)
 {

@@ -73,7 +73,7 @@ static struct virtio_ident {
 	{ 0, NULL }
 };
 
-/* Device independent features. */
+/* Device independent features. 非设备依赖特征 */
 static struct virtio_feature_desc virtio_common_feature_desc[] = {
 	{ VIRTIO_F_NOTIFY_ON_EMPTY,	"NotifyOnEmpty"	},
 	{ VIRTIO_RING_F_INDIRECT_DESC,	"RingIndirect"	},
@@ -83,6 +83,7 @@ static struct virtio_feature_desc virtio_common_feature_desc[] = {
 	{ 0, NULL }
 };
 
+/* 从name list中查找名称，并返回相应值 */
 const char *
 virtio_device_name(uint16_t devid)
 {

@@ -59,11 +59,12 @@
 #define VIRTIO_NET_S_LINK_UP	1	/* Link is up */
 
 struct virtio_net_config {
-	/* The config defining mac address (if VIRTIO_NET_F_MAC) */
+	/* The config defining mac address (if VIRTIO_NET_F_MAC) - MAC地址 */
 	uint8_t		mac[ETHER_ADDR_LEN];
 	/* See VIRTIO_NET_F_STATUS and VIRTIO_NET_S_* above */
 	uint16_t	status;
 	/* Maximum number of each of transmit and receive queues;
+		每个传输和接收队列的最大数目
 	 * see VIRTIO_NET_F_MQ and VIRTIO_NET_CTRL_MQ.
 	 * Legal values are between 1 and 0x8000.
 	 */

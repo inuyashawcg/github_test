@@ -214,6 +214,12 @@ enum sysinit_elem_order {
 typedef void (*sysinit_nfunc_t)(void *);
 typedef void (*sysinit_cfunc_t)(const void *);
 
+/*
+	从注册的实际情况来看，这里的 func 其实就是 module_register_init 函数，然后会把
+	udata 成员变量传递给 module_register_init；以 virtio 代码为例，udata 其实表示
+	的就是 virtio_mod，它其实就是定义了关于 module 的一些操作，比如说 LOAD/UNLOAD 等，
+	所以 sysinit 所处理的事情其实就是控制 module 的加载等操作，目前没有看到其他操作
+*/
 struct sysinit {
 	enum sysinit_sub_id	subsystem;	/* subsystem identifier*/
 	enum sysinit_elem_order	order;		/* init order within subsystem*/
