@@ -69,17 +69,17 @@ struct virtqueue {
 	char			 vq_name[VIRTQUEUE_MAX_NAME_SZ];	// 主要用于调试
 	uint16_t		 vq_queue_index;	// queue 的索引，用于区分一个设备中的多个queue？
 
-	// 从实际代码逻辑可以看出，该成员表示的应该是 vq_desc_extra 的数量
+	// 从实际代码逻辑可以看出，该成员表示的应该是 vq_desc_extra 的数量，也表示 vring 成员的数量
 	uint16_t		 vq_nentries;	
 	uint32_t		 vq_flags;	// features标识
 #define	VIRTQUEUE_FLAG_INDIRECT	 0x0001
 #define	VIRTQUEUE_FLAG_EVENT_IDX 0x0002	// 貌似是用来触发中断
 
 	int			 vq_alignment;	// 字节对齐要求
-	int			 vq_ring_size;	// ring的大小？
-	void			*vq_ring_mem;	// 指向 ring 分配的内存的起始地址？？
-	int			 vq_max_indirect_size;	// 应该表示的是数量信息
-	int			 vq_indirect_mem_size;	// indirect 内存空间大小
+	int			 vq_ring_size;	// vring成员的大小
+	void			*vq_ring_mem;	// 指向 ring 分配的连续的物理内存的起始地址
+	int			 vq_max_indirect_size;	// 应该表示的是数量信息，是vq_desc_extra中indirect数组中元素数量
+	int			 vq_indirect_mem_size;	// vq_desc_extra中indirect数组内存空间大小
 	virtqueue_intr_t	*vq_intrhand;	// 回调函数
 	void			*vq_intrhand_arg;	// 传递给回调函数的参数？？
 
@@ -182,7 +182,10 @@ virtqueue_filter_features(uint64_t features)
 	return (features & mask);
 }
 
-/* 为 virtqueue 分配空间 */
+/* 
+	为 virtqueue 分配空间，vq_alloc_info 会包含有queue分配的相关信息，我们需要通过
+	info 中的信息来进行空间分配
+*/
 int
 virtqueue_alloc(device_t dev, uint16_t queue, uint16_t size, int align,
     vm_paddr_t highaddr, struct vq_alloc_info *info, struct virtqueue **vqp)
@@ -213,6 +216,7 @@ virtqueue_alloc(device_t dev, uint16_t queue, uint16_t size, int align,
 
 	/*
 		从代码逻辑来看，size 表示的应该是 vring_desc 的数量信息，也就是表示有多少个vring？？
+		size传入的大小是256，(vring_desc)16*256=4096，刚好是一个page的大小
 	*/ 
 	vq = malloc(sizeof(struct virtqueue) +
 	    size * sizeof(struct vq_desc_extra), M_DEVBUF, M_NOWAIT | M_ZERO);
@@ -241,8 +245,11 @@ virtqueue_alloc(device_t dev, uint16_t queue, uint16_t size, int align,
 	if (VIRTIO_BUS_WITH_FEATURE(dev, VIRTIO_RING_F_EVENT_IDX) != 0)
 		vq->vq_flags |= VIRTQUEUE_FLAG_EVENT_IDX;
 
-	/* info->vqai_maxindirsz 指定了 vq_desc_extra 中的 vring_desc 元素的
-		数量上限，也是用于空间分配
+	/* 
+		info->vqai_maxindirsz 指定了 vq_desc_extra 中的 vring_desc 元素的数量上限，也是用于空间分配；
+		这里的设计思路可能是这样：有些设备需要传输大量的数据，所以 vq_desc_extra 结构体中 vring_desc 数组
+		的数量是变化的。如果数据量小的话，它可能就包含有一个元素；如果数据量比较大的话，那它就包含有多个元素，
+		这些元素也会形成类似单链表的数据结构进行管理(virtqueue_init_indirect)
 	 */
 	if (info->vqai_maxindirsz > 1) {
 		error = virtqueue_init_indirect(vq, info->vqai_maxindirsz);
@@ -250,7 +257,9 @@ virtqueue_alloc(device_t dev, uint16_t queue, uint16_t size, int align,
 			goto fail;
 	}
 
-	/* 这里也用到了size，说明ring的数量跟vq_desc_extra数量是一样的？？ */
+	/* 
+		这里也用到了size，说明ring的数量跟vq_desc_extra数量是一样的？？ 
+	*/
 	vq->vq_ring_size = round_page(vring_size(size, align));
 	vq->vq_ring_mem = contigmalloc(vq->vq_ring_size, M_DEVBUF,
 	    M_NOWAIT | M_ZERO, 0, highaddr, PAGE_SIZE, 0);	// 分配连续的物理地址
@@ -302,8 +311,10 @@ virtqueue_init_indirect(struct virtqueue *vq, int indirect_size)
 	}
 
 	/*
-		从这里可以的代码逻辑可以看出，indirect_size 表示的应该是 ring_desc 的数量，
+		从这里可以的代码逻辑可以看出，indirect_size 表示的应该是 vring_desc 的数量，
 		memory size表示的就是其真正的大小
+		vring_desc 表示的仅仅是链表中的一个元素，而不是表示整个链表，这一点要搞清楚，并且从代码逻辑上看，
+		每个 vring_desc 链表中的元素的数量其实是有限制的，我们需要根据整个限制来分配相应的空间
 	*/ 
 	size = indirect_size * sizeof(struct vring_desc);
 	vq->vq_max_indirect_size = indirect_size;	// 更新virtqueue成员变量
@@ -319,7 +330,7 @@ virtqueue_init_indirect(struct virtqueue *vq, int indirect_size)
 		dxp = &vq->vq_descx[i];
 
 		/*
-			为 vring_desc 来分配空间用于对vring的管理
+			为每个 vring_desc 类型的链表分配空间
 		*/
 		dxp->indirect = malloc(size, M_DEVBUF, M_NOWAIT);
 		if (dxp->indirect == NULL) {
@@ -327,7 +338,7 @@ virtqueue_init_indirect(struct virtqueue *vq, int indirect_size)
 			return (ENOMEM);
 		}
 
-		/* 从函数命名来看，应该是分配物理地址，与qemu有关联？？ */
+		/* 从函数命名来看，应该是虚拟地址映射到物理地址，与qemu有关联？？ */
 		dxp->indirect_paddr = vtophys(dxp->indirect);
 
 		/* 
@@ -517,7 +528,9 @@ void
 virtqueue_notify(struct virtqueue *vq)
 {
 
-	/* Ensure updated avail->idx is visible to host. */
+	/* Ensure updated avail->idx is visible to host. 
+		确保更新的avail->idx对主机可见
+	*/
 	mb();
 
 	if (vq_ring_must_notify_host(vq))
@@ -746,7 +759,7 @@ vq_ring_init(struct virtqueue *vq)
 	int i, size;
 
 	ring_mem = vq->vq_ring_mem;	// ring memory的起始地址
-	size = vq->vq_nentries;
+	size = vq->vq_nentries;	// size的大小是256
 	vr = &vq->vq_ring;
 
 	/* 初始化desc、avail和used指针 */

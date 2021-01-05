@@ -55,7 +55,10 @@
 
 /* The Guest uses this in avail->flags to advise the Host: don't
  * interrupt me when you consume a buffer.  It's unreliable, so it's
- * simply an optimization.  */
+ * simply an optimization.
+ * 来宾在avail->flags中使用这个命令来通知主机：在使用缓冲区时不要打断我。这是不可靠的，
+ * 所以它只是一个优化
+ */
 #define VRING_AVAIL_F_NO_INTERRUPT      1
 
 /* VirtIO ring descriptors: 16 bytes.
@@ -158,6 +161,7 @@ struct vring {
 /*
  * We publish the used event index at the end of the available ring, and vice
  * versa. They are at the end for backwards compatibility.
+ * 我们在可用环的末尾发布所使用的事件索引，反之亦然。它们位于向后兼容性的末尾
  */
 #define vring_used_event(vr)	((vr)->avail->ring[(vr)->num])
 #define vring_avail_event(vr)	(*(uint16_t *)&(vr)->used->ring[(vr)->num])
@@ -198,6 +202,8 @@ vring_init(struct vring *vr, unsigned int num, uint8_t *p,
  * Assuming a given event_idx value from the other size, if we have
  * just incremented index from old to new_idx, should we trigger an
  * event?
+ * 假设一个给定的事件的idx值来自另一个大小，如果我们刚刚将索引从旧的增加到新的idx，
+ * 我们应该触发一个事件吗？
  */
 static inline int
 vring_need_event(uint16_t event_idx, uint16_t new_idx, uint16_t old)

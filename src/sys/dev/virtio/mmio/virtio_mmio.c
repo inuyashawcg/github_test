@@ -489,6 +489,14 @@ vtmmio_with_feature(device_t dev, uint64_t feature)
 	return ((sc->vtmmio_features & feature) != 0);
 }
 
+/*
+	GDB-qemu 参数：
+		vq_info:
+			- vqai_name: vtblk0 request
+			- vqai_maxindirsz: 256 - 256*16=4096=4k，刚好是一个page
+			- vqai_intr: (virtqueue_intr_t *) 0xffffffc0001595fa <vtblk_vq_intr>
+			- vqai_intr_arg: (void *) 0xffffffd0012f7a00
+*/
 static int
 vtmmio_alloc_virtqueues(device_t dev, int flags, int nvqs,
     struct vq_alloc_info *vq_info)
@@ -512,6 +520,7 @@ vtmmio_alloc_virtqueues(device_t dev, int flags, int nvqs,
 	if (sc->vtmmio_vqs == NULL)
 		return (ENOMEM);
 
+	/* 设置guest页的大小 */
 	vtmmio_write_config_4(sc, VIRTIO_MMIO_GUEST_PAGE_SIZE,
 	    (1 << PAGE_SHIFT));
 
