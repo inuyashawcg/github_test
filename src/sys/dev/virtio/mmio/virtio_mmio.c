@@ -35,6 +35,7 @@
 /*
  * VirtIO MMIO interface.
  * This driver is heavily based on VirtIO PCI interface driver.
+ * 此驱动程序主要基于VirtIO PCI接口驱动程序
  */
 
 /*
@@ -93,6 +94,7 @@ struct vtmmio_softc {
 	device_t			vtmmio_child_dev;
 	struct virtio_feature_desc	*vtmmio_child_feat_desc;
 
+	/* nvqs: number of virtqueues?? */
 	int				vtmmio_nvqs;
 	struct vtmmio_virtqueue		*vtmmio_vqs;
 	void				*ih;
@@ -628,6 +630,7 @@ vtmmio_notify_virtqueue(device_t dev, uint16_t queue)
 
 	sc = device_get_softc(dev);
 
+	/* 共享内存？？ */
 	vtmmio_write_config_4(sc, VIRTIO_MMIO_QUEUE_NOTIFY, queue);
 }
 
@@ -839,6 +842,7 @@ vtmmio_reset(struct vtmmio_softc *sc)
 	/*
 	 * Setting the status to RESET sets the host device to
 	 * the original, uninitialized state.
+	 * 将状态设置为重置将主机设备设置为原始的未初始化状态
 	 */
 	vtmmio_set_status(sc->dev, VIRTIO_CONFIG_STATUS_RESET);
 }

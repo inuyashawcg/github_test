@@ -33,7 +33,9 @@
 
 /* Status byte for guest to report progress. */
 #define VIRTIO_CONFIG_STATUS_RESET	0x00
-/* We have seen device and processed generic fields. */
+/* We have seen device and processed generic fields.
+    我们已经看到了设备和处理的通用字段
+ */
 #define VIRTIO_CONFIG_STATUS_ACK	0x01
 /* We have found a driver for the device. */
 #define VIRTIO_CONFIG_STATUS_DRIVER	0x02

@@ -66,6 +66,7 @@ __FBSDID("$FreeBSD: releng/12.0/sys/dev/virtio/console/virtio_console.c 328218 2
 /*
  * The buffers cannot cross more than one page boundary due to the
  * size of the sglist segment array used.
+ * 由于使用的sglist段数组的大小，缓冲区不能跨越多个页边界
  */
 CTASSERT(VTCON_BULK_BUFSZ <= PAGE_SIZE);
 CTASSERT(VTCON_CTRL_BUFSZ <= PAGE_SIZE);
@@ -80,8 +81,11 @@ struct vtcon_port {
 	struct vtcon_softc		*vtcport_sc;
 	struct vtcon_softc_port		*vtcport_scport;
 	struct tty			*vtcport_tty;
+
+	/* 输入输出 virtqueue */
 	struct virtqueue		*vtcport_invq;
 	struct virtqueue		*vtcport_outvq;
+
 	int				 vtcport_id;
 	int				 vtcport_flags;
 #define VTCON_PORT_FLAG_GONE	0x01
@@ -117,10 +121,14 @@ struct vtcon_softc {
 	 * Ports can be added and removed during runtime, but we have
 	 * to allocate all the virtqueues during attach. This array is
 	 * indexed by the port ID.
+	 * 端口可以在运行时添加和删除，但我们必须在连接期间分配所有virtqueue，
+	 * 此数组由端口ID索引
 	 */
 	struct vtcon_softc_port	*vtcon_ports;
 
 	struct task		 vtcon_ctrl_task;
+	
+	/* 控制队列 */
 	struct virtqueue	*vtcon_ctrl_rxvq;
 	struct virtqueue	*vtcon_ctrl_txvq;
 	struct mtx		 vtcon_ctrl_tx_mtx;

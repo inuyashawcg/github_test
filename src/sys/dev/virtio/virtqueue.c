@@ -97,14 +97,18 @@ struct virtqueue {
 	/*
 	 * Head of the free chain in the descriptor table. If
 	 * there are no free descriptors, this will be set to
-	 * VQ_RING_DESC_CHAIN_END. (free chain 应该就是表示空闲的
-	 * 描述符)
-	 * 
+	 * VQ_RING_DESC_CHAIN_END. 
 	 * desc 用于存储一些关联的描述符，每个描述符记录一个对 buffer 的描述，
 	 * available ring 则用于 guest 端表示当前有哪些描述符是可用的，而 
 	 * used ring 则表示 host 端哪些描述符已经被使用
 	 * 
-	 * chain 是一个环形队列，肯定是要有头尾元素的索引
+	 * linux下：
+	 * virtqueue中的last_avail_idx记录ring[]数组中首个可用的buffer头部；即根据last_avail_idx查找ring[],
+	 * 根据ring[]数组得到desc表的下标，然后last_avail_idx++；每次HOST向客户机发送数据就需要从这里获取一个buffer head；
+	 * 当host完成数据写入，可能会产生多个 VirtQueueElement，即使用多个逻辑buffer，每个 VirtQueueElement 的信息记录到
+	 * VRingUsed 的 VRingUsedElem 数组当中，一个元素对应一个 VRingUsedElem 结构，其中 id 记录对应 buffer 的 head，
+	 * len 记录长度信息
+	 * 
 	 */
 	uint16_t		 vq_desc_head_idx;
 	/*
@@ -538,7 +542,7 @@ virtqueue_notify(struct virtqueue *vq)
 	vq->vq_queued_cnt = 0;
 }
 
-/* nused: number used?? */
+/* nused: number used?? 计算有多少描述符被使用了？？ */
 int
 virtqueue_nused(struct virtqueue *vq)
 {
@@ -603,6 +607,7 @@ virtqueue_postpone_intr(struct virtqueue *vq, vq_postpone_t hint)
 
 /*
  * Note this is only considered a hint to the host.
+ * 注意这只被认为是对主机的提示
  */
 void
 virtqueue_disable_intr(struct virtqueue *vq)
@@ -615,6 +620,10 @@ virtqueue_disable_intr(struct virtqueue *vq)
 		vq->vq_ring.avail->flags |= VRING_AVAIL_F_NO_INTERRUPT;
 }
 
+/* 
+	slist用于管理一块物理地址空间，它可能包含一个或者多个元素，每个list都表示一块物理地址的起始地址和
+	长度，不同的情况有不同的读写权限
+*/
 int
 virtqueue_enqueue(struct virtqueue *vq, void *cookie, struct sglist *sg,
     int readable, int writable)
@@ -653,6 +662,10 @@ virtqueue_enqueue(struct virtqueue *vq, void *cookie, struct sglist *sg,
 	dxp->cookie = cookie;
 	dxp->ndescs = needed;
 
+	/*
+		从头开始分配virtqueue->vring中的内存，可读区域放到前面，可写区域放到后边，分配完之后更新 
+		vq_desc_head_idx 和 vq_free_cnt 的值
+	*/
 	idx = vq_ring_enqueue_segments(vq, vq->vq_ring.desc, head_idx,
 	    sg, readable, writable);
 
@@ -721,7 +734,9 @@ virtqueue_drain(struct virtqueue *vq, int *last)
 	while (idx < vq->vq_nentries && cookie == NULL) {
 		if ((cookie = vq->vq_descx[idx].cookie) != NULL) {
 			vq->vq_descx[idx].cookie = NULL;
-			/* Free chain to keep free count consistent. */
+			/* Free chain to keep free count consistent.
+				自由链保持自由计数一致
+			*/
 			vq_ring_free_chain(vq, idx);
 		}
 		idx++;
@@ -782,17 +797,24 @@ vq_ring_update_avail(struct virtqueue *vq, uint16_t desc_idx)
 	 * deferring to virtqueue_notify() in the hopes that if the host is
 	 * currently running on another CPU, we can keep it processing the new
 	 * descriptor.
+	 * 将描述符链的头放入下一个插槽中，并使其对主机可用。该链现在可用，而不是推迟到 virtqueue_notify，
+	 * 希望如果主机当前正在另一个CPU上运行，我们可以让它继续处理新的描述符
 	 */
-	avail_idx = vq->vq_ring.avail->idx & (vq->vq_nentries - 1);
+	avail_idx = vq->vq_ring.avail->idx & (vq->vq_nentries - 1);	// idx & 255(11111111)
 	vq->vq_ring.avail->ring[avail_idx] = desc_idx;
 
 	wmb();
 	vq->vq_ring.avail->idx++;
 
-	/* Keep pending count until virtqueue_notify(). */
+	/* Keep pending count until virtqueue_notify(). 
+		保持挂起计数直到virtqueue_notify()
+	*/
 	vq->vq_queued_cnt++;
 }
 
+/* 
+	这里要分情况讨论，有的情况下处理的是 indirect，有的情况下处理的是 vring	 
+*/
 static uint16_t
 vq_ring_enqueue_segments(struct virtqueue *vq, struct vring_desc *desc,
     uint16_t head_idx, struct sglist *sg, int readable, int writable)
@@ -815,6 +837,9 @@ vq_ring_enqueue_segments(struct virtqueue *vq, struct vring_desc *desc,
 		dp->len = seg->ss_len;
 		dp->flags = 0;
 
+		/*
+			这里就可以对应linux中的一个默认规定，可读内存区域是在可写内存区域的前面
+		*/
 		if (i < needed - 1)
 			dp->flags |= VRING_DESC_F_NEXT;
 		if (i >= readable)
@@ -831,6 +856,10 @@ vq_ring_use_indirect(struct virtqueue *vq, int needed)
 	if ((vq->vq_flags & VIRTQUEUE_FLAG_INDIRECT) == 0)
 		return (0);
 
+	/* 
+		程序所需要的描述符的数量用一个 desc_extra->indirect 就可以装下，那么我就只用
+		一个 desc_extra 就行了，剩下就是对 indirect 的操作
+	 */
 	if (vq->vq_max_indirect_size < needed)
 		return (0);
 
@@ -840,6 +869,7 @@ vq_ring_use_indirect(struct virtqueue *vq, int needed)
 	return (1);
 }
 
+/* 处理的对象是 indirect 而不是 vring */
 static void
 vq_ring_enqueue_indirect(struct virtqueue *vq, void *cookie,
     struct sglist *sg, int readable, int writable)
@@ -912,6 +942,7 @@ vq_ring_enable_interrupt(struct virtqueue *vq, uint16_t ndesc)
 static int
 vq_ring_must_notify_host(struct virtqueue *vq)
 {
+	/* old是add_sg之前的avail.idx，而new是当前的avail.idx - linux */
 	uint16_t new_idx, prev_idx, event_idx;
 
 	if (vq->vq_flags & VIRTQUEUE_FLAG_EVENT_IDX) {

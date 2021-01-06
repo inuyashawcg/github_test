@@ -61,17 +61,27 @@
  */
 #define VRING_AVAIL_F_NO_INTERRUPT      1
 
+// 参考： https://www.cnblogs.com/ck1020/p/5939777.html
+
 /* VirtIO ring descriptors: 16 bytes.
  * These can chain together via "next". 
- * 用于管理所有的ring，要注意仅仅起到管理作用，
- * 里边包含的仅仅是管理信息，而不是真正的 ring */
+ * 用于管理所有的ring，要注意仅仅起到管理作用，里边包含的仅仅是管理信息，而不是真正的ring；
+ * 每一个描述符表项都对应着一个物理块，表项都记录了其对应物理块的物理地址，长度，标志位，和
+ * next指针；同一buffer的不同物理块正是通过这个next指针连接起来的
+ * */
 struct vring_desc {
         /* Address (guest-physical). guest物理地址 */
         uint64_t addr;
-        /* Length. */
+
+        /* 
+            Length.buffer的大小，需要注意当描述符作为节点连接一个描述符表时，描述符项的个数为
+            len/sizeof(VRingDesc)
+        */
         uint32_t len;
+
         /* The flags as indicated above. */
         uint16_t flags;
+
         /* We chain unused descriptors via this, too. 
             - 通过该成员将未使用到的描述符串联起来
             - 所有的 buffers 通过 next 串联起来组成 descriptor table
@@ -81,8 +91,18 @@ struct vring_desc {
 };
 
 struct vring_avail {
-        uint16_t flags;
+        uint16_t flags; // 限制host是否向客户机注入中断
+
+        /*
+            VRingAvail中的idx表明客户机驱动下次添加buffer使用的ring下标，VRingUsed中的idx表明qemu
+            下次添加VRingUsedElem使用的ring下标
+        */
         uint16_t idx;
+        
+        /*
+            这是一个索引数组，对应在描述符表中表项的下标，代表一个buffer的head，即一个buffer有多个description组成，
+            其head会记录到ring数组中，使用的时候需要从ring数组中取出一个head才可以
+        */
         uint16_t ring[0];
 };
 
@@ -91,36 +111,41 @@ struct vring_used_elem {
         /* Index of start of used descriptor chain. 已使用描述符列表的起始索引 */
         uint32_t id;
         /* Total length of the descriptor chain which was written to. 需要写入的描述符列表的总长度 */
-        uint32_t len;
+        uint32_t len;   // 应该表示它代表的数据段的长度 - linux
 };
 
 struct vring_used {
-        uint16_t flags;
+        uint16_t flags; // flags限制当客户机增加buffer后，是否通知给HOST
         uint16_t idx;
-        struct vring_used_elem ring[0];
+        struct vring_used_elem ring[0]; // 意义同VRingAvail
 };
 
 /* 可以看到其中包含有三个数组成员，分别对应描述符列表，已使用的描述符和可用的描述符 
     https://www.ibm.com/developerworks/cn/linux/1402_caobb_virtio/index.html
 */
 struct vring {
-        unsigned int num;
+        unsigned int num;   // 描述符表中表项的数量
         /*
             描述符数组（descriptor table）用于存储一些关联的描述符，每个描述符都是一个对 buffer 的描述，
             包含一个 address/length 的配对
+            - 指向描述符表，表示描述符表的物理地址
         */
         struct vring_desc *desc;
+
         /* 
             可用的 ring(available ring)用于 guest 端表示那些描述符链当前是可用的
             - Available ring 指向 guest 提供给设备的描述符,它指向一个 descriptor 链表的头,
             flags 值为 0 或者 1，1 表明 Guest 不需要 device 使用完这些 descriptor 时上报中断,
             idx 指向我们下一个 descriptor 入口处，idx 从 0 开始，一直增加，使用时需要取模
+            - 表示VRingAvail的物理地址
         */
         struct vring_avail *avail;
+
         /* 使用过的 ring(used ring)用于表示 Host 端表示那些描述符已经使用 
             Used ring 指向 device(host)使用过的 buffers。Used ring 和 Available ring 之间在内存中的
             分布会有一定间隙，从而避免了 host 和 guest 两端由于 cache 的影响而会写入到 virtqueue 结构体的
             同一部分的情况
+            - 表示VRingUsed的物理地址
         */
         struct vring_used *used;
 };
