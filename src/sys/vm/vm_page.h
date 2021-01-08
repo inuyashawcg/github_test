@@ -184,7 +184,9 @@ typedef uint32_t vm_page_bits_t;
 #define VM_PAGE_BITS_ALL 0xfffffffffffffffflu
 typedef uint64_t vm_page_bits_t;
 #endif
-
+/*
+	虚拟地址所使用的物理地址的最底层的数据结构
+*/
 struct vm_page {
 	union {
 		TAILQ_ENTRY(vm_page) q; /* page queue or free list (Q) */

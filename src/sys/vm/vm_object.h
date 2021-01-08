@@ -88,6 +88,7 @@
  *	(o)	per-object lock 
  *	(f)	free pages queue mutex
  *
+ * 	表示一段地址的范围的数据源结构
  */
 
 #ifndef VM_PAGE_HAVE_PGLIST
@@ -100,19 +101,19 @@ struct vm_object {
 	TAILQ_ENTRY(vm_object) object_list; /* list of all objects */
 	LIST_HEAD(, vm_object) shadow_head; /* objects that this is a shadow for */
 	LIST_ENTRY(vm_object) shadow_list; /* chain of shadow objects */
-	struct pglist memq;		/* list of resident pages */
-	struct vm_radix rtree;		/* root of the resident page radix trie*/
+	struct pglist memq;		/* list of resident pages 常驻页列表 */
+	struct vm_radix rtree;		/* root of the resident page radix trie 常驻页的根 */
 	vm_pindex_t size;		/* Object size */
 	struct domainset_ref domain;	/* NUMA policy. */
 	int generation;			/* generation ID */
 	int ref_count;			/* How many refs?? */
 	int shadow_count;		/* how many objects that this is a shadow for */
-	vm_memattr_t memattr;		/* default memory attribute for pages */
+	vm_memattr_t memattr;		/* default memory attribute for pages 页的默认内存属性 */
 	objtype_t type;			/* type of pager */
 	u_short flags;			/* see below */
 	u_short pg_color;		/* (c) color of first page in obj */
 	u_int paging_in_progress;	/* Paging (in or out) so don't collapse or destroy */
-	int resident_page_count;	/* number of resident pages */
+	int resident_page_count;	/* number of resident pages 常驻页数 */
 	struct vm_object *backing_object; /* object that I'm a shadow of */
 	vm_ooffset_t backing_object_offset;/* Offset in backing object */
 	TAILQ_ENTRY(vm_object) pager_object_list; /* list of all objects of this pager type */

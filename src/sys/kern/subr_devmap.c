@@ -226,6 +226,7 @@ devmap_ptov(vm_paddr_t pa, vm_size_t size)
 /*
  * Look up the given virtual address in the static mapping data and return the
  * corresponding physical address, or DEVMAP_PADDR_NOTFOUND if not found.
+ * 通过虚拟地址查找物理地址
  */
 vm_paddr_t
 devmap_vtop(void * vpva, vm_size_t size)
@@ -255,6 +256,8 @@ devmap_vtop(void * vpva, vm_size_t size)
  * This routine is intended to be used for mapping device memory, NOT real
  * memory; the mapping type is inherently VM_MEMATTR_DEVICE in
  * pmap_kenter_device().
+ * 
+ * 把一块物理地址映射到内核虚拟地址空间
  */
 void *
 pmap_mapdev(vm_offset_t pa, vm_size_t size)
@@ -320,6 +323,7 @@ pmap_mapdev_attr(vm_offset_t pa, vm_size_t size, vm_memattr_t ma)
 
 /*
  * Unmap device memory and free the kva space.
+ * 取消设备memory映射，释放掉 kernel virtual address space 
  */
 void
 pmap_unmapdev(vm_offset_t va, vm_size_t size)
