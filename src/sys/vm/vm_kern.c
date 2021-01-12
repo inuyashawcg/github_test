@@ -418,6 +418,11 @@ kmem_malloc_domain(int domain, vm_size_t size, int flags)
 	return (addr);
 }
 
+/*
+	不可调页的地址范围，也被称为固定的地址范围，在调用的时候就会给它分配物理内存，pageout 守护进程不会
+	替换这段内存。固定的页面从不会产生可能会引发一次阻塞操作的缺页，固定内存则是由 kmem_alloc() 和
+	kmem_malloc 来分配
+*/
 vm_offset_t
 kmem_malloc(vm_size_t size, int flags)
 {

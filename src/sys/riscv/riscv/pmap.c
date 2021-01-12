@@ -536,6 +536,7 @@ pmap_bootstrap_l3(vm_offset_t l1pt, vm_offset_t va, vm_offset_t l3_start)
 
 /*
  *	Bootstrap the system enough to run with virtual memory.
+ 	引导系统运行足够的虚拟内存
  */
 void
 pmap_bootstrap(vm_offset_t l1pt, vm_paddr_t kernstart, vm_size_t kernlen)

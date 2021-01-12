@@ -38,6 +38,8 @@
 /*
  * This structure is used by MD code to describe static mappings of devices
  * which are established as part of bringing up the MMU early in the boot.
+ * 
+ * MD：machine dependent
  */
 struct devmap_entry {
 	vm_offset_t	pd_va;		/* virtual address */

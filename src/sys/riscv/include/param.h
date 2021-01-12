@@ -80,7 +80,7 @@
 
 #define	PAGE_SHIFT	12
 #define	PAGE_SIZE	(1 << PAGE_SHIFT)	/* Page size  - 4K */
-#define	PAGE_MASK	(PAGE_SIZE - 1)     /* 111111111111 */
+#define	PAGE_MASK	(PAGE_SIZE - 1)     /* 1111 1111 1111*/
 
 #define	MAXPAGESIZES	1		/* maximum number of supported page sizes */
 
