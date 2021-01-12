@@ -1,0 +1,43 @@
+ARCH_FLAGS      = -msoft-float -Wno-builtin-declaration-mismatch -marm
+
+# Raspberry PI
+ARCH_FLAGS +=-march=armv6
+#-mtune=arm1176jzf-s
+# -mfloat-abi=hard -mfpu=vfp -mcpu=arm1176jzf-s -march=armv6zk
+
+#-X-mthumb-interwork
+#-mpoke-function-name
+
+
+#BIN_PREFIX=arm-elf-
+#BIN_PREFIX=arm-none-eabi-
+BIN_PREFIX=arm-linux-gnueabihf-
+
+export AS       = $(BIN_PREFIX)as
+export CC       = $(BIN_PREFIX)gcc
+export LD       = $(BIN_PREFIX)ld
+export STRIP    = $(BIN_PREFIX)strip
+export AR       = $(BIN_PREFIX)ar
+export RANLIB   = $(BIN_PREFIX)ranlib
+export OBJCOPY  = $(BIN_PREFIX)objcopy
+export NM       = $(BIN_PREFIX)nm
+
+AWK             = gawk
+YACC            = bison -y
+M4              = m4
+
+
+#USR_LD_ADDR=-Wl,-Ttext-segment,0 -Wl,-Ttext,0
+
+ifeq ($(OSTYPE),cygwin)
+  USR_LD_ADDR=-Wl,-Ttext,0
+else
+  USR_LD_ADDR=-Wl,-Ttext-segment,0
+endif
+
+
+TARGET_OBJECT_FORMAT=elf32-littlearm
+
+
+# Use local overrides, if any
+-include $(realpath $(PHANTOM_HOME))/local-config.$(ARCH).mk

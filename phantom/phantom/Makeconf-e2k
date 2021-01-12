@@ -1,0 +1,40 @@
+#ARCH_FLAGS      = -EL -march=mips32r2 -G 0 -mno-abicalls -fno-pic -mno-gpopt
+
+# [dz] unsure about -fexclude-ctpr2
+# [dz] do we have -nostdinc added elsewhere?
+
+# -Wno-main - don't bother me with main() args
+
+ARCH_FLAGS      = -fkernel -fexclude-ctpr2 -nostdinc -fno-builtin -Wno-builtin-functions-redefined -Wno-main
+
+TARGET_OBJECT_FORMAT=elf64-e2k
+
+
+BIN_PREFIX=e2k-linux-gnu-
+
+export AS       = $(BIN_PREFIX)as
+export CC       = $(BIN_PREFIX)gcc
+export LD       = $(BIN_PREFIX)ld
+export STRIP    = $(BIN_PREFIX)strip
+export AR       = $(BIN_PREFIX)ar
+export RANLIB   = $(BIN_PREFIX)ranlib
+export OBJCOPY  = $(BIN_PREFIX)objcopy
+export NM       = $(BIN_PREFIX)nm
+
+AWK             = gawk
+YACC            = bison -y
+M4              = m4
+
+#USR_LD_ADDR=-Wl,-Ttext-segment,0 -Wl,-Ttext,0
+
+ifeq ($(OSTYPE),cygwin)
+  USR_LD_ADDR=-Wl,-Ttext,0
+else
+  USR_LD_ADDR=-Wl,-Ttext-segment,0
+endif
+
+
+
+
+# Use local overrides, if any
+-include $(realpath $(PHANTOM_HOME))/local-config.$(ARCH).mk
