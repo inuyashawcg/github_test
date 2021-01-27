@@ -1,1 +1,0 @@
-sudo nohup openvpn --client --config chenguang.ovpn & - nohup: 保证程序在后台运行，即使关闭命令窗口也不会失效

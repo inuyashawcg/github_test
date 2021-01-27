@@ -99,6 +99,7 @@ SDT_PROBE_DEFINE3(vfs, namecache, shrink_negative, done, "struct vnode *",
 /*
  * This structure describes the elements in the cache of recent
  * names looked up by namei.
+ * 此结构描述namei查找的最近名称的缓存中的元素
  */
 
 struct	namecache {

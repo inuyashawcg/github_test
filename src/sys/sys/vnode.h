@@ -57,6 +57,28 @@
 
 /*
  * Vnode types.  VNON means no type.
+ * 
+ *   VNON   No type.
+
+     VREG   A regular file; may	be with	or without VM object backing.  If you
+	    want to make sure this get a backing object, call
+	    vnode_create_vobject().
+
+     VDIR   A directory.
+
+     VBLK   A block device; may	be with	or without VM object backing.  If you
+	    want to make sure this get a backing object, call
+	    vnode_create_vobject().
+
+     VCHR   A character	device.
+
+     VLNK   A symbolic link.
+
+     VSOCK  A socket.  Advisory	locking	will not work on this.
+
+     VFIFO  A FIFO (named pipe).  Advisory locking will	not work on this.
+
+     VBAD   Indicates that the vnode has been reclaimed.
  */
 enum vtype	{ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD,
 		  VMARKER };
@@ -105,13 +127,17 @@ struct vnode {
 	 * Fields which define the identity of the vnode.  These fields are
 	 * owned by the filesystem (XXX: and vgone() ?)
 	 */
-	const char *v_tag;			/* u type of underlying data */
-	struct	vop_vector *v_op;		/* u vnode operations vector */
-	void	*v_data;			/* u private data for fs */
+	const char *v_tag;			/* u type of underlying data 属性标识 */
+	struct	vop_vector *v_op;		/* u vnode operations vector 操作集合 */
+	void	*v_data;			/* u private data for fs filesystem的私有数据 */
 
 	/*
 	 * Filesystem instance stuff
 	 */
+	/*
+		在一个操作系统中会包含有多种不同类型的文件系统，struct mount 表示的就是挂载在
+		操作系统中的文件系统，这个指针表示的就是vnode对象所在的文件系统
+	*/
 	struct	mount *v_mount;			/* u ptr to vfs we are in */
 	TAILQ_ENTRY(vnode) v_nmntvnodes;	/* m vnodes for mount point */
 
@@ -234,6 +260,12 @@ struct xvnode {
  *
  *	VI_DOOMED is doubly protected by the interlock and vnode lock.  Both
  *	are required for writing but the status may be checked with either.
+ 	写入时两者都是必需的，但状态可以用其中一个进行检查，写操作需要检查两个锁的状态，读操作
+	的话获取任意一个锁就可以
+
+	vnode也是会维护一些链表用于脏缓存和干净缓存，这个就类似于内存管理中的机制。所有修改过但还未
+	回写到文件中的缓冲区，会暂时保存到脏链表；没有修改过或者已经将修改回写到文件的缓冲区，则会保留
+	在干净链表
  */
 #define	VI_MOUNT	0x0020	/* Mount in progress */
 #define	VI_DOOMED	0x0080	/* This vnode is being recycled */
@@ -275,12 +307,12 @@ struct vattr {
 	dev_t		va_fsid;	/* filesystem id */
 	ino_t		va_fileid;	/* file id */
 	u_quad_t	va_size;	/* file size in bytes */
-	long		va_blocksize;	/* blocksize preferred for i/o */
+	long		va_blocksize;	/* blocksize preferred for i/o 优先用于i/o的块大小 */
 	struct timespec	va_atime;	/* time of last access */
 	struct timespec	va_mtime;	/* time of last modification */
 	struct timespec	va_ctime;	/* time file changed */
 	struct timespec	va_birthtime;	/* time file created */
-	u_long		va_gen;		/* generation number of file */
+	u_long		va_gen;		/* generation number of file 文件的生成号 */
 	u_long		va_flags;	/* flags defined for file */
 	dev_t		va_rdev;	/* device the special file represents */
 	u_quad_t	va_bytes;	/* bytes of disk space held by file */
@@ -351,6 +383,7 @@ struct vattr {
 
 /*
  * Permissions that were traditionally granted only to the file owner.
+ * 传统上只授予文件所有者的权限
  */
 #define VADMIN_PERMS	(VADMIN | VWRITE_ATTRIBUTES | VWRITE_ACL | \
     VWRITE_OWNER)
@@ -368,6 +401,7 @@ struct vattr {
 
 /*
  * Token indicating no attribute value yet assigned.
+ * 表示尚未分配属性值的标记
  */
 #define	VNOVAL	(-1)
 
@@ -387,6 +421,7 @@ extern u_int ncsizefactor;
 /*
  * Convert between vnode types and inode formats (since POSIX.1
  * defines mode word of stat structure in terms of inode formats).
+ * 在vnode类型和inode格式之间转换
  */
 extern enum vtype	iftovt_tab[];
 extern int		vttoif_tab[];
@@ -398,11 +433,11 @@ extern int		vttoif_tab[];
  * Flags to various vnode functions.
  */
 #define	SKIPSYSTEM	0x0001	/* vflush: skip vnodes marked VSYSTEM */
-#define	FORCECLOSE	0x0002	/* vflush: force file closure */
+#define	FORCECLOSE	0x0002	/* vflush: force file closure 强制关闭文件 */
 #define	WRITECLOSE	0x0004	/* vflush: only close writable files */
 #define	EARLYFLUSH	0x0008	/* vflush: early call for ffs_flushfiles */
 #define	V_SAVE		0x0001	/* vinvalbuf: sync file first */
-#define	V_ALT		0x0002	/* vinvalbuf: invalidate only alternate bufs */
+#define	V_ALT		0x0002	/* vinvalbuf: invalidate only alternate bufs 仅使备用BUF无效 */
 #define	V_NORMAL	0x0004	/* vinvalbuf: invalidate only regular bufs */
 #define	V_CLEANONLY	0x0008	/* vinvalbuf: invalidate only clean bufs */
 #define	V_VMIO		0x0010	/* vinvalbuf: called during pageout */

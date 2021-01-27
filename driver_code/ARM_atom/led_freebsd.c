@@ -76,7 +76,7 @@ dev_write(struct cdev *dev, struct uio *uio, int ioflag) {
         vm_offset_t vaddr;
         struct bus_space* tag = &memmap_bus;
         vaddr = (vm_offset_t)pmap_mapdev(TARGET_REGION_ADDR, TARGET_REGION_SIZE);
-        tag->bs_w_2(NULL, vaddr,TARGET_REGION_SIZE, FINISHER_RESET);
+        tag->bs_w_2(NULL, 0, FINISHER_RESET);
     } else {
         uprintf(" Invalid command.\n");
     }

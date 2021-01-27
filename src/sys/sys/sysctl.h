@@ -183,7 +183,6 @@ struct ctlname {
 /*
  * This describes the access space for a sysctl request.  This is needed
  * so that we can use the interface from the kernel or from user-space.
- * 用于user space和kernel space的数据交换
  */
 struct sysctl_req {
 	struct thread	*td;		/* used for access checking 用于访问检查 */

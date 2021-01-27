@@ -120,8 +120,13 @@ struct vring_used {
         struct vring_used_elem ring[0]; // 意义同VRingAvail
 };
 
-/* 可以看到其中包含有三个数组成员，分别对应描述符列表，已使用的描述符和可用的描述符 
-    https://www.ibm.com/developerworks/cn/linux/1402_caobb_virtio/index.html
+/* 
+    可以看到其中包含有三个数组成员，分别对应描述符列表，已使用的描述符和可用的描述符 
+     - https://www.ibm.com/developerworks/cn/linux/1402_caobb_virtio/index.html
+    vq_desc_extra 结构体的中的desc数组可能会包含有多个元素，但是从源代码的逻辑来看，vq_vring 中
+    的desc数组的元素个数跟 desc_extra 是一样的，这里做个推测：因为desc包含的是一块内存的起始地址和
+    大小，所以如果 desc_extra 中包含有多个描述符，这里的大小就可能表示的是所有描述符所表示的总的空间
+    的大小
 */
 struct vring {
         unsigned int num;   // 描述符表中表项的数量

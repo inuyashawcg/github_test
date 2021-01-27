@@ -1,5 +1,0 @@
-store.o: store.c
-	gcc -m32 -c store.c
-        
-#generate.o: generate.c
-#	gcc -m32 -c generate.c

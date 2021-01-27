@@ -78,8 +78,8 @@ struct virtqueue {
 	int			 vq_alignment;	// 字节对齐要求
 	int			 vq_ring_size;	// vring成员的大小
 	void			*vq_ring_mem;	// 指向 ring 分配的连续的物理内存的起始地址
-	int			 vq_max_indirect_size;	// 应该表示的是数量信息，是vq_desc_extra中indirect数组中元素数量
-	int			 vq_indirect_mem_size;	// vq_desc_extra中indirect数组内存空间大小
+	int			 vq_max_indirect_size;	// 应该表示的是数量信息，是 vq_desc_extra 中 indirect 数组中元素数量
+	int			 vq_indirect_mem_size;	// vq_desc_extra 中 indirect 数组内存空间大小
 	virtqueue_intr_t	*vq_intrhand;	// 回调函数
 	void			*vq_intrhand_arg;	// 传递给回调函数的参数？？
 
@@ -129,7 +129,7 @@ struct virtqueue {
 		void		  *cookie;
 		struct vring_desc *indirect;	//对于ring的描述，地址、名称等等
 		vm_paddr_t	   indirect_paddr;	// 物理地址？？
-		uint16_t	   ndescs;	// 描述的数量？？
+		uint16_t	   ndescs;	// 描述符的数量？？
 	} vq_descx[0];
 };
 
@@ -621,6 +621,7 @@ virtqueue_disable_intr(struct virtqueue *vq)
 }
 
 /* 
+	一般队列的enqueue操作是从队列的尾部加入元素
 	slist用于管理一块物理地址空间，它可能包含一个或者多个元素，每个list都表示一块物理地址的起始地址和
 	长度，不同的情况有不同的读写权限
 */
@@ -632,7 +633,7 @@ virtqueue_enqueue(struct virtqueue *vq, void *cookie, struct sglist *sg,
 	int needed;
 	uint16_t head_idx, idx;
 
-	needed = readable + writable;	// 可读可写标识
+	needed = readable + writable;	// 可读可写内存区块的数量
 
 	VQASSERT(vq, cookie != NULL, "enqueuing with no cookie");
 	VQASSERT(vq, needed == sg->sg_nseg,
@@ -647,6 +648,10 @@ virtqueue_enqueue(struct virtqueue *vq, void *cookie, struct sglist *sg,
 	if (vq->vq_free_cnt == 0)
 		return (ENOSPC);
 
+	/*
+		这里对应的就是一个 vq_desc_extra 中 vring_desc 数组不足以提供所需要的描述符的数量，
+		如果不够的话就返回0，够的话是返回1
+	*/
 	if (vq_ring_use_indirect(vq, needed)) {
 		vq_ring_enqueue_indirect(vq, cookie, sg, readable, writable);
 		return (0);
@@ -681,6 +686,7 @@ virtqueue_enqueue(struct virtqueue *vq, void *cookie, struct sglist *sg,
 	return (0);
 }
 
+/* 队列的dequeue操作是从头部取出元素，所以下面会有一个free操作 */
 void *
 virtqueue_dequeue(struct virtqueue *vq, uint32_t *len)
 {
@@ -695,13 +701,14 @@ virtqueue_dequeue(struct virtqueue *vq, uint32_t *len)
 	uep = &vq->vq_ring.used->ring[used_idx];
 
 	rmb();
+	/* vq_ring.used->ring[] 中存储的也是 vq_ring.desc[]数组的索引 */
 	desc_idx = (uint16_t) uep->id;
 	if (len != NULL)
 		*len = uep->len;
 
-	vq_ring_free_chain(vq, desc_idx);
+	vq_ring_free_chain(vq, desc_idx);	// 将对应索引的 desc_chain 清空
 
-	cookie = vq->vq_descx[desc_idx].cookie;
+	cookie = vq->vq_descx[desc_idx].cookie;	// cookie起到类似标识符的作用
 	VQASSERT(vq, cookie != NULL, "no cookie for index %d", desc_idx);
 	vq->vq_descx[desc_idx].cookie = NULL;
 
@@ -799,12 +806,14 @@ vq_ring_update_avail(struct virtqueue *vq, uint16_t desc_idx)
 	 * descriptor.
 	 * 将描述符链的头放入下一个插槽中，并使其对主机可用。该链现在可用，而不是推迟到 virtqueue_notify，
 	 * 希望如果主机当前正在另一个CPU上运行，我们可以让它继续处理新的描述符
+	 * 从代码逻辑可以看出，vq_ring.avail->ring[] 中存储的是 vq_ring desc[] 数组元素的索引，也就是
+	 * 说真正存放内存管理的信息的还是描述符数组，avail[] 只是用来查找可用的描述符在描述符数组中所在的位置
 	 */
 	avail_idx = vq->vq_ring.avail->idx & (vq->vq_nentries - 1);	// idx & 255(11111111)
 	vq->vq_ring.avail->ring[avail_idx] = desc_idx;
 
 	wmb();
-	vq->vq_ring.avail->idx++;
+	vq->vq_ring.avail->idx++;	// avail元素索引自增
 
 	/* Keep pending count until virtqueue_notify(). 
 		保持挂起计数直到virtqueue_notify()
@@ -849,6 +858,11 @@ vq_ring_enqueue_segments(struct virtqueue *vq, struct vring_desc *desc,
 	return (idx);
 }
 
+/*
+	返回0：
+		条件1 - indirect 元素的数量小于 needed
+		条件2 - needed < 2
+*/
 static int
 vq_ring_use_indirect(struct virtqueue *vq, int needed)
 {
@@ -869,7 +883,7 @@ vq_ring_use_indirect(struct virtqueue *vq, int needed)
 	return (1);
 }
 
-/* 处理的对象是 indirect 而不是 vring */
+/* 处理的对象是 indirect 而不是 vring，处理的是一个indirect够用的情况 */
 static void
 vq_ring_enqueue_indirect(struct virtqueue *vq, void *cookie,
     struct sglist *sg, int readable, int writable)
@@ -879,7 +893,7 @@ vq_ring_enqueue_indirect(struct virtqueue *vq, void *cookie,
 	int needed;
 	uint16_t head_idx;
 
-	needed = readable + writable;
+	needed = readable + writable;	// 计算可读可写内存块的总数量
 	VQASSERT(vq, needed <= vq->vq_max_indirect_size,
 	    "enqueuing too many indirect descriptors");
 
@@ -887,7 +901,10 @@ vq_ring_enqueue_indirect(struct virtqueue *vq, void *cookie,
 	head_idx = vq->vq_desc_head_idx;
 	VQ_RING_ASSERT_VALID_IDX(vq, head_idx);
 
-	/* vq_ring和vq_descx */
+	/* 
+		dp 获取 vring 当中的 vring_desc 数组中的元素，而 dxp 是获取的则是 virtqueue
+		中的 vq_desc_extra 数组中的元素，两者类型是不一样的。这里要注意，不要搞混了
+	*/
 	dp = &vq->vq_ring.desc[head_idx];
 	dxp = &vq->vq_descx[head_idx];
 
@@ -896,6 +913,11 @@ vq_ring_enqueue_indirect(struct virtqueue *vq, void *cookie,
 	dxp->cookie = cookie;
 	dxp->ndescs = 1;
 
+	/*
+		上一步给 dxp->ndescs 赋值为1，说明 vq_desc_extra 中的 vring 数组只包含有一个元素，
+		也就是说明 vring 管理的描述符跟 vq_desc_extra 数组管理的描述符的数量是一致的；这里应该
+		对应的就是 indirect 数组元素数量为1的情况 ？？
+	*/
 	dp->addr = dxp->indirect_paddr;
 	dp->len = needed * sizeof(struct vring_desc);
 	dp->flags = VRING_DESC_F_INDIRECT;
@@ -903,13 +925,20 @@ vq_ring_enqueue_indirect(struct virtqueue *vq, void *cookie,
 	vq_ring_enqueue_segments(vq, dxp->indirect, 0,
 	    sg, readable, writable);
 
-	vq->vq_desc_head_idx = dp->next;
+	/* 
+		把 vq_ring.desc 的index赋值给 vq_desc_head_idx，然后 vq_free_cnt--，
+		后边的话再执行 update avail 操作，肯定是跟前面这些操作是有关联的
+		下一步操作是更新 vq_desc_head_idx，使得它指向 vq_queue->ring 数组的下一个元素，可以看到
+		下一个元素还未分配相应的数据，所以它应该表示的是前端驱动可用的索引的起始位置
+	*/
+	vq->vq_desc_head_idx = dp->next;	
 	vq->vq_free_cnt--;
 	if (vq->vq_free_cnt == 0)
 		VQ_RING_ASSERT_CHAIN_TERM(vq);
 	else
 		VQ_RING_ASSERT_VALID_IDX(vq, vq->vq_desc_head_idx);
 
+	/* 这里传入的 head_idx 还是未刷新前的 vq_desc_head_idx */
 	vq_ring_update_avail(vq, head_idx);
 }
 
@@ -970,6 +999,8 @@ vq_ring_free_chain(struct virtqueue *vq, uint16_t desc_idx)
 	struct vq_desc_extra *dxp;
 
 	VQ_RING_ASSERT_VALID_IDX(vq, desc_idx);
+
+	/* 每次dp跟dxp都是同步出现 */
 	dp = &vq->vq_ring.desc[desc_idx];
 	dxp = &vq->vq_descx[desc_idx];
 
@@ -994,6 +1025,11 @@ vq_ring_free_chain(struct virtqueue *vq, uint16_t desc_idx)
 	 * We must append the existing free chain, if any, to the end of
 	 * newly freed chain. If the virtqueue was completely used, then
 	 * head would be VQ_RING_DESC_CHAIN_END (ASSERTed above).
+	 * 
+	 * 这里的逻辑是：当我们把其中一个chain给free掉之后，它就变成了可用的，然后我们把这一串
+	 * 描述符的最后一个元素的next指向目前可用的描述符串的起始位置的索引，然后把可用的描述符
+	 * 串的索引更新为这一次free掉的chain的起始位置的索引，就相当于把这次free掉的chain添加
+	 * 到当前可用的chain的头部
 	 */
 	dp->next = vq->vq_desc_head_idx;
 	vq->vq_desc_head_idx = desc_idx;
