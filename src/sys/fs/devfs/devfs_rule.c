@@ -138,6 +138,8 @@ static TAILQ_HEAD(, devfs_ruleset) devfs_rulesets =
  * Called to apply the proper rules for 'de' before it can be
  * exposed to the userland.  This should be called with an exclusive
  * lock on dm in case we need to run anything.
+ * 调用以在“de”暴露给用户之前应用适当的规则。如果我们需要运行任何东西，应该用dm上
+ * 的独占锁调用它
  */
 void
 devfs_rules_apply(struct devfs_mount *dm, struct devfs_dirent *de)

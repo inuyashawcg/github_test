@@ -35,8 +35,10 @@
 
 /*
  * A kernel process descriptor; used to start "internal" daemons.
+ * 内核进程描述符；用于启动“内部”守护进程
  *
  * Note: global_procpp may be NULL for no global save area.
+ * 对于无全局保存区域，global_procpp 可能为空。
  */
 struct kproc_desc {
 	const char	*arg0;			/* arg 0 (for 'ps' listing) */

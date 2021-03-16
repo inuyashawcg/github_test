@@ -43,33 +43,45 @@ struct devfs_dirent;
 struct devfs_mount;
 
 struct cdev_privdata {
-	struct file		*cdpd_fp;
-	void			*cdpd_data;
-	void			(*cdpd_dtr)(void *);
-	LIST_ENTRY(cdev_privdata) cdpd_list;
+	struct file		*cdpd_fp;	// 对应的file
+	void			*cdpd_data;	// cdev private data 
+	void			(*cdpd_dtr)(void *);	// 对应的函数指针
+	LIST_ENTRY(cdev_privdata) cdpd_list;	// cdev_privdata 也是队列管理？
 };
 
+/* 
+	cdev 私有数据？ cdevp_list 是用来存放 cdev_priv 结构体的一个队列，cdev_priv 中又包含
+	有指向 cdev 的指针。说明 cdev_priv 就是一个对 cdev 进行全方位管理的这么一个结构体，所以
+	devfs 在创建 cdev 的时候会一定会创建一个 cdev_priv
+*/
 struct cdev_priv {
-	struct cdev		cdp_c;
-	TAILQ_ENTRY(cdev_priv)	cdp_list;
+	struct cdev		cdp_c;	// 指向对应的cdev
+	TAILQ_ENTRY(cdev_priv)	cdp_list;	// 这个是 cdev_priv 队列管理，下面得是data管理
 
-	u_int			cdp_inode;
+	u_int			cdp_inode;	// 对应inode id?
 
 	u_int			cdp_flags;
 #define CDP_ACTIVE		(1 << 0)
 #define CDP_SCHED_DTR		(1 << 1)
 #define	CDP_UNREF_DTR		(1 << 2)
 
-	u_int			cdp_inuse;
+	u_int			cdp_inuse;	// in use 使用中标志？
 	u_int			cdp_maxdirent;
+	/*
+		cdp_dirents 保存的可能是所有子目录的指针变量。比如 /dev 可以认为是一个cdev，
+		它下面肯定会有很多子目录，该成员可能就用来管理这些目录
+	*/
 	struct devfs_dirent	**cdp_dirents;
 	struct devfs_dirent	*cdp_dirent0;
 
-	TAILQ_ENTRY(cdev_priv)	cdp_dtr_list;
+	TAILQ_ENTRY(cdev_priv)	cdp_dtr_list;	// cdev_priv 也是队列管理？
 	void			(*cdp_dtr_cb)(void *);
 	void			*cdp_dtr_cb_arg;
 
-	LIST_HEAD(, cdev_privdata) cdp_fdpriv;
+	/* 
+		cdp_fdpriv 是 cdev_privdata 管理队列的 header 指针
+	*/
+	LIST_HEAD(, cdev_privdata) cdp_fdpriv;	// fd: 文件描述符相关
 };
 
 #define	cdev2priv(c)	__containerof(c, struct cdev_priv, cdp_c)

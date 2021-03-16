@@ -206,6 +206,7 @@ dev_refthread(struct cdev *dev, int *ref)
 	return (csw);
 }
 
+/* devcie vnode reference thread? */
 struct cdevsw *
 devvn_refthread(struct vnode *vp, struct cdev **devp, int *ref)
 {
@@ -214,8 +215,12 @@ devvn_refthread(struct vnode *vp, struct cdev **devp, int *ref)
 	struct cdev *dev;
 
 	mtx_assert(&devmtx, MA_NOTOWNED);
+	/* VV_ETERNALDEV 表示设备永远不会被销毁 */
 	if ((vp->v_vflag & VV_ETERNALDEV) != 0) {
-		dev = vp->v_rdev;
+		/* 
+			vnode 对应的cdev，推测vnode对应的文件应该是一个字符设备结点文件
+		*/ 
+		dev = vp->v_rdev;	
 		if (dev == NULL)
 			return (NULL);
 		KASSERT((dev->si_flags & SI_ETERNAL) != 0,
@@ -234,6 +239,7 @@ devvn_refthread(struct vnode *vp, struct cdev **devp, int *ref)
 		dev_unlock();
 		return (NULL);
 	}
+	// 返回的就是与cdev关联的cdev private data
 	cdp = cdev2priv(dev);
 	if ((cdp->cdp_flags & CDP_SCHED_DTR) == 0) {
 		csw = dev->si_devsw;
@@ -766,10 +772,14 @@ make_dev_sv(struct make_dev_args *args1, struct cdev **dres,
 	KASSERT((args.mda_flags & MAKEDEV_WAITOK) == 0 ||
 	    (args.mda_flags & MAKEDEV_NOWAIT) == 0,
 	    ("make_dev_sv: both WAITOK and NOWAIT specified"));
+
+	// 返回一个cdev类型的对象，/dev本质上也是一个字符设备文件
 	dev_new = devfs_alloc(args.mda_flags);
 	if (dev_new == NULL)
 		return (ENOMEM);
 	dev_lock();
+
+	// 可以认为是初始化cdevsw
 	res = prep_cdevsw(args.mda_devsw, args.mda_flags);
 	if (res != 0) {
 		dev_unlock();

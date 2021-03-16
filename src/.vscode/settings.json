@@ -52,6 +52,9 @@
         "stack": "c",
         "unordered_map": "c",
         "unordered_set": "c",
-        "hashtable": "c"
+        "hashtable": "c",
+        "*.in": "c",
+        "hash_set": "cpp",
+        "valarray": "cpp"
     }
 }

@@ -37,10 +37,10 @@
 #define	EXT2FS_MAXNAMLEN	255
 
 struct ext2fs_direct {
-	uint32_t e2d_ino;		/* inode number of entry */
-	uint16_t e2d_reclen;		/* length of this record */
-	uint16_t e2d_namlen;		/* length of string in e2d_name */
-	char e2d_name[EXT2FS_MAXNAMLEN];/* name with length<=EXT2FS_MAXNAMLEN */
+	uint32_t e2d_ino;		/* inode number of entry 索引节点号 */
+	uint16_t e2d_reclen;		/* length of this record 目录项长度 */
+	uint16_t e2d_namlen;		/* length of string in e2d_name 文件名长度 */
+	char e2d_name[EXT2FS_MAXNAMLEN];/* name with length<=EXT2FS_MAXNAMLEN 文件名 */
 };
 
 enum slotstatus {

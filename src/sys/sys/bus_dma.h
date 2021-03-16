@@ -83,7 +83,7 @@
 #define	BUS_DMA_WAITOK		0x00	/* safe to sleep (pseudo-flag) */
 #define	BUS_DMA_NOWAIT		0x01	/* not safe to sleep */
 #define	BUS_DMA_ALLOCNOW	0x02	/* perform resource allocation now */
-#define	BUS_DMA_COHERENT	0x04	/* hint: map memory in a coherent way */
+#define	BUS_DMA_COHERENT	0x04	/* hint: map memory in a coherent(连贯的) way */
 #define	BUS_DMA_ZERO		0x08	/* allocate zero'ed memory */
 #define	BUS_DMA_BUS1		0x10	/* placeholders for bus functions... */
 #define	BUS_DMA_BUS2		0x20
@@ -92,7 +92,7 @@
 
 /*
  * The following two flags are non-standard or specific to only certain
- * architectures
+ * architectures 以下两个标志是非标准的或仅特定于某些体系结构
  */
 #define	BUS_DMA_NOWRITE		0x100
 #define	BUS_DMA_NOCACHE		0x200
@@ -101,6 +101,8 @@
  * The following flag is a DMA tag hint that the page offset of the
  * loaded kernel virtual address must be preserved in the first
  * physical segment address, when the KVA is loaded into DMA.
+ * 下面的标志是一个DMA标记，提示当KVA加载到DMA中时，可加载的内核虚拟地址的页偏移量必须
+ * 保留在第一个物理段地址中
  */
 #define	BUS_DMA_KEEP_PG_OFFSET	0x400
 
@@ -127,7 +129,8 @@ struct uio;
  *
  *	Describes a single contiguous DMA transaction.  Values
  *	are suitable for programming into DMA registers.
-	描述单个连续的DMA事务，它的值适合于编写到DMA寄存器
+ *	描述单个连续的DMA事务，它的值适合于编写到DMA寄存器。segment意思就是段，
+ 		所以这个结构体表示的就是一个地址空间段
  */
 typedef struct bus_dma_segment {
 	bus_addr_t	ds_addr;	/* DMA address */
@@ -194,7 +197,10 @@ void busdma_lock_mutex(void *arg, bus_dma_lock_op_t op);
  *	dmat:		A pointer to set to a valid dma tag should the return
  *			value of this function indicate success.
  */
-/* XXX Should probably allow specification of alignment */
+/* XXX Should probably allow specification of alignment 
+	创建一个DMA标签(tag)，主要用于描述DMA事务的特性和限制；可以多次调用该函数，注意每次传入的参数会不同，
+	因为一个DMA标签可以从其他DMA标签处继承特性和限制。当然，子标签不能放宽父标签所建立的限制
+*/
 int bus_dma_tag_create(bus_dma_tag_t parent, bus_size_t alignment,
 		       bus_addr_t boundary, bus_addr_t lowaddr,
 		       bus_addr_t highaddr, bus_dma_filter_t *filtfunc,
@@ -206,7 +212,8 @@ int bus_dma_tag_create(bus_dma_tag_t parent, bus_size_t alignment,
  * Set the memory domain to be used for allocations.
  *
  * Automatic for PCI devices.  Must be set prior to creating maps or
- * allocating memory.
+ * allocating memory. 必须在创建映射或分配内存之前设置
+ * 从函数代码来看，DMA 功能应该是要划归到bus当中，并且tag应该是一个相当重要的量
  */
 int bus_dma_tag_set_domain(bus_dma_tag_t dmat, int domain);
 
@@ -215,6 +222,7 @@ int bus_dma_tag_destroy(bus_dma_tag_t dmat);
 /*
  * A function that processes a successfully loaded dma map or an error
  * from a delayed load map.
+ * 这个函数用于处理加载成功的DMA映射和加载错误的延迟映射的情况
  */
 typedef void bus_dmamap_callback_t(void *, bus_dma_segment_t *, int, int);
 
@@ -222,11 +230,13 @@ typedef void bus_dmamap_callback_t(void *, bus_dma_segment_t *, int, int);
  * Like bus_dmamap_callback but includes map size in bytes.  This is
  * defined as a separate interface to maintain compatibility for users
  * of bus_dmamap_callback_t--at some point these interfaces should be merged.
+ * 只是比上面的函数多了一个映射的字节数
  */
 typedef void bus_dmamap_callback2_t(void *, bus_dma_segment_t *, int, bus_size_t, int);
 
 /*
  * Map the buffer buf into bus space using the dmamap map.
+ * 将 buffer 映射到总线地址空间，所以说DMA应该还是属于总线操作的范畴
  */
 int bus_dmamap_load(bus_dma_tag_t dmat, bus_dmamap_t map, void *buf,
 		    bus_size_t buflen, bus_dmamap_callback_t *callback,
@@ -247,7 +257,7 @@ int bus_dmamap_load_mbuf_sg(bus_dma_tag_t dmat, bus_dmamap_t map,
 
 /*
  * Like bus_dmamap_load but for uios.  Note the use of the
- * bus_dmamap_callback2_t interface.
+ * bus_dmamap_callback2_t interface.	
  */
 int bus_dmamap_load_uio(bus_dma_tag_t dmat, bus_dmamap_t map,
 			struct uio *ui,
@@ -255,7 +265,7 @@ int bus_dmamap_load_uio(bus_dma_tag_t dmat, bus_dmamap_t map,
 			int flags);
 
 /*
- * Like bus_dmamap_load but for cam control blocks.
+ * Like bus_dmamap_load but for cam control blocks.	CAM控制块
  */
 int bus_dmamap_load_ccb(bus_dma_tag_t dmat, bus_dmamap_t map, union ccb *ccb,
 			bus_dmamap_callback_t *callback, void *callback_arg,
@@ -269,14 +279,14 @@ int bus_dmamap_load_bio(bus_dma_tag_t dmat, bus_dmamap_t map, struct bio *bio,
 			int flags);
 
 /*
- * Loads any memory descriptor.
+ * Loads any memory descriptor. dma_load都是用于映射，只是作用的对象不同
  */
 int bus_dmamap_load_mem(bus_dma_tag_t dmat, bus_dmamap_t map,
 			struct memdesc *mem, bus_dmamap_callback_t *callback,
 			void *callback_arg, int flags);
 
 /*
- * Placeholder for use by busdma implementations which do not benefit
+ * Placeholder(占位符) for use by busdma implementations which do not benefit
  * from optimized procedure to load an array of vm_page_t.  Falls back
  * to do _bus_dmamap_load_phys() in loop.
  */
@@ -292,7 +302,8 @@ int bus_dmamap_load_ma_triv(bus_dma_tag_t dmat, bus_dmamap_t map,
 
 /*
  * Allocate a handle for mapping from kva/uva/physical
- * address space into bus device space.
+ * address space into bus device space. 用于管理总线设备地址空间的映射
+ * kernel virtual address / user virtual address / physical address
  */
 BUS_DMAMAP_OP int bus_dmamap_create(bus_dma_tag_t dmat, int flags, bus_dmamap_t *mapp);
 
@@ -306,6 +317,7 @@ BUS_DMAMAP_OP int bus_dmamap_destroy(bus_dma_tag_t dmat, bus_dmamap_t map);
  * Allocate a piece of memory that can be efficiently mapped into
  * bus device space based on the constraints listed in the dma tag.
  * A dmamap to for use with dmamap_load is also allocated.
+ * 用于分配一块可用于DMA映射的内存地址空间
  */
 BUS_DMAMAP_OP int bus_dmamem_alloc(bus_dma_tag_t dmat, void** vaddr, int flags,
 		     bus_dmamap_t *mapp);
@@ -318,7 +330,7 @@ BUS_DMAMAP_OP void bus_dmamem_free(bus_dma_tag_t dmat, void *vaddr, bus_dmamap_t
 
 /*
  * Perform a synchronization operation on the given map. If the map
- * is NULL we have a fully IO-coherent system.
+ * is NULL we have a fully IO-coherent(连贯的) system.
  */
 BUS_DMAMAP_OP void bus_dmamap_sync(bus_dma_tag_t dmat, bus_dmamap_t dmamap, bus_dmasync_op_t op);
 

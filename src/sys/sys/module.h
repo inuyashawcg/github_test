@@ -57,7 +57,8 @@ typedef int (*modeventhand_t)(module_t, int /* modeventtype_t */, void *);
 
 /*
  * Struct for registering modules statically via SYSINIT.
- * 通过system init来进行注册
+ * 通过system init来进行注册。moduledata 应该就是对应的 module metadata。注册的时候这两个数据
+ * 是要组合在一起构成一个完整的模块
  */
 typedef struct moduledata {
 	const char	*name;		/* module name */
@@ -79,7 +80,7 @@ typedef union modspecific {
 
 /*
  * Module dependency declaration
- * module 的依赖项
+ * module 依赖的版本信息
  */
 struct mod_depend {
 	int	md_ver_minimum;
@@ -94,7 +95,11 @@ struct mod_version {
 	int	mv_version;
 };
 
-/* MDT: metadata? */
+/* MDT: metadata? 元数据
+	元数据可以理解为是对一个事务的描述或者管理的数据，一般的场景是说明事务是名称、标识、位置、版本等等信息，或者是说某块数据
+	代表什么意义(类似于协议一类的东西)。与之对应的是数据，数据就是表示真正需要被用到的、进行功能实现的那部分。一般两者都是组
+	合在一起使用，构成一个完整的模块
+*/
 struct mod_metadata {
 	int		md_version;	/* structure version MDTV_* */
 	int		md_type;	/* type of entry MDT_* */

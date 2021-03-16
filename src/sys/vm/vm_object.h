@@ -105,9 +105,9 @@ struct vm_object {
 	struct vm_radix rtree;		/* root of the resident page radix trie 常驻页的根 */
 	vm_pindex_t size;		/* Object size */
 	struct domainset_ref domain;	/* NUMA policy. */
-	int generation;			/* generation ID */
+	int generation;			/* generation ID 应该是用于区分不同的object */
 	int ref_count;			/* How many refs?? */
-	int shadow_count;		/* how many objects that this is a shadow for */
+	int shadow_count;		/* how many objects that this is a shadow for 这是多少个对象的阴影 */
 	vm_memattr_t memattr;		/* default memory attribute for pages 页的默认内存属性 */
 	objtype_t type;			/* type of pager */
 	u_short flags;			/* see below */

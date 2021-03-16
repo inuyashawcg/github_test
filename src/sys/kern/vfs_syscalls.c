@@ -1065,6 +1065,7 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 	/*
 	 * Allocate a file structure. The descriptor to reference it
 	 * is allocated and set by finstall() below.
+	 * 分配文件结构。引用它的描述符由下面的 finstall() 分配和设置(此时还未分配问价描述符)
 	 */
 	error = falloc_noinstall(td, &fp);
 	if (error != 0)
@@ -1073,9 +1074,16 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 	 * An extra reference on `fp' has been held for us by
 	 * falloc_noinstall().
 	 */
-	/* Set the flags early so the finit in devfs can pick them up. */
+	/* Set the flags early so the finit in devfs can pick them up. 
+		尽早设置标志，以便devfs中的finit可以拾取它们
+	*/
 	fp->f_flag = flags & FMASK;
 	cmode = ((mode & ~fdp->fd_cmask) & ALLPERMS) & ~S_ISTXT;
+
+	/* 
+		填充nameidata结构体，把这些零散的数据进行打包处理。所以此时 nameidata 结构体中包含
+		了一些基本信息，比如路径信息、权限信息、线程信息
+	*/
 	NDINIT_ATRIGHTS(&nd, LOOKUP, FOLLOW | AUDITVNODE1, pathseg, path, fd,
 	    &rights, td);
 	td->td_dupfd = -1;		/* XXX check for fdopen */

@@ -79,16 +79,17 @@ typedef void bio_task_t(void *);
 
 /*
  * The bio structure describes an I/O operation in the kernel.
+ * bio: block I/O ? buffer I/O
  */
 struct bio {
-	uint16_t bio_cmd;		/* I/O operation. */
-	uint16_t bio_flags;		/* General flags. */
-	uint16_t bio_cflags;		/* Private use by the consumer. */
-	uint16_t bio_pflags;		/* Private use by the provider. */
-	struct cdev *bio_dev;		/* Device to do I/O on. */
-	struct disk *bio_disk;		/* Valid below geom_disk.c only */
-	off_t	bio_offset;		/* Offset into file. */
-	long	bio_bcount;		/* Valid bytes in buffer. */
+	uint16_t bio_cmd;		/* I/O operation. 输入输出操作 */
+	uint16_t bio_flags;		/* General flags. 通用标志 */
+	uint16_t bio_cflags;		/* Private use by the consumer. 消费者私用 */
+	uint16_t bio_pflags;		/* Private use by the provider. 提供者私用 */
+	struct cdev *bio_dev;		/* Device to do I/O on. 表示执行输入输出的设备 */
+	struct disk *bio_disk;		/* Valid below geom_disk.c only 指向disk的指针 */
+	off_t	bio_offset;		/* Offset into file. 文件中的请求位置 */
+	long	bio_bcount;		/* Valid bytes in buffer. 有效字节数 */
 	caddr_t	bio_data;		/* Memory, superblocks, indirect etc. */
 	struct vm_page **bio_ma;	/* Or unmapped. */
 	int	bio_ma_offset;		/* Offset in the first page of bio_ma. */
@@ -100,7 +101,7 @@ struct bio {
 	void	*bio_driver2;		/* Private use by the provider. */
 	void	*bio_caller1;		/* Private use by the consumer. */
 	void	*bio_caller2;		/* Private use by the consumer. */
-	TAILQ_ENTRY(bio) bio_queue;	/* Disksort queue. */
+	TAILQ_ENTRY(bio) bio_queue;	/* Disksort queue. 磁盘排序队列 */
 	const char *bio_attribute;	/* Attribute for BIO_[GS]ETATTR */
 	struct  disk_zone_args bio_zone;/* Used for BIO_ZONE */
 	struct g_consumer *bio_from;	/* GEOM linkage */

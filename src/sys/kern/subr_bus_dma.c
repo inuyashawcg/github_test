@@ -59,6 +59,7 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/subr_bus_dma.c 326271 2017-11-27 15:20:
  * Load up data starting at offset within a region specified by a
  * list of virtual address ranges until either length or the region
  * are exhausted.
+ * 从虚拟地址范围列表指定的区域内的偏移量开始加载数据，直到耗尽长度或区域
  */
 static int
 _bus_dmamap_load_vlist(bus_dma_tag_t dmat, bus_dmamap_t map,
@@ -68,6 +69,7 @@ _bus_dmamap_load_vlist(bus_dma_tag_t dmat, bus_dmamap_t map,
 	int error;
 
 	error = 0;
+	/* 循环加载数据 */
 	for (; sglist_cnt > 0 && length != 0; sglist_cnt--, list++) {
 		char *addr;
 		size_t ds_len;
@@ -90,7 +92,7 @@ _bus_dmamap_load_vlist(bus_dma_tag_t dmat, bus_dmamap_t map,
 }
 
 /*
- * Load a list of physical addresses.
+ * Load a list of physical addresses. 加载物理地址列表
  */
 static int
 _bus_dmamap_load_plist(bus_dma_tag_t dmat, bus_dmamap_t map,
@@ -110,7 +112,7 @@ _bus_dmamap_load_plist(bus_dma_tag_t dmat, bus_dmamap_t map,
 }
 
 /*
- * Load an mbuf chain.
+ * Load an mbuf chain. mbuf主要用于内核进程间通信(IPC)
  */
 static int
 _bus_dmamap_load_mbuf_sg(bus_dma_tag_t dmat, bus_dmamap_t map,
@@ -133,7 +135,7 @@ _bus_dmamap_load_mbuf_sg(bus_dma_tag_t dmat, bus_dmamap_t map,
 }
 
 /*
- * Load from block io.
+ * Load from block io. 可能是跟磁盘相关，用于文件访问
  */
 static int
 _bus_dmamap_load_bio(bus_dma_tag_t dmat, bus_dmamap_t map, struct bio *bio,

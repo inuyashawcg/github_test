@@ -97,6 +97,7 @@ union vm_map_object {
  *	a VM object (or sharing map) and offset into that object,
  *	and user-exported inheritance and protection information.
  *	Also included is control information for virtual copy operations.
+
 	- 地址映射条目包括起始地址和结束地址、VM对象（或共享映射）和该对象的偏移量，
 	以及用户导出的继承和保护信息。还包括虚拟复制操作的控制信息。
 	- 表示一段连续的虚拟地址范围，这些地址共享保护权限和继承属性，并且使用相同的
@@ -107,13 +108,13 @@ struct vm_map_entry {
 	struct vm_map_entry *next;	/* next entry */
 	struct vm_map_entry *left;	/* left child in binary search tree */
 	struct vm_map_entry *right;	/* right child in binary search tree */
-	vm_offset_t start;		/* start address */
+	vm_offset_t start;		/* start address 指定了entry所表示的虚拟内存空间的大小 */
 	vm_offset_t end;		/* end address */
 	vm_offset_t next_read;		/* vaddr of the next sequential read 下一次顺序读取的vaddr */
 	vm_size_t adj_free;		/* amount of adjacent free space 相邻可用空间量 */
 	vm_size_t max_free;		/* max free space in subtree 子树中的最大可用空间 */
 	union vm_map_object object;	/* object I point to */
-	vm_ooffset_t offset;		/* offset into object */
+	vm_ooffset_t offset;		/* offset into object 在object中的偏移量 */
 	vm_eflags_t eflags;		/* map entry flags */
 	vm_prot_t protection;		/* protection code */
 	vm_prot_t max_protection;	/* maximum protection */
@@ -280,7 +281,7 @@ struct vmspace {
 	 * structure on a single architecture don't result in offset
 	 * variations of the machine-independent fields in the vmspace.
 	 */
-	struct pmap vm_pmap;	/* private physical map */
+	struct pmap vm_pmap;	/* private physical map - CPU相关物理内存 */
 };
 
 #ifdef	_KERNEL

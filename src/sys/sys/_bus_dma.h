@@ -53,7 +53,7 @@ typedef struct bus_dmamap	*bus_dmamap_t;
 
 /*
  * A function that performs driver-specific synchronization on behalf of
- * busdma.
+ * busdma. 代表busdma执行特定于驱动程序的同步的函数
  */
 typedef enum {
 	BUS_DMA_LOCK	= 0x01,

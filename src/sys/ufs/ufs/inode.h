@@ -57,25 +57,36 @@
  * is the permanent meta-data associated with the file which is read in
  * from the permanent dinode from long term storage when the file becomes
  * active, and is put back when the file is no longer being used.
- *
+ * inode 用于描述UFS中的每一个处于活跃状态的文件。它由两类信息构成，一种是文件仅仅处于活跃状态
+ * 的时候需要的信息(比如文件的标识和提升查找速度的链接)。第二部分是与文件相关联的永久元数据，
+ * 当文件处于活动状态时，从长期存储器的永久性 dinode 读入，当文件不再被使用时放回
+ * 
  * An inode may only be changed while holding either the exclusive
  * vnode lock or the shared vnode lock and the vnode interlock. We use
  * the latter only for "read" and "get" operations that require
  * changing i_flag, or a timestamp. This locking protocol allows executing
  * those operations without having to upgrade the vnode lock from shared to
  * exclusive.
+ * 当持有上述三个lock中的其中任何一个的时候，inode 才可以被修改。后者(lock?)仅仅被用于读取或者
+ * 获取 i_flag / timestamp。此锁定协议允许执行这些操作，而无需将vnode锁从shared升级为exclusive
+ * 
+ * Q: 为什么要引入 inode 结构体？
+ * A: 为了能够并发地给多个文件分配空间，并且能够随机访问文件的内容
+ * 
+ * 文件库(快速文件系统)有一个非常有用的特性是它能够快速生成一个文件系统的快照(snapshot)。快照每几个
+ * 小时生成一次，并且安装在一个明确的位置。用户可以利用快照进行文件系统的恢复
  */
 struct inode {
 	TAILQ_ENTRY(inode) i_nextsnap; /* snapshot file list. */
-	struct	vnode  *i_vnode;/* Vnode associated with this inode. */
-	struct 	ufsmount *i_ump;/* Ufsmount point associated with this inode. */
-	struct	 dquot *i_dquot[MAXQUOTAS]; /* Dquot structures. */
+	struct	vnode  *i_vnode;/* Vnode associated with this inode. 对应的vnode */
+	struct 	ufsmount *i_ump;/* Ufsmount point associated with this inode. 挂载点信息 */
+	struct	 dquot *i_dquot[MAXQUOTAS]; /* Dquot structures. 描述磁盘属性 */
 	union {
 		struct dirhash *dirhash; /* Hashing for large directories. */
-		daddr_t *snapblklist;    /* Collect expunged snapshot blocks. */
+		daddr_t *snapblklist;    /* Collect expunged snapshot blocks. 收集删除的快照块 */
 	} i_un;
 	/*
-	 * The real copy of the on-disk inode.
+	 * The real copy of the on-disk inode. 磁盘inode的真实副本
 	 */
 	union {
 		struct ufs1_dinode *din1;	/* UFS1 on-disk dinode. */
@@ -88,7 +99,7 @@ struct inode {
 
 
 	/*
-	 * Side effects; used during directory lookup.
+	 * Side effects; used during directory lookup. 目录查找的时候会用到
 	 */
 	int32_t	  i_count;	/* Size of free slot in directory. */
 	doff_t	  i_endoff;	/* End of useful stuff in directory. */

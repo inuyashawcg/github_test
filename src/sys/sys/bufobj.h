@@ -77,10 +77,11 @@ typedef int b_write_t(struct buf *);
 typedef int b_sync_t(struct bufobj *, int waitfor);
 typedef void b_bdflush_t(struct bufobj *, struct buf *);
 
+// buffer object所支持的一些操作
 struct buf_ops {
 	char		*bop_name;
 	b_write_t	*bop_write;
-	b_strategy_t	*bop_strategy;
+	b_strategy_t	*bop_strategy;	// buffer操作策略？
 	b_sync_t	*bop_sync;
 	b_bdflush_t	*bop_bdflush;
 };
@@ -97,16 +98,16 @@ struct buf_ops {
  * '-' Constant and unchanging after initialization.
  */
 struct bufobj {
-	struct rwlock	bo_lock;	/* Lock which protects "i" things */
-	struct buf_ops	*bo_ops;	/* - Buffer operations */
+	struct rwlock	bo_lock;	/* Lock which protects "i" things 读写锁 */
+	struct buf_ops	*bo_ops;	/* - Buffer operations 对buffer可以执行的操作 */
 	struct vm_object *bo_object;	/* v Place to store VM object */
 	LIST_ENTRY(bufobj) bo_synclist;	/* S dirty vnode list */
 	void		*bo_private;	/* private pointer */
-	struct bufv	bo_clean;	/* i Clean buffers */
-	struct bufv	bo_dirty;	/* i Dirty buffers */
+	struct bufv	bo_clean;	/* i Clean buffers 干净缓存 */
+	struct bufv	bo_dirty;	/* i Dirty buffers 脏缓存 */
 	long		bo_numoutput;	/* i Writes in progress */
 	u_int		bo_flag;	/* i Flags */
-	int		bo_domain;	/* - Clean queue affinity */
+	int		bo_domain;	/* - Clean queue affinity 清除队列相关性 */
 	int		bo_bsize;	/* - Block size for i/o */
 };
 

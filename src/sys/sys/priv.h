@@ -300,7 +300,7 @@
 					 */
 
 /*
- * Device file system privileges.
+ * Device file system privileges. 设备文件的系统权限
  */
 #define	PRIV_DEVFS_RULE		370	/* Can manage devfs rules. */
 #define	PRIV_DEVFS_SYMLINK	371	/* Can create symlinks in devfs. */

@@ -99,6 +99,7 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/vfs_subr.c 337977 2018-08-17 16:07:06Z 
 #include <ddb/ddb.h>
 #endif
 
+/* static类型的函数在class中应该要声明为private */
 static void	delmntque(struct vnode *vp);
 static int	flushbuflist(struct bufv *bufv, int flags, struct bufobj *bo,
 		    int slpflag, int slptimeo);
@@ -136,23 +137,30 @@ static void	destroy_vpollinfo(struct vpollinfo *vi);
 /*
  * Number of vnodes in existence.  Increased whenever getnewvnode()
  * allocates a new vnode, decreased in vdropl() for VI_DOOMED vnode.
+ * 表示目前已经存在的vnode的数量，而且是静态的，也是全局参数
  */
 static unsigned long	numvnodes;
 
 SYSCTL_ULONG(_vfs, OID_AUTO, numvnodes, CTLFLAG_RD, &numvnodes, 0,
     "Number of vnodes in existence");
 
+/*
+	通过 getnewvnode 函数创建的 vnode 数量
+*/
 static counter_u64_t vnodes_created;
 SYSCTL_COUNTER_U64(_vfs, OID_AUTO, vnodes_created, CTLFLAG_RD, &vnodes_created,
     "Number of vnodes created by getnewvnode");
 
+/*
+	mount中的free list对于 vnode数量的限制
+*/
 static u_long mnt_free_list_batch = 128;
 SYSCTL_ULONG(_vfs, OID_AUTO, mnt_free_list_batch, CTLFLAG_RW,
     &mnt_free_list_batch, 0, "Limit of vnodes held on mnt's free list");
 
 /*
  * Conversion tables for conversion from vnode types to inode formats
- * and back.
+ * and back. 用于从vnode类型转换为inode格式并返回的转换表
  */
 enum vtype iftovt_tab[16] = {
 	VNON, VFIFO, VCHR, VNON, VDIR, VNON, VBLK, VNON,
@@ -165,6 +173,7 @@ int vttoif_tab[10] = {
 
 /*
  * List of vnodes that are ready for recycling.
+ * 已经准备好回收的 vnode链表，也就是说目前还未回收？
  */
 static TAILQ_HEAD(freelst, vnode) vnode_free_list;
 
@@ -177,7 +186,11 @@ static TAILQ_HEAD(freelst, vnode) vnode_free_list;
  * of this sub-cache with its complement to try to prevent either from
  * thrashing while the other is relatively inactive.  The targets express
  * a preference for the best balance.
- *
+ * 空闲的vnode很少是完全空闲的，只是相比较而言回收成本比较低而已；它们通常用于已统计但
+ * 未读取的文件；这些文件通常附带inode和namecache数据。此目标是主要由此类文件组成的子
+ * 缓存的首选最小大小。系统平衡这个子缓存的大小和它的补码，以防止其中一个在另一个相对不
+ * 活动的情况下抖动。目标表示对最佳平衡的偏好
+ * 
  * "Above" this target there are 2 further targets (watermarks) related
  * to recyling of free vnodes.  In the best-operating case, the cache is
  * exactly full, the free list has size between vlowat and vhiwat above the
@@ -190,6 +203,9 @@ static TAILQ_HEAD(freelst, vnode) vnode_free_list;
  * of 25% for wantfreevnodes are too large if the memory size is large.
  * E.g., 9% of 75% of MAXVNODES is more than 566000 vnodes to reclaim
  * whenever vnlru_proc() becomes active.
+ * 
+ * 上述表达的意思就是维持vnode回收机制的一个最佳状态，通过sysctl控制一些参数来进行
+ * 相应的配置，
  */
 static u_long wantfreevnodes;
 SYSCTL_ULONG(_vfs, OID_AUTO, wantfreevnodes, CTLFLAG_RW,
@@ -214,9 +230,11 @@ SYSCTL_INT(_vfs, OID_AUTO, reassignbufcalls, CTLFLAG_RW, &reassignbufcalls, 0,
 static counter_u64_t free_owe_inact;
 SYSCTL_COUNTER_U64(_vfs, OID_AUTO, free_owe_inact, CTLFLAG_RD, &free_owe_inact,
     "Number of times free vnodes kept on active list due to VFS "
-    "owing inactivation");
+    "owing inactivation"); // 由于VFS失活而保留在活动列表上的可用Vnode的次数
 
-/* To keep more than one thread at a time from running vfs_getnewfsid */
+/* To keep more than one thread at a time from running vfs_getnewfsid 
+	保证每个时刻都至少一个线程运行 vfs_getnewfsid 函数
+*/
 static struct mtx mntid_mtx;
 
 /*
@@ -224,15 +242,20 @@ static struct mtx mntid_mtx;
  *	vnode_free_list
  *	numvnodes
  *	freevnodes
+
+	如果要访问下面列举的三个变量，首先要加锁 vnode_free_list_mtx
  */
 static struct mtx vnode_free_list_mtx;
 
 /* Publicly exported FS */
 struct nfs_public nfs_pub;
 
+// trie: 表示的可能是一种查找树，单词查找树？
 static uma_zone_t buf_trie_zone;
 
-/* Zone for allocation of new vnodes - used exclusively by getnewvnode() */
+/* Zone for allocation of new vnodes - used exclusively by getnewvnode() 
+	分配新vnode的区域-由getnewvnode独占使用
+*/
 static uma_zone_t vnode_zone;
 static uma_zone_t vnodepoll_zone;
 
@@ -260,9 +283,21 @@ static uma_zone_t vnodepoll_zone;
  *
  *	syncer_workitem_pending[(syncer_delayno + 15) & syncer_mask]
  *
+ * 将文件数据和文件系统元数据的写入延迟几十秒是很有用的，这样快速创建和删除的文件
+ * 就不必浪费创建和删除时的磁盘带宽。为了实现这一点，我们将vnode附加到“workitem”队列中。
+ * 使用软更新实现运行时，大多数挂起的元数据依赖项不应等待超过几秒钟。因此，安装在块设备上
+ * 的延迟时间仅为文件数据延迟时间的一半左右。类似地，目录更新更为关键，因此仅延迟文件数据
+ * 延迟时间的三分之一。因此，有SYNCER_MAXDELAY队列以每秒一个的速率进行循环处理（从文件
+ * 系统SYNCER进程驱动）。syncer_delayno变量表示要处理的下一个队列。需要尽快处理的项目
+ * 将放置在此队列中 
+ * 	syncer_workitem_pending[syncer_delayno]
+ * 延迟15秒是通过在队列中稍后放置15个条目来完成的：
+ * 	syncer_workitem_pending[(syncer_delayno + 15) & syncer_mask]
  */
 static int syncer_delayno;
 static long syncer_mask;
+
+/* synclist 中存放的元素是 bufobj */
 LIST_HEAD(synclist, bufobj);
 static struct synclist *syncer_workitem_pending;
 /*
@@ -275,13 +310,13 @@ static struct synclist *syncer_workitem_pending;
  *	syncer_worklist_len
  *	rushjob
  */
-static struct mtx sync_mtx;
-static struct cv sync_wakeup;
+static struct mtx sync_mtx;	// sync_mtx 会保护上述变量
+static struct cv sync_wakeup; //  条件变量，唤醒同步操作
 
 #define SYNCER_MAXDELAY		32
 static int syncer_maxdelay = SYNCER_MAXDELAY;	/* maximum delay time */
-static int syncdelay = 30;		/* max time to delay syncing data */
-static int filedelay = 30;		/* time to delay syncing files */
+static int syncdelay = 30;		/* max time to delay syncing data 延迟数据同步的最大时间 */
+static int filedelay = 30;		/* time to delay syncing files 延迟文件同步的时间 */
 SYSCTL_INT(_kern, OID_AUTO, filedelay, CTLFLAG_RW, &filedelay, 0,
     "Time to delay syncing files (in seconds)");
 static int dirdelay = 29;		/* time to delay syncing directories */
@@ -291,12 +326,13 @@ static int metadelay = 28;		/* time to delay syncing metadata */
 SYSCTL_INT(_kern, OID_AUTO, metadelay, CTLFLAG_RW, &metadelay, 0,
     "Time to delay syncing metadata (in seconds)");
 static int rushjob;		/* number of slots to run ASAP */
-static int stat_rush_requests;	/* number of times I/O speeded up */
+static int stat_rush_requests;	/* number of times I/O speeded up I/O加速次数 */
 SYSCTL_INT(_debug, OID_AUTO, rush_requests, CTLFLAG_RW, &stat_rush_requests, 0,
     "Number of times I/O speeded up (rush requests)");
 
 /*
  * When shutting down the syncer, run it at four times normal speed.
+ * 关闭同步器时，以正常速度的四倍运行
  */
 #define SYNCER_SHUTDOWN_SPEEDUP		4
 static int sync_vnode_count;
@@ -307,11 +343,12 @@ static enum { SYNCER_RUNNING, SYNCER_SHUTTING_DOWN, SYNCER_FINAL_DELAY }
 /* Target for maximum number of vnodes. */
 int desiredvnodes;
 static int gapvnodes;		/* gap between wanted and desired */
-static int vhiwat;		/* enough extras after expansion */
+static int vhiwat;		/* enough extras after expansion 扩展后有足够的额外功能 */
 static int vlowat;		/* minimal extras before expansion */
 static int vstir;		/* nonzero to stir non-free vnodes */
 static volatile int vsmalltrigger = 8;	/* pref to keep if > this many pages */
 
+/* 更新desiredvnodes，sysctl其实就是在用户态控制内核态中的一些属性参数 */
 static int
 sysctl_update_desiredvnodes(SYSCTL_HANDLER_ARGS)
 {
@@ -338,7 +375,10 @@ static int vnlru_nowhere;
 SYSCTL_INT(_debug, OID_AUTO, vnlru_nowhere, CTLFLAG_RW,
     &vnlru_nowhere, 0, "Number of times the vnlru process ran without success");
 
-/* Shift count for (uintptr_t)vp to initialize vp->v_hash. */
+/* Shift count for (uintptr_t)vp to initialize vp->v_hash. 
+	(uintptr_t)vp 的移位计数来初始化 vp->v_hash
+	展开来看就是: vnode size to log，表示的是移位计数
+*/
 static int vnsz2log;
 
 /*
@@ -365,6 +405,8 @@ PCTRIE_DEFINE(BUF, buf, b_lblkno, buf_trie_alloc, buf_trie_free);
  * Reevaluate the following cap on the number of vnodes after the physical
  * memory size exceeds 512GB.  In the limit, as the physical memory size
  * grows, the ratio of the memory size in KB to vnodes approaches 64:1.
+ * 在物理内存大小超过512GB后，请重新评估以下Vnode数上限。在限制中，随着物理内存大小的增长，
+ * 以KB为单位的内存大小与vnodes的比率接近64:1(用于vnode的内存是总物理内存大小的 1/64 ?)
  */
 #ifndef	MAXVNODES_MAX
 #define	MAXVNODES_MAX	(512 * 1024 * 1024 / 64)	/* 8M */
@@ -444,6 +486,7 @@ vnode_fini(void *mem, int size)
 #define	NC_SZ		92
 #endif
 
+/* vnode table initialize */
 static void
 vntblinit(void *dummy __unused)
 {
@@ -460,6 +503,11 @@ vntblinit(void *dummy __unused)
 	 * 1:64.  However, desiredvnodes is limited by the kernel's heap
 	 * size.  The memory required by desiredvnodes vnodes and vm objects
 	 * must not exceed 1/10th of the kernel's heap size.
+	 * 
+	 * Desiredvnodes是物理内存大小和内核堆大小的函数。一般来说，它随物理内存大小而扩展。
+	 * 在desiredvnodes超过98304之前，desiredvnodes与物理内存大小的比率为1:16
+	 * 此后，期望vnode与物理内存大小的边际比率为1:64。但是，DesiredVnode受到内核堆大小的限制。
+	 * desiredvnodes vnodes和vm对象所需的内存不得超过内核堆大小的十分之一
 	 */
 	physvnodes = maxproc + pgtok(vm_cnt.v_page_count) / 64 +
 	    3 * min(98304 * 16, pgtok(vm_cnt.v_page_count)) / 64;
@@ -472,10 +520,12 @@ vntblinit(void *dummy __unused)
 			    desiredvnodes, MAXVNODES_MAX);
 		desiredvnodes = MAXVNODES_MAX;
 	}
-	wantfreevnodes = desiredvnodes / 4;
+	wantfreevnodes = desiredvnodes / 4;	//wantfreevnodes 为 desiredvnodes 大小的 1/4
 	mtx_init(&mntid_mtx, "mntid", NULL, MTX_DEF);
-	TAILQ_INIT(&vnode_free_list);
+	TAILQ_INIT(&vnode_free_list);	// 初始化vnode free list，下一步就直接初始化free_list锁
 	mtx_init(&vnode_free_list_mtx, "vnode_free_list", NULL, MTX_DEF);
+
+	/* 创建了一块内存区域和缓存区域 */
 	vnode_zone = uma_zcreate("VNODE", sizeof (struct vnode), NULL, NULL,
 	    vnode_init, vnode_fini, UMA_ALIGN_PTR, 0);
 	vnodepoll_zone = uma_zcreate("VNODEPOLL", sizeof (struct vpollinfo),
@@ -484,24 +534,39 @@ vntblinit(void *dummy __unused)
 	 * Preallocate enough nodes to support one-per buf so that
 	 * we can not fail an insert.  reassignbuf() callers can not
 	 * tolerate the insertion failure.
+	 * 预先分配足够的节点来支持每个buf一个节点，这样我们就不会导致插入失败。
+	 * reassignbuf（）调用者不能容忍插入失败
 	 */
 	buf_trie_zone = uma_zcreate("BUF TRIE", pctrie_node_size(),
 	    NULL, NULL, pctrie_zone_init, NULL, UMA_ALIGN_PTR, 
 	    UMA_ZONE_NOFREE | UMA_ZONE_VM);
+
+	/* 
+		The uma_prealloc()	function allocates slabs for the requested number of items, 
+		typically following	the initial creation of	a zone.	 Subsequent allocations from 
+		the zone will be satisfied using the pre-allocated slabs.
+		这里应该就是之前所说的slab机制，上面我们初始创建了 buf_trie_zone 这么一个区域，然后再利用下面
+		这个函数分配 nbuf 数量的区域来使用
+	*/
 	uma_prealloc(buf_trie_zone, nbuf);
 
+	/* 指针变量，所以通过 alloc 分配相应的内存空间来存储数据 */
 	vnodes_created = counter_u64_alloc(M_WAITOK);
 	recycles_count = counter_u64_alloc(M_WAITOK);
 	free_owe_inact = counter_u64_alloc(M_WAITOK);
 
 	/*
-	 * Initialize the filesystem syncer.
+	 * Initialize the filesystem syncer. 初始化文件系统同步器。从代码实现来看，syncer_maxdelay用来
+	 * 计算需要分配的 hashtable 的内存大小，malloc 之后返回一个 hashtable。hashtable 中的每一个元素都
+	 * 是一个链表类型的指针
+	 * M_VNODE 在 vfs_int 中定义的是 Dynamically allocated vnodes，所以 syncer_workitem_pending
+	 * vfs 统一管理 vnode 的一个全局哈希表
 	 */
 	syncer_workitem_pending = hashinit(syncer_maxdelay, M_VNODE,
 	    &syncer_mask);
 	syncer_maxdelay = syncer_mask + 1;
 	mtx_init(&sync_mtx, "Syncer mtx", NULL, MTX_DEF);
-	cv_init(&sync_wakeup, "syncer");
+	cv_init(&sync_wakeup, "syncer");  //Condition variable，条件变量，同步的时候使用 
 	for (i = 1; i <= sizeof(struct vnode); i <<= 1)
 		vnsz2log++;
 	vnsz2log--;
@@ -512,6 +577,8 @@ SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_FIRST, vntblinit, NULL);
 /*
  * Mark a mount point as busy. Used to synchronize access and to delay
  * unmounting. Eventually, mountlist_mtx is not released on failure.
+ * 将一个挂载点标记为busy状态，用于同步访问和延迟卸载。最终，mountlist_mtx 在失败的时候
+ * 是不会被释放的。查阅用户手册注释，实现该功能的方式是通过增加point的引用计数
  *
  * vfs_busy() is a custom lock, it can block the caller.
  * vfs_busy() only sleeps if the unmount is active on the mount point.
@@ -661,7 +728,7 @@ vfs_busyfs(fsid_t *fsid)
 	    mp->mnt_stat.f_fsid.val[0] != fsid->val[0] ||
 	    mp->mnt_stat.f_fsid.val[1] != fsid->val[1])
 		goto slow;
-	if (vfs_busy(mp, 0) != 0) {
+	if (vfs_busy(mp, 0) != 0) {	// 主要逻辑的实现还是通过 vfs_busy 函数
 		cache[hash] = NULL;
 		goto slow;
 	}
@@ -693,6 +760,7 @@ slow:
 
 /*
  * Check if a user can access privileged mount options.
+ * 检查用户是否可以访问特权装载选项
  */
 int
 vfs_suser(struct mount *mp, struct thread *td)
@@ -785,7 +853,7 @@ SYSCTL_INT(_vfs, OID_AUTO, timestamp_precision, CTLFLAG_RW,
     "3+: sec + ns (max. precision))");
 
 /*
- * Get a current timestamp.
+ * Get a current timestamp. 获取当前的时间戳
  */
 void
 vfs_timestamp(struct timespec *tsp)
@@ -848,8 +916,11 @@ vattr_null(struct vattr *vap)
  * have VM backing store (VM backing store is typically the cause
  * of a vnode blowout so we want to do this).  Therefore, this operation
  * is not considered cheap.
+ * 当我们有太多的vnode时调用这个例程。它尝试释放<count>vnode，并可能释放仍具有VM 
+ * backing store的vnode（VM backing store通常是vnode井喷的原因，因此我们希望这样做）。
+ * 因此，这种操作并不便宜
  *
- * A number of conditions may prevent a vnode from being reclaimed.
+ * A number of conditions may prevent a vnode from being reclaimed(回收).
  * the buffer cache may have references on the vnode, a directory
  * vnode may still have references due to the namei cache representing
  * underlying files, or the vnode may be in active use.   It is not
@@ -972,6 +1043,7 @@ SYSCTL_INT(_debug, OID_AUTO, max_vnlru_free, CTLFLAG_RW, &max_vnlru_free,
 
 /*
  * Attempt to reduce the free list by the requested amount.
+ * count 就表示我们想要减少的数量
  */
 static void
 vnlru_free_locked(int count, struct vfsops *mnt_op)
@@ -982,8 +1054,14 @@ vnlru_free_locked(int count, struct vfsops *mnt_op)
 
 	tried_batches = false;
 	mtx_assert(&vnode_free_list_mtx, MA_OWNED);
+
+	/*
+		从free list中减少成员数量的时候会有限制，最大不超过 max_vnlru_free
+	*/
 	if (count > max_vnlru_free)
 		count = max_vnlru_free;
+	
+	/* 可以明确 vnode_free_list 管理空闲vnode */
 	for (; count > 0; count--) {
 		vp = TAILQ_FIRST(&vnode_free_list);
 		/*
@@ -1015,6 +1093,7 @@ vnlru_free_locked(int count, struct vfsops *mnt_op)
 		 * vnode is reclaimed.
 		 * Don't recycle if we can't get the interlock without
 		 * blocking.
+		 * 如果是不同类型mount结点的vnode，则不能回收，处理的方法是把该结点转移到链表尾部
 		 */
 		if ((mnt_op != NULL && (mp = vp->v_mount) != NULL &&
 		    mp->mnt_op != mnt_op) || !VI_TRYLOCK(vp)) {
@@ -1149,17 +1228,20 @@ vnlru_proc(void)
 	unsigned long onumvnodes;
 	int done, force, reclaim_nc_src, trigger, usevnodes;
 
+	// 注册一个内核事件来触发 kproc_shutdown
 	EVENTHANDLER_REGISTER(shutdown_pre_sync, kproc_shutdown, vnlruproc,
 	    SHUTDOWN_PRI_FIRST);
 
 	force = 0;
 	for (;;) {
-		kproc_suspend_check(vnlruproc);
+		kproc_suspend_check(vnlruproc);	// 用户挂起或者恢复内核进程
 		mtx_lock(&vnode_free_list_mtx);
 		/*
 		 * If numvnodes is too large (due to desiredvnodes being
 		 * adjusted using its sysctl, or emergency growth), first
 		 * try to reduce it by discarding from the free list.
+		 * 如果numvnodes太大（由于desiredvnodes正在使用其sysctl或紧急增长进行调整），
+		 * 请首先尝试通过从空闲列表中丢弃来减少它，调用 vnlru_free_locked
 		 */
 		if (numvnodes > desiredvnodes)
 			vnlru_free_locked(numvnodes - desiredvnodes, NULL);
@@ -1190,6 +1272,9 @@ vnlru_proc(void)
 		 * The trigger point is to avoid recycling vnodes with lots
 		 * of resident pages.  We aren't trying to free memory; we
 		 * are trying to recycle or at least free vnodes.
+		 * 计算回收参数。这些在整个循环中都是相同的，给人一种公平的假象。触发点是
+		 * 避免回收具有大量驻留页的vnode。我们不是在尝试释放内存，而是在尝试回收
+		 * 或至少释放vnode
 		 */
 		if (numvnodes <= desiredvnodes)
 			usevnodes = numvnodes - freevnodes;
@@ -1245,6 +1330,10 @@ vnlru_proc(void)
 	}
 }
 
+/*
+	vnlru: 表示的意思可能是 vnode recycle run，可能是跟vnode回收机制相关的操作。
+	看下面的操作，感觉像是专门创建了一个进程来支持vnode回收
+*/
 static struct kproc_desc vnlru_kp = {
 	"vnlru",
 	vnlru_proc,
@@ -1413,6 +1502,7 @@ getnewvnode_drop_reserve(void)
 
 /*
  * Return the next vnode from the free list.
+ * 从VFS中的 vnode free list中拿到一个vnode分配给某个文件系统实例
  */
 int
 getnewvnode(const char *tag, struct mount *mp, struct vop_vector *vops,
@@ -1467,20 +1557,29 @@ getnewvnode(const char *tag, struct mount *mp, struct vop_vector *vops,
 	mtx_unlock(&vnode_free_list_mtx);
 alloc:
 	counter_u64_add(vnodes_created, 1);
+
+	/* 为vnode申请内存空间 */
 	vp = (struct vnode *) uma_zalloc(vnode_zone, M_WAITOK);
 	/*
 	 * Locks are given the generic name "vnode" when created.
 	 * Follow the historic practice of using the filesystem
 	 * name when they allocated, e.g., "zfs", "ufs", "nfs, etc.
+	 * 锁在创建时被赋予通用名称“vnode”。遵循在分配文件时使用文件系统名称的历史惯例，
+	 * 例如“zfs”、“ufs”、“nfs”等
 	 *
 	 * Locks live in a witness group keyed on their name. Thus,
 	 * when a lock is renamed, it must also move from the witness
 	 * group of its old name to the witness group of its new name.
+	 * 锁生活在一个证人组键入他们的名字。因此，重命名锁时，它还必须从旧名称的见证组
+	 * 移到新名称的见证组
 	 *
 	 * The change only needs to be made when the vnode moves
 	 * from one filesystem type to another. We ensure that each
 	 * filesystem use a single static name pointer for its tag so
 	 * that we can compare pointers rather than doing a strcmp().
+	 * 只有当vnode从一种文件系统类型移动到另一种文件系统类型时，才需要进行更改。
+	 * 我们确保每个文件系统为其标记使用一个静态名称指针，这样我们就可以比较指针，
+	 * 而不是执行strcmp
 	 */
 	lo = &vp->v_vnlock->lock_object;
 	if (lo->lo_name != tag) {
@@ -1532,6 +1631,7 @@ alloc:
 
 /*
  * Delete from old mount point vnode list, if on one.
+ * 从旧装载点vnode列表中删除（如果在一个上）
  */
 static void
 delmntque(struct vnode *vp)
@@ -1577,6 +1677,7 @@ insmntque_stddtr(struct vnode *vp, void *dtr_arg)
 
 /*
  * Insert into list of vnodes for the new mount point, if available.
+ * 插入新装入点的vnode列表（如果可用）
  */
 int
 insmntque1(struct vnode *vp, struct mount *mp,
@@ -1637,6 +1738,7 @@ insmntque(struct vnode *vp, struct mount *mp)
 /*
  * Flush out and invalidate all buffers associated with a bufobj
  * Called with the underlying object locked.
+ * 清除与bufobj关联的所有缓冲区并使其无效。在锁定基础对象的情况下调用
  */
 int
 bufobj_invalbuf(struct bufobj *bo, int flags, int slpflag, int slptimeo)
@@ -1727,6 +1829,7 @@ bufobj_invalbuf(struct bufobj *bo, int flags, int slpflag, int slptimeo)
 /*
  * Flush out and invalidate all buffers associated with a vnode.
  * Called with the underlying object locked.
+ * 清除与vnode关联的所有缓冲区并使其无效。在锁定基础对象的情况下调用
  */
 int
 vinvalbuf(struct vnode *vp, int flags, int slpflag, int slptimeo)
@@ -1741,6 +1844,7 @@ vinvalbuf(struct vnode *vp, int flags, int slpflag, int slptimeo)
 
 /*
  * Flush out buffers on the specified list.
+ * 清除指定列表上的缓冲区
  *
  */
 static int
@@ -1852,6 +1956,7 @@ again:
  * Truncate a file's buffer and pages to a specified length.  This
  * is in lieu of the old vinvalbuf mechanism, which performed unneeded
  * sync activity.
+ * 将文件的缓冲区和页截断为指定的长度。这代替了旧的vinvalbuf机制，后者执行不需要的同步活动
  */
 int
 vtruncbuf(struct vnode *vp, struct ucred *cred, off_t length, int blksize)
@@ -1976,7 +2081,7 @@ buf_vlist_remove(struct buf *bp)
 }
 
 /*
- * Add the buffer to the sorted clean or dirty block list.
+ * Add the buffer to the sorted clean or dirty block list. 将缓冲区添加到已排序的干净或脏块列表中
  *
  * NOTE: xflags is passed as a constant, optimizing this inline function!
  */
@@ -2032,7 +2137,7 @@ gbincore(struct bufobj *bo, daddr_t lblkno)
 }
 
 /*
- * Associate a buffer with a vnode.
+ * Associate a buffer with a vnode. 将缓冲区与vnode关联
  */
 void
 bgetvp(struct vnode *vp, struct buf *bp)
@@ -2057,7 +2162,7 @@ bgetvp(struct vnode *vp, struct buf *bp)
 }
 
 /*
- * Disassociate a buffer from a vnode.
+ * Disassociate a buffer from a vnode. 解除缓冲区与vnode的关联
  */
 void
 brelvp(struct buf *bp)
@@ -2113,6 +2218,9 @@ vn_syncer_add_to_worklist(struct bufobj *bo, int delay)
 		delay = syncer_maxdelay - 2;
 	slot = (syncer_delayno + delay) & syncer_mask;
 
+	/* 
+		bo_synclist 是一个脏缓存链表，同步器把work item添加到到了链表头部？
+	*/
 	LIST_INSERT_HEAD(&syncer_workitem_pending[slot], bo, bo_synclist);
 	mtx_unlock(&sync_mtx);
 }
@@ -2191,6 +2299,7 @@ static int first_printf = 1;
 
 /*
  * System filesystem synchronizer daemon.
+ * 系统文件系统同步程序守护程序，同步针对的对象好像是bufobj
  */
 static void
 sched_sync(void)
@@ -2235,8 +2344,10 @@ sched_sync(void)
 		/*
 		 * Push files whose dirty time has expired.  Be careful
 		 * of interrupt race on slp queue.
+		 * 推送脏时间已过期的文件。注意slp队列上的中断竞争
 		 *
 		 * Skip over empty worklist slots when shutting down.
+		 * 关闭时跳过空的工作列表插槽
 		 */
 		do {
 			slp = &syncer_workitem_pending[syncer_delayno];
@@ -2249,6 +2360,8 @@ sched_sync(void)
 			 * it was emptied of all but syncer vnodes,
 			 * switch to the FINAL_DELAY state and run
 			 * for one more second.
+			 * 如果工作列表自清空后已包装，但同步器vnode除外，请切换到
+			 * FINAL_DELAY状态并再运行一秒钟
 			 */
 			if (syncer_state == SYNCER_SHUTTING_DOWN &&
 			    net_worklist_len == 0 &&
@@ -2558,6 +2671,7 @@ v_decr_devcount(struct vnode *vp)
  * is being destroyed.  Only callers who specify LK_RETRY will
  * see doomed vnodes.  If inactive processing was delayed in
  * vput try to do it here.
+ * 从空闲列表中获取一个特定的vnode，增加它的引用计数并锁定它
  *
  * Notes on lockless counter manipulation:
  * _vhold, vputx and other routines make various decisions based
@@ -2626,6 +2740,7 @@ vget(struct vnode *vp, int flags, struct thread *td)
 /*
  * Increase the reference (use) and hold count of a vnode.
  * This will also remove the vnode from the free list if it is presently free.
+ * 如果vnode当前是空闲的，这也将从空闲列表中删除它
  */
 void
 vref(struct vnode *vp)
@@ -2690,6 +2805,7 @@ vrefcnt(struct vnode *vp)
 
 /*
  * Decrement the use and hold counts for a vnode.
+ * 减少vnode的使用和保持计数
  *
  * See an explanation near vget() as to why atomic operation is safe.
  */
@@ -2813,6 +2929,7 @@ vunref(struct vnode *vp)
 
 /*
  * Increase the hold count and activate if this is the first reference.
+ * 如果这是第一个引用，则增加保持计数并激活
  */
 void
 _vhold(struct vnode *vp, bool locked)
@@ -4331,6 +4448,7 @@ sync_inactive(struct vop_inactive_args *ap)
 
 /*
  * The syncer vnode is no longer needed and is being decommissioned.
+ * 同步器vnode不再需要，正在停用
  *
  * Modifications to the worklist must be protected by sync_mtx.
  */
@@ -4390,6 +4508,7 @@ out:
  * and optional call-by-reference privused argument allowing vaccess()
  * to indicate to the caller whether privilege was used to satisfy the
  * request (obsoleted).  Returns 0 on success, or an errno on failure.
+ * 其实就是就是对于权限的检查，看是否被允许做特定的操作
  */
 int
 vaccess(enum vtype type, mode_t file_mode, uid_t file_uid, gid_t file_gid,
@@ -4921,6 +5040,9 @@ vop_readdir_post(void *ap, int rc)
 		VFS_KNOTE_LOCKED(a->a_vp, NOTE_READ);
 }
 
+/*
+	可能是用于管理 kernel 相关事件的信息，或者一些内核行为记录的东西，通过链表组织管理
+*/
 static struct knlist fs_knlist;
 
 static void

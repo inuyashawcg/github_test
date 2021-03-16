@@ -196,6 +196,7 @@ struct lock_class {
 /*
  * Helpful macros for quickly coming up with assertions with informative
  * panic messages.
+ * 有助于快速生成带有信息性恐慌消息的断言的宏
  */
 #define MPASS(ex)		MPASS4(ex, #ex, __FILE__, __LINE__)
 #define MPASS2(ex, what)	MPASS4(ex, what, __FILE__, __LINE__)

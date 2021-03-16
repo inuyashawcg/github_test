@@ -269,6 +269,7 @@ typedef	__pid_t		pid_t;
 /*
  * Advisory file segment locking data type -
  * information passed to system by user
+ * 建议文件段锁定数据类型-用户传递给系统的信息
  */
 struct flock {
 	off_t	l_start;	/* starting offset */

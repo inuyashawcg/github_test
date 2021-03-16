@@ -103,6 +103,7 @@ static fo_stat_t	vn_statfile;
 static fo_close_t	vn_closefile;
 static fo_mmap_t	vn_mmap;
 
+// opt: options, ops: operations
 struct 	fileops vnops = {
 	.fo_read = vn_io_fault,
 	.fo_write = vn_io_fault,
@@ -121,6 +122,7 @@ struct 	fileops vnops = {
 	.fo_flags = DFLAG_PASSABLE | DFLAG_SEEKABLE
 };
 
+/* io_hold_cnt 表示比如说uio中的属性对的个数？ */
 static const int io_hold_cnt = 16;
 static int vn_io_fault_enable = 1;
 SYSCTL_INT(_debug, OID_AUTO, vn_io_fault_enable, CTLFLAG_RW,
@@ -180,12 +182,14 @@ vn_open(struct nameidata *ndp, int *flagp, int cmode, struct file *fp)
 }
 
 /*
- * Common code for vnode open operations via a name lookup.
+ * Common code for vnode open operations via a name lookup. 通过查找到的名字打开vnode结点
  * Lookup the vnode and invoke VOP_CREATE if needed.
  * Check permissions, and call the VOP_OPEN or VOP_CREATE routine.
  * 
  * Note that this does NOT free nameidata for the successful case,
  * due to the NDINIT being done elsewhere.
+ * 注意，这里不会因为成功执行后释放 nameidata，因为NDINIT是在其他地方完成的，搜索vn_open关键字可以看到，
+ * 在linker代码查找文件的时候会用到这个函数
  */
 int
 vn_open_cred(struct nameidata *ndp, int *flagp, int cmode, u_int vn_open_flags,
@@ -208,6 +212,7 @@ restart:
 		/*
 		 * Set NOCACHE to avoid flushing the cache when
 		 * rolling in many files at once.
+		 * 设置NOCACHE以避免在一次滚动多个文件时刷新缓存
 		*/
 		ndp->ni_cnd.cn_flags = ISOPEN | LOCKPARENT | LOCKLEAF | NOCACHE;
 		if ((fmode & O_EXCL) == 0 && (fmode & O_NOFOLLOW) == 0)
@@ -216,15 +221,17 @@ restart:
 			ndp->ni_cnd.cn_flags |= AUDITVNODE1;
 		if (vn_open_flags & VN_OPEN_NOCAPCHECK)
 			ndp->ni_cnd.cn_flags |= NOCAPCHECK;
-		bwillwrite();
+		bwillwrite();	// 锁操作，write操作之前执行，下面紧接着开始write
 		if ((error = namei(ndp)) != 0)
 			return (error);
-		if (ndp->ni_vp == NULL) {
-			VATTR_NULL(vap);
+		if (ndp->ni_vp == NULL) {	// 当vnode为空，还未指定？
+			VATTR_NULL(vap);	// vnode 属性置空
 			vap->va_type = VREG;
 			vap->va_mode = cmode;
 			if (fmode & O_EXCL)
 				vap->va_vaflags |= VA_EXCLUSIVE;
+
+			// vn_start_write 函数为文件系统的写操作做准备
 			if (vn_start_write(ndp->ni_dvp, &mp, V_NOWAIT) != 0) {
 				NDFREE(ndp, NDF_ONLY_PNBUF);
 				vput(ndp->ni_dvp);
@@ -241,7 +248,7 @@ restart:
 			if (error == 0)
 #endif
 				error = VOP_CREATE(ndp->ni_dvp, &ndp->ni_vp,
-						   &ndp->ni_cnd, vap);
+						   &ndp->ni_cnd, vap);	// 创建相应的一个file或者socket等等
 			vput(ndp->ni_dvp);
 			vn_finished_write(mp);
 			if (error) {
@@ -293,13 +300,14 @@ bad:
 /*
  * Common code for vnode open operations once a vnode is located.
  * Check permissions, and call the VOP_OPEN routine.
+ * 找到vnode后用于vnode打开操作的通用代码。检查权限，并调用VOP_OPEN例程
  */
 int
 vn_open_vnode(struct vnode *vp, int fmode, struct ucred *cred,
     struct thread *td, struct file *fp)
 {
-	accmode_t accmode;
-	struct flock lf;
+	accmode_t accmode;	// access permission
+	struct flock lf;	// 感觉像是对文件数据操作的指针的位置，偏移等等的描述
 	int error, lock_flags, type;
 
 	if (vp->v_type == VLNK)
@@ -333,19 +341,19 @@ vn_open_vnode(struct vnode *vp, int fmode, struct ucred *cred,
 #endif
 	if ((fmode & O_CREAT) == 0) {
 		if (accmode & VWRITE) {
-			error = vn_writechk(vp);
+			error = vn_writechk(vp); // 检查写入权限
 			if (error)
 				return (error);
 		}
 		if (accmode) {
-		        error = VOP_ACCESS(vp, accmode, cred, td);
+		        error = VOP_ACCESS(vp, accmode, cred, td); // 再次进行权限检查
 			if (error)
 				return (error);
 		}
 	}
 	if (vp->v_type == VFIFO && VOP_ISLOCKED(vp) != LK_EXCLUSIVE)
 		vn_lock(vp, LK_UPGRADE | LK_RETRY);
-	if ((error = VOP_OPEN(vp, fmode, cred, td, fp)) != 0)
+	if ((error = VOP_OPEN(vp, fmode, cred, td, fp)) != 0)	// 打开文件
 		return (error);
 
 	while ((fmode & (O_EXLOCK | O_SHLOCK)) != 0) {
@@ -356,7 +364,7 @@ vn_open_vnode(struct vnode *vp, int fmode, struct ucred *cred,
 		}
 		lock_flags = VOP_ISLOCKED(vp);
 		VOP_UNLOCK(vp, 0);
-		lf.l_whence = SEEK_SET;
+		lf.l_whence = SEEK_SET;	// 从文件开头开始查找
 		lf.l_start = 0;
 		lf.l_len = 0;
 		if (fmode & O_EXLOCK)
@@ -408,6 +416,7 @@ vn_open_vnode(struct vnode *vp, int fmode, struct ucred *cred,
 /*
  * Check for write permissions on the specified vnode.
  * Prototype text segments cannot be written.
+ * 检查指定vnode上的写入权限。无法写入原型文本段
  */
 int
 vn_writechk(struct vnode *vp)
@@ -427,6 +436,8 @@ vn_writechk(struct vnode *vp)
 
 /*
  * Vnode close call
+ * 对vnode进行打开和关闭操作的时候，好像都会用到vn_start_write这个函数，推测是因为vnode中
+ * 包含有一些引用计数，每次执行一些操作的时候要对其值进行更新，所以才包含了write
  */
 static int
 vn_close1(struct vnode *vp, int flags, struct ucred *file_cred,
@@ -470,6 +481,7 @@ vn_close(struct vnode *vp, int flags, struct ucred *file_cred,
 
 /*
  * Heuristic to detect sequential operation.
+ * 顺序操作检测的启发式算法
  */
 static int
 sequential_heuristic(struct uio *uio, struct file *fp)
@@ -485,6 +497,8 @@ sequential_heuristic(struct uio *uio, struct file *fp)
 	 * sequential.  Seeking to offset 0 doesn't change sequentiality
 	 * unless previous seeks have reduced f_seqcount to 0, in which
 	 * case offset 0 is not special.
+	 * 偏移量0是专门处理的。open（）将f_seqcount设置为1，这样第一个I/O通常被认为是稍微连续的；
+	 * 寻找偏移量0不会改变序列性，除非先前的寻找将fèseqcount减少到0，在这种情况下，偏移量0不是特殊的
 	 */
 	if ((uio->uio_offset == 0 && fp->f_seqcount > 0) ||
 	    uio->uio_offset == fp->f_nextoff) {
@@ -513,7 +527,7 @@ sequential_heuristic(struct uio *uio, struct file *fp)
 
 /*
  * Package up an I/O request on a vnode into a uio and do it.
- * 将vnode上的I/O请求打包到uio中并执行此操作
+ * 将vnode上的I/O请求打包到uio中并执行此操作。vnode读写相关操作
  */
 int
 vn_rdwr(enum uio_rw rw, struct vnode *vp, void *base, int len, off_t offset,
@@ -620,6 +634,10 @@ vn_rdwr(enum uio_rw rw, struct vnode *vp, void *base, int len, off_t offset,
  * check bwillwrite() before calling vn_rdwr().  We also call kern_yield()
  * to give other processes a chance to lock the vnode (either other processes
  * core'ing the same binary, or unrelated processes scanning the directory).
+ * 
+ * I/O请求被分割成更小的块，我们试图避免缓冲区缓存饱和，同时可能会锁定一个vnode，因此在调用
+ * vn_rdwr 之前检查 bwillwrite。我们还调用 kern_yield 给其他进程一个锁定vnode的机会
+ * （或者其他进程以相同的二进制为核心，或者不相关的进程扫描目录）
  */
 int
 vn_rdwr_inchunks(enum uio_rw rw, struct vnode *vp, void *base, size_t len,
@@ -645,6 +663,7 @@ vn_rdwr_inchunks(enum uio_rw rw, struct vnode *vp, void *base, size_t len,
 		if (rw != UIO_READ && vp->v_type == VREG)
 			bwillwrite();
 		iaresid = 0;
+		// 主要的功能还是 vn_rdwr 函数来实现
 		error = vn_rdwr(rw, vp, base, chunk, offset, segflg,
 		    ioflg, active_cred, file_cred, &iaresid, td);
 		len -= chunk;	/* aresid calc already includes length */
@@ -679,6 +698,7 @@ foffset_lock(struct file *fp, int flags)
 	/*
 	 * According to McKusick the vn lock was protecting f_offset here.
 	 * It is now protected by the FOFFSET_LOCKED flag.
+	 * 根据McKusick的说法，vn锁是用来保护f_offset的。它现在由FOFFSET_LOCKED标志保护
 	 */
 	mtxp = mtx_pool_find(mtxpool_sleep, fp);
 	mtx_lock(mtxp);
@@ -765,7 +785,7 @@ get_advice(struct file *fp, struct uio *uio)
 }
 
 /*
- * File table vnode read routine.
+ * File table vnode read routine. 文件表vnode读取例程
  */
 static int
 vn_read(struct file *fp, struct uio *uio, struct ucred *active_cred, int flags,
@@ -820,7 +840,7 @@ vn_read(struct file *fp, struct uio *uio, struct ucred *active_cred, int flags,
 }
 
 /*
- * File table vnode write routine.
+ * File table vnode write routine. 文件表vnode写入例程
  */
 static int
 vn_write(struct file *fp, struct uio *uio, struct ucred *active_cred, int flags,
@@ -1283,7 +1303,7 @@ vn_io_fault_pgmove(vm_page_t ma[], vm_offset_t offset, int xfersize,
 
 
 /*
- * File table truncate routine.
+ * File table truncate routine. 文件表截断例程
  */
 static int
 vn_truncate(struct file *fp, off_t length, struct ucred *active_cred,
@@ -1586,6 +1606,8 @@ vn_suspendable(struct mount *mp)
  * permitted, then we bump the count of operations in progress and
  * proceed. If a suspend request is in progress, we wait until the
  * suspension is over, and then proceed.
+ * 为开始文件系统的写操作做准备。如果允许该操作，那么我们将增加正在进行的操作的计数并继续；
+ * 如果挂起请求正在进行，我们将等待挂起结束，然后继续
  */
 static int
 vn_start_write_locked(struct mount *mp, int flags)
@@ -1623,6 +1645,9 @@ unlock:
 	return (error);
 }
 
+/*
+	前面调用的一种情况是，mpp直接传进来一个空指针
+*/
 int
 vn_start_write(struct vnode *vp, struct mount **mpp, int flags)
 {
@@ -1638,7 +1663,7 @@ vn_start_write(struct vnode *vp, struct mount **mpp, int flags)
 	 * to which it will write.
 	 */
 	if (vp != NULL) {
-		if ((error = VOP_GETWRITEMOUNT(vp, mpp)) != 0) {
+		if ((error = VOP_GETWRITEMOUNT(vp, mpp)) != 0) { // 判断mpp的refcount
 			*mpp = NULL;
 			if (error != EOPNOTSUPP)
 				return (error);
@@ -1650,7 +1675,7 @@ vn_start_write(struct vnode *vp, struct mount **mpp, int flags)
 
 	if (!vn_suspendable(mp)) {
 		if (vp != NULL || (flags & V_MNTREF) != 0)
-			vfs_rel(mp);
+			vfs_rel(mp);	// mp引用计数--操作
 		return (0);
 	}
 
@@ -1660,12 +1685,13 @@ vn_start_write(struct vnode *vp, struct mount **mpp, int flags)
 	 * As long as a vnode is not provided we need to acquire a
 	 * refcount for the provided mountpoint too, in order to
 	 * emulate a vfs_ref().
+	 * 只要不提供vnode，我们也需要为提供的装入点获取refcount，以便模拟vfs_ref
 	 */
 	MNT_ILOCK(mp);
 	if (vp == NULL && (flags & V_MNTREF) == 0)
 		MNT_REF(mp);
 
-	return (vn_start_write_locked(mp, flags));
+	return (vn_start_write_locked(mp, flags)); // 对mount pointer加锁
 }
 
 /*
@@ -1785,7 +1811,7 @@ vn_finished_secondary_write(struct mount *mp)
 
 
 /*
- * Request a filesystem to suspend write operations.
+ * Request a filesystem to suspend write operations. 请求文件系统挂起写操作
  */
 int
 vfs_write_suspend(struct mount *mp, int flags)

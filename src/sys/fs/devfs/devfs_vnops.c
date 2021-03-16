@@ -81,6 +81,7 @@ static struct fileops devfs_ops_f;
 
 static MALLOC_DEFINE(M_CDEVPDATA, "DEVFSP", "Metainfo for cdev-fp data");
 
+// 通过 sysctl 控制相关的参数
 struct mtx	devfs_de_interlock;
 MTX_SYSINIT(devfs_de_interlock, &devfs_de_interlock, "devfs interlock", MTX_DEF);
 struct sx	clone_drain_lock;
@@ -97,6 +98,7 @@ SYSCTL_INT(_vfs_devfs, OID_AUTO, dotimes, CTLFLAG_RW,
 /*
  * Update devfs node timestamp.  Note that updates are unlocked and
  * stat(2) could see partially updated times.
+ * 更新时间戳timestamp
  */
 static void
 devfs_timestamp(struct timespec *tsp)
@@ -114,11 +116,12 @@ devfs_timestamp(struct timespec *tsp)
 	}
 }
 
+/* 对于file的属性检测 */
 static int
 devfs_fp_check(struct file *fp, struct cdev **devp, struct cdevsw **dswp,
     int *ref)
 {
-
+	/* 获取 vnode 对应的 cdev 的 cdevsw */
 	*dswp = devvn_refthread(fp->f_vnode, devp, ref);
 	if (*devp != fp->f_data) {
 		if (*dswp != NULL)
@@ -133,6 +136,11 @@ devfs_fp_check(struct file *fp, struct cdev **devp, struct cdevsw **dswp,
 	return (0);
 }
 
+/*
+	获取cdev的私有数据
+	这里扩展一下，当我们对一个文件进行操作的时候，肯定是通过某一个进程或者线程来进行的。这个时候
+	文件会被映射到进程的地址空间，td_fpop 成员貌似表示的就是线程所要操作的设备文件
+*/ 
 int
 devfs_get_cdevpriv(void **datap)
 {
@@ -140,6 +148,7 @@ devfs_get_cdevpriv(void **datap)
 	struct cdev_privdata *p;
 	int error;
 
+	/* 当前线程会关联一个file， file中包含着 cdev private data */
 	fp = curthread->td_fpop;
 	if (fp == NULL)
 		return (EBADF);
@@ -152,6 +161,10 @@ devfs_get_cdevpriv(void **datap)
 	return (error);
 }
 
+/* 
+	devfs_***_cdevpriv 主要是为了允许cdev驱动程序方法将一些特定于驱动程序的数据与
+	设备特殊文件的每个用户进程open（2）相关联
+*/
 int
 devfs_set_cdevpriv(void *priv, d_priv_dtor_t *priv_dtr)
 {
@@ -160,7 +173,7 @@ devfs_set_cdevpriv(void *priv, d_priv_dtor_t *priv_dtr)
 	struct cdev_privdata *p;
 	int error;
 
-	fp = curthread->td_fpop;
+	fp = curthread->td_fpop;  // 这里也是跟上面相同的操作，获取当前线程对应的文件
 	if (fp == NULL)
 		return (ENOENT);
 	cdp = cdev2priv((struct cdev *)fp->f_data);
@@ -170,6 +183,9 @@ devfs_set_cdevpriv(void *priv, d_priv_dtor_t *priv_dtr)
 	p->cdpd_fp = fp;
 	mtx_lock(&cdevpriv_mtx);
 	if (fp->f_cdevpriv == NULL) {
+		/*
+			这里涉及到了 cdp_fdpriv 队列，貌似跟文件描述符有什么联系？
+		*/ 
 		LIST_INSERT_HEAD(&cdp->cdp_fdpriv, p, cdpd_list);
 		fp->f_cdevpriv = p;
 		mtx_unlock(&cdevpriv_mtx);
@@ -190,6 +206,8 @@ devfs_destroy_cdevpriv(struct cdev_privdata *p)
 	KASSERT(p->cdpd_fp->f_cdevpriv == p,
 	    ("devfs_destoy_cdevpriv %p != %p", p->cdpd_fp->f_cdevpriv, p));
 	p->cdpd_fp->f_cdevpriv = NULL;
+
+	/* cdev_private 从链表中移除， */
 	LIST_REMOVE(p, cdpd_list);
 	mtx_unlock(&cdevpriv_mtx);
 	(p->cdpd_dtr)(p->cdpd_data);
@@ -206,9 +224,13 @@ devfs_fpdrop(struct file *fp)
 		mtx_unlock(&cdevpriv_mtx);
 		return;
 	}
+	// 从链表中移除 cdev_privdate
 	devfs_destroy_cdevpriv(p);
 }
 
+/* 
+	该函数以及上面三个函数其实都是对 cdev_privdata 数据进行操作，说明这个数据还是相当重要的
+*/
 void
 devfs_clear_cdevpriv(void)
 {
@@ -222,21 +244,28 @@ devfs_clear_cdevpriv(void)
 
 /*
  * On success devfs_populate_vp() returns with dmp->dm_lock held.
+ * populate: 填充，迁移
+ * 
+ * vnode其实是有vfs统一管理的，所以这里
  */
 static int
 devfs_populate_vp(struct vnode *vp)
 {
-	struct devfs_dirent *de;
-	struct devfs_mount *dmp;
+	struct devfs_dirent *de;	// 目录信息
+	struct devfs_mount *dmp;	// 挂载点信息
 	int locked;
 
 	ASSERT_VOP_LOCKED(vp, "devfs_populate_vp");
 
+	/* 
+		将 vnode 对应的 mount 强制类型转换成 devfs_mount
+		- 这里不是将 mount 结构体进行强制转换，是将 mount->mnt_data 进行强制转换
+	*/
 	dmp = VFSTODEVFS(vp->v_mount);
 	locked = VOP_ISLOCKED(vp);
 
 	sx_xlock(&dmp->dm_lock);
-	DEVFS_DMP_HOLD(dmp);
+	DEVFS_DMP_HOLD(dmp);	// dm_holdcnt++
 
 	/* Can't call devfs_populate() with the vnode lock held. */
 	VOP_UNLOCK(vp, 0);
@@ -254,6 +283,8 @@ devfs_populate_vp(struct vnode *vp)
 		sx_xunlock(&dmp->dm_lock);
 		return (ERESTART);
 	}
+
+	/* v_data 表示的是 vnode 的私有数据，从此处可以看到，表示的应该是路径信息 */
 	de = vp->v_data;
 	KASSERT(de != NULL,
 	    ("devfs_populate_vp: vp->v_data == NULL but vnode not doomed"));
@@ -265,6 +296,10 @@ devfs_populate_vp(struct vnode *vp)
 	return (0);
 }
 
+/*
+	vnode pointer to component name？
+	获取当前所在目录的名称？？
+*/
 static int
 devfs_vptocnp(struct vop_vptocnp_args *ap)
 {
@@ -339,6 +374,8 @@ finished:
 /*
  * Construct the fully qualified path name relative to the mountpoint.
  * If a NULL cnp is provided, no '/' is appended to the resulting path.
+ * 构造相对于装入点的完全限定路径名。如果提供了空cnp，则结果路径中不会追加“/”。感觉
+ * 应该还是相对于mount pointer 的路径，不是绝对路径
  */
 char *
 devfs_fqpn(char *buf, struct devfs_mount *dmp, struct devfs_dirent *dd,
@@ -419,6 +456,7 @@ devfs_insmntque_dtr(struct vnode *vp, void *arg)
 /*
  * devfs_allocv shall be entered with dmp->dm_lock held, and it drops
  * it on return.
+ * devfs allocate vnode ??
  */
 int
 devfs_allocv(struct devfs_dirent *de, struct mount *mp, int lockmode,
@@ -439,6 +477,8 @@ loop:
 	DEVFS_DE_HOLD(de);
 	DEVFS_DMP_HOLD(dmp);
 	mtx_lock(&devfs_de_interlock);
+
+	/* 当目录项对应的vnode为空的时候， 需要申请新的vnode */
 	vp = de->de_vnode;
 	if (vp != NULL) {
 		VI_LOCK(vp);
@@ -448,7 +488,7 @@ loop:
 		sx_xlock(&dmp->dm_lock);
 		if (devfs_allocv_drop_refs(0, dmp, de)) {
 			vput(vp);
-			return (ENOENT);
+			return (ENOENT); // 没有对应的文件或者目录
 		}
 		else if ((vp->v_iflag & VI_DOOMED) != 0) {
 			mtx_lock(&devfs_de_interlock);
@@ -474,6 +514,8 @@ loop:
 	} else {
 		dev = NULL;
 	}
+
+	/* devfs申请vnode */
 	error = getnewvnode("devfs", mp, &devfs_vnodeops, &vp);
 	if (error != 0) {
 		devfs_allocv_drop_refs(1, dmp, de);
@@ -530,24 +572,29 @@ loop:
 	return (0);
 }
 
+/* 从代码逻辑可以看出，该函数主要就是调用 vaccess 函数来检查权限 */
 static int
 devfs_access(struct vop_access_args *ap)
 {
 	struct vnode *vp = ap->a_vp;
-	struct devfs_dirent *de;
+	struct devfs_dirent *de;	// directory entry?
 	struct proc *p;
 	int error;
 
 	de = vp->v_data;
+	/* 如果vnode的类型是目录，执行if分支 */
 	if (vp->v_type == VDIR)
 		de = de->de_dir;
 
+	// 操作权限检查
 	error = vaccess(vp->v_type, de->de_mode, de->de_uid, de->de_gid,
 	    ap->a_accmode, ap->a_cred, NULL);
 	if (error == 0)
 		return (0);
 	if (error != EACCES)
 		return (error);
+
+	// 如果权限不够，则执行下面的分支代码
 	p = ap->a_td->td_proc;
 	/* We do, however, allow access to the controlling terminal */
 	PROC_LOCK(p);
@@ -678,12 +725,13 @@ devfs_close_f(struct file *fp, struct thread *td)
 	return (error);
 }
 
+// 获取属性
 static int
 devfs_getattr(struct vop_getattr_args *ap)
 {
 	struct vnode *vp = ap->a_vp;
-	struct vattr *vap = ap->a_vap;
-	struct devfs_dirent *de;
+	struct vattr *vap = ap->a_vap;	// 属性信息
+	struct devfs_dirent *de;	// 目录信息
 	struct devfs_mount *dmp;
 	struct cdev *dev;
 	struct timeval boottime;
@@ -696,7 +744,7 @@ devfs_getattr(struct vop_getattr_args *ap)
 	dmp = VFSTODEVFS(vp->v_mount);
 	sx_xunlock(&dmp->dm_lock);
 
-	de = vp->v_data;
+	de = vp->v_data;	// v_data 表示的是私有数据，每种fs的内容应该是不一样的
 	KASSERT(de != NULL, ("Null dirent in devfs_getattr vp=%p", vp));
 	if (vp->v_type == VDIR) {
 		de = de->de_dir;
@@ -891,7 +939,7 @@ static int
 devfs_lookupx(struct vop_lookup_args *ap, int *dm_unlock)
 {
 	struct componentname *cnp;
-	struct vnode *dvp, **vpp;
+	struct vnode *dvp, **vpp; // vnode 指针，vnode 指针的指针
 	struct thread *td;
 	struct devfs_dirent *de, *dd;
 	struct devfs_dirent **dde;
@@ -910,15 +958,17 @@ devfs_lookupx(struct vop_lookup_args *ap, int *dm_unlock)
 	nameiop = cnp->cn_nameiop;
 	mp = dvp->v_mount;
 	dmp = VFSTODEVFS(mp);
-	dd = dvp->v_data;
+	dd = dvp->v_data;	// vnode -> v_data，不同的文件系统可能有不同的数据定义
 	*vpp = NULLVP;
 
 	if ((flags & ISLASTCN) && nameiop == RENAME)
 		return (EOPNOTSUPP);
 
+	/* 如果不是目录类型就报错，说明这里操作的对象是目录文件 */
 	if (dvp->v_type != VDIR)
 		return (ENOTDIR);
 
+	/* 如果是 ..目录或者vnode对应的是该文件系统的root，报错 */
 	if ((flags & ISDOTDOT) && (dvp->v_vflag & VV_ROOT))
 		return (EIO);
 
@@ -1040,6 +1090,9 @@ devfs_lookup(struct vop_lookup_args *ap)
 	struct devfs_mount *dmp;
 	int dm_unlock;
 
+	/*
+		注意这里的操作逻辑，查找的时候会传入查找的参数，这个参数中包含有 vnode，
+	*/
 	if (devfs_populate_vp(ap->a_dvp) != 0)
 		return (ENOTDIR);
 
@@ -1051,6 +1104,9 @@ devfs_lookup(struct vop_lookup_args *ap)
 	return (j);
 }
 
+/*
+	用来创建特殊的字符设备，貌似还可以用来创建FIFO
+*/
 static int
 devfs_mknod(struct vop_mknod_args *ap)
 {
@@ -1098,7 +1154,11 @@ notfound:
 	return (error);
 }
 
-/* ARGSUSED */
+/* ARGSUSED 
+	打开已有文件或者创建一个文件，应该是要调用 lookup 函数。这里好像还有些讲究，比如说对于一些有状态的
+	文件系统，加锁然后调用create函数就可以了；对于一些无状态的文件系统(比如nfs)，那就不能给目录上锁，
+	在调用 create 函数的时候要重新扫描这个目录，保证lookup之前没有创建该文件
+*/
 static int
 devfs_open(struct vop_open_args *ap)
 {
@@ -1231,7 +1291,9 @@ devfs_pathconf(struct vop_pathconf_args *ap)
 	/* NOTREACHED */
 }
 
-/* ARGSUSED */
+/* ARGSUSED 
+	poll 操作允许进程检查一个对象是否可读或者可写
+*/
 static int
 devfs_poll_f(struct file *fp, int events, struct ucred *cred, struct thread *td)
 {
@@ -1297,6 +1359,10 @@ devfs_read_f(struct file *fp, struct uio *uio, struct ucred *cred,
 	return (error);
 }
 
+/*
+	readdir 操作将一个目录的特定于文件系统的格式转换成一个应用程序所能识别的标准目录项列表。
+	需要注意的是对目录内容的解释是由层次型文件系统的管理层提供的
+*/
 static int
 devfs_readdir(struct vop_readdir_args *ap)
 {
@@ -1375,6 +1441,9 @@ devfs_readdir(struct vop_readdir_args *ap)
 	return (error);
 }
 
+/*
+	readlink 操作返回一个符号链接的内容
+*/
 static int
 devfs_readlink(struct vop_readlink_args *ap)
 {
@@ -1539,6 +1608,9 @@ devfs_revoke(struct vop_revoke_args *ap)
 	return (0);
 }
 
+/*
+	ioctl 操作向一台特殊的设备发送控制请求
+*/
 static int
 devfs_rioctl(struct vop_ioctl_args *ap)
 {
@@ -1696,6 +1768,9 @@ devfs_stat_f(struct file *fp, struct stat *sb, struct ucred *cred, struct thread
 	return (vnops.fo_stat(fp, sb, cred, td));
 }
 
+/*
+	主要是用来创建符号链接
+*/
 static int
 devfs_symlink(struct vop_symlink_args *ap)
 {
@@ -1704,7 +1779,7 @@ devfs_symlink(struct vop_symlink_args *ap)
 	struct devfs_dirent *de, *de_covered, *de_dotdot;
 	struct devfs_mount *dmp;
 
-	error = priv_check(curthread, PRIV_DEVFS_SYMLINK);
+	error = priv_check(curthread, PRIV_DEVFS_SYMLINK); // 首先检查设备文件的系统权限
 	if (error)
 		return(error);
 	dmp = VFSTODEVFS(ap->a_dvp->v_mount);
@@ -1748,6 +1823,10 @@ devfs_symlink(struct vop_symlink_args *ap)
 	return (devfs_allocv(de, ap->a_dvp->v_mount, LK_EXCLUSIVE, ap->a_vpp));
 }
 
+/*
+	truncate： 截断
+	文件系统中对于目录可以执行 truncate 操作，能够将目录变小，加快搜索的速度
+*/
 static int
 devfs_truncate_f(struct file *fp, off_t length, struct ucred *cred, struct thread *td)
 {
@@ -1755,6 +1834,9 @@ devfs_truncate_f(struct file *fp, off_t length, struct ucred *cred, struct threa
 	return (vnops.fo_truncate(fp, length, cred, td));
 }
 
+/*
+	uio 在用户空间和内核空间进行数据传输
+*/
 static int
 devfs_write_f(struct file *fp, struct uio *uio, struct ucred *cred,
     int flags, struct thread *td)
@@ -1765,9 +1847,10 @@ devfs_write_f(struct file *fp, struct uio *uio, struct ucred *cred,
 	struct cdevsw *dsw;
 	struct file *fpop;
 
+	// 首先判断需要传输数据的剩余字节数是否符合文件系统的设计要求
 	if (uio->uio_resid > DEVFS_IOSIZE_MAX)
 		return (EINVAL);
-	fpop = td->td_fpop;
+	fpop = td->td_fpop;	// 线程对应的 cdev 设备文件？
 	error = devfs_fp_check(fp, &dev, &dsw, &ref);
 	if (error != 0) {
 		error = vnops.fo_write(fp, uio, cred, flags, td);
@@ -1781,7 +1864,11 @@ devfs_write_f(struct file *fp, struct uio *uio, struct ucred *cred,
 
 	resid = uio->uio_resid;
 
-	error = dsw->d_write(dev, uio, ioflag);
+	/*
+		执行write函数后会更新文件指针的位置，可能是由于这个原因，后面会更新 td->td_fpop。
+		这个write函数很可能会出现在一个循环当中，然后判断 uio->resid 的值是否为0
+	*/ 
+	error = dsw->d_write(dev, uio, ioflag);	
 	if (uio->uio_resid != resid || (error == 0 && resid != 0)) {
 		devfs_timestamp(&dev->si_ctime);
 		dev->si_mtime = dev->si_ctime;
@@ -1793,6 +1880,10 @@ devfs_write_f(struct file *fp, struct uio *uio, struct ucred *cred,
 	return (error);
 }
 
+/*
+	将文件映射到进程的地址空间。其中addr表示的应该就是映射到的进程地址空间的起始位置，
+	size表示大小
+*/
 static int
 devfs_mmap_f(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
     vm_prot_t prot, vm_prot_t cap_maxprot, int flags, vm_ooffset_t foff,
@@ -1807,13 +1898,16 @@ devfs_mmap_f(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	vm_prot_t maxprot;
 	int error, ref;
 
-	vp = fp->f_vnode;
+	vp = fp->f_vnode;	// file 会对应一个 vnode
 
 	/*
 	 * Ensure that file and memory protections are
-	 * compatible.
+	 * compatible. 确保文件和内存保护兼容，应该就是为了确认挂载点的保护机制是否正常
+	 * 
+	 * 上面首先根据 file 结构体找到对应的 vnode，再从 vnode 找到对应的 mount，从这一步我们就可以
+	 * 判断处该 file 是属于哪个文件系统
 	 */
-	mp = vp->v_mount;
+	mp = vp->v_mount;	
 	if (mp != NULL && (mp->mnt_flag & MNT_NOEXEC) != 0) {
 		maxprot = VM_PROT_NONE;
 		if ((prot & VM_PROT_EXECUTE) != 0)
@@ -1829,14 +1923,17 @@ devfs_mmap_f(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	 * If we are sharing potential changes via MAP_SHARED and we
 	 * are trying to get write permission although we opened it
 	 * without asking for it, bail out.
+	 * 如果我们通过 MAP_SHARED 共享潜在的更改，并试图获得写入权限，尽管我们未经请求就打开了它，请退出
 	 *
 	 * Note that most character devices always share mappings.
 	 * The one exception is that D_MMAP_ANON devices
 	 * (i.e. /dev/zero) permit private writable mappings.
+	 * 请注意，大多数字符设备总是共享映射。一个例外是，D_MMAP_ANON 设备（即/dev/zero）允许私有可写映射
 	 *
 	 * Rely on vm_mmap_cdev() to fail invalid MAP_PRIVATE requests
 	 * as well as updating maxprot to permit writing for
 	 * D_MMAP_ANON devices rather than doing that here.
+	 * 
 	 */
 	if ((flags & MAP_SHARED) != 0) {
 		if ((fp->f_flag & FWRITE) != 0)
@@ -1858,6 +1955,7 @@ devfs_mmap_f(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	if (error != 0)
 		return (error);
 
+	// addr 参数表示的是文件映射到的虚拟地址？
 	error = vm_mmap_object(map, addr, size, prot, maxprot, flags, object,
 	    foff, FALSE, td);
 	if (error != 0)
@@ -1873,6 +1971,27 @@ dev2udev(struct cdev *x)
 	return (cdev2priv(x)->cdp_inode);
 }
 
+/* 
+	***_f 表示的应该就是对 file 的操作，下面定义的是对vnode的操作，要注意两者的区别，
+	因为 devfs 是跟设备驱动紧密联系的，写驱动程序的时候我们可以通过 echo 命令将数据写入
+	文件，这里调用的应该就是 fileops 提供的函数。观察 devfs_write_f 函数可以发现，其中
+	包含了 d_write，这个是 cdevsw 中包含一个函数，是驱动程序提供给用户的一个接口，所以要
+	考虑一下两者之间的关系到底是什么样的。
+	个人理解是两者所负责的功能是不一样的，fileops 主要针对的是关于文件所支持的操作。驱动程序
+	会在 /dev 下生成一个设备驱动文件，本质上是一个文件，所以我们对它的操作其实就是对文件的操作，
+	对文件的操作那就要遵守文件所支持的一些函数接口，也正是 fileops。
+
+	大致流程猜测会是这样： 第一步应该是 syscall，请求打开某一个函数；第二步应该就会跳转到 vfs
+	中提供的 open 函数，然后 vfs 判断该文件属于哪个文件系统，然后就会调用那个文件系统提供的 open
+	函数在执行具体的操作。通过源码发现，这个过程跟 vnode 有强关联，所以要弄清楚整个机制的实现，肯定
+	是要搞清楚 vnode 在不同阶段的行为。还有一个思想要明确，那就是操作系统对于文件(大一点来说就是数据)
+	的处理肯定是离不开内存的，一提到内存首先就要想到的是内存映射，所以文件系统的内存映射机制也是一定要
+	理清楚的。这里出现了一个 devfs_mmap_f 函数，其作用就是将文件映射到进程虚拟地址空间。我们通过 echo
+	等命令对文件进行写操作其实就是往这块地址空间中写数据。然后 cdevsw 的 write 函数应该就是把这块空间
+	中的数据获取到，写入另外一个虚拟地址空间？这个可能就涉及到了内核地址空间和用户地址空间的相互映射。
+	驱动程序的物理地址映射到的是内核地址空间的虚拟地址，但是文件系统操作的可能是用户态的地址空间，所以可能
+	还需要再做一步转换
+*/
 static struct fileops devfs_ops_f = {
 	.fo_read =	devfs_read_f,
 	.fo_write =	devfs_write_f,
@@ -1891,7 +2010,9 @@ static struct fileops devfs_ops_f = {
 	.fo_flags =	DFLAG_PASSABLE | DFLAG_SEEKABLE
 };
 
-/* Vops for non-CHR vnodes in /dev. */
+/* Vops for non-CHR vnodes in /dev. 
+	这里定义的是对非字符设备的操作，下面定义的是对字符设备的操作，两者有共通的地方
+*/
 static struct vop_vector devfs_vnodeops = {
 	.vop_default =		&default_vnodeops,
 

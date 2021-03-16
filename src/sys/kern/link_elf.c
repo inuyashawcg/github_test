@@ -838,21 +838,29 @@ link_elf_link_preload_finish(linker_file_t lf)
 	return (link_elf_link_common_finish(lf));
 }
 
+/*
+	当我们执行 kldload 命令加载一个 .ko文件的时候，一般情况下会在 /dev 下生成一个设备节点文件。
+	/dev 其实就是devfs文件系统挂载点，所以两者之间的关系是相当紧密的
+*/
 static int
 link_elf_load_file(linker_class_t cls, const char* filename,
     linker_file_t* result)
 {
+	/* 
+		在文件系统相关代码中经常可以遇到这个结构体，主要作用其实就是将文件路径信息做整合，比如
+		文件所在的目录，对应的vnode等等 
+	*/
 	struct nameidata nd;
 	struct thread* td = curthread;	/* XXX */
 	Elf_Ehdr *hdr;
-	caddr_t firstpage;
+	caddr_t firstpage;	// 应该表示的是 memory page
 	int nbytes, i;
 	Elf_Phdr *phdr;
 	Elf_Phdr *phlimit;
 	Elf_Phdr *segs[MAXSEGS];
 	int nsegs;
 	Elf_Phdr *phdyn;
-	caddr_t mapbase;
+	caddr_t mapbase; // 内存映射虚拟基地址？
 	size_t mapsize;	/* 这里以elf_obj类似，都包含mapsize */
 	Elf_Addr base_vaddr;
 	Elf_Addr base_vlimit;
@@ -873,9 +881,10 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 	lf = NULL;
 	shstrs = NULL;
 
+	/* 初始化 nameidata */
 	NDINIT(&nd, LOOKUP, FOLLOW, UIO_SYSSPACE, filename, td);
 	flags = FREAD;
-	error = vn_open(&nd, &flags, 0, NULL);
+	error = vn_open(&nd, &flags, 0, NULL);	// 打开一个已有的、或者新建一个vnode关联到file
 	if (error != 0)
 		return (error);
 	NDFREE(&nd, NDF_ONLY_PNBUF);

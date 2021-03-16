@@ -88,30 +88,40 @@ struct disk {
 
 	/* Shared fields */
 	u_int			d_flags;
-	const char		*d_name;
-	u_int			d_unit;
+	const char		*d_name;	// 存储设备的名字，必须指定
+	u_int			d_unit;	// 存储设备的单位号，必须指定
 	struct bio_queue_head	*d_queue;
 	struct mtx		*d_lock;
 
 	/* Disk methods  */
 	disk_open_t		*d_open;
 	disk_close_t		*d_close;
+
+	/*
+		指定存储设备的策略例程。策略例程用于处理以块为中心的读、写或者其他输入输出操作。
+		因此，所有的disk结构都应定义该字段
+	*/
 	disk_strategy_t		*d_strategy;
-	disk_ioctl_t		*d_ioctl;
+	disk_ioctl_t		*d_ioctl;	// 该字段可选择性定义
+
+	/*
+		指定存储设备的转储例程。内核报错的时候会调用该例程将物理内存的内容转储到存储设备之上。
+		要注意该字段也是可选的，因而很可能是未定义的
+	*/
 	dumper_t		*d_dump;
 	disk_getattr_t		*d_getattr;
 	disk_gone_t		*d_gone;
 
 	/* Info fields from driver to geom_disk.c. Valid when open */
-	u_int			d_sectorsize;
-	off_t			d_mediasize;
+	u_int			d_sectorsize;	// 表示存储设备的扇区的大小，必须指定
+	off_t			d_mediasize;	// 媒体字节的大小？必须指定
 	u_int			d_fwsectors;
 	u_int			d_fwheads;
-	u_int			d_maxsize;
+	u_int			d_maxsize;	// 表示存储设备中一条输入输出操作的最大字节数，必须指定
 	off_t			d_delmaxsize;
 	u_int			d_stripeoffset;
 	u_int			d_stripesize;
-	char			d_ident[DISK_IDENT_SIZE];
+	char			d_ident[DISK_IDENT_SIZE];	// 存储设备的序列号，可选的
 	char			d_descr[DISK_IDENT_SIZE];
 	uint16_t		d_hba_vendor;
 	uint16_t		d_hba_device;

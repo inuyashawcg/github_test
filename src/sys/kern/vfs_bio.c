@@ -2559,6 +2559,10 @@ bbarrierwrite(struct buf *bp)
  *	dirty buffers so we block here.  By blocking prior to the locking
  *	of any vnodes we attempt to avoid the situation where a locked vnode
  *	prevents the various system daemons from flushing related buffers.
+ 
+ 	当我们期望写入时，在锁定任何vnode之前调用。我们不想用太多脏的缓冲区耗尽缓冲区缓存，
+ 	所以我们在这里阻塞。通过在锁定任何vnode之前进行阻塞，我们试图避免锁定的vnode阻止
+	各种系统守护进程刷新相关缓冲区的情况
  */
 void
 bwillwrite(void)

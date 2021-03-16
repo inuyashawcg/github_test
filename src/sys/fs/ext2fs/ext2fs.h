@@ -45,46 +45,48 @@
  * Super block for an ext2fs file system.
  */
 struct ext2fs {
-	uint32_t  e2fs_icount;		/* Inode count */
-	uint32_t  e2fs_bcount;		/* blocks count */
-	uint32_t  e2fs_rbcount;		/* reserved blocks count */
-	uint32_t  e2fs_fbcount;		/* free blocks count */
-	uint32_t  e2fs_ficount;		/* free inodes count */
-	uint32_t  e2fs_first_dblock;	/* first data block */
-	uint32_t  e2fs_log_bsize;	/* block size = 1024*(2^e2fs_log_bsize) */
-	uint32_t  e2fs_log_fsize;	/* fragment size */
-	uint32_t  e2fs_bpg;		/* blocks per group */
-	uint32_t  e2fs_fpg;		/* frags per group */
-	uint32_t  e2fs_ipg;		/* inodes per group */
-	uint32_t  e2fs_mtime;		/* mount time */
-	uint32_t  e2fs_wtime;		/* write time */
-	uint16_t  e2fs_mnt_count;	/* mount count */
-	uint16_t  e2fs_max_mnt_count;	/* max mount count */
-	uint16_t  e2fs_magic;		/* magic number */
-	uint16_t  e2fs_state;		/* file system state */
-	uint16_t  e2fs_beh;		/* behavior on errors */
-	uint16_t  e2fs_minrev;		/* minor revision level */
-	uint32_t  e2fs_lastfsck;	/* time of last fsck */
-	uint32_t  e2fs_fsckintv;	/* max time between fscks */
-	uint32_t  e2fs_creator;		/* creator OS */
-	uint32_t  e2fs_rev;		/* revision level */
-	uint16_t  e2fs_ruid;		/* default uid for reserved blocks */
-	uint16_t  e2fs_rgid;		/* default gid for reserved blocks */
+	uint32_t  e2fs_icount;		/* Inode count 索引节点的总数 */
+	uint32_t  e2fs_bcount;		/* blocks count 以块为单位的文件系统的大小 */
+	uint32_t  e2fs_rbcount;		/* reserved blocks count 保留的块数 */
+	uint32_t  e2fs_fbcount;		/* free blocks count 空闲块计数器 */
+	uint32_t  e2fs_ficount;		/* free inodes count 空闲索引节点计数器 */
+	uint32_t  e2fs_first_dblock;	/* first data block 第一个使用的块号(总是为1) */
+	uint32_t  e2fs_log_bsize;	/* block size = 1024*(2 ^ e2fs_log_bsize) 块的大小 */
+	uint32_t  e2fs_log_fsize;	/* fragment size 片的大小 */
+	uint32_t  e2fs_bpg;		/* blocks per group 每个组中的块数 */
+	uint32_t  e2fs_fpg;		/* frags per group 每个组中的片数 */
+	uint32_t  e2fs_ipg;		/* inodes per group 每个组中的索引节点数 */
+	uint32_t  e2fs_mtime;		/* mount time 最后一次挂载的时间 */
+	uint32_t  e2fs_wtime;		/* write time 最后一次写操作的时间 */
+	uint16_t  e2fs_mnt_count;	/* mount count 安装操作计数器 */
+	uint16_t  e2fs_max_mnt_count;	/* max mount count 检查之前安装的次数 */
+	uint16_t  e2fs_magic;		/* magic number 魔数 */
+	uint16_t  e2fs_state;		/* file system state 状态标志 */
+	uint16_t  e2fs_beh;		/* behavior on errors 当检测到错误时的行为 */
+	uint16_t  e2fs_minrev;		/* minor revision level 次版本号 */
+	uint32_t  e2fs_lastfsck;	/* time of last fsck 最后一次检查的时间 */
+	uint32_t  e2fs_fsckintv;	/* max time between fscks 两次检查之间的时间间隔 */
+	uint32_t  e2fs_creator;		/* creator OS 创建文件系统的操作系统 */
+	uint32_t  e2fs_rev;		/* revision level 版本号 */
+	uint16_t  e2fs_ruid;		/* default uid for reserved blocks 保留块的缺省UID */
+	uint16_t  e2fs_rgid;		/* default gid for reserved blocks 保留块的缺省GID */
 	/* EXT2_DYNAMIC_REV superblocks */
-	uint32_t  e2fs_first_ino;	/* first non-reserved inode */
-	uint16_t  e2fs_inode_size;	/* size of inode structure */
-	uint16_t  e2fs_block_group_nr;	/* block grp number of this sblk*/
-	uint32_t  e2fs_features_compat;	/* compatible feature set */
-	uint32_t  e2fs_features_incompat; /* incompatible feature set */
-	uint32_t  e2fs_features_rocompat; /* RO-compatible feature set */
-	uint8_t	  e2fs_uuid[16];	/* 128-bit uuid for volume */
-	char      e2fs_vname[16];	/* volume name */
-	char      e2fs_fsmnt[64];	/* name mounted on */
-	uint32_t  e2fs_algo;		/* For compression */
-	uint8_t   e2fs_prealloc;	/* # of blocks for old prealloc */
-	uint8_t   e2fs_dir_prealloc;	/* # of blocks for old prealloc dirs */
-	uint16_t  e2fs_reserved_ngdb;	/* # of reserved gd blocks for resize */
-	char      e3fs_journal_uuid[16]; /* uuid of journal superblock */
+	uint32_t  e2fs_first_ino;	/* first non-reserved inode 第一个非保留的索引节点号 */
+	uint16_t  e2fs_inode_size;	/* size of inode structure 磁盘上索引节点结构的大小 */
+	uint16_t  e2fs_block_group_nr;	/* block grp number of this sblk 这个超级块的块组号 */
+	uint32_t  e2fs_features_compat;	/* compatible feature set 具有兼容特点的位图 */
+	uint32_t  e2fs_features_incompat; /* incompatible feature set 具有非兼容特点的位图 */
+	uint32_t  e2fs_features_rocompat; /* RO-compatible feature set 只读兼容特点的位图 */
+	uint8_t	  e2fs_uuid[16];	/* 128-bit uuid for volume 128位文件系统标识符 */
+	char      e2fs_vname[16];	/* volume name 卷名？ */
+	char      e2fs_fsmnt[64];	/* name mounted on 最后一个安装点的路径名 */
+	uint32_t  e2fs_algo;		/* For compression 用于压缩 */
+	uint8_t   e2fs_prealloc;	/* # of blocks for old prealloc 预分配的块数 */
+	uint8_t   e2fs_dir_prealloc;	/* # of blocks for old prealloc dirs 为目录项预分配的块数 */
+	uint16_t  e2fs_reserved_ngdb;	/* # of reserved gd blocks for resize 用null填充字节？ */
+
+	/* ext3特有的字段，这样设计可以确保兼容性 */
+	char      e3fs_journal_uuid[16]; /* uuid of journal superblock 日志超级块的 uuid */
 	uint32_t  e3fs_journal_inum;	/* inode number of journal file */
 	uint32_t  e3fs_journal_dev;	/* device number of journal file */
 	uint32_t  e3fs_last_orphan;	/* start of list of inodes to delete */
@@ -96,6 +98,8 @@ struct ext2fs {
 	uint32_t  e3fs_first_meta_bg;	/* First metablock block group */
 	uint32_t  e3fs_mkfs_time;	/* when the fs was created */
 	uint32_t  e3fs_jnl_blks[17];	/* backup of the journal inode */
+
+	/* ext4 */
 	uint32_t  e4fs_bcount_hi;	/* high bits of blocks count */
 	uint32_t  e4fs_rbcount_hi;	/* high bits of reserved blocks count */
 	uint32_t  e4fs_fbcount_hi;	/* high bits of free blocks count */
@@ -366,15 +370,20 @@ static const struct ext2_feature incompat[] = {
 #define	EXT2_BG_BLOCK_UNINIT	0x0002	/* Block bitmap not in use */
 #define	EXT2_BG_INODE_ZEROED	0x0004	/* On-disk itable initialized to zero */
 
-/* ext2 file system block group descriptor */
+/* ext2 file system block group descriptor 组描述符 
+	分配新的索引节点和数据块时，会用到 ext2bgd_nbfree、ext2bgd_nifree 和 ext2bgd_ndirs，
+	这些字段确定在最合适的块中给每个数据结构进行分配
+*/
 
 struct ext2_gd {
-	uint32_t ext2bgd_b_bitmap;	/* blocks bitmap block */
-	uint32_t ext2bgd_i_bitmap;	/* inodes bitmap block */
-	uint32_t ext2bgd_i_tables;	/* inodes table block  */
-	uint16_t ext2bgd_nbfree;	/* number of free blocks */
-	uint16_t ext2bgd_nifree;	/* number of free inodes */
-	uint16_t ext2bgd_ndirs;		/* number of directories */
+	uint32_t ext2bgd_b_bitmap;	/* blocks bitmap block 块位图的块号 */
+	uint32_t ext2bgd_i_bitmap;	/* inodes bitmap block 索引节点位图的块号 */
+	uint32_t ext2bgd_i_tables;	/* inodes table block  第一个索引节点块表的块号 */
+	uint16_t ext2bgd_nbfree;	/* number of free blocks 组中空闲块的个数 */
+	uint16_t ext2bgd_nifree;	/* number of free inodes 组中空闲节点的个数 */
+	uint16_t ext2bgd_ndirs;		/* number of directories 组中目录的个数 */
+
+	/* ext4特有成员 */
 	uint16_t ext4bgd_flags;		/* block group flags */
 	uint32_t ext4bgd_x_bitmap;	/* snapshot exclusion bitmap loc. */
 	uint16_t ext4bgd_b_bmap_csum;	/* block bitmap checksum */

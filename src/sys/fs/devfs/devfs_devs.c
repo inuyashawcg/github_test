@@ -52,6 +52,8 @@
 
 /*
  * The one true (but secret) list of active devices in the system.
+ * 系统中活动设备的一个真实（但保密）列表，也就是管理都是处于活跃状态的设备
+ * 
  * Locked by dev_lock()/devmtx
  */
 struct cdev_priv_list cdevp_list = TAILQ_HEAD_INITIALIZER(cdevp_list);
@@ -126,6 +128,7 @@ SYSCTL_INT(_debug_sizeof, OID_AUTO, cdev, CTLFLAG_RD,
 SYSCTL_INT(_debug_sizeof, OID_AUTO, cdev_priv, CTLFLAG_RD,
     SYSCTL_NULL_INT_PTR, sizeof(struct cdev_priv), "sizeof(struct cdev_priv)");
 
+/* devfs 创建一个 cdev */
 struct cdev *
 devfs_alloc(int flags)
 {
@@ -138,23 +141,35 @@ devfs_alloc(int flags)
 	if (cdp == NULL)
 		return (NULL);
 
+	/* 初始化 cdp_dirents 指针 */
 	cdp->cdp_dirents = &cdp->cdp_dirent0;
 
-	cdev = &cdp->cdp_c;
-	LIST_INIT(&cdev->si_children);
-	vfs_timestamp(&ts);
+	cdev = &cdp->cdp_c;	// cdev_priv 管理的范围感觉比较逛
+	LIST_INIT(&cdev->si_children);	// 初始化children链表
+	vfs_timestamp(&ts);	// 获取系统当前时间戳
 	cdev->si_atime = cdev->si_mtime = cdev->si_ctime = ts;
 
 	return (cdev);
 }
 
+/* 应该是通过文件名查找对应的dev */
 int
 devfs_dev_exists(const char *name)
 {
+	/*
+		devfs 一些功能函数代码实现上有一个规律，那就是 cdev_priv 经常性的出现在
+		函数开头，说明这个结构体应该是有相当的重要性
+	*/
 	struct cdev_priv *cdp;
 
 	mtx_assert(&devmtx, MA_OWNED);
 
+	/* 
+		cdevp_list 又是存放的 cdev_priv，所以一定要重点关注。我们一般查找 cdev 的时候是通过
+		遍历 cdevp_list 链表来进行的。内核代码软件设计的思路挺多都是这种。首先设计出一个涵盖各种
+		成员变量的复杂的结构体，用来全方位描述所要管理的对象；然后在构建一个队列，将所有需要管理的
+		对象通过描述结构体来进行统一管理
+	*/
 	TAILQ_FOREACH(cdp, &cdevp_list, cdp_list) {
 		if ((cdp->cdp_flags & CDP_ACTIVE) == 0)
 			continue;
@@ -183,12 +198,21 @@ devfs_free(struct cdev *cdev)
 	free(cdp, M_CDEVP);
 }
 
+/* 
+	查找某个目录下的子目录？ 从代码逻辑来看，其实就是在传入的 dd 中的 de_dlist 目录列表
+	对比；dd 有些情况传入的是根目录
+*/
 struct devfs_dirent *
 devfs_find(struct devfs_dirent *dd, const char *name, int namelen, int type)
 {
 	struct devfs_dirent *de;
 
 	TAILQ_FOREACH(de, &dd->de_dlist, de_list) {
+		/*
+			de_dirent 是 dirent 类型的一个结构体，它存放有directory entry 的 inode number，
+			name length 等信息。一般存在与目录结构体中，我们可以通过它获取到目录项的一些信息
+			de_dlist 应该表示的是子目录列表，通过目录name和type来判断当前目录是不是我们要找的那个
+		*/
 		if (namelen != de->de_dirent->d_namlen)
 			continue;
 		if (type != 0 && type != de->de_dirent->d_type)
@@ -212,6 +236,9 @@ devfs_find(struct devfs_dirent *dd, const char *name, int namelen, int type)
 	return (de);
 }
 
+/* 
+	devfs 创建新的目录项，注意里边包含有 dirent，devfs_dirent 就是管理目录的队列中的元素
+*/
 struct devfs_dirent *
 devfs_newdirent(char *name, int namelen)
 {
@@ -220,6 +247,8 @@ devfs_newdirent(char *name, int namelen)
 	struct dirent d;
 
 	d.d_namlen = namelen;
+
+	/* devfs_dirent + dirent 大小的总和 */
 	i = sizeof(*de) + GENERIC_DIRSIZ(&d);
 	de = malloc(i, M_DEVFS3, M_WAITOK | M_ZERO);
 	de->de_dirent = (struct dirent *)(de + 1);
@@ -240,7 +269,12 @@ devfs_newdirent(char *name, int namelen)
 struct devfs_dirent *
 devfs_parent_dirent(struct devfs_dirent *de)
 {
-
+	/*
+		当de不是一个目录的时候，执行下面的if分支。所以后边的代码肯定处理的是de表示
+		目录的情形，目录的话一般都会包含有子目录，所以要对dot 和 dotdot 进行判断，
+		看是否包含有这两个子目录。也从侧面验证了之前的猜想， de_dlist 表示的就是子
+		目录，de_dir 表示的是文件当前所在的目录
+	*/
 	if (de->de_dirent->d_type != DT_DIR)
 		return (de->de_dir);
 
@@ -257,6 +291,11 @@ devfs_parent_dirent(struct devfs_dirent *de)
 	return (de->de_dir);
 }
 
+/*
+	创建目录，make directory
+	dotdot 不仅仅是 .. , devfs_find 函数调用的时候传入的是根目录，调用的场景就是查找目录项的时候没有找到，
+	这个时候就要创建一个新的 devfs directory entry
+*/ 
 struct devfs_dirent *
 devfs_vmkdir(struct devfs_mount *dmp, char *name, int namelen,
     struct devfs_dirent *dotdot, u_int inode)
@@ -266,19 +305,25 @@ devfs_vmkdir(struct devfs_mount *dmp, char *name, int namelen,
 
 	/* Create the new directory */
 	dd = devfs_newdirent(name, namelen);
-	TAILQ_INIT(&dd->de_dlist);
+	TAILQ_INIT(&dd->de_dlist);	// 初始化子目录列表
 	dd->de_dirent->d_type = DT_DIR;
 	dd->de_mode = 0555;
 	dd->de_links = 2;
 	dd->de_dir = dd;
+	/* 
+		devfs_mount 的时候。inode传入的是 DEVFS_ROOTINO = 2。如果传入的inode不是0，
+		那么就直接赋值给 de_inode，如果是0的话，那就调用 alloc_unr 来分配一个。所以unr
+		的作用其中一个就是管理inode number的分配工作
+	*/
 	if (inode != 0)
-		dd->de_inode = inode;
+		dd->de_inode = inode;	
 	else
 		dd->de_inode = alloc_unr(devfs_inos);
 
 	/*
 	 * "." and ".." are always the two first entries in the
-	 * de_dlist list.
+	 * de_dlist list. 一般文件下面都会有 . 和 .. 两个子文件，所以
+	 * 从这里可以推测出来 de_dlist 表示的就是子目录链表
 	 *
 	 * Create the "." entry in the new directory.
 	 */
@@ -288,7 +333,10 @@ devfs_vmkdir(struct devfs_mount *dmp, char *name, int namelen,
 	TAILQ_INSERT_TAIL(&dd->de_dlist, de, de_list);
 	de->de_dir = dd;
 
-	/* Create the ".." entry in the new directory. */
+	/* Create the ".." entry in the new directory. 
+		一般我们执行 cd .. 的时候就是退回到上一层目录，这里应该就是起到了这样一个功能。
+		.. 应该就是在本目录中保存的对上级目录的一个链接，所以后边会把 dotdot -> de_links++
+	*/
 	de = devfs_newdirent("..", 2);
 	de->de_dirent->d_type = DT_DIR;
 	de->de_flags |= DE_DOTDOT;
@@ -324,7 +372,7 @@ devfs_dirent_free(struct devfs_dirent *de)
 
 /*
  * Removes a directory if it is empty. Also empty parent directories are
- * removed recursively.
+ * removed recursively. 删除空目录。空的父目录也会被递归删除
  */
 static void
 devfs_rmdir_empty(struct devfs_mount *dm, struct devfs_dirent *de)
@@ -386,6 +434,7 @@ devfs_delete(struct devfs_mount *dm, struct devfs_dirent *de, int flags)
 			DEVFS_DE_HOLD(dd);
 		if (de->de_flags & DE_USER) {
 			KASSERT(dd != NULL, ("devfs_delete: NULL dd"));
+			/* 删除的项应该是de，这里传入的却是de的parent目录 */
 			devfs_dir_unref_de(dm, dd);
 		}
 	} else
@@ -432,9 +481,10 @@ devfs_delete(struct devfs_mount *dm, struct devfs_dirent *de, int flags)
 }
 
 /*
- * Called on unmount.
- * Recursively removes the entire tree.
+ * Called on unmount. 在unmount的时候调用
+ * Recursively removes the entire tree.	递归删除整个树
  * The caller needs to hold the dm for the duration of the call.
+ * 呼叫者需要在通话期间保持dm
  */
 
 static void
@@ -450,16 +500,17 @@ devfs_purge(struct devfs_mount *dm, struct devfs_dirent *dd)
 		 * Use TAILQ_LAST() to remove "." and ".." last.
 		 * We might need ".." to resolve a path in
 		 * devfs_dir_unref_de().
+		 * 最后再删除 . 和 .. ，因为我们还可能需要用到它们来解决路径问题
 		 */
 		de = TAILQ_LAST(&dd->de_dlist, devfs_dlist_head);
 		if (de == NULL)
-			break;
+			break;	// 知道de为空，跳出循环
 		TAILQ_REMOVE(&dd->de_dlist, de, de_list);
 		if (de->de_flags & DE_USER)
 			devfs_dir_unref_de(dm, dd);
 		if (de->de_flags & (DE_DOT | DE_DOTDOT))
 			devfs_delete(dm, de, DEVFS_DEL_NORECURSE);
-		else if (de->de_dirent->d_type == DT_DIR)
+		else if (de->de_dirent->d_type == DT_DIR)	// 当de表示一个目录的时候，递归删除
 			devfs_purge(dm, de);
 		else
 			devfs_delete(dm, de, DEVFS_DEL_NORECURSE);
@@ -473,8 +524,11 @@ devfs_purge(struct devfs_mount *dm, struct devfs_dirent *dd)
 /*
  * Each cdev_priv has an array of pointers to devfs_dirent which is indexed
  * by the mount points dm_idx.
+ * 每个 cdev_priv 都有一个指向 devfs_dirent 的指针数组，devfs_dirent 由装入点 dm_idx 索引
+ * 
  * This function extends the array when necessary, taking into account that
  * the default array is 1 element and not malloc'ed.
+ * 考虑到默认数组是1个元素而不是malloc'ed，此函数在必要时扩展数组
  */
 static void
 devfs_metoo(struct cdev_priv *cdp, struct devfs_mount *dm)
@@ -509,7 +563,12 @@ devfs_metoo(struct cdev_priv *cdp, struct devfs_mount *dm)
 static int
 devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 {
-	struct cdev_priv *cdp;
+	struct cdev_priv *cdp;	// cdev 的私有数据
+
+	/*
+		devfs_dirent 表示/dev 下的目录项
+		dd表示 dot dot? dt表示dot？
+	*/ 
 	struct devfs_dirent *de;
 	struct devfs_dirent *dd, *dt;
 	struct cdev *pdev;
@@ -518,6 +577,11 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 
 	sx_assert(&dm->dm_lock, SX_XLOCKED);
 	dev_lock();
+
+	/*  
+		cdevp_list 中存放的是所有创建的cdev的私有数据，应该是可以通过判断其中的
+		一些属性值来检测 cdev 的状态
+	*/
 	TAILQ_FOREACH(cdp, &cdevp_list, cdp_list) {
 
 		KASSERT(cdp->cdp_dirents != NULL, ("NULL cdp_dirents"));
@@ -525,10 +589,17 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 		/*
 		 * If we are unmounting, or the device has been destroyed,
 		 * clean up our dirent.
+		 * 当没有挂载，或者device已经被销毁(不活跃？？)，则直接销毁相应的目录项。从代码中可以看到，
+		 * cdev directory entry 是有数量限制的；这里比较的是 devfs_mount 和 cdev_priv -> cdp_maxdirent
+		 * 进行比较，然后对 cdp_dirents 中的元素判断是否为null，元素表示挂载点的私有数据？
 		 */
 		if ((cleanup || !(cdp->cdp_flags & CDP_ACTIVE)) &&
 		    dm->dm_idx <= cdp->cdp_maxdirent &&
 		    cdp->cdp_dirents[dm->dm_idx] != NULL) {
+			/*
+				用de暂存，然后将对应数组中的元素清空，注意 cdp_dirents 中的索引，是devfs_mount
+				的成员index
+			*/
 			de = cdp->cdp_dirents[dm->dm_idx];
 			cdp->cdp_dirents[dm->dm_idx] = NULL;
 			KASSERT(cdp == de->de_cdp,
@@ -567,10 +638,13 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 		if (dm->dm_idx <= cdp->cdp_maxdirent &&
 		    cdp->cdp_dirents[dm->dm_idx] != NULL) {
 			de = cdp->cdp_dirents[dm->dm_idx];
-			KASSERT(cdp == de->de_cdp, ("inconsistent cdp"));
+			KASSERT(cdp == de->de_cdp, ("inconsistent cdp"));	//不一致的 cdev_privdata
 			continue;
 		}
-
+		/* 
+			从上面的代码逻辑可以看出，这个循环貌似是要从 cdevp_list 里边寻找 devfs_mount 所对应的
+			devfs_dirent 的 cdev_privdata？？ 找到了以后，执行下面的操作
+		*/
 
 		cdp->cdp_inuse++;
 		dev_unlock();
@@ -578,21 +652,27 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 		if (dm->dm_idx > cdp->cdp_maxdirent)
 		        devfs_metoo(cdp, dm);
 
-		dd = dm->dm_rootdir;
+		dd = dm->dm_rootdir;	// 根目录
 		s = cdp->cdp_c.si_name;
+
+		/*
+			从逻辑上来看，这里把完整的文件路径进行了拆分，会把"/"中间的目录名单独提取出来，在根目录的 de_dlist
+			中进行遍历查找。如果找到的话就继续解析路径，提取路径名，再查找，直到解析完毕；所以其中一旦有某一个目录
+			没有找到，应该是要做相应处理的，报错或者是重新创建一个。也可以大致推测一下这个函数的功能是干什么
+		*/
 		for (;;) {
 			for (q = s; *q != '/' && *q != '\0'; q++)
-				continue;
+				continue;	
 			if (*q != '/')
-				break;
-			de = devfs_find(dd, s, q - s, 0);
-			if (de == NULL)
+				break;	// 只是单个名称，没有对应的路径信息
+			de = devfs_find(dd, s, q - s, 0);	// q - s 路径名
+			if (de == NULL)	// 如果当前目录中没有这个目录，那就要重新创建一个
 				de = devfs_vmkdir(dm, s, q - s, dd, 0);
-			else if (de->de_dirent->d_type == DT_LNK) {
+			else if (de->de_dirent->d_type == DT_LNK) {	// 如果是链接文件，那就找对应的目录实体
 				de = devfs_find(dd, s, q - s, DT_DIR);
 				if (de == NULL)
 					de = devfs_vmkdir(dm, s, q - s, dd, 0);
-				de->de_flags |= DE_COVERED;
+				de->de_flags |= DE_COVERED;	// 把 flag 设置成覆盖类型？？
 			}
 			s = q + 1;
 			dd = de;
@@ -601,7 +681,9 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 			    ("%s: invalid directory (si_name=%s)",
 			    __func__, cdp->cdp_c.si_name));
 
-		}
+		}	// end of for
+
+		/* 如果是没有路径的文件名称 */
 		de_flags = 0;
 		de = devfs_find(dd, s, q - s, DT_LNK);
 		if (de != NULL)
@@ -616,9 +698,12 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 			pdev = cdp->cdp_c.si_parent;
 			dt = dd;
 			depth = 0;
+			
+			/* 计算文件层次深度 */
 			while (dt != dm->dm_rootdir &&
 			    (dt = devfs_parent_dirent(dt)) != NULL)
 				depth++;
+
 			j = depth * 3 + strlen(pdev->si_name) + 1;
 			de->de_symlink = malloc(j, M_DEVFS, M_WAITOK);
 			de->de_symlink[0] = 0;
@@ -650,7 +735,8 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 		    ("%s %d\n", __func__, __LINE__));
 		dev_unlock();
 		return (1);
-	}
+	}	// end of foreach loop
+
 	dev_unlock();
 	return (0);
 }
@@ -663,6 +749,11 @@ devfs_populate(struct devfs_mount *dm)
 {
 	unsigned gen;
 
+	/* 
+		devfs_generation 只有在 devfs_create 和 devfs_destory 的时候才会进行增删，
+		所以它记录的应该就是cdev的状态的一些变化。这个函数功能应该就是检测cdev状态不一致
+		的时候，是哪里出了问题
+	*/
 	sx_assert(&dm->dm_lock, SX_XLOCKED);
 	gen = devfs_generation;
 	if (dm->dm_generation == gen)
@@ -697,10 +788,18 @@ devfs_create(struct cdev *dev)
 	struct cdev_priv *cdp;
 
 	mtx_assert(&devmtx, MA_OWNED);
+
+	/* cdev关联的private data */
 	cdp = cdev2priv(dev);
 	cdp->cdp_flags |= CDP_ACTIVE;
+
+	/* 
+		devfs_inos 本身就是一个unr，管理alloc内存分配，alloc_unrl 表示的就是从
+		devfs_inos 中的应该是free list中拿到一个可用的对象进行分配，感觉就仅仅是
+		一个数字，可能仅仅代表的就是编号一类的东西？？
+	 */
 	cdp->cdp_inode = alloc_unrl(devfs_inos);
-	dev_refl(dev);
+	dev_refl(dev);	// reference count + 1
 	TAILQ_INSERT_TAIL(&cdevp_list, cdp, cdp_list);
 	devfs_generation++;
 }
@@ -734,7 +833,13 @@ devfs_free_cdp_inode(ino_t ino)
 static void
 devfs_devs_init(void *junk __unused)
 {
-
+	/*
+		表示要分配的元素数量限制，从命名来看，很可能就是inode的数量的范围。结构体中也有相应的链表，表示
+		分配的元素和释放的元素，inode table？
+		每一个文件都会对应一个 inode，inode中会有一个随机分配的 identify number 来标识它。初始化函数
+		好像仅仅分配了一个 inode number。devfs 应该就是 /dev，本质上也是一个文件，所以它也会对应一个
+		inode，这里应该就是给 /dev 的 inode 分配一个随机数
+	*/
 	devfs_inos = new_unrhdr(DEVFS_ROOTINO + 1, INT_MAX, &devmtx);
 }
 

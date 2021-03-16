@@ -140,12 +140,17 @@ static struct vop_vector crossmp_vnodeops = {
 	.vop_unlock =		crossmp_vop_unlock,
 };
 
+/*
+	namei capture tracker：名字捕获追踪器？其实就是vnode的队列
+*/
 struct nameicap_tracker {
 	struct vnode *dp;
 	TAILQ_ENTRY(nameicap_tracker) nm_link;
 };
 
-/* Zone for cap mode tracker elements used for dotdot capability checks. */
+/* Zone for cap mode tracker elements used for dotdot capability checks. 
+	用于dotdot功能检查的cap模式跟踪器元素的区域
+*/
 static uma_zone_t nt_zone;
 
 static void
@@ -260,14 +265,18 @@ namei_handle_root(struct nameidata *ndp, struct vnode **dpp)
 
 /*
  * Convert a pathname into a pointer to a locked vnode.
+ * 将路径名转换为指向锁定vnode的指针
  *
  * The FOLLOW flag is set when symbolic links are to be followed
  * when they occur at the end of the name translation process.
  * Symbolic links are always followed for all other pathname
  * components other than the last.
+ * 当符号链接出现在名称转换过程的末尾时，将在符号链接后面设置FOLLOW标志。
+ * 对于除最后一个以外的所有其他路径名组件，始终遵循符号链接
  *
  * The segflg defines whether the name is to be copied from user
  * space or kernel space.
+ * segflg定义是从用户空间还是从内核空间复制名称
  *
  * Overall outline of namei:
  *
@@ -283,7 +292,9 @@ namei(struct nameidata *ndp)
 {
 	struct filedesc *fdp;	/* pointer to file descriptor state */
 	char *cp;		/* pointer into pathname argument */
-	struct vnode *dp;	/* the directory we are searching */
+
+	/* 貌似对于目录或者文件的访问，都是通过关联的vnode进行的 */
+	struct vnode *dp;	/* the directory we are searching 我们正在查找的目录 */
 	struct iovec aiov;		/* uio for reading symbolic links */
 	struct componentname *cnp;
 	struct thread *td;
@@ -292,6 +303,7 @@ namei(struct nameidata *ndp)
 	struct uio auio;
 	int error, linklen, startdir_used;
 
+	// 注意这里，cnp 其实就是 ndp->ni_cnd，后面对于 cnp 的操作其实就是对 ni_cnd 的操作
 	cnp = &ndp->ni_cnd;
 	td = cnp->cn_thread;
 	p = td->td_proc;
@@ -303,16 +315,19 @@ namei(struct nameidata *ndp)
 	    ("namei: flags contaminated with nameiops"));
 	MPASS(ndp->ni_startdir == NULL || ndp->ni_startdir->v_type == VDIR ||
 	    ndp->ni_startdir->v_type == VBAD);
+
+	// 进程对应的文件描述符，这里初始化fdp，后面会用到
 	fdp = p->p_fd;
-	TAILQ_INIT(&ndp->ni_cap_tracker);
+	TAILQ_INIT(&ndp->ni_cap_tracker); // 初始化用于名称查找的 vnode 队列	
 	ndp->ni_lcf = 0;
 
 	/* We will set this ourselves if we need it. */
-	cnp->cn_flags &= ~TRAILINGSLASH;
+	cnp->cn_flags &= ~TRAILINGSLASH; // 表示路径以 '/' 结束
 
 	/*
 	 * Get a buffer for the name to be translated, and copy the
-	 * name into the buffer.
+	 * name into the buffer. 为要翻译的名称获取一个缓冲区，并将名称复制到缓冲区中
+	 * 将 nameidata 中的数据拷贝到 componentname 当中(下面的代码为 componentname 分配了存储空间)
 	 */
 	if ((cnp->cn_flags & HASBUF) == 0)
 		cnp->cn_pnbuf = uma_zalloc(namei_zone, M_WAITOK);
@@ -324,7 +339,7 @@ namei(struct nameidata *ndp)
 		    &ndp->ni_pathlen);
 
 	/*
-	 * Don't allow empty pathnames.
+	 * Don't allow empty pathnames. 不允许空的路径
 	 */
 	if (error == 0 && *cnp->cn_pnbuf == '\0')
 		error = ENOENT;
@@ -333,6 +348,8 @@ namei(struct nameidata *ndp)
 	/*
 	 * In capability mode, lookups must be restricted to happen in
 	 * the subtree with the root specified by the file descriptor:
+	 * 在功能模式下，必须限制查找发生在具有由文件描述符指定的根的子树中
+	 * 
 	 * - The root must be real file descriptor, not the pseudo-descriptor
 	 *   AT_FDCWD.
 	 * - The passed path must be relative and not absolute.
@@ -356,11 +373,11 @@ namei(struct nameidata *ndp)
 	}
 #endif
 	if (error != 0) {
-		namei_cleanup_cnp(cnp);
+		namei_cleanup_cnp(cnp);	// 释放掉 componentname 的存储空间
 		ndp->ni_vp = NULL;
 		return (error);
 	}
-	ndp->ni_loopcnt = 0;
+	ndp->ni_loopcnt = 0; // 符号链接设置为0
 #ifdef KTRACE
 	if (KTRPOINT(td, KTR_NAMEI)) {
 		KASSERT(cnp->cn_thread == curthread,
@@ -369,15 +386,17 @@ namei(struct nameidata *ndp)
 	}
 #endif
 	/*
-	 * Get starting point for the translation.
+	 * Get starting point for the translation. 
+	 * 获取翻译的起点，应该就是路径的起始地址
 	 */
-	FILEDESC_SLOCK(fdp);
+	FILEDESC_SLOCK(fdp);	// slock: shared lock
 	ndp->ni_rootdir = fdp->fd_rdir;
 	vrefact(ndp->ni_rootdir);
 	ndp->ni_topdir = fdp->fd_jdir;
 
 	/*
 	 * If we are auditing the kernel pathname, save the user pathname.
+	 * 如果我们正在审核内核路径名，请保存用户路径名
 	 */
 	if (cnp->cn_flags & AUDITVNODE1)
 		AUDIT_ARG_UPATH1(td, ndp->ni_dirfd, cnp->cn_pnbuf);
@@ -385,9 +404,11 @@ namei(struct nameidata *ndp)
 		AUDIT_ARG_UPATH2(td, ndp->ni_dirfd, cnp->cn_pnbuf);
 
 	startdir_used = 0;
-	dp = NULL;
+	dp = NULL;	// dp 表示我们目前需要查找的目录
+
+	// 之前把 nameidata 中的路径数据保存到了 cn_pnbuf，现在将 cn_nameptr 指向它
 	cnp->cn_nameptr = cnp->cn_pnbuf;
-	if (cnp->cn_pnbuf[0] == '/') {
+	if (cnp->cn_pnbuf[0] == '/') {	// 路径从根目录开始
 		error = namei_handle_root(ndp, &dp);
 	} else {
 		if (ndp->ni_startdir != NULL) {
@@ -413,6 +434,7 @@ namei(struct nameidata *ndp)
 			 * If file descriptor doesn't have all rights,
 			 * all lookups relative to it must also be
 			 * strictly relative.
+			 * 如果文件描述符没有所有权限，那么所有与之相关的查找也必须是严格相对的
 			 */
 			CAP_ALL(&rights);
 			if (!cap_rights_contains(&ndp->ni_filecaps.fc_rights,
@@ -439,6 +461,8 @@ namei(struct nameidata *ndp)
 		ndp->ni_lcf |= NI_LCF_CAP_DOTDOT;
 	SDT_PROBE3(vfs, namei, lookup, entry, dp, cnp->cn_pnbuf,
 	    cnp->cn_flags);
+
+	/* 到这里代码的主要功能是获取 rootdir或者 startdir对应的 vnode */
 	for (;;) {
 		ndp->ni_startdir = dp;
 		error = lookup(ndp);
@@ -580,12 +604,15 @@ needs_exclusive_leaf(struct mount *mp, int flags)
 /*
  * Search a pathname.
  * This is a very central and rather complicated routine.
+ * 这是一个非常核心和相当复杂的程序
  *
  * The pathname is pointed to by ni_ptr and is of length ni_pathlen.
  * The starting directory is taken from ni_startdir. The pathname is
  * descended until done, or a symbolic link is encountered. The variable
  * ni_more is clear if the path is completed; it is set to one if a
  * symbolic link needing interpretation is encountered.
+ * 路径名一直向下，直到完成，或者遇到符号链接。如果路径已完成，则变量ni_more是明确的；
+ * 如果遇到需要解释的符号链接，则将其设置为1
  *
  * The flag argument is LOOKUP, CREATE, RENAME, or DELETE depending on
  * whether the name is to be looked up, created, renamed, or deleted.
@@ -599,11 +626,11 @@ needs_exclusive_leaf(struct mount *mp, int flags)
  * When creating or renaming and LOCKPARENT is specified, the target may not
  * be ".".  When deleting and LOCKPARENT is specified, the target may be ".".
  *
- * Overall outline of lookup:
+ * Overall outline of lookup: 查找的总体轮廓
  *
  * dirloop:
  *	identify next component of name at ndp->ni_ptr
- *	handle degenerate case where name is null string
+ *	handle degenerate case where name is null string 处理名称为空字符串的退化情况
  *	if .. and crossing mount points and on mounted filesys, find parent
  *	call VOP_LOOKUP routine for next component name
  *	    directory vnode returned in ni_dvp, unlocked unless LOCKPARENT set
@@ -653,10 +680,11 @@ lookup(struct nameidata *ndp)
 	/*
 	 * We use shared locks until we hit the parent of the last cn then
 	 * we adjust based on the requesting flags.
+	 * 我们使用共享锁，直到到达最后一个cn的父级，然后根据请求的标志进行调整
 	 */
 	cnp->cn_lkflags = LK_SHARED;
 	dp = ndp->ni_startdir;
-	ndp->ni_startdir = NULLVP;
+	ndp->ni_startdir = NULLVP;	// start directory置空？
 	vn_lock(dp,
 	    compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags | LK_RETRY,
 	    cnp->cn_flags));
@@ -696,6 +724,11 @@ dirloop:
 	 * fs's don't know about trailing slashes.  Remember if there were
 	 * trailing slashes to handle symlinks, existing non-directories
 	 * and non-existing files that won't be directories specially later.
+	 * 
+	 * 用一个斜杠替换多个斜杠，用空斜杠替换后面的斜杠。这必须在 VOP_LOOKUP 之前完成，
+	 * 因为有些fs不知道后面的斜杠。请记住，如果后面有斜杠来处理符号链接、现有的非目录和
+	 * 不存在的文件,这些文件稍后将不会成为目录
+	 * 应该就是对尾部'/'的处理，不同的文件系统处理的方式不一样，要注意区分
 	 */
 	while (*cp == '/' && (cp[1] == '/' || cp[1] == '\0')) {
 		cp++;
@@ -707,7 +740,7 @@ dirloop:
 	}
 	ndp->ni_next = cp;
 
-	cnp->cn_flags |= MAKEENTRY;
+	cnp->cn_flags |= MAKEENTRY;	// 将entry添加到名称缓存
 	if (*cp == '\0' && docache == 0)
 		cnp->cn_flags &= ~MAKEENTRY;
 	if (cnp->cn_namelen == 2 &&
@@ -727,10 +760,11 @@ dirloop:
 		goto bad;
 	}
 
+	/* 将我们需要查找的 vnode 添加到队列当中 */
 	nameicap_tracker_add(ndp, dp);
 
 	/*
-	 * Check for degenerate name (e.g. / or "")
+	 * Check for degenerate(退化的) name (e.g. / or "")
 	 * which is a way of talking about a directory,
 	 * e.g. like "/." or ".".
 	 */
@@ -766,22 +800,33 @@ dirloop:
 	 * Handle "..": five special cases.
 	 * 0. If doing a capability lookup and lookup_cap_dotdot is
 	 *    disabled, return ENOTCAPABLE.
+	 * 	  如果禁用了执行功能 lookup 和 lookup_cap_dotdot，则返回 ENOTCAPABLE
+	 * 
 	 * 1. Return an error if this is the last component of
 	 *    the name and the operation is DELETE or RENAME.
+	 *    如果这是名称的最后一个组件，并且操作是DELETE或RENAME，则返回错误
+	 * 
 	 * 2. If at root directory (e.g. after chroot)
 	 *    or at absolute root directory
 	 *    then ignore it so can't get out.
+	 *    如果在根目录（例如chroot之后）或绝对根目录，则忽略它，这样就无法退出
+	 * 
 	 * 3. If this vnode is the root of a mounted
 	 *    filesystem, then replace it with the
 	 *    vnode which was mounted on so we take the
 	 *    .. in the other filesystem.
+	 *    如果这个vnode是一个挂载的文件系统的根，那么用挂载的vnode替换它，这样我们就采用..在另一个文件系统中
+	 * 
 	 * 4. If the vnode is the top directory of
-	 *    the jail or chroot, don't let them out.
+	 *    the jail or chroot, don't let them out. 如果vnode是jail或chroot的顶级目录，请不要将它们释放
+	 * 
 	 * 5. If doing a capability lookup and lookup_cap_dotdot is
 	 *    enabled, return ENOTCAPABLE if the lookup would escape
 	 *    from the initial file descriptor directory.  Checks are
 	 *    done by ensuring that namei() already traversed the
 	 *    result of dotdot lookup.
+	 *    如果执行功能查找并且启用了 lookup_cap_dotdot，则如果查找将从初始文件描述符目录转义，则返回 ENOTCAPABLE。
+	 *    检查是通过确保 namei() 已经遍历 dotdot loookup 的结果来完成的
 	 */
 	if (cnp->cn_flags & ISDOTDOT) {
 		if ((ndp->ni_lcf & (NI_LCF_STRICTRELATIVE | NI_LCF_CAP_DOTDOT))
@@ -840,6 +885,7 @@ dirloop:
 
 	/*
 	 * We now have a segment name to search for, and a directory to search.
+	 * 我们现在有一个要搜索的段名和一个要搜索的目录
 	 */
 unionlookup:
 #ifdef MAC
@@ -1240,6 +1286,13 @@ bad:
 	return (error);
 }
 
+/*
+	初始化 nameidata。假设我们要打开一个文件，经历的大致流程是： 应用程序或终端指令 -> syscall ->
+	vfs -> fs。所以这里的 nameidata 中填充的数据应该就是调用 syscall 时我们所输入的数据，比如路径信息、
+	文件名信息等等，相当于是对数据做了一个打包处理。
+	做软件设计的时候可以借鉴这种处理方式，将一些需要同时传输的数据进行打包，组合成一个结构体类型，这样我们
+	再设计函数的时候传参就会变得更加简洁，阅读起来也比较方便。
+*/
 void
 NDINIT_ALL(struct nameidata *ndp, u_long op, u_long flags, enum uio_seg segflg,
     const char *namep, int dirfd, struct vnode *startdir, cap_rights_t *rightsp,

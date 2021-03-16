@@ -81,9 +81,12 @@ struct nfs_accesscache {
 
 /*
  * The nfsnode is the nfs equivalent to ufs's inode. Any similarity
- * is purely coincidental.
+ * is purely coincidental. nfsnode相当于ufs的inode。任何相似之处纯属巧合、
+ * 
  * There is a unique nfsnode allocated for each active file,
  * each current directory, each mounted-on file, text file, and the root.
+ * 为每个活动文件、每个当前目录、每个挂载文件、文本文件和根目录分配一个唯一的 nfsnode
+ * 
  * An nfsnode is 'named' by its file handle. (nget/nfs_node.c)
  * If this structure exceeds 256 bytes (it is currently 256 using 4.4BSD-Lite
  * type definitions), file handles of > 32 bytes should probably be split out
@@ -93,12 +96,12 @@ struct nfs_accesscache {
  *     be well aligned and, therefore, tightly packed.
  */
 struct nfsnode {
-	struct mtx 		n_mtx;		/* Protects all of these members */
+	struct mtx 		n_mtx;		/* Protects all of these members 保护锁 */
 	struct lock		n_excl;		/* Exclusive helper for shared
-						   vnode lock */
+						   vnode lock 共享锁 */
 	u_quad_t		n_size;		/* Current size of file */
-	u_quad_t		n_brev;		/* Modify rev when cached */
-	u_quad_t		n_lrev;		/* Modify rev for lease */
+	u_quad_t		n_brev;		/* Modify rev when cached 缓存时修改rev */
+	u_quad_t		n_lrev;		/* Modify rev for lease 修改租赁的rev */
 	struct nfsvattr		n_vattr;	/* Vnode attribute cache */
 	time_t			n_attrstamp;	/* Attr. cache timestamp */
 	struct nfs_accesscache	n_accesscache[NFS_ACCESSCACHESIZE];

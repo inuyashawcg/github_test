@@ -35,19 +35,21 @@
 
 struct mtx;
 
-/* Header element for a unr number space. */
+/* Header element for a unr number space. 
+	从定义来看，应该是管理内存分配相关的结构体
+*/
 
 struct unrhdr {
 	TAILQ_HEAD(unrhd,unr)	head;
 	u_int			low;	/* Lowest item */
 	u_int			high;	/* Highest item */
-	u_int			busy;	/* Count of allocated items */
-	u_int			alloc;	/* Count of memory allocations */
-	u_int			first;	/* items in allocated from start */
-	u_int			last;	/* items free at end */
+	u_int			busy;	/* Count of allocated items 已经分配的项目计数 */
+	u_int			alloc;	/* Count of memory allocations 内存分配计数 */
+	u_int			first;	/* items in allocated from start 分配的第一个项目 */
+	u_int			last;	/* items free at end 在最后释放的项目 */
 	struct mtx		*mtx;
 	TAILQ_HEAD(unrfr,unr)	ppfree;	/* Items to be freed after mtx
-					   lock dropped */
+					   lock dropped mtx锁丢失后要释放的项目 */
 };
 
 #endif

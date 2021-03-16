@@ -102,26 +102,31 @@
 #define	EXT2_MAXSYMLINKLEN		(EXT2_N_BLOCKS * sizeof(uint32_t))
 
 /*
- * Structure of an inode on the disk
+ * Structure of an inode on the disk 磁盘上的一个inode节点结构
+ * e2di_nblock 表示的是分配给文件的块数，e2di_size 表示的文件真正的大小，两者很大概率是不一样的，
+ * 所以文件中会有空洞。一个非空的文件至少接受一个数据块；
+ * e2di_nblock 字段是具有 EXT2_N_BLOCKS(通常是15个)指针元素的一个数组，每个元素指向分配给文件的数据块
  */
 struct ext2fs_dinode {
-	uint16_t	e2di_mode;	/*   0: IFMT, permissions; see below. */
-	uint16_t	e2di_uid;	/*   2: Owner UID */
-	uint32_t	e2di_size;	/*   4: Size (in bytes) */
-	uint32_t	e2di_atime;	/*   8: Access time */
-	uint32_t	e2di_ctime;	/*  12: Change time */
-	uint32_t	e2di_mtime;	/*  16: Modification time */
-	uint32_t	e2di_dtime;	/*  20: Deletion time */
-	uint16_t	e2di_gid;	/*  24: Owner GID */
-	uint16_t	e2di_nlink;	/*  26: File link count */
-	uint32_t	e2di_nblock;	/*  28: Blocks count */
-	uint32_t	e2di_flags;	/*  32: Status flags (chflags) */
-	uint32_t	e2di_version;	/*  36: Low 32 bits inode version */
-	uint32_t	e2di_blocks[EXT2_N_BLOCKS]; /* 40: disk blocks */
-	uint32_t	e2di_gen;	/* 100: generation number */
-	uint32_t	e2di_facl;	/* 104: Low EA block */
+	uint16_t	e2di_mode;	/*   0: IFMT, permissions; see below. 文件类型和访问权限 */
+	uint16_t	e2di_uid;	/*   2: Owner UID 拥有者标识符 */
+	uint32_t	e2di_size;	/*   4: Size (in bytes) 以字节为单位的文件长度 */
+	uint32_t	e2di_atime;	/*   8: Access time 最后一次节点访问的时间 */
+	uint32_t	e2di_ctime;	/*  12: Change time 最后一次节点修改的时间 */
+	uint32_t	e2di_mtime;	/*  16: Modification time 文件内容最后改变的时间 */
+	uint32_t	e2di_dtime;	/*  20: Deletion time 文件删除的时间 */
+	uint16_t	e2di_gid;	/*  24: Owner GID 用户组标识符 */
+	uint16_t	e2di_nlink;	/*  26: File link count 硬链接计数器 */
+	uint32_t	e2di_nblock;	/*  28: Blocks count 文件的数据块数 */
+	uint32_t	e2di_flags;	/*  32: Status flags (chflags) 文件标志 */
+	uint32_t	e2di_version;	/*  36: Low 32 bits inode version inode版本信息 */
+	uint32_t	e2di_blocks[EXT2_N_BLOCKS]; /* 40: disk blocks 指向数据块的指针 */
+	uint32_t	e2di_gen;	/* 100: generation number 文件版本(当网络文件系统访问文件的时候使用) */
+	uint32_t	e2di_facl;	/* 104: Low EA block 文件访问控制列表 */
 	uint32_t	e2di_size_high;	/* 108: Upper bits of file size */
 	uint32_t	e2di_faddr;	/* 112: Fragment address (obsolete) */
+
+	/* 其余字段与ext2具体实现相关，主要用户处理块的分配等任务 */
 	uint16_t	e2di_nblock_high; /* 116: Blocks count bits 47:32 */
 	uint16_t	e2di_facl_high;	/* 118: File EA bits 47:32 */
 	uint16_t	e2di_uid_high;	/* 120: Owner UID top 16 bits */

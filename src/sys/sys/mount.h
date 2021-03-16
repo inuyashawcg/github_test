@@ -176,6 +176,8 @@ struct vfsopt {
  * Structure per mounted filesystem.  Each mounted filesystem has an
  * array of operations and an instance record.  The filesystems are
  * put on a doubly linked list.
+ * 每个装入的文件系统的结构。每个挂载的文件系统都有一个操作数组和一个实例记录。文件
+ * 系统被放在一个双链表上。
  *
  * Lock reference:
  * 	l - mnt_listmtx
@@ -187,30 +189,30 @@ struct vfsopt {
  *
  */
 struct mount {
-	struct mtx	mnt_mtx;		/* mount structure interlock */
+	struct mtx	mnt_mtx;		/* mount structure interlock 内部锁 */
 	int		mnt_gen;		/* struct mount generation */
 #define	mnt_startzero	mnt_list
-	TAILQ_ENTRY(mount) mnt_list;		/* (m) mount list */
-	struct vfsops	*mnt_op;		/* operations on fs */
-	struct vfsconf	*mnt_vfc;		/* configuration info */
-	struct vnode	*mnt_vnodecovered;	/* vnode we mounted on */
-	struct vnode	*mnt_syncer;		/* syncer vnode */
-	int		mnt_ref;		/* (i) Reference count */
-	struct vnodelst	mnt_nvnodelist;		/* (i) list of vnodes */
+	TAILQ_ENTRY(mount) mnt_list;		/* (m) mount list 挂载链表项，表明挂载项也是通过链表统一管理 */
+	struct vfsops	*mnt_op;		/* operations on fs fs的操作函数表 */
+	struct vfsconf	*mnt_vfc;		/* configuration info 文件系统的配置信息 */
+	struct vnode	*mnt_vnodecovered;	/* vnode we mounted on 我们所挂载的vnode？ */
+	struct vnode	*mnt_syncer;		/* syncer vnode 同步器vnode */
+	int		mnt_ref;		/* (i) Reference count - mount引用计数 */
+	struct vnodelst	mnt_nvnodelist;		/* (i) list of vnodes 管理所有的vnode */
 	int		mnt_nvnodelistsize;	/* (i) # of vnodes */
-	int		mnt_writeopcount;	/* (i) write syscalls pending */
-	int		mnt_kern_flag;		/* (i) kernel only flags */
-	uint64_t	mnt_flag;		/* (i) flags shared with user */
+	int		mnt_writeopcount;	/* (i) write syscalls pending 写入系统调用挂起 */
+	int		mnt_kern_flag;		/* (i) kernel only flags 内核才有的flag？ */
+	uint64_t	mnt_flag;		/* (i) flags shared with user 和用户空间共享的flag */
 	struct vfsoptlist *mnt_opt;		/* current mount options */
-	struct vfsoptlist *mnt_optnew;		/* new options passed to fs */
+	struct vfsoptlist *mnt_optnew;		/* new options passed to fs 传递给fs的新option，update */
 	int		mnt_maxsymlinklen;	/* max size of short symlink */
-	struct statfs	mnt_stat;		/* cache of filesystem stats */
-	struct ucred	*mnt_cred;		/* credentials of mounter */
+	struct statfs	mnt_stat;		/* cache of filesystem stats 文件系统状态缓存 */
+	struct ucred	*mnt_cred;		/* credentials of mounter - mounter证书？ */
 	void *		mnt_data;		/* private data */
 	time_t		mnt_time;		/* last time written*/
 	int		mnt_iosize_max;		/* max size for clusters, etc */
 	struct netexport *mnt_export;		/* export list */
-	struct label	*mnt_label;		/* MAC label for the fs */
+	struct label	*mnt_label;		/* MAC label for the fs 好像是表示文件系统的存储类型 */
 	u_int		mnt_hashseed;		/* Random seed for vfs_hash */
 	int		mnt_lockref;		/* (i) Lock reference count */
 	int		mnt_secondary_writes;   /* (i) # of secondary writes */
@@ -219,9 +221,9 @@ struct mount {
 #define	mnt_endzero	mnt_gjprovider
 	char		*mnt_gjprovider;	/* gjournal provider name */
 	struct mtx	mnt_listmtx;
-	struct vnodelst	mnt_activevnodelist;	/* (l) list of active vnodes */
+	struct vnodelst	mnt_activevnodelist;	/* (l) list of active vnodes 活跃的vnode list */
 	int		mnt_activevnodelistsize;/* (l) # of active vnodes */
-	struct vnodelst	mnt_tmpfreevnodelist;	/* (l) list of free vnodes */
+	struct vnodelst	mnt_tmpfreevnodelist;	/* (l) list of free vnodes 空闲的vnode list */
 	int		mnt_tmpfreevnodelistsize;/* (l) # of free vnodes */
 	struct lock	mnt_explock;		/* vfs_export walkers lock */
 	TAILQ_ENTRY(mount) mnt_upper_link;	/* (m) we in the all uppers */

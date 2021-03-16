@@ -38,10 +38,15 @@
  * The top two bits in the first element of the cr_rights[] array contain
  * total number of elements in the array - 2. This means if those two bits are
  * equal to 0, we have 2 array elements.
+ * cr_rights[]数组第一个元素的前两位包含数组中元素的总数-2。这意味着如果这两个位等于0，我们有2个数组元素
+ * 
  * The top two bits in all remaining array elements should be 0.
+ * 所有剩余数组元素中的前两位应为0
+ * 
  * The next five bits contain array index. Only one bit is used and bit position
  * in this five-bits range defines array index. This means there can be at most
  * five array elements.
+ * 接下来的五位包含数组索引。只使用一个位，这个五位范围中的位位置定义数组索引。这意味着最多可以有五个数组元素
  */
 #define	CAP_RIGHTS_VERSION_00	0
 /*

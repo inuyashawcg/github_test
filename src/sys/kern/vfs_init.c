@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: releng/12.0/sys/kern/vfs_init.c 333263 2018-05-04 20:54:27Z jamie $");
+__FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -66,9 +66,10 @@ int maxvfsconf = VFS_GENERIC + 1;
 /*
  * Single-linked list of configured VFSes.
  * New entries are added/deleted by vfs_register()/vfs_unregister()
+ * 管理文件系统的全局队列
  */
 struct vfsconfhead vfsconf = TAILQ_HEAD_INITIALIZER(vfsconf);
-struct sx vfsconf_sx;
+struct sx vfsconf_sx;	// 定义一个锁
 SX_SYSINIT(vfsconf, &vfsconf_sx, "vfsconf");
 
 /*
@@ -76,6 +77,8 @@ SX_SYSINIT(vfsconf, &vfsconf_sx, "vfsconf");
  * calculation on vfc_name, so that it doesn't change when file systems are
  * loaded in a different order. This will avoid the NFS server file handles from
  * changing for file systems that use vfc_typenum in their fsid.
+ * 通过vfc_name计算得到vfc_typenum，所以vfc_typenum不会因为文件系统加载的顺序而改变
+ * 从下文代码逻辑可以推断，这个参数主要是用于文件系统的查找
  */
 static int	vfs_typenumhash = 1;
 SYSCTL_INT(_vfs, OID_AUTO, typenumhash, CTLFLAG_RDTUN, &vfs_typenumhash, 0,
@@ -92,7 +95,7 @@ struct vattr va_null;
 /*
  * vfs_init.c
  *
- * Allocate and fill in operations vectors.
+ * Allocate and fill in operations vectors. 分配并填写操作向量
  *
  * An undocumented feature of this approach to defining operations is that
  * there can be multiple entries in vfs_opv_descs for the same operations
@@ -110,6 +113,10 @@ struct vattr va_null;
  * Routines having to do with the management of the vnode table.
  */
 
+/*
+	vfsconf 表示的应该就是文件系统的描述信息，然后通过队列来管理，所以我们就可以通过搜索整个
+	队列来查找相应的文件系统
+*/
 static struct vfsconf *
 vfs_byname_locked(const char *name)
 {
@@ -142,11 +149,15 @@ vfs_byname_kld(const char *fstype, struct thread *td, int *error)
 	struct vfsconf *vfsp;
 	int fileid, loaded;
 
+	// 如果找到了对应的文件系统，就直接返回；没有找到的话，就执行后续操作
 	vfsp = vfs_byname(fstype);
 	if (vfsp != NULL)
 		return (vfsp);
 
-	/* Try to load the respective module. */
+	/* Try to load the respective module. 
+		这里用到的是linker中提供的接口函数，用于加载module(.ko)的，所以文件系统也是一个
+		内核模块
+	*/
 	*error = kern_kldload(td, fstype, &fileid);
 	loaded = (*error == 0);
 	if (*error == EEXIST)
@@ -154,7 +165,9 @@ vfs_byname_kld(const char *fstype, struct thread *td, int *error)
 	if (*error)
 		return (NULL);
 
-	/* Look up again to see if the VFS was loaded. */
+	/* Look up again to see if the VFS was loaded. 
+		挂载完以后再次查找，判断是否挂载成功
+	*/
 	vfsp = vfs_byname(fstype);
 	if (vfsp == NULL) {
 		if (loaded)
@@ -165,8 +178,220 @@ vfs_byname_kld(const char *fstype, struct thread *td, int *error)
 	return (vfsp);
 }
 
+/*
+	sigdeferstop: signal deference stop？线程相关，可能是对于信号量的设置
+	TSRAW: 调用的tslog函数，估计是log打印相关函数
+*/ 
+static int
+vfs_mount_sigdefer(struct mount *mp)
+{
+	int prev_stops, rc;
 
-/* Register a new filesystem type in the global table */
+	TSRAW(curthread, TS_ENTER, "VFS_MOUNT", mp->mnt_vfc->vfc_name);
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_mount)(mp);
+	sigallowstop(prev_stops);
+	TSRAW(curthread, TS_EXIT, "VFS_MOUNT", mp->mnt_vfc->vfc_name);
+	return (rc);
+}
+
+static int
+vfs_unmount_sigdefer(struct mount *mp, int mntflags)
+{
+	int prev_stops, rc;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_unmount)(mp, mntflags);
+	sigallowstop(prev_stops);
+	return (rc);
+}
+
+static int
+vfs_root_sigdefer(struct mount *mp, int flags, struct vnode **vpp)
+{
+	int prev_stops, rc;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_root)(mp, flags, vpp);
+	sigallowstop(prev_stops);
+	return (rc);
+}
+
+static int
+vfs_cachedroot_sigdefer(struct mount *mp, int flags, struct vnode **vpp)
+{
+	int prev_stops, rc;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_cachedroot)(mp, flags, vpp);
+	sigallowstop(prev_stops);
+	return (rc);
+}
+
+static int
+vfs_quotactl_sigdefer(struct mount *mp, int cmd, uid_t uid, void *arg)
+{
+	int prev_stops, rc;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_quotactl)(mp, cmd, uid, arg);
+	sigallowstop(prev_stops);
+	return (rc);
+}
+
+static int
+vfs_statfs_sigdefer(struct mount *mp, struct statfs *sbp)
+{
+	int prev_stops, rc;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_statfs)(mp, sbp);
+	sigallowstop(prev_stops);
+	return (rc);
+}
+
+static int
+vfs_sync_sigdefer(struct mount *mp, int waitfor)
+{
+	int prev_stops, rc;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_sync)(mp, waitfor);
+	sigallowstop(prev_stops);
+	return (rc);
+}
+
+static int
+vfs_vget_sigdefer(struct mount *mp, ino_t ino, int flags, struct vnode **vpp)
+{
+	int prev_stops, rc;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_vget)(mp, ino, flags, vpp);
+	sigallowstop(prev_stops);
+	return (rc);
+}
+
+static int
+vfs_fhtovp_sigdefer(struct mount *mp, struct fid *fidp, int flags,
+    struct vnode **vpp)
+{
+	int prev_stops, rc;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_fhtovp)(mp, fidp, flags, vpp);
+	sigallowstop(prev_stops);
+	return (rc);
+}
+
+static int
+vfs_checkexp_sigdefer(struct mount *mp, struct sockaddr *nam, uint64_t *exflg,
+    struct ucred **credp, int *numsecflavors, int *secflavors)
+{
+	int prev_stops, rc;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_checkexp)(mp, nam, exflg, credp,
+	    numsecflavors, secflavors);
+	sigallowstop(prev_stops);
+	return (rc);
+}
+
+static int
+vfs_extattrctl_sigdefer(struct mount *mp, int cmd, struct vnode *filename_vp,
+    int attrnamespace, const char *attrname)
+{
+	int prev_stops, rc;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_extattrctl)(mp, cmd,
+	    filename_vp, attrnamespace, attrname);
+	sigallowstop(prev_stops);
+	return (rc);
+}
+
+static int
+vfs_sysctl_sigdefer(struct mount *mp, fsctlop_t op, struct sysctl_req *req)
+{
+	int prev_stops, rc;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	rc = (*mp->mnt_vfc->vfc_vfsops_sd->vfs_sysctl)(mp, op, req);
+	sigallowstop(prev_stops);
+	return (rc);
+}
+
+static void
+vfs_susp_clean_sigdefer(struct mount *mp)
+{
+	int prev_stops;
+
+	if (*mp->mnt_vfc->vfc_vfsops_sd->vfs_susp_clean == NULL)
+		return;
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	(*mp->mnt_vfc->vfc_vfsops_sd->vfs_susp_clean)(mp);
+	sigallowstop(prev_stops);
+}
+
+static void
+vfs_reclaim_lowervp_sigdefer(struct mount *mp, struct vnode *vp)
+{
+	int prev_stops;
+
+	if (*mp->mnt_vfc->vfc_vfsops_sd->vfs_reclaim_lowervp == NULL)
+		return;
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	(*mp->mnt_vfc->vfc_vfsops_sd->vfs_reclaim_lowervp)(mp, vp);
+	sigallowstop(prev_stops);
+}
+
+static void
+vfs_unlink_lowervp_sigdefer(struct mount *mp, struct vnode *vp)
+{
+	int prev_stops;
+
+	if (*mp->mnt_vfc->vfc_vfsops_sd->vfs_unlink_lowervp == NULL)
+		return;
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	(*(mp)->mnt_vfc->vfc_vfsops_sd->vfs_unlink_lowervp)(mp, vp);
+	sigallowstop(prev_stops);
+}
+
+static void
+vfs_purge_sigdefer(struct mount *mp)
+{
+	int prev_stops;
+
+	prev_stops = sigdeferstop(SIGDEFERSTOP_SILENT);
+	(*mp->mnt_vfc->vfc_vfsops_sd->vfs_purge)(mp);
+	sigallowstop(prev_stops);
+}
+
+// 文件系统操作函数表，上面有具体的定义
+static struct vfsops vfsops_sigdefer = {
+	.vfs_mount =		vfs_mount_sigdefer,
+	.vfs_unmount =		vfs_unmount_sigdefer,
+	.vfs_root =		vfs_root_sigdefer,
+	.vfs_cachedroot =	vfs_cachedroot_sigdefer,
+	.vfs_quotactl =		vfs_quotactl_sigdefer,
+	.vfs_statfs =		vfs_statfs_sigdefer,
+	.vfs_sync =		vfs_sync_sigdefer,
+	.vfs_vget =		vfs_vget_sigdefer,
+	.vfs_fhtovp =		vfs_fhtovp_sigdefer,
+	.vfs_checkexp =		vfs_checkexp_sigdefer,
+	.vfs_extattrctl =	vfs_extattrctl_sigdefer,
+	.vfs_sysctl =		vfs_sysctl_sigdefer,
+	.vfs_susp_clean =	vfs_susp_clean_sigdefer,
+	.vfs_reclaim_lowervp =	vfs_reclaim_lowervp_sigdefer,
+	.vfs_unlink_lowervp =	vfs_unlink_lowervp_sigdefer,
+	.vfs_purge =		vfs_purge_sigdefer,
+
+};
+
+/* Register a new filesystem type in the global table 
+	在一个全局的队列中注册一个新的文件系统类型，所以可以推断系统对于文件系统的管理也是
+	通过全局队列来实现的
+*/
 static int
 vfs_register(struct vfsconf *vfc)
 {
@@ -181,7 +406,7 @@ vfs_register(struct vfsconf *vfc)
 		vattr_null(&va_null);
 		once = 1;
 	}
-	
+
 	if (vfc->vfc_version != VFS_VERSION) {
 		printf("ERROR: filesystem %s, unsupported ABI version %x\n",
 		    vfc->vfc_name, vfc->vfc_version);
@@ -190,7 +415,7 @@ vfs_register(struct vfsconf *vfc)
 	vfsconf_lock();
 	if (vfs_byname_locked(vfc->vfc_name) != NULL) {
 		vfsconf_unlock();
-		return (EEXIST);
+		return (EEXIST);	// 查找目前已经注册过的文件系统，如果有的话就直接返回
 	}
 
 	if (vfs_typenumhash != 0) {
@@ -199,6 +424,8 @@ vfs_register(struct vfsconf *vfc)
 		 * all of 1<->255 are assigned, it is limited to 8bits since
 		 * that is what ZFS uses from vfc_typenum and is also the
 		 * preferred range for vfs_getnewfsid().
+		 * vfc_name 主要是用于计算 vfc_typenum，并且number显示为8bit，范围是在1-255之间，
+		 * ZFS也是使用的这个标准，vfs_getnewfsid 函数也是采用的这个范围
 		 */
 		hashval = fnv_32_str(vfc->vfc_name, FNV1_32_INIT);
 		hashval &= 0xff;
@@ -206,7 +433,7 @@ vfs_register(struct vfsconf *vfc)
 		do {
 			/* Look for and fix any collision. */
 			TAILQ_FOREACH(tvfc, &vfsconf, vfc_list) {
-				if (hashval == tvfc->vfc_typenum) {
+				if (hashval == tvfc->vfc_typenum) {	// 通过hashval与vfc_typenum的比对来查找对应的文件系统
 					if (hashval == 255 && secondpass == 0) {
 						hashval = 1;
 						secondpass = 1;
@@ -218,16 +445,17 @@ vfs_register(struct vfsconf *vfc)
 		} while (tvfc != NULL);
 		vfc->vfc_typenum = hashval;
 		if (vfc->vfc_typenum >= maxvfsconf)
-			maxvfsconf = vfc->vfc_typenum + 1;
+			maxvfsconf = vfc->vfc_typenum + 1;	// 对应之前说的vfc_typenum的范围，最高255，每次添加的时候判断是否越界
 	} else
 		vfc->vfc_typenum = maxvfsconf++;
-	TAILQ_INSERT_TAIL(&vfsconf, vfc, vfc_list);
+	TAILQ_INSERT_TAIL(&vfsconf, vfc, vfc_list);	// 将新的文件系统类型插入到全局队列当中
 
 	/*
 	 * Initialise unused ``struct vfsops'' fields, to use
 	 * the vfs_std*() functions.  Note, we need the mount
 	 * and unmount operations, at the least.  The check
 	 * for vfsops available is just a debugging aid.
+	 * 初始化文件系统的操作函数表
 	 */
 	KASSERT(vfc->vfc_vfsops != NULL,
 	    ("Filesystem %s has no vfsops", vfc->vfc_name));
@@ -278,13 +506,21 @@ vfs_register(struct vfsconf *vfc)
 	if (vfsops->vfs_sysctl == NULL)
 		vfsops->vfs_sysctl = vfs_stdsysctl;
 
+	if ((vfc->vfc_flags & VFCF_SBDRY) != 0) {
+		vfc->vfc_vfsops_sd = vfc->vfc_vfsops;
+		vfc->vfc_vfsops = &vfsops_sigdefer;
+	}
+
 	if (vfc->vfc_flags & VFCF_JAIL)
-		prison_add_vfs(vfc);
+		prison_add_vfs(vfc); // jail机制
 
 	/*
 	 * Call init function for this VFS...
 	 */
-	(*(vfc->vfc_vfsops->vfs_init))(vfc);
+	if ((vfc->vfc_flags & VFCF_SBDRY) != 0)
+		vfc->vfc_vfsops_sd->vfs_init(vfc);
+	else
+		vfc->vfc_vfsops->vfs_init(vfc);
 	vfsconf_unlock();
 
 	/*
@@ -311,7 +547,6 @@ vfs_register(struct vfsconf *vfc)
 	return (0);
 }
 
-
 /* Remove registration of a filesystem type */
 static int
 vfs_unregister(struct vfsconf *vfc)
@@ -329,12 +564,18 @@ vfs_unregister(struct vfsconf *vfc)
 		vfsconf_unlock();
 		return (EBUSY);
 	}
-	if (vfc->vfc_vfsops->vfs_uninit != NULL) {
-		error = (*vfc->vfc_vfsops->vfs_uninit)(vfsp);
-		if (error != 0) {
-			vfsconf_unlock();
-			return (error);
-		}
+	error = 0;
+	if ((vfc->vfc_flags & VFCF_SBDRY) != 0) {
+		if (vfc->vfc_vfsops_sd->vfs_uninit != NULL)
+			error = vfc->vfc_vfsops_sd->vfs_uninit(vfsp);
+	} else {
+		if (vfc->vfc_vfsops->vfs_uninit != NULL) {
+			error = vfc->vfc_vfsops->vfs_uninit(vfsp);
+	}
+	if (error != 0) {
+		vfsconf_unlock();
+		return (error);
+	}
 	}
 	TAILQ_REMOVE(&vfsconf, vfsp, vfc_list);
 	maxtypenum = VFS_GENERIC;

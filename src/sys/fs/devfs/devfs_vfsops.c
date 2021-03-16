@@ -54,6 +54,7 @@ static struct unrhdr	*devfs_unr;
 
 MALLOC_DEFINE(M_DEVFS, "DEVFS", "DEVFS data");
 
+// 定义mount相关功能函数
 static vfs_mount_t	devfs_mount;
 static vfs_unmount_t	devfs_unmount;
 static vfs_root_t	devfs_root;
@@ -71,7 +72,7 @@ devfs_mount(struct mount *mp)
 {
 	int error;
 	struct devfs_mount *fmp;
-	struct vnode *rvp;
+	struct vnode *rvp;	// 关联的 vnode？
 	struct thread *td = curthread;
 	int injail, rsnum;
 
@@ -86,6 +87,7 @@ devfs_mount(struct mount *mp)
 	rsnum = 0;
 	injail = jailed(td->td_ucred);
 
+	// 查看是否有新的属性需要更新
 	if (mp->mnt_optnew != NULL) {
 		if (vfs_filteropt(mp->mnt_optnew, devfs_opts))
 			return (EINVAL);
@@ -110,7 +112,7 @@ devfs_mount(struct mount *mp)
 	if (injail)
 		rsnum = td->td_ucred->cr_prison->pr_devfs_rsnum;
 
-	if (mp->mnt_flag & MNT_UPDATE) {
+	if (mp->mnt_flag & MNT_UPDATE) {	// 如果仅仅是升级，而不是真正的挂载
 		if (rsnum != 0) {
 			fmp = mp->mnt_data;
 			if (fmp != NULL) {
@@ -123,6 +125,10 @@ devfs_mount(struct mount *mp)
 		return (0);
 	}
 
+	/*
+		FreeBSD中有一个关于vnode分配的一个机制，所有的fs共用同所有的vnode，看这里的逻辑推测一下，
+		unr 很可能就是管理vnode的，每次分配的时候需要看一下还有哪些vnode的是可以被使用的
+	*/
 	fmp = malloc(sizeof *fmp, M_DEVFS, M_WAITOK | M_ZERO);
 	fmp->dm_idx = alloc_unr(devfs_unr);
 	sx_init(&fmp->dm_lock, "devfsmount");
@@ -137,10 +143,12 @@ devfs_mount(struct mount *mp)
 	MNT_IUNLOCK(mp);
 	fmp->dm_mount = mp;
 	mp->mnt_data = (void *) fmp;
+	// 每一个文件系统都会对应一个唯一的id
 	vfs_getnewfsid(mp);
 
 	fmp->dm_rootdir = devfs_vmkdir(fmp, NULL, 0, NULL, DEVFS_ROOTINO);
 
+	/* 给devfs 根目录申请一个vnode并赋值给 rvp */
 	error = devfs_root(mp, LK_EXCLUSIVE, &rvp);
 	if (error) {
 		sx_destroy(&fmp->dm_lock);
@@ -151,7 +159,7 @@ devfs_mount(struct mount *mp)
 
 	if (rsnum != 0) {
 		sx_xlock(&fmp->dm_lock);
-		devfs_ruleset_set((devfs_rsnum)rsnum, fmp);
+		devfs_ruleset_set((devfs_rsnum)rsnum, fmp);	// 配置 rule set
 		sx_xunlock(&fmp->dm_lock);
 	}
 
@@ -212,6 +220,8 @@ devfs_root(struct mount *mp, int flags, struct vnode **vpp)
 
 	dmp = VFSTODEVFS(mp);
 	sx_xlock(&dmp->dm_lock);
+
+	/* 从 vnode list 中找到一个free项给devfs用 */
 	error = devfs_allocv(dmp->dm_rootdir, mp, LK_EXCLUSIVE, &vp);
 	if (error)
 		return (error);

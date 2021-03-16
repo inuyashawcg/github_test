@@ -201,8 +201,8 @@ struct vm_page {
 	} plinks;
 	TAILQ_ENTRY(vm_page) listq;	/* pages in same object (O) */
 	vm_object_t object;		/* which object am I in (O,P) */
-	vm_pindex_t pindex;		/* offset into object (O,P) */
-	vm_paddr_t phys_addr;		/* physical address of page (C) */
+	vm_pindex_t pindex;		/* offset into object (O,P) 指的应该是对象在磁盘中的偏移地址 */
+	vm_paddr_t phys_addr;		/* physical address of page (C) 它所要对应的物理地址 */
 	struct md_page md;		/* machine dependent stuff */
 	u_int wire_count;		/* wired down maps refs (P) */
 	volatile u_int busy_lock;	/* busy owners lock */

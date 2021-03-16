@@ -48,10 +48,10 @@ static struct rwlock			vfs_hash_lock;
 static void
 vfs_hashinit(void *dummy __unused)
 {
-
+	// 初始化 hash table，desiredvnodes 表示的是数量
 	vfs_hash_tbl = hashinit(desiredvnodes, M_VFS_HASH, &vfs_hash_mask);
-	rw_init(&vfs_hash_lock, "vfs hash");
-	LIST_INIT(&vfs_hash_side);
+	rw_init(&vfs_hash_lock, "vfs hash"); // hash table 锁初始化
+	LIST_INIT(&vfs_hash_side);	// hash table中的每一个元素又是一个vnode list？
 }
 
 /* Must be SI_ORDER_SECOND so desiredvnodes is available */
@@ -60,10 +60,17 @@ SYSINIT(vfs_hash, SI_SUB_VFS, SI_ORDER_SECOND, vfs_hashinit, NULL);
 u_int
 vfs_hash_index(struct vnode *vp)
 {
-
+	/* 
+		在 struct vnode 的定义的注释中可以看到，vnode hash = mount + inode，v_hash表示
+		的是这个含义？
+	*/
 	return (vp->v_hash + vp->v_mount->mnt_hashseed);
 }
 
+/*
+	返回的应该是一个vnode list，mount->mnt_hashseed + hash 计算出的值表示的是 hash table
+	的下标，然后下标对应的元素是一个指向vnode链表的一个指针
+*/
 static struct vfs_hash_head *
 vfs_hash_bucket(const struct mount *mp, u_int hash)
 {
@@ -71,6 +78,11 @@ vfs_hash_bucket(const struct mount *mp, u_int hash)
 	return (&vfs_hash_tbl[(hash + mp->mnt_hashseed) & vfs_hash_mask]);
 }
 
+/*
+	主要逻辑就是通过hash值在哈希表中找到某个vnode，所以可以推断一下，hash table里边其实就是存放的vnode，
+	我们要找的时候，就利用mount和外部提供的某个hash值来确定它位于哪个元素(vnode list)，然后在根据相应的
+	属性进行匹配
+*/
 int
 vfs_hash_get(const struct mount *mp, u_int hash, int flags, struct thread *td,
     struct vnode **vpp, vfs_hash_cmp_t *fn, void *arg)
@@ -87,6 +99,8 @@ vfs_hash_get(const struct mount *mp, u_int hash, int flags, struct thread *td,
 				continue;
 			if (fn != NULL && fn(vp, arg))
 				continue;
+
+			/* 遍历整个vnode list，找到符合上述条件的vnode */
 			vhold(vp);
 			rw_runlock(&vfs_hash_lock);
 			error = vget(vp, flags | LK_VNHELD, td);
@@ -105,6 +119,10 @@ vfs_hash_get(const struct mount *mp, u_int hash, int flags, struct thread *td,
 	}
 }
 
+/*
+	传入的参数每次都会有一个mount和一个hash，说明hash table是可以用来区分不同挂载的文件系统的，
+	要确认一下另外一个hash代表的是什么含义
+*/
 void
 vfs_hash_ref(const struct mount *mp, u_int hash, struct thread *td,
     struct vnode **vpp, vfs_hash_cmp_t *fn, void *arg)

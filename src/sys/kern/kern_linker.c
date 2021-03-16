@@ -756,6 +756,8 @@ linker_make_file(const char *pathname, linker_class_t lc)
 	lf->loadcnt = ++loadcnt;
 	STAILQ_INIT(&lf->common);
 	TAILQ_INIT(&lf->modules);
+
+	/* 所有的linker file也是要统一管理的 */
 	TAILQ_INSERT_TAIL(&linker_files, lf, link);
 	return (lf);
 }
@@ -2435,6 +2437,8 @@ linker_load_module(const char *kldname, const char *modname,
  		 */
 		KASSERT(verinfo == NULL, ("linker_load_module: verinfo"
 		    " is not NULL"));
+
+		/* 在/boot/modules 和 /boot/kernel 中查找需要加载的文件 */
 		pathname = linker_search_kld(kldname);
 	} else {
 		if (modlist_lookup2(modname, verinfo) != NULL)

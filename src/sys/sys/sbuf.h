@@ -40,6 +40,7 @@ typedef int (sbuf_drain_func)(void *, const char *, int);
 
 /*
  * Structure definition
+ * 智能缓冲区操作功能.智能缓冲区用于省去每次尝试添加内容时检查缓冲区边界的麻烦；
  */
 struct sbuf {
 	char		*s_buf;		/* storage buffer */

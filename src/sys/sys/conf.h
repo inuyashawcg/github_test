@@ -71,24 +71,24 @@ struct cdev {
 	uid_t		si_uid;
 	gid_t		si_gid;
 	mode_t		si_mode;
-	struct ucred	*si_cred;	/* cached clone-time credential */
+	struct ucred	*si_cred;	/* cached clone-time credential 缓存的克隆时间凭据 */
 	int		si_drv0;
 	int		si_refcount;
 	LIST_ENTRY(cdev)	si_list;
 	LIST_ENTRY(cdev)	si_clone;
-	LIST_HEAD(, cdev)	si_children;
+	LIST_HEAD(, cdev)	si_children;	// 管理目录下所包含的文件或二级目录？
 	LIST_ENTRY(cdev)	si_siblings;
-	struct cdev *si_parent;
-	struct mount	*si_mountpt;
+	struct cdev *si_parent;	// 上级目录？
+	struct mount	*si_mountpt;	// 挂载点
 	void		*si_drv1, *si_drv2;
-	struct cdevsw	*si_devsw;
+	struct cdevsw	*si_devsw;	// 操作函数表
 	int		si_iosize_max;	/* maximum I/O size (for physio &al) */
 	u_long		si_usecount;
 	u_long		si_threadcount;
 	union {
 		struct snapdata *__sid_snapdata;
 	} __si_u;
-	char		si_name[SPECNAMELEN + 1];
+	char		si_name[SPECNAMELEN + 1];	// 可能存放的是文件路径名
 };
 
 #define	si_snapdata	__si_u.__sid_snapdata
@@ -201,7 +201,9 @@ struct cdevsw {
 	int32_t			d_spare0[3];
 	void			*d_spare1[3];
 
-	/* These fields should not be messed with by drivers */
+	/* These fields should not be messed with by drivers 
+		这些字段不应该被驱动程序弄乱
+	*/
 	LIST_HEAD(, cdev)	d_devs;
 	int			d_spare2;
 	union {

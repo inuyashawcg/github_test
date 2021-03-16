@@ -197,6 +197,7 @@ rangelock_unlock_range(struct rangelock *lock, void *cookie, off_t start,
 /*
  * Add the lock request to the queue of the pending requests for
  * rangelock.  Sleep until the request can be granted.
+ * 将锁请求添加到rangelock的挂起请求队列中。睡眠，直到请求可以被批准
  */
 static void *
 rangelock_enqueue(struct rangelock *lock, off_t start, off_t end, int mode,

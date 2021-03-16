@@ -86,6 +86,7 @@ SYSCTL_INT(_vfs, OID_AUTO, read_min, CTLFLAG_RW, &read_min, 0,
 /*
  * Read data to a buf, including read-ahead if we find this to be beneficial.
  * cluster_read replaces bread.
+ * 将数据读取到buf，如果我们发现这是有益的，则包括预读。阅读代替面包。
  */
 int
 cluster_read(struct vnode *vp, u_quad_t filesize, daddr_t lblkno, long size,
@@ -335,6 +336,8 @@ cluster_read(struct vnode *vp, u_quad_t filesize, daddr_t lblkno, long size,
  * If blocks are contiguous on disk, use this to provide clustered
  * read ahead.  We will read as many blocks as possible sequentially
  * and then parcel them up into logical blocks in the buffer hash table.
+ * 如果磁盘上的块是连续的，则使用它提供集群预读。我们将按顺序读取尽可能多的块，然后
+ * 将它们打包到缓冲区哈希表中的逻辑块中
  */
 static struct buf *
 cluster_rbuild(struct vnode *vp, u_quad_t filesize, daddr_t lbn,
@@ -559,6 +562,8 @@ clean_sbusy:
  * This is complicated by the fact that any of the buffers might have
  * extra memory (if there were no empty buffer headers at allocbuf time)
  * that we will need to shift around.
+ * 群集读或写操作后的清理。任何缓冲区都可能有额外的内存（如果allocbuf时间没有空的缓冲区头），
+ * 这一事实使这一点变得复杂，我们将需要在这些内存之间切换
  */
 static void
 cluster_callback(struct buf *bp)
@@ -1038,6 +1043,7 @@ cluster_wbuild(struct vnode *vp, long size, daddr_t start_lbn, int len,
 /*
  * Collect together all the buffers in a cluster.
  * Plus add one additional buffer.
+ * 将集群中的所有缓冲区收集在一起。再加上一个缓冲区。
  */
 static struct cluster_save *
 cluster_collectbufs(struct vnode *vp, struct buf *last_bp, int gbflags)

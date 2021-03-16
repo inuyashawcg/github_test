@@ -125,6 +125,10 @@ typedef int fo_mmap_t(struct file *fp, vm_map_t map, vm_offset_t *addr,
 typedef int fo_aio_queue_t(struct file *fp, struct kaiocb *job);
 typedef	int fo_flags_t;
 
+/*
+	这里定义了文件操作函数，devfs下貌似创建的都是 cdev 设备结点文件，属于特殊文件类型。
+	所以这里定义的文件操作函数同样适用于 cdev
+*/
 struct fileops {
 	fo_rdwr_t	*fo_read;
 	fo_rdwr_t	*fo_write;
@@ -168,10 +172,10 @@ struct fadvise_info {
 };
 
 struct file {
-	void		*f_data;	/* file descriptor specific data */
-	struct fileops	*f_ops;		/* File operations */
-	struct ucred	*f_cred;	/* associated credentials. */
-	struct vnode 	*f_vnode;	/* NULL or applicable vnode */
+	void		*f_data;	/* file descriptor specific data 指定数据的文件描述符 */
+	struct fileops	*f_ops;		/* File operations 文件所支持的一些操作 */
+	struct ucred	*f_cred;	/* associated credentials. 关联的凭据 */
+	struct vnode 	*f_vnode;	/* NULL or applicable vnode 文件所对应的vnode */
 	short		f_type;		/* descriptor type */
 	short		f_vnread_flags; /* (f) Sleep lock for f_offset */
 	volatile u_int	f_flag;		/* see fcntl.h */
@@ -179,10 +183,10 @@ struct file {
 	/*
 	 *  DTYPE_VNODE specific fields.
 	 */
-	int		f_seqcount;	/* (a) Count of sequential accesses. */
-	off_t		f_nextoff;	/* next expected read/write offset. */
+	int		f_seqcount;	/* (a) Count of sequential accesses. 顺序访问计数 */
+	off_t		f_nextoff;	/* next expected read/write offset. 文件指针的offset */
 	union {
-		struct cdev_privdata *fvn_cdevpriv;
+		struct cdev_privdata *fvn_cdevpriv;	// 表示设备文件的时候，共用体用的是 cdev_privdata 指针
 					/* (d) Private data for the cdev. */
 		struct fadvise_info *fvn_advice;
 	} f_vnun;
@@ -191,7 +195,7 @@ struct file {
 	 */
 	off_t		f_offset;
 	/*
-	 * Mandatory Access control information.
+	 * Mandatory Access control information.强制访问控制信息
 	 */
 	void		*f_label;	/* Place-holder for MAC label. */
 };

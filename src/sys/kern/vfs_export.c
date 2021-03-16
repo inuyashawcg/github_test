@@ -97,6 +97,7 @@ struct netexport {
 /*
  * Build hash lists of net addresses and hang them off the mount point.
  * Called by vfs_export() to set up the lists of export addresses.
+ * 构建网络地址的哈希列表，并将它们挂在挂载点上。由 vfs_export 调用以设置导出地址列表
  */
 static int
 vfs_hang_addrlist(struct mount *mp, struct netexport *nep,

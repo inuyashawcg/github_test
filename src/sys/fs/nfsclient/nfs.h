@@ -77,10 +77,17 @@ extern int nfs_debug;
 
 /*
  * NFS iod threads can be in one of these three states once spawned.
+ * 一旦产生NFS iod线程，它可以处于这三种状态之一
+ * 
  * NFSIOD_NOT_AVAILABLE - Cannot be assigned an I/O operation at this time.
+ * 此时无法分配I/O操作
+ * 
  * NFSIOD_AVAILABLE - Available to be assigned an I/O operation.
+ * 可分配I/O操作
+ * 
  * NFSIOD_CREATED_FOR_NFS_ASYNCIO - Newly created for nfs_asyncio() and
- *	will be used by the thread that called nfs_asyncio().
+ * will be used by the thread that called nfs_asyncio()
+ * 为 nfs_asyncio 新创建的，将由调用 nfs_asyncio 的线程使用
  */
 enum nfsiod_state {
 	NFSIOD_NOT_AVAILABLE = 0,
@@ -89,7 +96,7 @@ enum nfsiod_state {
 };
 
 /*
- * Function prototypes.
+ * Function prototypes. 函数原型
  */
 int ncl_meta_setsize(struct vnode *, struct ucred *, struct thread *,
     u_quad_t);

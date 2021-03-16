@@ -35,6 +35,7 @@
  * The following functions define the interface between the MD and MI
  * busdma layers.  These are not intended for consumption by driver
  * software.
+ * 以下函数定义MD和MI busdma层之间的接口。这些不是用于驱动程序软件的消费
  */
 
 bus_dma_segment_t	*_bus_dmamap_complete(bus_dma_tag_t dmat,

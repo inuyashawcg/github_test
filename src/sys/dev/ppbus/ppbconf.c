@@ -500,6 +500,7 @@ ppbus_teardown_intr(device_t bus, device_t child, struct resource *r, void *ih)
  * ppb_request_bus()
  *
  * Allocate the device to perform transfers.
+ * 分配设备以执行传输
  *
  * how	: PPB_WAIT or PPB_DONTWAIT
  */

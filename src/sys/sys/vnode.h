@@ -129,7 +129,11 @@ struct vnode {
 	 */
 	const char *v_tag;			/* u type of underlying data 属性标识 */
 	struct	vop_vector *v_op;		/* u vnode operations vector 操作集合 */
-	void	*v_data;			/* u private data for fs filesystem的私有数据 */
+
+	/*
+		vnode 有一个对应的私有数据的指针，v_data成员可能就是指向的这个设备
+	*/
+	void	*v_data;			/* u private data for fs */
 
 	/*
 	 * Filesystem instance stuff
@@ -143,9 +147,10 @@ struct vnode {
 
 	/*
 	 * Type specific fields, only one applies to any given vnode.
+	 * 类型特定的字段，只有一个适用于任何给定的vnode。
 	 */
 	union {
-		struct mount	*v_mountedhere;	/* v ptr to mountpoint (VDIR) */
+		struct mount	*v_mountedhere;	/* v ptr to mountpoint (VDIR) 指向mount结构体 */
 		struct unpcb	*v_unpcb;	/* v unix domain net (VSOCK) */
 		struct cdev	*v_rdev; 	/* v device (VCHR, VBLK) */
 		struct fifoinfo	*v_fifoinfo;	/* v fifo (VFIFO) */
@@ -154,6 +159,7 @@ struct vnode {
 	/*
 	 * vfs_hash: (mount + inode) -> vnode hash.  The hash value
 	 * itself is grouped with other int fields, to avoid padding.
+	 * 哈希值本身与其他int字段分组，以避免填充
 	 */
 	LIST_ENTRY(vnode)	v_hashlist;
 
@@ -162,20 +168,20 @@ struct vnode {
 	 */
 	LIST_HEAD(, namecache) v_cache_src;	/* c Cache entries from us */
 	TAILQ_HEAD(, namecache) v_cache_dst;	/* c Cache entries to us */
-	struct namecache *v_cache_dd;		/* c Cache entry for .. vnode */
+	struct namecache *v_cache_dd;		/* c Cache entry for .. vnode ..文件对应的 vnode 的 namecache */
 
 	/*
 	 * Locking
 	 */
 	struct	lock v_lock;			/* u (if fs don't have one) */
 	struct	mtx v_interlock;		/* lock for "i" things */
-	struct	lock *v_vnlock;			/* u pointer to vnode lock */
+	struct	lock *v_vnlock;			/* u pointer to vnode lock 指向 v_lock的指针？ */
 
 	/*
 	 * The machinery of being a vnode
 	 */
 	TAILQ_ENTRY(vnode) v_actfreelist;	/* l vnode active/free lists */
-	struct bufobj	v_bufobj;		/* * Buffer cache object */
+	struct bufobj	v_bufobj;		/* * Buffer cache object 干净缓存和脏缓存 */
 
 	/*
 	 * Hooks for various subsystems and features.
@@ -212,6 +218,7 @@ struct vnode {
 
 /*
  * Userland version of struct vnode, for sysctl.
+ * 用户态的vnode版本，应用与sysctl。新的操作系统会统一地址空间，所以这里以后应该是要舍弃
  */
 struct xvnode {
 	size_t	xv_size;			/* sizeof(struct xvnode) */
@@ -221,7 +228,7 @@ struct xvnode {
 	int	xv_writecount;			/* reference count of writers */
 	int	xv_holdcnt;			/* page & buffer references */
 	u_long	xv_id;				/* capability identifier */
-	void	*xv_mount;			/* address of parent mount */
+	void	*xv_mount;			/* address of parent mount 所属的文件系统 */
 	long	xv_numoutput;			/* num of writes in progress */
 	enum	vtype xv_type;			/* vnode type */
 	union {
@@ -268,7 +275,7 @@ struct xvnode {
 	在干净链表
  */
 #define	VI_MOUNT	0x0020	/* Mount in progress */
-#define	VI_DOOMED	0x0080	/* This vnode is being recycled */
+#define	VI_DOOMED	0x0080	/* This vnode is being recycled 此vnode正在回收 */
 #define	VI_FREE		0x0100	/* This vnode is on the freelist */
 #define	VI_ACTIVE	0x0200	/* This vnode is on the active list */
 #define	VI_DOINGINACT	0x0800	/* VOP_INACTIVE is in progress */
@@ -279,7 +286,7 @@ struct xvnode {
 #define	VV_NOSYNC	0x0004	/* unlinked, stop syncing */
 #define	VV_ETERNALDEV	0x0008	/* device that is never destroyed */
 #define	VV_CACHEDLABEL	0x0010	/* Vnode has valid cached MAC label */
-#define	VV_TEXT		0x0020	/* vnode is a pure text prototype */
+#define	VV_TEXT		0x0020	/* vnode is a pure text prototype vnode是一个纯文本类型 */
 #define	VV_COPYONWRITE	0x0040	/* vnode is doing copy-on-write */
 #define	VV_SYSTEM	0x0080	/* vnode being used by kernel */
 #define	VV_PROCDEP	0x0100	/* vnode is process dependent */
@@ -296,6 +303,7 @@ struct xvnode {
  * is unavailable (getattr) or which is not to be changed (setattr).
  * 
  * Vnode attributes 表示vnode属性，字段值VNOVAL表示值不可用（getattr）或不可更改的字段（setattr）
+ * vnode属性设计成class的时候可以直接作为成员变量，考虑访问控制
  */
 struct vattr {
 	enum vtype	va_type;	/* vnode type (for create) */
@@ -315,8 +323,8 @@ struct vattr {
 	u_long		va_gen;		/* generation number of file 文件的生成号 */
 	u_long		va_flags;	/* flags defined for file */
 	dev_t		va_rdev;	/* device the special file represents */
-	u_quad_t	va_bytes;	/* bytes of disk space held by file */
-	u_quad_t	va_filerev;	/* file modification number */
+	u_quad_t	va_bytes;	/* bytes of disk space held by file 文件管理的磁盘空间大小(bytes) */
+	u_quad_t	va_filerev;	/* file modification number 文件修改号 */
 	u_int		va_vaflags;	/* operations flags, see below */
 	long		va_spare;	/* remain quad aligned */
 };
@@ -325,12 +333,12 @@ struct vattr {
  * Flags for va_vaflags.
  */
 #define	VA_UTIMES_NULL	0x01		/* utimes argument was NULL */
-#define	VA_EXCLUSIVE	0x02		/* exclusive create request */
+#define	VA_EXCLUSIVE	0x02		/* exclusive create request 独占创建请求 */
 #define	VA_SYNC		0x04		/* O_SYNC truncation */
 
 /*
  * Flags for ioflag. (high 16 bits used to ask for read-ahead and
- * help with write clustering)
+ * help with write clustering) 高16位用于请求预读和帮助写群集
  * NB: IO_NDELAY and IO_DIRECT are linked to fcntl.h
  */
 #define	IO_UNIT		0x0001		/* do I/O as atomic unit */
@@ -353,7 +361,7 @@ struct vattr {
 #define IO_SEQSHIFT	16		/* seq heuristic in upper 16 bits */
 
 /*
- * Flags for accmode_t.
+ * Flags for accmode_t. 访问权限标识
  */
 #define	VEXEC			000000000100 /* execute/search permission */
 #define	VWRITE			000000000200 /* write permission */
@@ -421,6 +429,7 @@ extern u_int ncsizefactor;
 /*
  * Convert between vnode types and inode formats (since POSIX.1
  * defines mode word of stat structure in terms of inode formats).
+ * 
  * 在vnode类型和inode格式之间转换
  */
 extern enum vtype	iftovt_tab[];
@@ -430,7 +439,8 @@ extern int		vttoif_tab[];
 #define	MAKEIMODE(indx, mode)	(int)(VTTOIF(indx) | (mode))
 
 /*
- * Flags to various vnode functions.
+ * Flags to various vnode functions. 
+ * 各种vnode函数的标志
  */
 #define	SKIPSYSTEM	0x0001	/* vflush: skip vnodes marked VSYSTEM */
 #define	FORCECLOSE	0x0002	/* vflush: force file closure 强制关闭文件 */
@@ -451,8 +461,7 @@ extern int		vttoif_tab[];
 #define	VR_START_WRITE	0x0001	/* vfs_write_resume: start write atomically */
 #define	VR_NO_SUSPCLR	0x0002	/* vfs_write_resume: do not clear suspension */
 
-#define	VS_SKIP_UNMOUNT	0x0001	/* vfs_write_suspend: fail if the
-				   filesystem is being unmounted */
+#define	VS_SKIP_UNMOUNT	0x0001	/* vfs_write_suspend: fail if the filesystem is being unmounted */
 
 #define	VREF(vp)	vref(vp)
 
@@ -464,14 +473,16 @@ extern int		vttoif_tab[];
 
 #define	NULLVP	((struct vnode *)NULL)
 
-/*
+/* 
  * Global vnode data.
+ * 全局的vnode数据，看着像是指针数组，大概率是用于统一管理vnode。对于这些全局定义的数组或者
+ * 链表等数据结构，就要考虑是不是要注册到 global registry
  */
 extern	struct vnode *rootvnode;	/* root (i.e. "/") vnode */
 extern	struct mount *rootdevmp;	/* "/dev" mount */
 extern	int desiredvnodes;		/* number of vnodes desired */
 extern	struct uma_zone *namei_zone;
-extern	struct vattr va_null;		/* predefined null vattr structure */
+extern	struct vattr va_null;		/* predefined null vattr structure 预定义的空vattr结构 */
 
 #define	VI_LOCK(vp)	mtx_lock(&(vp)->v_interlock)
 #define	VI_LOCK_FLAGS(vp, flags) mtx_lock_flags(&(vp)->v_interlock, (flags))
@@ -502,7 +513,7 @@ extern	struct vattr va_null;		/* predefined null vattr structure */
 #define	VDESC_VPP_WILLRELE	0x0200
 
 /*
- * A generic structure.
+ * A generic structure. 泛型结构
  * This can be used by bypass routines to identify generic arguments.
  */
 struct vop_generic_args {
@@ -520,6 +531,7 @@ typedef int vop_bypass_t(struct vop_generic_args *);
 
 /*
  * This structure describes the vnode operation taking place.
+ * 此结构描述发生的vnode操作
  */
 struct vnodeop_desc {
 	char	*vdesc_name;		/* a readable name for debugging */
@@ -531,6 +543,8 @@ struct vnodeop_desc {
 	 * Creds and procs are not needed in bypass routines, but sometimes
 	 * they are useful to (for example) transport layers.
 	 * Nameidata is useful because it has a cred in it.
+	 * 
+	 * 这些操作被旁路例程用来映射和定位参数。
 	 */
 	int	*vdesc_vp_offsets;	/* list ended by VDESC_NO_OFFSET */
 	int	vdesc_vpp_offset;	/* return vpp location */
@@ -542,6 +556,7 @@ struct vnodeop_desc {
 #ifdef _KERNEL
 /*
  * A list of all the operation descs.
+ * 要注意这里是有一个extern，管理所有的vnode operations
  */
 extern struct vnodeop_desc *vnodeop_descs[];
 
@@ -584,6 +599,7 @@ void	assert_vop_unlocked(struct vnode *vp, const char *str);
 
 /*
  * This call works for vnodes in the kernel.
+ * 此调用适用于内核中的vnode
  */
 #define VCALL(c) ((c)->a_desc->vdesc_call(c))
 
@@ -618,6 +634,8 @@ typedef void vop_getpages_iodone_t(void *, vm_page_t *, int, int);
 
 /*
  * Public vnode manipulation functions.
+ * 公共vnode操作函数。因为vnode有很多分类，看这里的注释应该就是所有vnode的通用func，
+ * 所以在新系统的中vnode基类应该包含这些共同的成员函数
  */
 struct componentname;
 struct file;

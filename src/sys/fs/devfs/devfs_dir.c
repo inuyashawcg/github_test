@@ -43,12 +43,16 @@
 #include <fs/devfs/devfs.h>
 #include <fs/devfs/devfs_int.h>
 
+/* directory list entry */
 struct dirlistent {
 	char			*dir;
 	int			refcnt;
 	LIST_ENTRY(dirlistent)	link;
 };
 
+/*
+	devfs 中所有的目录文件也都统一管理起来
+*/
 static LIST_HEAD(, dirlistent) devfs_dirlist =
     LIST_HEAD_INITIALIZER(devfs_dirlist);
 
@@ -75,6 +79,7 @@ devfs_dir_find(const char *path)
 	return (0);
 }
 
+/* 从directory list 中找到某个entry */
 static struct dirlistent *
 devfs_dir_findent_locked(const char *dir)
 {
@@ -137,9 +142,9 @@ devfs_dir_unref(const char *dir)
 	mtx_lock(&dirlist_mtx);
 	dle = devfs_dir_findent_locked(dir);
 	KASSERT(dle != NULL, ("devfs_dir_unref: dir %s not referenced", dir));
-	dle->refcnt--;
+	dle->refcnt--;	// 第一步是引用计数减1
 	KASSERT(dle->refcnt >= 0, ("devfs_dir_unref: negative refcnt"));
-	if (dle->refcnt == 0) {
+	if (dle->refcnt == 0) {	// 当引用计数为0的时候，直接remove掉
 		LIST_REMOVE(dle, link);
 		mtx_unlock(&dirlist_mtx);
 		free(dle->dir, M_DEVFS4);
@@ -153,13 +158,16 @@ devfs_dir_unref_de(struct devfs_mount *dm, struct devfs_dirent *de)
 {
 	char dirname[SPECNAMELEN + 1], *namep;
 
+	// 获取相对于mount点的目录完全路径
 	namep = devfs_fqpn(dirname, dm, de, NULL);
 	KASSERT(namep != NULL, ("devfs_unref_dir_de: NULL namep"));
 
 	devfs_dir_unref(namep);
 }
 
-/* Returns 1 if the path p1 contains the path p2. */
+/* Returns 1 if the path p1 contains the path p2. 
+	当路径1包含路径2的时候返回1
+*/
 int
 devfs_pathpath(const char *p1, const char *p2)
 {

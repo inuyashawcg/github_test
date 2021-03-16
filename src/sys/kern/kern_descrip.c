@@ -1842,6 +1842,7 @@ falloc_caps(struct thread *td, struct file **resultfp, int *resultfd, int flags,
 
 /*
  * Create a new open file structure without allocating a file descriptor.
+ * 在不分配文件描述符的情况下创建新的打开文件结构
  */
 int
 falloc_noinstall(struct thread *td, struct file **resultfp)
@@ -3012,6 +3013,7 @@ done2:
 }
 /*
  * Duplicate the specified descriptor to a free descriptor.
+ * 将指定的描述符复制到自由描述符
  */
 int
 dupfdopen(struct thread *td, struct filedesc *fdp, int dfd, int mode,

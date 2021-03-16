@@ -519,6 +519,7 @@ struct nfs_vattr {
 	int	junk;
 };
 
+// 对 vnode 的属性做了进一步扩展
 struct nfsvattr {
 	struct vattr	na_vattr;
 	nfsattrbit_t	na_suppattr;

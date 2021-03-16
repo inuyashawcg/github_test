@@ -72,20 +72,24 @@ struct fdescenttbl {
 
 /*
  * This structure is used for the management of descriptors.  It may be
- * shared by multiple processes.
+ * shared by multiple processes. 此结构用于管理描述符。它可以由多个进程共享
  */
 #define NDSLOTTYPE	u_long
 
+/*
+	结构体中表示当前目录和根目录的成员变量都是用vnode来表示的，可以看出来系统文件树其实
+	是经过vnode来建立起来的
+*/
 struct filedesc {
-	struct	fdescenttbl *fd_files;	/* open files table */
+	struct	fdescenttbl *fd_files;	/* open files table 打开的文件列表？ */
 	struct	vnode *fd_cdir;		/* current directory */
 	struct	vnode *fd_rdir;		/* root directory */
-	struct	vnode *fd_jdir;		/* jail root directory */
+	struct	vnode *fd_jdir;		/* jail root directory 监控根目录 */
 	NDSLOTTYPE *fd_map;		/* bitmap of free fds */
 	int	fd_lastfile;		/* high-water mark of fd_ofiles */
 	int	fd_freefile;		/* approx. next free file */
 	u_short	fd_cmask;		/* mask for file creation */
-	int	fd_refcnt;		/* thread reference count */
+	int	fd_refcnt;		/* thread reference count 被线程引用的次数？ */
 	int	fd_holdcnt;		/* hold count on structure + mutex */
 	struct	sx fd_sx;		/* protects members of this struct */
 	struct	kqlist fd_kqlist;	/* list of kqueues on this filedesc */

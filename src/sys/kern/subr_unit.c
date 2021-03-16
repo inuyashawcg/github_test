@@ -28,10 +28,11 @@
  * $FreeBSD: releng/12.0/sys/kern/subr_unit.c 326271 2017-11-27 15:20:12Z pfg $
  *
  *
- * Unit number allocation functions.
+ * Unit number allocation functions. 单元号分配函数
  *
  * These functions implement a mixed run-length/bitmap management of unit
  * number spaces in a very memory efficient manner.
+ * 这些函数以非常节省内存的方式实现了单元数空间的混合运行长度/位图管理
  *
  * Allocation policy is always lowest free number first.
  *
@@ -168,15 +169,24 @@ mtx_assert(struct mtx *mp, int flag)
  * This is our basic building block.
  *
  * It can be used in three different ways depending on the value of the ptr
- * element:
+ * element: 根据ptr元素的值，它可以以三种不同的方式使用
  *     If ptr is NULL, it represents a run of free items.
+ * 		如果ptr为NULL，则表示自由项的运行
+ * 
  *     If ptr points to the unrhdr it represents a run of allocated items.
+ * 		如果ptr指向unrhdr，则表示已分配项的运行
+ * 
  *     Otherwise it points to a bitstring of allocated items.
+ * 		否则，它将指向已分配项的位字符串
  *
  * For runs the len field is the length of the run.
+ * 对于运行，len字段是运行的长度
+ * 
  * For bitmaps the len field represents the number of allocated items.
+ * 对于位图，len字段表示分配的项目数
  *
  * The bitmap is the same size as struct unr to optimize memory management.
+ * 位图的大小与struct unr相同，以优化内存管理
  */
 struct unr {
 	TAILQ_ENTRY(unr)	list;
@@ -267,6 +277,7 @@ check_unrhdr(struct unrhdr *uh __unused, int line __unused)
 /*
  * Userland memory management.  Just use calloc and keep track of how
  * many elements we have allocated for check_unrhdr().
+ * 用户区内存管理。只需使用calloc并跟踪我们为check_unrhdr分配了多少元素
  */
 
 static __inline void *
@@ -274,7 +285,7 @@ new_unr(struct unrhdr *uh, void **p1, void **p2)
 {
 	void *p;
 
-	uh->alloc++;
+	uh->alloc++;	// alloc 表示分配的元素项的数量，unr？
 	KASSERT(*p1 != NULL || *p2 != NULL, ("Out of cached memory"));
 	if (*p1 != NULL) {
 		p = *p1;
@@ -292,8 +303,9 @@ delete_unr(struct unrhdr *uh, void *ptr)
 {
 	struct unr *up;
 
-	uh->alloc--;
+	uh->alloc--;	// 对应上面的代码，这里是对alloc做--操作
 	up = ptr;
+	/* ppfree应该就表示需要被释放的元素的缓存队列，lock解除之后释放 */
 	TAILQ_INSERT_TAIL(&uh->ppfree, up, list);
 }
 
@@ -303,6 +315,7 @@ clean_unrhdrl(struct unrhdr *uh)
 	struct unr *up;
 
 	mtx_assert(uh->mtx, MA_OWNED);
+	// 遍历ppfree，free掉其中的元素
 	while ((up = TAILQ_FIRST(&uh->ppfree)) != NULL) {
 		TAILQ_REMOVE(&uh->ppfree, up, list);
 		mtx_unlock(uh->mtx);
@@ -344,6 +357,12 @@ init_unrhdr(struct unrhdr *uh, int low, int high, struct mtx *mutex)
  * Allocate a new unrheader set.
  *
  * Highest and lowest valid values given as parameters.
+ * 作为参数给出的最高和最低有效值。devfs中的函数调用传入的 low = DEVFS_ROOTINO + 1 = 3，
+ * 也就表示 devfs_rootinode 的id应该是2，其他的inode范围就是3 - INT_MAX。说明inode
+ * 数量是有限制的
+ * 
+ * kernel unit number，低参数和高参数指定最小和最大单元数数字。在那里没有与单位数范围相关的成本，
+ * 因此除非资源确实是有限的，否则可以使用 INT_MAX
  */
 
 struct unrhdr *

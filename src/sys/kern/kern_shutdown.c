@@ -241,6 +241,7 @@ SYSINIT(shutdown_conf, SI_SUB_INTRINSIC, SI_ORDER_ANY, shutdown_conf, NULL);
 /*
  * The only reason this exists is to create the /dev/reroot/ directory,
  * used by reroot code in init(8) as a mountpoint for tmpfs.
+ * 创建一个 /dev/reroot 的目录，作为 init 重启代码的 tmpfs 的挂载点
  */
 static void
 reroot_conf(void *unused)
