@@ -119,9 +119,9 @@ static void	filecaps_free_finish(u_long *ioctls);
 /*
  * Each process has:
  *
- * - An array of open file descriptors (fd_ofiles)
- * - An array of file flags (fd_ofileflags)
- * - A bitmap recording which descriptors are in use (fd_map)
+ * - An array of open file descriptors (fd_ofiles)	打开文件数组
+ * - An array of file flags (fd_ofileflags)	文件标识数组
+ * - A bitmap recording which descriptors are in use (fd_map) 描述哪个描述符被使用的位图
  *
  * A process starts out with NDFILE descriptors.  The value of NDFILE has
  * been selected based the historical limit of 20 open files, and an
@@ -148,10 +148,11 @@ static void	filecaps_free_finish(u_long *ioctls);
 /*
  * SLIST entry used to keep track of ofiles which must be reclaimed when
  * the process exits.
+ * SLIST条目用于跟踪进程退出时必须回收的文件
  */
 struct freetable {
-	struct fdescenttbl *ft_table;
-	SLIST_ENTRY(freetable) ft_next;
+	struct fdescenttbl *ft_table;	// 描述符表
+	SLIST_ENTRY(freetable) ft_next;	// 这里是 slist 的 entry
 };
 
 /*
@@ -166,6 +167,11 @@ struct fdescenttbl0 {
 
 struct filedesc0 {
 	struct filedesc fd_fd;
+	/*
+		这里包含了 freetable 的 head，对应上面的 entry，每一个entry中都包含有一个描述符表指针，
+		所以这个是一个描述符表的链表。每个进程都会对应一个描述符表，所以就表示 list 中的每一个元素都
+		会对应一个进程？这个结构体是用于系统级描述符表管理？
+	*/
 	SLIST_HEAD(, freetable) fd_free;
 	struct	fdescenttbl0 fd_dfiles;
 	NDSLOTTYPE fd_dmap[NDSLOTS(NDFILE)];
@@ -174,7 +180,7 @@ struct filedesc0 {
 /*
  * Descriptor management.
  */
-volatile int __exclusive_cache_line openfiles; /* actual number of open files */
+volatile int __exclusive_cache_line openfiles; /* actual number of open files 实际打开的文件数 */
 struct mtx sigio_lock;		/* mtx to protect pointers to sigio */
 void __read_mostly (*mq_fdclose)(struct thread *td, int fd, struct file *fp);
 
@@ -182,6 +188,7 @@ void __read_mostly (*mq_fdclose)(struct thread *td, int fd, struct file *fp);
  * If low >= size, just return low. Otherwise find the first zero bit in the
  * given bitmap, starting at low and not exceeding size - 1. Return size if
  * not found.
+ * 找到第一个可以被使用的空闲文件描述符标号
  */
 static int
 fd_first_free(struct filedesc *fdp, int low, int size)
@@ -209,6 +216,7 @@ fd_first_free(struct filedesc *fdp, int low, int size)
 /*
  * Find the highest non-zero bit in the given bitmap, starting at 0 and
  * not exceeding size - 1. Return -1 if not found.
+ * 在给定的位图中查找最高的非零位，从0开始，大小不超过-1。未找到返回-1
  */
 static int
 fd_last_used(struct filedesc *fdp, int size)
@@ -230,6 +238,7 @@ fd_last_used(struct filedesc *fdp, int size)
 	return (-1);
 }
 
+/* 判断 fd 标号的文件描述符是否已经被使用了 */
 static int
 fdisused(struct filedesc *fdp, int fd)
 {
@@ -242,6 +251,7 @@ fdisused(struct filedesc *fdp, int fd)
 
 /*
  * Mark a file descriptor as used.
+ * 标识一个文件描述符已经被使用了
  */
 static void
 fdused_init(struct filedesc *fdp, int fd)
@@ -267,6 +277,7 @@ fdused(struct filedesc *fdp, int fd)
 
 /*
  * Mark a file descriptor as unused.
+ * 标识一个文件描述符已经被使用了
  */
 static void
 fdunused(struct filedesc *fdp, int fd)
@@ -286,9 +297,10 @@ fdunused(struct filedesc *fdp, int fd)
 }
 
 /*
- * Free a file descriptor.
+ * Free a file descriptor.	释放掉一个文件描述符
  *
  * Avoid some work if fdp is about to be destroyed.
+ * 如果fdp即将被破坏，避免一些工作
  */
 static inline void
 fdefree_last(struct filedescent *fde)
@@ -297,6 +309,7 @@ fdefree_last(struct filedescent *fde)
 	filecaps_free(&fde->fde_caps);
 }
 
+/* 把 fd 标号的文件描述符条目释放掉 */
 static inline void
 fdfree(struct filedesc *fdp, int fd)
 {
@@ -311,7 +324,7 @@ fdfree(struct filedesc *fdp, int fd)
 	seq_write_end(&fde->fde_seq);
 #endif
 	fdefree_last(fde);
-	fdunused(fdp, fd);
+	fdunused(fdp, fd);	// 设置 fd 目前还未使用
 }
 
 void
@@ -362,9 +375,11 @@ sys_getdtablesize(struct thread *td, struct getdtablesize_args *uap)
 
 /*
  * Duplicate a file descriptor to a particular value.
+ * 将文件描述符复制到特定值
  *
  * Note: keep in mind that a potential race condition exists when closing
  * descriptors from a shared descriptor table (via rfork).
+ * 注意：请记住，当关闭共享描述符表中的描述符时，存在潜在的竞争条件
  */
 #ifndef _SYS_SYSPROTO_H_
 struct dup2_args {
@@ -381,7 +396,7 @@ sys_dup2(struct thread *td, struct dup2_args *uap)
 }
 
 /*
- * Duplicate a file descriptor.
+ * Duplicate a file descriptor.复制文件描述符，fork的时候使用？
  */
 #ifndef _SYS_SYSPROTO_H_
 struct dup_args {
@@ -805,6 +820,8 @@ getmaxfd(struct thread *td)
 
 /*
  * Common code for dup, dup2, fcntl(F_DUPFD) and fcntl(F_DUP2FD).
+ * fcntl: file control，文件描述符相关
+ * 起的作用就是把以 old 标识的文件描述符条目拷贝到以 new 标识的文件描述符条目
  */
 int
 kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
@@ -942,6 +959,8 @@ unlock:
  * If sigio is on the list associated with a process or process group,
  * disable signalling from the device, remove sigio from the list and
  * free sigio.
+ * 如果 sigio 位于与进程或进程组关联的列表中，请禁用设备的信令，从列表中删除 sigio 
+ * 并释放 sigio
  */
 void
 funsetown(struct sigio **sigiop)
@@ -1268,10 +1287,15 @@ sys_closefrom(struct thread *td, struct closefrom_args *uap)
 	/*
 	 * Treat negative starting file descriptor values identical to
 	 * closefrom(0) which closes all files.
+	 * 处理与关闭所有文件的closefrom（0）相同的负起始文件描述符值
 	 */
 	if (uap->lowfd < 0)
 		uap->lowfd = 0;
 	FILEDESC_SLOCK(fdp);
+	/*  
+		uap 中传递进来的是一个低文件描述符标号，函数要把指定范围中的文件描述符代表的
+		文件全部关闭
+	*/
 	for (fd = uap->lowfd; fd <= fdp->fd_lastfile; fd++) {
 		if (fdp->fd_ofiles[fd].fde_file != NULL) {
 			FILEDESC_SUNLOCK(fdp);
@@ -1430,6 +1454,7 @@ sys_fpathconf(struct thread *td, struct fpathconf_args *uap)
 	return (error);
 }
 
+/* 路径相关 */
 int
 kern_fpathconf(struct thread *td, int fd, int name, long *valuep)
 {
@@ -1437,6 +1462,7 @@ kern_fpathconf(struct thread *td, int fd, int name, long *valuep)
 	struct vnode *vp;
 	int error;
 
+	/* 获取文件指针 */
 	error = fget(td, fd, &cap_fpathconf_rights, &fp);
 	if (error != 0)
 		return (error);
@@ -1484,12 +1510,14 @@ filecaps_init(struct filecaps *fcaps)
  *
  * Note that if the table was not locked, the caller has to check the relevant
  * sequence counter to determine whether the operation was successful.
+ * 注意，如果表没有被锁定，调用者必须检查相关的序列计数器以确定操作是否成功
  */
 bool
 filecaps_copy(const struct filecaps *src, struct filecaps *dst, bool locked)
 {
 	size_t size;
 
+	/* 判断是否允许ioctl */ 
 	if (src->fc_ioctls != NULL && !locked)
 		return (false);
 	memcpy(dst, src, sizeof(*src));
@@ -1499,6 +1527,7 @@ filecaps_copy(const struct filecaps *src, struct filecaps *dst, bool locked)
 	KASSERT(src->fc_nioctls > 0,
 	    ("fc_ioctls != NULL, but fc_nioctls=%hd", src->fc_nioctls));
 
+	/* 计算ioctl数组大小 */
 	size = sizeof(src->fc_ioctls[0]) * src->fc_nioctls;
 	dst->fc_ioctls = malloc(size, M_FILECAPS, M_WAITOK);
 	memcpy(dst->fc_ioctls, src->fc_ioctls, size);
@@ -1517,6 +1546,7 @@ filecaps_copy_prep(const struct filecaps *src)
 	KASSERT(src->fc_nioctls > 0,
 	    ("fc_ioctls != NULL, but fc_nioctls=%hd", src->fc_nioctls));
 
+	/* 从代码逻辑可以看出，文件描述符属性的设置是通过 ioctl 的方式来实现的 */
 	size = sizeof(src->fc_ioctls[0]) * src->fc_nioctls;
 	ioctls = malloc(size, M_FILECAPS, M_WAITOK);
 	return (ioctls);
@@ -1541,6 +1571,7 @@ filecaps_copy_finish(const struct filecaps *src, struct filecaps *dst,
 
 /*
  * Move filecaps structure to the new place and clear the old place.
+ * 通过一个文件描述符的属性设置另外一个文件描述符的属性
  */
 void
 filecaps_move(struct filecaps *src, struct filecaps *dst)
@@ -1552,6 +1583,7 @@ filecaps_move(struct filecaps *src, struct filecaps *dst)
 
 /*
  * Fill the given filecaps structure with full rights.
+ * 将给定的文件描述符属性填充全属性
  */
 static void
 filecaps_fill(struct filecaps *fcaps)
@@ -1565,6 +1597,7 @@ filecaps_fill(struct filecaps *fcaps)
 
 /*
  * Free memory allocated within filecaps structure.
+ * 释放掉给 filecaps 结构体申请的内存空间 
  */
 void
 filecaps_free(struct filecaps *fcaps)
@@ -1574,6 +1607,7 @@ filecaps_free(struct filecaps *fcaps)
 	bzero(fcaps, sizeof(*fcaps));
 }
 
+/* prep: prepare，推测是做某种操作的准备阶段，对应会有一个 finish 函数 */
 static u_long *
 filecaps_free_prep(struct filecaps *fcaps)
 {
@@ -1593,6 +1627,7 @@ filecaps_free_finish(u_long *ioctls)
 
 /*
  * Validate the given filecaps structure.
+ * 验证给定的filecaps结构
  */
 static void
 filecaps_validate(const struct filecaps *fcaps, const char *func)
@@ -1613,6 +1648,7 @@ filecaps_validate(const struct filecaps *fcaps, const char *func)
 	    ("%s: ioctls without CAP_IOCTL", func));
 }
 
+/* 扩展文件描述符表 */
 static void
 fdgrowtable_exp(struct filedesc *fdp, int nfd)
 {
@@ -1628,14 +1664,15 @@ fdgrowtable_exp(struct filedesc *fdp, int nfd)
 
 /*
  * Grow the file table to accommodate (at least) nfd descriptors.
+ * 扩展文件表以容纳（至少）nfd 描述符
  */
 static void
 fdgrowtable(struct filedesc *fdp, int nfd)
 {
 	struct filedesc0 *fdp0;
 	struct freetable *ft;
-	struct fdescenttbl *ntable;
-	struct fdescenttbl *otable;
+	struct fdescenttbl *ntable;	// new table
+	struct fdescenttbl *otable;	// old table
 	int nnfiles, onfiles;
 	NDSLOTTYPE *nmap, *omap;
 
@@ -1643,19 +1680,21 @@ fdgrowtable(struct filedesc *fdp, int nfd)
 	 * If lastfile is -1 this struct filedesc was just allocated and we are
 	 * growing it to accommodate for the one we are going to copy from. There
 	 * is no need to have a lock on this one as it's not visible to anyone.
+	 * 如果lastfile是-1，那么这个structfiledesc是刚刚分配的，我们正在增加它以适应我们要
+	 * 从中复制的结构。没有必要把这个锁上，因为任何人都看不见
 	 */
 	if (fdp->fd_lastfile != -1)
 		FILEDESC_XLOCK_ASSERT(fdp);
 
 	KASSERT(fdp->fd_nfiles > 0, ("zero-length file table"));
 
-	/* save old values */
+	/* save old values 保存之前的描述符表相关信息 */
 	onfiles = fdp->fd_nfiles;
 	otable = fdp->fd_files;
 	omap = fdp->fd_map;
 
 	/* compute the size of the new table */
-	nnfiles = NDSLOTS(nfd) * NDENTRIES; /* round up */
+	nnfiles = NDSLOTS(nfd) * NDENTRIES; /* round up 汇总 */
 	if (nnfiles <= onfiles)
 		/* the table is already large enough */
 		return;
@@ -1666,6 +1705,8 @@ fdgrowtable(struct filedesc *fdp, int nfd)
 	 * when we decommission the table and place it on the freelist.
 	 * We place the struct freetable in the middle so we don't have
 	 * to worry about padding.
+	 * 分配新表。我们需要足够的空间来容纳条目数、文件条目数本身以及解约表并将其放在freelist
+	 * 上时将使用的struct freetable。我们将struct freetable放在中间，这样就不必担心填充问题
 	 */
 	ntable = malloc(offsetof(struct fdescenttbl, fdt_ofiles) +
 	    nnfiles * sizeof(ntable->fdt_ofiles[0]) +
@@ -1680,11 +1721,16 @@ fdgrowtable(struct filedesc *fdp, int nfd)
 	 * Allocate a new map only if the old is not large enough.  It will
 	 * grow at a slower rate than the table as it can map more
 	 * entries than the table can hold.
+	 * 仅当旧地图不够大时才分配新地图。它将以比表慢的速度增长，因为它可以映射比表所能
+	 * 容纳的更多的条目
 	 */
 	if (NDSLOTS(nnfiles) > NDSLOTS(onfiles)) {
 		nmap = malloc(NDSLOTS(nnfiles) * NDSLOTSIZE, M_FILEDESC,
 		    M_ZERO | M_WAITOK);
-		/* copy over the old data and update the pointer */
+		/* 
+			copy over the old data and update the pointer
+			复制旧数据并更新指针
+		*/
 		memcpy(nmap, omap, NDSLOTS(onfiles) * sizeof(*omap));
 		fdp->fd_map = nmap;
 	}
@@ -1693,6 +1739,8 @@ fdgrowtable(struct filedesc *fdp, int nfd)
 	 * Make sure that ntable is correctly initialized before we replace
 	 * fd_files poiner. Otherwise fget_unlocked() may see inconsistent
 	 * data.
+	 * 在替换fd_file 指针之前，请确保 ntable 已正确初始化。否则 fget_unlocked 可能会
+	 * 看到不一致的数据
 	 */
 	atomic_store_rel_ptr((volatile void *)&fdp->fd_files, (uintptr_t)ntable);
 
@@ -1700,10 +1748,14 @@ fdgrowtable(struct filedesc *fdp, int nfd)
 	 * Do not free the old file table, as some threads may still
 	 * reference entries within it.  Instead, place it on a freelist
 	 * which will be processed when the struct filedesc is released.
+	 * 不要释放旧的文件描述表，因为一些线程可能仍然要引用其中的条目。相反，将它放在
+	 * 释放 struct filedesc 时将处理的 freelist 上
 	 *
 	 * Note that if onfiles == NDFILE, we're dealing with the original
 	 * static allocation contained within (struct filedesc0 *)fdp,
 	 * which must not be freed.
+	 * 注意，如果onfiles==NDFILE，我们将处理（struct filedesc0*）fdp中包含的
+	 * 原始静态分配，不能释放它
 	 */
 	if (onfiles > NDFILE) {
 		ft = (struct freetable *)&otable->fdt_ofiles[onfiles];
@@ -1715,6 +1767,7 @@ fdgrowtable(struct filedesc *fdp, int nfd)
 	 * The map does not have the same possibility of threads still
 	 * holding references to it.  So always free it as long as it
 	 * does not reference the original static allocation.
+	 * 映射不具有线程仍然持有对它的引用的可能性。因此，只要它不引用原始静态分配，就总是释放它
 	 */
 	if (NDSLOTS(onfiles) > NDSLOTS(NDFILE))
 		free(omap, M_FILEDESC);
@@ -1722,6 +1775,8 @@ fdgrowtable(struct filedesc *fdp, int nfd)
 
 /*
  * Allocate a file descriptor for the process.
+ * 为进程申请一个文件描述符。从函数代码逻辑来看，即使传入的参数是线程指针，给局部文件描述符
+ * 变量赋值的时候，还是通过其所在的进程来执行的。所以，文件描述符的管理对象应该是进程
  */
 int
 fdalloc(struct thread *td, int minfd, int *result)
@@ -1738,15 +1793,23 @@ fdalloc(struct thread *td, int minfd, int *result)
 	if (fdp->fd_freefile > minfd)
 		minfd = fdp->fd_freefile;
 
-	maxfd = getmaxfd(td);
+	maxfd = getmaxfd(td);	// 获取每个进程所能拥有的最大文件描述符的数量
 
 	/*
 	 * Search the bitmap for a free descriptor starting at minfd.
 	 * If none is found, grow the file table.
+	 * 文件描述符是有标号的(索引)，随着打开文件数的增加而不断增大，而且描述符也有最大的限制。所以，
+	 * fd_freefile 成员表示的应该就是目前可以使用的文件描述符最小标号是多少(应该是要从3开始，0、1
+	 * 和2已经分配给了标准输入输出和error)；代码逻辑就是首先找到一个可用的空闲描述符标号，如果检查之后
+	 * 发现没有，那么就需要扩展文件描述符表
 	 */
 	fd = fd_first_free(fdp, minfd, fdp->fd_nfiles);
-	if (fd >= maxfd)
+	if (fd >= maxfd)	// 提示 Too many open files
 		return (EMFILE);
+	/*
+		如果 fd 比已经分配的文件描述符的数量还要多，那就需要对文件描述符表进行扩展，
+		从 fd*2 和 maxfd 中选一个比较小的值出来，等于需要扩展的数量
+	*/
 	if (fd >= fdp->fd_nfiles) {
 		allocfd = min(fd * 2, maxfd);
 #ifdef RACCT
@@ -1782,6 +1845,7 @@ fdalloc(struct thread *td, int minfd, int *result)
 
 /*
  * Allocate n file descriptors for the process.
+ * 分配n个文件描述符给进程
  */
 int
 fdallocn(struct thread *td, int minfd, int *fds, int n)
@@ -1811,6 +1875,9 @@ fdallocn(struct thread *td, int minfd, int *fds, int n)
  * descriptor table and one reference for resultfp. This is to prevent us
  * being preempted and the entry in the descriptor table closed after we
  * release the FILEDESC lock.
+ * 创建一个新的打开文件结构，并为引用它的进程分配一个文件描述符。我们为 descriptor 表和
+ * resultfp 添加了一个对文件的引用。这是为了防止我们在释放FILEDESC锁后被抢占，描述符表
+ * 中的条目被关闭
  */
 int
 falloc_caps(struct thread *td, struct file **resultfp, int *resultfd, int flags,
@@ -1819,7 +1886,7 @@ falloc_caps(struct thread *td, struct file **resultfp, int *resultfd, int flags,
 	struct file *fp;
 	int error, fd;
 
-	error = falloc_noinstall(td, &fp);
+	error = falloc_noinstall(td, &fp);	// 创建 file 结构体
 	if (error)
 		return (error);		/* no reference held on error */
 
@@ -1842,12 +1909,15 @@ falloc_caps(struct thread *td, struct file **resultfp, int *resultfd, int flags,
 
 /*
  * Create a new open file structure without allocating a file descriptor.
- * 在不分配文件描述符的情况下创建新的打开文件结构
+ * 在不分配文件描述符的情况下创建新的打开文件结构，两者是独立的过程
  */
 int
 falloc_noinstall(struct thread *td, struct file **resultfp)
 {
 	struct file *fp;
+	/*
+		最大打开文件数，计算方式是处于什么考虑？
+	*/
 	int maxuserfiles = maxfiles - (maxfiles / 20);
 	int openfiles_new;
 	static struct timeval lastfail;
@@ -1855,6 +1925,7 @@ falloc_noinstall(struct thread *td, struct file **resultfp)
 
 	KASSERT(resultfp != NULL, ("%s: resultfp == NULL", __func__));
 
+	/* 我们要重新创建一个新的file structure结构体，所以这里要加1 */
 	openfiles_new = atomic_fetchadd_int(&openfiles, 1) + 1;
 	if ((openfiles_new >= maxuserfiles &&
 	    priv_check(td, PRIV_MAXFILES) != 0) ||
@@ -1866,12 +1937,18 @@ falloc_noinstall(struct thread *td, struct file **resultfp)
 		}
 		return (ENFILE);
 	}
+
+	/* 
+		注意 file_zone。file_zone 在 SYSINIT 的时候会调用 uma_zcreate() 函数初始化
+		设置，这里的话是调用的 uma_zalloc 进行分配内存空间。所以，可以推测一下 create 函数
+		应该就是为了定义一个 slab 类型，然后再调用 alloc 函数的时候，就可以直接分配对应的空间
+	*/
 	fp = uma_zalloc(file_zone, M_WAITOK);
 	bzero(fp, sizeof(*fp));
-	refcount_init(&fp->f_count, 1);
-	fp->f_cred = crhold(td->td_ucred);
-	fp->f_ops = &badfileops;
-	*resultfp = fp;
+	refcount_init(&fp->f_count, 1);	// 初始化 file 的引用计数为1
+	fp->f_cred = crhold(td->td_ucred);	// ucred 的引用计数加1
+	fp->f_ops = &badfileops;	// 初始化文件操作
+	*resultfp = fp;	// 赋值 resultfp，将创建的 file 对象返回
 	return (0);
 }
 
@@ -1908,6 +1985,7 @@ int
 finstall(struct thread *td, struct file *fp, int *fd, int flags,
     struct filecaps *fcaps)
 {
+	/* 用线程所在的进程的 fd 赋值 */
 	struct filedesc *fdp = td->td_proc->p_fd;
 	int error;
 
@@ -1927,6 +2005,7 @@ finstall(struct thread *td, struct file *fp, int *fd, int flags,
 /*
  * Build a new filedesc structure from another.
  * Copy the current, root, and jail root vnode references.
+ * 从另外一个结构体构造一个新的结构体
  *
  * If fdp is not NULL, return with it shared locked.
  */
@@ -1979,6 +2058,7 @@ fdinit(struct filedesc *fdp, bool prepfiles)
 	return (newfdp);
 }
 
+/* 进程 filedesc 计数+1 */
 static struct filedesc *
 fdhold(struct proc *p)
 {
@@ -2006,6 +2086,7 @@ fddrop(struct filedesc *fdp)
 
 /*
  * Share a filedesc structure.
+ * 共享文件描述符结构
  */
 struct filedesc *
 fdshare(struct filedesc *fdp)
@@ -2017,6 +2098,7 @@ fdshare(struct filedesc *fdp)
 
 /*
  * Unshare a filedesc structure, if necessary by making a copy
+ * 取消共享filedesc结构，如果需要，可以制作一个副本
  */
 void
 fdunshare(struct thread *td)
@@ -2043,6 +2125,7 @@ fdinstall_remapped(struct thread *td, struct filedesc *fdp)
 /*
  * Copy a filedesc structure.  A NULL pointer in returns a NULL reference,
  * this is to ease callers, not catch errors.
+ * 拷贝一个 filedesc 结构体
  */
 struct filedesc *
 fdcopy(struct filedesc *fdp)
@@ -2081,9 +2164,11 @@ fdcopy(struct filedesc *fdp)
 /*
  * Copies a filedesc structure, while remapping all file descriptors
  * stored inside using a translation table.
+ * 复制filedesc结构，同时使用转换表重新映射存储在其中的所有文件描述符
  *
  * File descriptors are copied over to the new file descriptor table,
  * regardless of whether the close-on-exec flag is set.
+ * 不管是否设置了close on exec标志，文件描述符都会复制到新的文件描述符表中
  */
 int
 fdcopy_remapped(struct filedesc *fdp, const int *fds, size_t nfds,
@@ -2097,7 +2182,7 @@ fdcopy_remapped(struct filedesc *fdp, const int *fds, size_t nfds,
 
 	newfdp = fdinit(fdp, true);
 	if (nfds > fdp->fd_lastfile + 1) {
-		/* New table cannot be larger than the old one. */
+		/* New table cannot be larger than the old one. 新表大小不会超过旧表 */
 		error = E2BIG;
 		goto bad;
 	}
@@ -2457,6 +2542,7 @@ fdcheckstd(struct thread *td)
  * Internal form of close.  Decrement reference count on file structure.
  * Note: td may be NULL when closing a file that was being passed in a
  * message.
+ * 封闭的内在形式。减少文件结构上的引用计数。注意：关闭在消息中传递的文件时，td 可能为 NULL
  *
  * XXXRW: Giant is not required for the caller, but often will be held; this
  * makes it moderately likely the Giant will be recursed in the VFS case.
@@ -2492,10 +2578,16 @@ closef(struct file *fp, struct thread *td)
 			    F_UNLCK, &lf, F_POSIX);
 		}
 		fdtol = td->td_proc->p_fdtol;
+		/*
+			当 fdtol 不为 null 的时候，注释中开始说明要去处理多个进程之间共享
+			文件描述符表的情况。很大概率就是这个 process leader 是用在多进程、
+			有共享的数据的情况当中的
+		*/
 		if (fdtol != NULL) {
 			/*
 			 * Handle special case where file descriptor table is
 			 * shared between multiple process leaders.
+			 * 处理文件描述符表在多个进程 leader 之间共享的特殊情况
 			 */
 			fdp = td->td_proc->p_fd;
 			FILEDESC_XLOCK(fdp);
@@ -2531,10 +2623,13 @@ closef(struct file *fp, struct thread *td)
 
 /*
  * Initialize the file pointer with the specified properties.
+ * 用指定的属性初始化文件指针
  *
  * The ops are set with release semantics to be certain that the flags, type,
  * and data are visible when ops is.  This is to prevent ops methods from being
  * called with bad data.
+ * ops被设置为release语义，以确保当ops被激活时，标志、类型和数据是可见的。这是为了防止用坏数据
+ * 调用ops方法
  */
 void
 finit(struct file *fp, u_int flag, short type, void *data, struct fileops *ops)
@@ -2621,6 +2716,7 @@ get_locked:
 	return (error);
 }
 
+/* 不加锁获取文件指针 */
 int
 fget_unlocked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
     struct file **fpp, seq_t *seqp)
@@ -2704,6 +2800,7 @@ fget_unlocked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
 /*
  * Extract the file pointer associated with the specified descriptor for the
  * current user process.
+ * 提取与当前用户进程的指定描述符关联的文件指针，fd应该就是描述符标号
  *
  * If the descriptor doesn't exist or doesn't match 'flags', EBADF is
  * returned.
@@ -3727,6 +3824,7 @@ export_vnode_for_osysctl(struct vnode *vp, int type, struct kinfo_file *kif,
 
 /*
  * Get per-process file descriptors for use by procstat(1), et al.
+ * 获取每个进程文件描述符的信息，通过 procstat 输出
  */
 static int
 sysctl_kern_proc_ofiledesc(SYSCTL_HANDLER_ARGS)
@@ -3817,6 +3915,7 @@ static SYSCTL_NODE(_kern_proc, KERN_PROC_FILEDESC, filedesc,
 
 /*
  * Store a process current working directory information to sbuf.
+ * 把当前进程所在工作目录事务信息保存到sbuf
  *
  * Takes a locked proc as argument, and returns with the proc unlocked.
  */
@@ -3829,7 +3928,7 @@ kern_proc_cwd_out(struct proc *p,  struct sbuf *sb, ssize_t maxlen)
 
 	PROC_LOCK_ASSERT(p, MA_OWNED);
 
-	fdp = fdhold(p);
+	fdp = fdhold(p);	// 进程引用计数+1
 	PROC_UNLOCK(p);
 	if (fdp == NULL)
 		return (EINVAL);

@@ -46,17 +46,18 @@
 #include <machine/_limits.h>
 
 struct filecaps {
-	cap_rights_t	 fc_rights;	/* per-descriptor capability rights */
+	cap_rights_t	 fc_rights;	/* per-descriptor capability rights 每描述符功能权限 */
 	u_long		*fc_ioctls;	/* per-descriptor allowed ioctls */
 	int16_t		 fc_nioctls;	/* fc_ioctls array size */
 	uint32_t	 fc_fcntls;	/* per-descriptor allowed fcntls */
 };
 
+/* file descriptor entry 文件描述符的单个条目 */
 struct filedescent {
-	struct file	*fde_file;	/* file structure for open file */
-	struct filecaps	 fde_caps;	/* per-descriptor rights */
-	uint8_t		 fde_flags;	/* per-process open file flags */
-	seq_t		 fde_seq;	/* keep file and caps in sync */
+	struct file	*fde_file;	/* file structure for open file 文件指针 */
+	struct filecaps	 fde_caps;	/* per-descriptor rights 属性信息 */
+	uint8_t		 fde_flags;	/* per-process open file flags 文件打开标志 */
+	seq_t		 fde_seq;	/* keep file and caps in sync 保持文件和功能的同步 */
 };
 #define	fde_rights	fde_caps.fc_rights
 #define	fde_fcntls	fde_caps.fc_fcntls
@@ -64,9 +65,10 @@ struct filedescent {
 #define	fde_nioctls	fde_caps.fc_nioctls
 #define	fde_change_size	(offsetof(struct filedescent, fde_seq))
 
+/* file descriptor entry table 文件描述符表 */
 struct fdescenttbl {
-	int	fdt_nfiles;		/* number of open files allocated */
-	struct	filedescent fdt_ofiles[0];	/* open files */
+	int	fdt_nfiles;		/* number of open files allocated 分配的打开文件数 */
+	struct	filedescent fdt_ofiles[0];	/* open files 文件描述符数组 */
 };
 #define	fd_seq(fdt, fd)	(&(fdt)->fdt_ofiles[(fd)].fde_seq)
 
@@ -79,36 +81,48 @@ struct fdescenttbl {
 /*
 	结构体中表示当前目录和根目录的成员变量都是用vnode来表示的，可以看出来系统文件树其实
 	是经过vnode来建立起来的
+	在进程 process 中包含有一个 filedesc 指针类型的成员。这里参考一下linux中的相关表述:
+		每一个文件描述符都会与一个打开的文件相对应，也就是说不打开的文件不会对应描述符；
+		不同的描述符可能会指向同一个文件；
+		相同的文件可以被不同的进程打开，也可以被同一个进程打开多次；
+		系统为每一个进程维护了一个文件描述符表，该表的值都是从0开始的，所以不同的进程会有相同的文件描述符，
+		这种情况下相同的文件描述符可能指向同一个文件，也可能指向不同的文件；
+	
+	操作系统中包括进程级的文件描述符表、系统级的打开文件描述符表。内核会对所有打开的文件维护一个系统级的
+	描述符表(open file descriptor table)，可称为打开文件表，并将表中的各个条目成为打开文件句柄(open
+	file handle)
 */
 struct filedesc {
-	struct	fdescenttbl *fd_files;	/* open files table 打开的文件列表？ */
+	struct	fdescenttbl *fd_files;	/* open files table 指向一个文件描述符表(系统级的？) */
 	struct	vnode *fd_cdir;		/* current directory */
 	struct	vnode *fd_rdir;		/* root directory */
 	struct	vnode *fd_jdir;		/* jail root directory 监控根目录 */
 	NDSLOTTYPE *fd_map;		/* bitmap of free fds */
 	int	fd_lastfile;		/* high-water mark of fd_ofiles */
-	int	fd_freefile;		/* approx. next free file */
+	int	fd_freefile;		/* approx. next free file 表示的应该是目前空闲的文件描述符的标号 */
 	u_short	fd_cmask;		/* mask for file creation */
 	int	fd_refcnt;		/* thread reference count 被线程引用的次数？ */
 	int	fd_holdcnt;		/* hold count on structure + mutex */
-	struct	sx fd_sx;		/* protects members of this struct */
+	struct	sx fd_sx;		/* protects members of this struct 保护此结构的成员 */
 	struct	kqlist fd_kqlist;	/* list of kqueues on this filedesc */
 	int	fd_holdleaderscount;	/* block fdfree() for shared close() */
 	int	fd_holdleaderswakeup;	/* fdfree() needs wakeup */
 };
 
 /*
- * Structure to keep track of (process leader, struct fildedesc) tuples.
+ * Structure to keep track(跟踪) of (process leader, struct fildedesc) tuples(数组).
  * Each process has a pointer to such a structure when detailed tracking
  * is needed, e.g., when rfork(RFPROC | RFMEM) causes a file descriptor
  * table to be shared by processes having different "p_leader" pointers
  * and thus distinct POSIX style locks.
  *
  * fdl_refcount and fdl_holdcount are protected by struct filedesc mtx.
+ * 结构体中只包含有一个比较重要的结构体 proc，然后是一种类似链表的结构，所以它可能是用于表示多进程
+ * 的情形中
  */
 struct filedesc_to_leader {
 	int		fdl_refcount;	/* references from struct proc */
-	int		fdl_holdcount;	/* temporary hold during closef */
+	int		fdl_holdcount;	/* temporary(临时的) hold during closef */
 	int		fdl_wakeup;	/* fdfree() waits on closef() */
 	struct proc	*fdl_leader;	/* owner of POSIX locks */
 	/* Circular list: */
@@ -144,7 +158,7 @@ struct filedesc_to_leader {
 enum {
 	FDDUP_NORMAL,		/* dup() behavior. */
 	FDDUP_FCNTL,		/* fcntl()-style errors. */
-	FDDUP_FIXED,		/* Force fixed allocation. */
+	FDDUP_FIXED,		/* Force fixed allocation. 强制固定分配 */
 	FDDUP_MUSTREPLACE,	/* Target must exist. */
 	FDDUP_LASTMODE,
 };
@@ -152,7 +166,7 @@ enum {
 /* Flags for kern_dup(). */
 #define	FDDUP_FLAG_CLOEXEC	0x1	/* Atomically set UF_EXCLOSE. */
 
-/* For backward compatibility. */
+/* For backward compatibility. 为了向后兼容性 */
 #define	falloc(td, resultfp, resultfd, flags) \
 	falloc_caps(td, resultfp, resultfd, flags, NULL)
 

@@ -80,6 +80,7 @@ typedef	__pid_t		pid_t;
 /*
  * Kernel encoding of open mode; separate read and write bits that are
  * independently testable: 1 greater than the above.
+ * 文件打开模式
  *
  * XXX
  * FREAD and FWRITE are excluded from the #ifdef _KERNEL so that TIOCFLUSH,
@@ -90,10 +91,10 @@ typedef	__pid_t		pid_t;
 #define	FWRITE		0x0002
 #endif
 #define	O_NONBLOCK	0x0004		/* no delay */
-#define	O_APPEND	0x0008		/* set append mode */
+#define	O_APPEND	0x0008		/* set append mode -每次调用 write 函数的时候，把文件指针指到文件尾部 */
 #if __BSD_VISIBLE
 #define	O_SHLOCK	0x0010		/* open with shared file lock */
-#define	O_EXLOCK	0x0020		/* open with exclusive file lock */
+#define	O_EXLOCK	0x0020		/* open with exclusive(独占) file lock */
 #define	O_ASYNC		0x0040		/* signal pgrp when data ready */
 #define	O_FSYNC		0x0080		/* synchronous writes */
 #endif

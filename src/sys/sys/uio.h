@@ -57,10 +57,10 @@ typedef	__off_t	off_t;
 	可能会涉及到用户态和内核态之前的数据传输
 */
 struct uio {
-	// 要处理的I/O向量数组。对于分散/聚集I/O，这将是多个向量
+	// 要处理的I/O向量数组。对于分散/聚集I/O，这将是多个向量；本质上就是一组地址空间
 	struct	iovec *uio_iov;		/* scatter/gather list */
 
-	// 当前I/O数组的数量
+	// 当前I/O数组的数量，上述数组中的元素个数
 	int	uio_iovcnt;		/* length of scatter/gather list */
 
 	// 设备的偏移量

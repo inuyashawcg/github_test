@@ -41,6 +41,8 @@
  * on a device or socket.  The structure is placed on an SLIST belonging
  * to the proc or pgrp so that the entire list may be revoked when the
  * process exits or the process group disappears.
+ * 当新数据到达设备或套接字时，此结构保存向进程或进程组发送 SIGIO 或 SIGURG 信号所需的信息。
+ * 结构放置在属于 proc 或 pgrp 的 SLIST上，以便在流程退出或进程组消失时，整个列表可能被撤销。
  *
  * (c)	const
  * (pg)	locked by either the process or process group lock

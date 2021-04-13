@@ -35,6 +35,9 @@
 #ifndef _KERNEL
 #define	FOF_OFFSET	1	/* Use the offset in uio argument */
 
+/*
+	内核中所有的 IO 操作都用 iovec 和 uio 来表示
+*/
 struct uio {
 	struct	iovec *uio_iov;
 	int	uio_iovcnt;
@@ -42,7 +45,7 @@ struct uio {
 	int	uio_resid;
 	enum	uio_seg uio_segflg;
 	enum	uio_rw uio_rw;
-	void	*uio_td;
+	void	*uio_td;	// owner
 };
 #endif
 

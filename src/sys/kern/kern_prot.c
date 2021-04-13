@@ -1846,6 +1846,7 @@ crget(void)
 
 /*
  * Claim another reference to a ucred structure.
+ * 声明对 ucred 结构的另一引用
  */
 struct ucred *
 crhold(struct ucred *cr)

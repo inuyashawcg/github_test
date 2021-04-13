@@ -67,6 +67,7 @@ physio(struct cdev *dev, struct uio *uio, int ioflag)
 	/*
 	 * If the driver does not want I/O to be split, that means that we
 	 * need to reject any requests that will not fit into one buffer.
+	 * 如果驱动程序不希望分割I/O，这意味着我们需要拒绝任何不能放入一个缓冲区的请求
 	 */
 	if (dev->si_flags & SI_NOSPLIT &&
 	    (uio->uio_resid > dev->si_iosize_max || uio->uio_resid > MAXPHYS ||

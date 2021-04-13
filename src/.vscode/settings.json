@@ -55,6 +55,10 @@
         "hashtable": "c",
         "*.in": "c",
         "hash_set": "cpp",
-        "valarray": "cpp"
+        "valarray": "cpp",
+        "uio.h": "c",
+        "__mutex_base": "c",
+        "shared_mutex": "c",
+        "mutex": "c"
     }
 }

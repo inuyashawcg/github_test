@@ -88,7 +88,7 @@ typedef void g_resize_t(struct g_consumer *cp);
  * The g_class structure describes a transformation class.  In other words
  * all BSD disklabel handlers share one g_class, all MBR handlers share
  * one common g_class and so on.
- * Certain operations are instantiated on the class, most notably the
+ * Certain operations are instantiated(实例化) on the class, most notably the
  * taste and config_geom functions.
  */
 struct g_class {

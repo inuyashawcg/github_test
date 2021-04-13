@@ -101,7 +101,15 @@ int pselect(int, fd_set *__restrict, fd_set *__restrict, fd_set *__restrict,
 	const struct timespec *__restrict, const sigset_t *__restrict);
 #ifndef _SELECT_DECLARED
 #define	_SELECT_DECLARED
-/* XXX missing restrict type-qualifier */
+/* XXX missing restrict type-qualifier 
+	参数1：表示集合中所有文件描述符的范围，即所有文件描述符的最大值+1
+	参数2：首先需要明白，fd_set是什么数据类型，有一点像int，又有点像struct，其实，fd_set声明的是一个集合，
+				也就是说，readfs(linux中的 select 函数)是一个容器，里面可以容纳多个文件描述符，把需要监视的描述符
+				放入这个集合中，当有文件描述符可读时，select就会返回一个大于0的值，表示有文件可读
+	参数3：writefd，作用同上
+	参数4：用来监视出现错误的文件
+	参数5：用来设置阻塞、非阻塞或者超时返回模式
+*/
 int	select(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 #endif
 __END_DECLS
