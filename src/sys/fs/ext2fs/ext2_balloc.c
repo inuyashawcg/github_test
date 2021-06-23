@@ -122,6 +122,7 @@ ext2_ext_balloc(struct inode *ip, uint32_t lbn, int size,
  * Balloc defines the structure of filesystem storage
  * by allocating the physical blocks on a device given
  * the inode and the logical block number in a file.
+ * Block alloc？ 通过在给定inode和文件中的逻辑块号的设备上分配物理块来定义文件系统存储的结构
  */
 int
 ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
@@ -136,7 +137,7 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 	e2fs_daddr_t *bap, pref;
 	int osize, nsize, num, i, error;
 
-	*bpp = NULL;
+	*bpp = NULL;	/* 用于存放得到的数据 */
 	if (lbn < 0)
 		return (EFBIG);
 	fs = ip->i_e2fs;
@@ -146,6 +147,8 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 	 * check if this is a sequential block allocation.
 	 * If so, increment next_alloc fields to allow ext2_blkpref
 	 * to make a good guess
+	 * 检查这是否是顺序块分配。如果是这样的话，增加 next_alloc 字段以允许
+	 * ext2_blkpref 做出正确的猜测
 	 */
 	if (lbn == ip->i_next_alloc_block + 1) {
 		ip->i_next_alloc_block++;
@@ -157,12 +160,14 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 
 	/*
 	 * The first EXT2_NDADDR blocks are direct blocks
+	 * 如果这个块落在了直接块索引数组当中
 	 */
 	if (lbn < EXT2_NDADDR) {
-		nb = ip->i_db[lbn];
+		nb = ip->i_db[lbn];	/* 通过逻辑块号索引得到物理块号？ */
 		/*
 		 * no new block is to be allocated, and no need to expand
 		 * the file
+		 * 没有新的块需要申请，并且不需要扩展文件
 		 */
 		if (nb != 0 && ip->i_size >= (lbn + 1) * fs->e2fs_bsize) {
 			error = bread(vp, lbn, fs->e2fs_bsize, NOCRED, &bp);
@@ -177,6 +182,7 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 		if (nb != 0) {
 			/*
 			 * Consider need to reallocate a fragment.
+			 * 考虑重新分配片段的需要
 			 */
 			osize = fragroundup(fs, blkoff(fs, ip->i_size));
 			nsize = fragroundup(fs, size);
@@ -197,10 +203,10 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 				    (int)ip->i_size, (int)nb);
 				panic(
 				    "ext2_balloc: Something is terribly wrong");
-/*
- * please note there haven't been any changes from here on -
- * FFS seems to work.
- */
+						/*
+						* please note there haven't been any changes from here on -
+						* FFS seems to work.
+						*/
 			}
 		} else {
 			if (ip->i_size < (lbn + 1) * fs->e2fs_bsize)

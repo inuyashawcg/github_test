@@ -329,6 +329,7 @@ error:
 
 /*
  * Try to lookup a directory entry in HTree index
+ * 在 htree 中尝试查找一个目录 entry
  */
 int
 ext2_htree_lookup(struct inode *ip, const char *name, int namelen,

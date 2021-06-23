@@ -335,6 +335,7 @@ pause_sbt(const char *wmesg, sbintime_t sbt, sbintime_t pr, int flags)
 
 /*
  * Make all threads sleeping on the specified identifier runnable.
+ * 使休眠在指定标识符上的所有线程都可运行
  */
 void
 wakeup(void *ident)

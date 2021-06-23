@@ -881,7 +881,7 @@ vfs_domount_first(
 	struct vfsoptlist **optlist	/* Options local to the filesystem. */
 	)
 {
-	struct vattr va;
+	struct vattr v
 	struct mount *mp;
 	struct vnode *newdp;
 	int error;
@@ -1753,12 +1753,22 @@ vfs_getopts(struct vfsoptlist *opts, const char *name, int *error)
 	return (NULL);
 }
 
+/*
+	这个是 vfs 提供给各个文件系统的功能函数，每个文件系统都会对应一个单独的操作队列，
+	这个队列中包含有该文件系统所支持的一些功能。该函数的其中一个应用场景就是当升级文件
+	系统属性的时候，会调用这个函数来检查新添加的操作是不是在文件系统所支持的操作列表的
+	范围内，如果是的话，属性升级才能完成
+*/
 int
 vfs_flagopt(struct vfsoptlist *opts, const char *name, uint64_t *w,
 	uint64_t val)
 {
 	struct vfsopt *opt;
 
+	/*
+		遍历操作链表，通过名字进行匹配对应属性的操作。如果匹配到了，就对 w 做相应的操作，
+		即把 val 表示的属性信息添加到 w 当中
+	*/
 	TAILQ_FOREACH(opt, opts, link) {
 		if (strcmp(name, opt->name) == 0) {
 			opt->seen = 1;

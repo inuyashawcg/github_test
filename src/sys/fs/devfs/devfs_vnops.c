@@ -245,8 +245,6 @@ devfs_clear_cdevpriv(void)
 /*
  * On success devfs_populate_vp() returns with dmp->dm_lock held.
  * populate: 填充，迁移
- * 
- * vnode其实是有vfs统一管理的，所以这里
  */
 static int
 devfs_populate_vp(struct vnode *vp)
@@ -1349,6 +1347,9 @@ devfs_read_f(struct file *fp, struct uio *uio, struct ucred *cred,
 		ioflag |= IO_DIRECT;
 
 	foffset_lock_uio(fp, uio, flags | FOF_NOLOCK);
+	/*
+		这里执行的是 cdevsw 表中的 read 函数
+	*/
 	error = dsw->d_read(dev, uio, ioflag);
 	if (uio->uio_resid != resid || (error == 0 && resid != 0))
 		devfs_timestamp(&dev->si_atime);

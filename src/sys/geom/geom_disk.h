@@ -90,7 +90,7 @@ struct disk {
 	u_int			d_flags;
 	const char		*d_name;	// 存储设备的名字，必须指定
 	u_int			d_unit;	// 存储设备的单位号，必须指定
-	struct bio_queue_head	*d_queue;
+	struct bio_queue_head	*d_queue;	/* 指向一个I/O请求队列 */
 	struct mtx		*d_lock;
 
 	/* Disk methods  */
@@ -112,11 +112,13 @@ struct disk {
 	disk_getattr_t		*d_getattr;
 	disk_gone_t		*d_gone;
 
-	/* Info fields from driver to geom_disk.c. Valid when open */
+	/* Info fields from driver to geom_disk.c. Valid when open 
+		从driver到geom_disk.c的信息字段。打开时有效
+	*/
 	u_int			d_sectorsize;	// 表示存储设备的扇区的大小，必须指定
 	off_t			d_mediasize;	// 媒体字节的大小？必须指定
-	u_int			d_fwsectors;
-	u_int			d_fwheads;
+	u_int			d_fwsectors;	/* 指定此存储设备上的扇区数，必须要指定 */
+	u_int			d_fwheads;	/* 指定此存储设备上的磁头数，必须要指定 */
 	u_int			d_maxsize;	// 表示存储设备中一条输入输出操作的最大字节数，必须指定
 	off_t			d_delmaxsize;
 	u_int			d_stripeoffset;
@@ -130,7 +132,7 @@ struct disk {
 	uint16_t		d_rotation_rate;
 
 	/* Fields private to the driver */
-	void			*d_drv1;
+	void			*d_drv1;	/* 驱动程序私有数据指针，一般指向softc结构体 */
 
 	/* Fields private to geom_disk, to be moved on next version bump */
 	LIST_HEAD(,disk_alias)	d_aliases;

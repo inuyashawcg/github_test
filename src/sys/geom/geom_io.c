@@ -1,4 +1,4 @@
-/*-
+ /*-
  * SPDX-License-Identifier: BSD-3-Clause
  *
  * Copyright (c) 2002 Poul-Henning Kamp
@@ -69,6 +69,14 @@ __FBSDID("$FreeBSD: releng/12.0/sys/geom/geom_io.c 330264 2018-03-02 04:34:53Z m
 
 static int	g_io_transient_map_bio(struct bio *bp);
 
+/*
+	GEOM 使用了两个线程来操作它的多层栈结构:
+		g_down - 负责把请求从上层的消费者传递给下层的过程
+		g_up - 负责把请求从下层的过程传递给上层的消费者
+
+		从文档的解释来看，一般把文件系统称作消费者，磁盘或者磁盘分区叫做提供者。
+		所以，g_down 是把文件系统的一些请求发送到磁盘；g_up 是把磁盘相关过程的结果发送给文件系统
+*/
 static struct g_bioq g_bio_run_down;
 static struct g_bioq g_bio_run_up;
 
@@ -80,6 +88,9 @@ static struct g_bioq g_bio_run_up;
  * there, at the expxense of some added latency while the memory
  * pressures exist. See g_io_schedule_down() for more details
  * and limitations.
+ * pace 暗示我们最近在分配 bios 的时候遇到了一些问题，因此我们应该停止尝试向 stack
+ * 发送I/O请求来让问题得到解决。当我们调整节奏的时候，应该关闭直接 dispatch 进而减小
+ * 来自I/O的内存压力。当内存压力存在的情况下，会增加一部分的延迟
  */
 static volatile u_int pace;
 
@@ -90,6 +101,7 @@ static uma_zone_t	biozone;
  * Use g_register_classifier() and g_unregister_classifier()
  * to add/remove entries to the list.
  * Classifiers are invoked in registration order.
+ * 分类器按注册顺序调用
  */
 static TAILQ_HEAD(g_classifier_tailq, g_classifier_hook)
     g_classifier_tailq = TAILQ_HEAD_INITIALIZER(g_classifier_tailq);
@@ -119,6 +131,7 @@ g_bioq_destroy(struct g_bioq *bq)
 }
 #endif
 
+/* g_bioq 其实就是 queue + mutex + length */
 static void
 g_bioq_init(struct g_bioq *bq)
 {
@@ -127,6 +140,7 @@ g_bioq_init(struct g_bioq *bq)
 	mtx_init(&bq->bio_queue_lock, "bio queue", NULL, MTX_DEF);
 }
 
+/* 取出队列中的第一个元素 */
 static struct bio *
 g_bioq_first(struct g_bioq *bq)
 {
@@ -137,12 +151,13 @@ g_bioq_first(struct g_bioq *bq)
 		KASSERT((bp->bio_flags & BIO_ONQUEUE),
 		    ("Bio not on queue bp=%p target %p", bp, bq));
 		bp->bio_flags &= ~BIO_ONQUEUE;
-		TAILQ_REMOVE(&bq->bio_queue, bp, bio_queue);
+		TAILQ_REMOVE(&bq->bio_queue, bp, bio_queue);	/* 元素取出后，是需要将其 remove 掉 */
 		bq->bio_queue_length--;
 	}
 	return (bp);
 }
 
+/* allocates	a new, empty bio structure. */
 struct bio *
 g_new_bio(void)
 {
@@ -161,6 +176,10 @@ g_new_bio(void)
 	return (bp);
 }
 
+/* 
+	same as g_new_bio(), but always succeeds (allocates bio 
+	with the M_WAITOK malloc flag) 
+*/
 struct bio *
 g_alloc_bio(void)
 {
@@ -179,6 +198,7 @@ g_alloc_bio(void)
 	return (bp);
 }
 
+/* deallocates and destroys the given bio */
 void
 g_destroy_bio(struct bio *bp)
 {
@@ -194,21 +214,33 @@ g_destroy_bio(struct bio *bp)
 	uma_zfree(biozone, bp);
 }
 
+/*
+	g_clone_bio 函数会申请一个新的 bio 空间并且从作为参数的 bio 中克隆以下内容:
+	bio_cmd, bio_length, bio_offset, bio_data, bio_attribute
+	该函数应用于通过特定geom的提供者进入的每个请求，并且需要将顺序定下来。正确的顺序是:
+		- 克隆接收到的 struct bio
+		- 修改克隆
+		- 将克隆安排在其自己的使用者上
+*/
 struct bio *
 g_clone_bio(struct bio *bp)
 {
 	struct bio *bp2;
 
-	bp2 = uma_zalloc(biozone, M_NOWAIT | M_ZERO);
+	bp2 = uma_zalloc(biozone, M_NOWAIT | M_ZERO);	/* 申请内存区域 */
 	if (bp2 != NULL) {
 		bp2->bio_parent = bp;
 		bp2->bio_cmd = bp->bio_cmd;
 		/*
 		 *  BIO_ORDERED flag may be used by disk drivers to enforce
 		 *  ordering restrictions, so this flag needs to be cloned.
+		 * 	BIO_ORDERED标志可能被磁盘驱动程序用来强制执行排序限制，因此需要克隆此标志
+		 * 
 		 *  BIO_UNMAPPED and BIO_VLIST should be inherited, to properly
 		 *  indicate which way the buffer is passed.
-		 *  Other bio flags are not suitable for cloning.
+		 *  应该继承BIO_UNMAPPED和BIO_VLIST，以正确指示缓冲区的传递方式
+		 * 
+		 *  Other bio flags are not suitable for cloning. 其他的 flag 不适合继承
 		 */
 		bp2->bio_flags = bp->bio_flags &
 		    (BIO_ORDERED | BIO_UNMAPPED | BIO_VLIST);
@@ -228,7 +260,7 @@ g_clone_bio(struct bio *bp)
 #if defined(BUF_TRACKING) || defined(FULL_BUF_TRACKING)
 		bp2->bio_track_bp = bp->bio_track_bp;
 #endif
-		bp->bio_children++;
+		bp->bio_children++;	/* children 用于记录衍生出的 bio 数量，所以这里要++ */
 	}
 #ifdef KTR
 	if ((KTR_COMPILE & KTR_GEOM) && (ktr_mask & KTR_GEOM)) {
@@ -242,6 +274,11 @@ g_clone_bio(struct bio *bp)
 	return(bp2);
 }
 
+/* 
+	赋值bio
+	same as g_clone_bio(),	but always succeeds (allocates
+  bio with the M_WAITOK malloc flag). 
+*/
 struct bio *
 g_duplicate_bio(struct bio *bp)
 {
@@ -258,7 +295,7 @@ g_duplicate_bio(struct bio *bp)
 	bp2->bio_ma_n = bp->bio_ma_n;
 	bp2->bio_ma_offset = bp->bio_ma_offset;
 	bp2->bio_attribute = bp->bio_attribute;
-	bp->bio_children++;
+	bp->bio_children++;	/* children 仍然要执行++操作 */
 #ifdef KTR
 	if ((KTR_COMPILE & KTR_GEOM) && (ktr_mask & KTR_GEOM)) {
 		struct stack st;
@@ -271,6 +308,10 @@ g_duplicate_bio(struct bio *bp)
 	return(bp2);
 }
 
+/*
+	resets the given bio structure back to its initial state
+	将给定的 bio 设置为其初始状态
+*/
 void
 g_reset_bio(struct bio *bp)
 {
@@ -281,7 +322,7 @@ g_reset_bio(struct bio *bp)
 void
 g_io_init()
 {
-
+	/* 初始化两个 bio 管理队列，定义uma内存分配类型 */
 	g_bioq_init(&g_bio_run_down);
 	g_bioq_init(&g_bio_run_up);
 	biozone = uma_zcreate("g_bio", sizeof (struct bio),
@@ -290,6 +331,12 @@ g_io_init()
 	    0, 0);
 }
 
+/*
+	从代码逻辑可以推断，当我们想要获取一些属性信息，或者传递一些数据的时候，要通过
+	发起一个 I/O 请求来实现。具体操作就是实例化出一个 bio，设置 bio 的具体用途，
+	里边存放我们想要读写的信息
+	要判断这个属性到底是谁的属性，消费者还是提供者
+*/
 int
 g_io_getattr(const char *attr, struct g_consumer *cp, int *len, void *ptr)
 {
@@ -297,13 +344,13 @@ g_io_getattr(const char *attr, struct g_consumer *cp, int *len, void *ptr)
 	int error;
 
 	g_trace(G_T_BIO, "bio_getattr(%s)", attr);
-	bp = g_alloc_bio();
+	bp = g_alloc_bio();	/* 动态分配 bio */
 	bp->bio_cmd = BIO_GETATTR;
 	bp->bio_done = NULL;
 	bp->bio_attribute = attr;
 	bp->bio_length = *len;
 	bp->bio_data = ptr;
-	g_io_request(bp, cp);
+	g_io_request(bp, cp);	/* 为了获取属性信息，发起一个 I/O 请求 */
 	error = biowait(bp, "ggetattr");
 	*len = bp->bio_completed;
 	g_destroy_bio(bp);
@@ -359,6 +406,7 @@ g_io_flush(struct g_consumer *cp)
 	return (error);
 }
 
+/* 该函数的作用就是判断一下 I/O 数据是否满足一定的条件限制，或者是否需要进一步处理 */
 static int
 g_io_check(struct bio *bp)
 {
@@ -372,7 +420,10 @@ g_io_check(struct bio *bp)
 	cp = bp->bio_from;
 	pp = bp->bio_to;
 
-	/* Fail if access counters dont allow the operation */
+	/* Fail if access counters dont allow the operation 
+		如果访问计数器不允许操作，则失败
+		这个 switch 就是判断 bio_cmd
+	*/
 	switch(bp->bio_cmd) {
 	case BIO_READ:
 	case BIO_GETATTR:
@@ -406,22 +457,26 @@ g_io_check(struct bio *bp)
 	case BIO_READ:
 	case BIO_WRITE:
 	case BIO_DELETE:
-		/* Zero sectorsize or mediasize is probably a lack of media. */
+		/* Zero sectorsize or mediasize is probably a lack of media. 
+			零扇区或媒体大小可能是缺少媒体
+		*/
 		if (pp->sectorsize == 0 || pp->mediasize == 0)
 			return (ENXIO);
-		/* Reject I/O not on sector boundary */
+		/* Reject I/O not on sector boundary 拒绝不在扇区边界上的I/O */
 		if (bp->bio_offset % pp->sectorsize)
 			return (EINVAL);
-		/* Reject I/O not integral sector long */
+		/* Reject I/O not integral sector long 拒绝I/O不完整扇区长 */
 		if (bp->bio_length % pp->sectorsize)
 			return (EINVAL);
-		/* Reject requests before or past the end of media. */
+		/* Reject requests before or past the end of media. 在媒体结束之前或之后拒绝请求 */
 		if (bp->bio_offset < 0)
 			return (EIO);
 		if (bp->bio_offset > pp->mediasize)
 			return (EIO);
 
-		/* Truncate requests to the end of providers media. */
+		/* Truncate(截断) requests to the end of providers media. 
+			从逻辑上看，就是当一个page装不下数据的时候，再给它分配一个page
+		*/
 		excess = bp->bio_offset + bp->bio_length;
 		if (excess > bp->bio_to->mediasize) {
 			KASSERT((bp->bio_flags & BIO_UNMAPPED) == 0 ||
@@ -440,7 +495,9 @@ g_io_check(struct bio *bp)
 				    bp->bio_to->name, excess);
 		}
 
-		/* Deliver zero length transfers right here. */
+		/* Deliver zero length transfers right here. 
+			在这里传递零长度传输
+		*/
 		if (bp->bio_length == 0) {
 			CTR2(KTR_GEOM, "g_down terminated 0-length "
 			    "bp %p provider %s", bp, bp->bio_to->name);
@@ -467,21 +524,29 @@ g_io_check(struct bio *bp)
  * are used to add/remove a classifier from the list.
  * The list is protected using the g_bio_run_down lock,
  * because the classifiers are called in this path.
- *
+ * 使用g_bio_run_down锁保护列表，因为分类器是在此路径中调用的
+ * 
  * g_io_request() passes bio's that are not already classified
  * (i.e. those with bio_classifier1 == NULL) to g_run_classifiers().
  * Classifiers can store their result in the two fields
  * bio_classifier1 and bio_classifier2.
+ * g_io_request 将尚未分类的bio（即bio_classifier1 == NULL 的bio）传递给 g_run_classifiers。
+ * 分类器可以将其结果存储在两个字段 bio_classifier1 和 bio_classifier2 中
+ * 
  * A classifier that updates one of the fields should
  * return a non-zero value.
+ * 更新其中一个字段的分类器应返回非零值
+ * 
  * If no classifier updates the field, g_run_classifiers() sets
  * bio_classifier1 = BIO_NOTCLASSIFIED to avoid further calls.
+ * 如果没有分类器更新字段，则 g_run_classifiers 将 bio_classifier1 = bio_NOTCLASSIFIED 
+ * 设置为避免进一步调用
  */
 
 int
 g_register_classifier(struct g_classifier_hook *hook)
 {
-
+	/* 注册 bio 分类，后面会用于对 bio 类型的查询 */
 	g_bioq_lock(&g_bio_run_down);
 	TAILQ_INSERT_TAIL(&g_classifier_tailq, hook, link);
 	g_bioq_unlock(&g_bio_run_down);
@@ -512,6 +577,7 @@ g_run_classifiers(struct bio *bp)
 
 	biotrack(bp, __func__);
 
+	/* 应该就是 */
 	TAILQ_FOREACH(hook, &g_classifier_tailq, link)
 		classified |= hook->func(hook->arg, bp);
 
@@ -519,6 +585,7 @@ g_run_classifiers(struct bio *bp)
 		bp->bio_classifier1 = BIO_NOTCLASSIFIED;
 }
 
+/* 调用该函数之前，会 malloc 一个 bio 出来作为该函数的参数传递进来 */
 void
 g_io_request(struct bio *bp, struct g_consumer *cp)
 {
@@ -531,7 +598,7 @@ g_io_request(struct bio *bp, struct g_consumer *cp)
 
 	KASSERT(cp != NULL, ("NULL cp in g_io_request"));
 	KASSERT(bp != NULL, ("NULL bp in g_io_request"));
-	pp = cp->provider;
+	pp = cp->provider;	/* 提供者 */
 	KASSERT(pp != NULL, ("consumer not attached in g_io_request"));
 #ifdef DIAGNOSTIC
 	KASSERT(bp->bio_driver1 == NULL,
@@ -604,7 +671,7 @@ g_io_request(struct bio *bp, struct g_consumer *cp)
 
 	if (!TAILQ_EMPTY(&g_classifier_tailq) && !bp->bio_classifier1) {
 		g_bioq_lock(&g_bio_run_down);
-		g_run_classifiers(bp);
+		g_run_classifiers(bp);	/* 对 bio 分类器进行查询 */ 
 		g_bioq_unlock(&g_bio_run_down);
 	}
 
@@ -612,17 +679,24 @@ g_io_request(struct bio *bp, struct g_consumer *cp)
 	 * The statistics collection is lockless, as such, but we
 	 * can not update one instance of the statistics from more
 	 * than one thread at a time, so grab the lock first.
+	 * 统计信息集合是无锁的，因此，我们不能一次从多个线程更新统计信息的一个
+	 * 实例，因此首先获取锁
 	 */
 	mtxp = mtx_pool_find(mtxpool_sleep, pp);
 	mtx_lock(mtxp);
 	if (g_collectstats & G_STATS_PROVIDERS)
-		devstat_start_transaction(pp->stat, &bp->bio_t0);
+		devstat_start_transaction(pp->stat, &bp->bio_t0);	/* 记录转换开始的时间 */
 	if (g_collectstats & G_STATS_CONSUMERS)
 		devstat_start_transaction(cp->stat, &bp->bio_t0);
 	pp->nstart++;
 	cp->nstart++;
 	mtx_unlock(mtxp);
 
+	/*
+		可能是要分成两种情况：如果定义了 GET_STACK_USAGE，就要进一步判断是不是要直接处理 IO 请求；
+		如果是，则直接处理，并调用 g_io_deliver 函数将数据发送出去；如果不是，那就放到队列尾部，等待
+		前面的 bio 处理完毕
+	*/
 	if (direct) {
 		error = g_io_check(bp);
 		if (error >= 0) {
@@ -632,17 +706,17 @@ g_io_request(struct bio *bp, struct g_consumer *cp)
 			g_io_deliver(bp, error);
 			return;
 		}
-		bp->bio_to->geom->start(bp);
+		bp->bio_to->geom->start(bp);	/* 调用 geom 处理 IO请求的函数 */
 	} else {
 		g_bioq_lock(&g_bio_run_down);
-		first = TAILQ_EMPTY(&g_bio_run_down.bio_queue);
-		TAILQ_INSERT_TAIL(&g_bio_run_down.bio_queue, bp, bio_queue);
+		first = TAILQ_EMPTY(&g_bio_run_down.bio_queue);	/* 判断队列是否为空 */
+		TAILQ_INSERT_TAIL(&g_bio_run_down.bio_queue, bp, bio_queue);	/* 将bp插入到队列尾部 */
 		bp->bio_flags |= BIO_ONQUEUE;
-		g_bio_run_down.bio_queue_length++;
+		g_bio_run_down.bio_queue_length++;	/* 队列长度+1 */
 		g_bioq_unlock(&g_bio_run_down);
 		/* Pass it on down. */
 		if (first)
-			wakeup(&g_wait_down);
+			wakeup(&g_wait_down);	/* 如果插入之前队列不为空，则唤醒等待的进程进行处理 */
 	}
 }
 
@@ -839,9 +913,10 @@ g_io_schedule_down(struct thread *tp __unused)
 
 	for(;;) {
 		g_bioq_lock(&g_bio_run_down);
-		bp = g_bioq_first(&g_bio_run_down);
+		bp = g_bioq_first(&g_bio_run_down);	/* 取队列首元素 */
 		if (bp == NULL) {
 			CTR0(KTR_GEOM, "g_down going to sleep");
+			/* 如果队列为null，则将线程睡眠 */
 			msleep(&g_wait_down, &g_bio_run_down.bio_queue_lock,
 			    PRIBIO | PDROP, "-", 0);
 			continue;
@@ -865,6 +940,12 @@ g_io_schedule_down(struct thread *tp __unused)
 			 * 10 IOPs for minutes at a time when transient memory
 			 * issues prevented allocation for a batch of requests
 			 * from the upper layers.
+			 * 自上次I/O完成以来，至少有一次内存分配失败。暂停1ms，让系统有机会释放内存。
+			 * 我们只做一次，因为在直接调度的情况下，大量的分配可能会失败，而这些失败的数量
+			 * 与中断的时间长短没有关系。如果仍然停电，我们会暂停一次又一次，直到它解决。
+			 * 旧版本暂停时间更长，每次分配失败暂停一次。这对于单线程gïu down是可以的，
+			 * 但是如果使用直接调度，则在瞬间内存问题阻止分配来自上层的一批请求时，
+			 * 最多会导致10分钟的IOPs
 			 *
 			 * XXX This pacing is really lame. It needs to be solved
 			 * by other methods. This is OK only because the worst
@@ -872,6 +953,9 @@ g_io_schedule_down(struct thread *tp __unused)
 			 * all memory is tied up waiting for I/O to complete
 			 * which can never happen since we can't allocate bios
 			 * for that I/O.
+			 * 这种步调真是蹩脚。需要用其他方法来解决。这是可以的，只是因为最坏的情况
+			 * 是如此罕见。在最坏的情况下，所有内存都被占用，等待I/O完成，这是永远不会
+			 * 发生的，因为我们无法为该I/O分配bios
 			 */
 			CTR0(KTR_GEOM, "g_down pacing self");
 			pause("g_down", min(hz/1000, 1));
@@ -919,6 +1003,17 @@ g_io_schedule_up(struct thread *tp __unused)
 	}
 }
 
+/*
+	g_read_data, g_write_data -- read/write data from/to GEOM consumer
+	g_read_data 主要是从 attach 到 consumer 的 provider 读取 length 字节的数据，起始位置
+	是 offset。函数返回的数据是用 g_malloc 申请的空间进行保存，所以调用者在使用完数据之后，需要
+	调用 g_free 将数据空间释放掉；如果操作出错，错误码就会保存到 error 参数中
+	read 和 write 函数中的读取数据的长度 length 有一定的要求，它必须是 provider sectorsize 的
+	整数倍并且要小于等于 DFLTPHYS(<sys/param.h>)
+	拓扑锁一定要持有
+	函数正确执行的时候，返回一个执行数据 buffer 的指针；当有错误发生的时候，返回 null。这种情况下，
+	错误码将保存到 error 参数中
+*/
 void *
 g_read_data(struct g_consumer *cp, off_t offset, off_t length, int *error)
 {
@@ -975,6 +1070,11 @@ g_use_g_read_data(void *devfd, off_t loc, void **bufp, int size)
 	return (0);
 }
 
+/*
+	g_write_data 函数是从 ptr 指向的数据中写入 length 字节的数据到 consumer 关联到的
+	provider 中，起始位置是在 offset
+	函数执行成功的话就返回0，否则就返回错误码
+*/
 int
 g_write_data(struct g_consumer *cp, off_t offset, void *ptr, off_t length)
 {
@@ -1028,6 +1128,9 @@ g_delete_data(struct g_consumer *cp, off_t offset, off_t length)
 	return (error);
 }
 
+/*
+	prints information about the given bio structure (for debugging purposes)
+*/
 void
 g_print_bio(struct bio *bp)
 {

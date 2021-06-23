@@ -422,6 +422,9 @@ vm_radix_is_singleton(struct vm_radix *rtree)
 /*
  * Returns the value stored at the index.  If the index is not present,
  * NULL is returned.
+ * radix tree(基数树)，能够更加合理的使用内存，提高查找效率
+ * 		https://blog.csdn.net/Poisx/article/details/115433816
+ * 
  */
 vm_page_t
 vm_radix_lookup(struct vm_radix *rtree, vm_pindex_t index)

@@ -54,24 +54,29 @@
 /* Number of spare 32-bit integrals following drive-type data */
 #define	BSD_NSPARE		5
 
+/*
+	里面包含有关于磁盘的最基本的信息，最后还有包含有一个分区表。从这个地方可以看出，BSD中的磁盘标签可能
+	作用就类似于MBR。从系统设计文档中可以看出，磁盘标签通常都放到磁盘开头附近，一般是在第0个块。必须要
+	靠近磁盘开头，这样才能由系统的初级引导代码读取到它。
+*/
 struct disklabel {
-	uint32_t d_magic;		/* the magic number */
-	uint16_t d_type;		/* drive type */
-	uint16_t d_subtype;		/* controller/d_type specific */
-	char	 d_typename[16];	/* type name, e.g. "eagle" */
+	uint32_t d_magic;		/* the magic number 磁盘标签魔数 */
+	uint16_t d_type;		/* drive type 驱动类型 */
+	uint16_t d_subtype;		/* controller/d_type specific 驱动控制器子类型，推测是用于区分不同的驱动 */
+	char	 d_typename[16];	/* type name, e.g. "eagle" 应该是驱动类型名称 */
 
 	char	 d_packname[16];	/* pack identifier */
 
-			/* disk geometry: */
-	uint32_t d_secsize;		/* # of bytes per sector */
-	uint32_t d_nsectors;		/* # of data sectors per track */
-	uint32_t d_ntracks;		/* # of tracks per cylinder */
-	uint32_t d_ncylinders;		/* # of data cylinders per unit */
-	uint32_t d_secpercyl;		/* # of data sectors per cylinder */
-	uint32_t d_secperunit;		/* # of data sectors per unit */
+			/* disk geometry: 磁盘几何结构 */
+	uint32_t d_secsize;		/* # of bytes per sector 每个扇区所包含的字节数 */
+	uint32_t d_nsectors;		/* # of data sectors per track 每个磁道所包含的扇区数 */
+	uint32_t d_ntracks;		/* # of tracks per cylinder 一个柱面所包含的磁道数 */
+	uint32_t d_ncylinders;		/* # of data cylinders per unit 一个单元所包含的柱面数 */
+	uint32_t d_secpercyl;		/* # of data sectors per cylinder 一个柱面所包含的扇区数 */
+	uint32_t d_secperunit;		/* # of data sectors per unit 一个单元多包含的扇区数 */
 
 	/*
-	 * Spares (bad sector replacements) below are not counted in
+	 * Spares(备用) (bad sector replacements) below are not counted in
 	 * d_nsectors or d_secpercyl.  Spare sectors are assumed to
 	 * be physical sectors which occupy space at the end of each
 	 * track and/or cylinder.
@@ -80,11 +85,11 @@ struct disklabel {
 	uint16_t d_sparespercyl;	/* # of spare sectors per cylinder */
 	/*
 	 * Alternate cylinders include maintenance, replacement, configuration
-	 * description areas, etc.
+	 * description areas, etc. 备用柱面包括维护、更换、配置描述区域等。
 	 */
 	uint32_t d_acylinders;		/* # of alt. cylinders per unit */
 
-			/* hardware characteristics: */
+			/* hardware characteristics: 硬件特性 */
 	/*
 	 * d_interleave, d_trackskew and d_cylskew describe perturbations
 	 * in the media format used to compensate for a slow controller.
@@ -100,8 +105,20 @@ struct disklabel {
 	 * sector 0 on track N-1 on the same cylinder.  Finally, d_cylskew
 	 * is the offset of sector 0 on cylinder N relative to sector 0
 	 * on cylinder N-1.
+	 * d_interleave、d_trackskew 和 d_cylskew 描述用于补偿慢速控制器的媒体格式中的扰动。
+	 * interleave 是物理扇区 interleave，由格式化程序或控制器在格式化时设置。当使用 interleave 时，
+	 * 逻辑上相邻的扇区不是物理上相邻的，而是由一些扇区分开。它被指定为每个逻辑扇区遍历的物理扇区的比率。
+	 * 因此，1:1的交织意味着连续布局，而2:1意味着逻辑扇区0由一个扇区与逻辑扇区1分开。d_trackskew 是
+	 * 轨道N上扇区0相对于同一圆柱面上轨道N-1上扇区0的偏移量。最后，d_cylskew 是N柱上扇区0相对于 N-1
+	 * 柱面上扇区0的偏移量。
+	 * interleave：交叉因子。这个跟磁盘的机械原理有关系。假设我们要读取相邻两个编号的扇区0和1。如果我们
+	 * 采用连续编址的方式，可能硬件再处理0号扇区数据的时候1号扇区由于高转速已经跳过去了，还得重新绕一圈再
+	 * 回来读，所以效率比较低。目前采用的方式就是交叉编址。如果是按照2：1来编址，就是 1，10，2，11 ....
+	 * 如果是按照3：1进行编址，那就是 1，7，13，2，8，14 .... 所以，设置交叉因子的本质还是磁盘控制器跟
+	 * 不上转速导致的。由于不同的磁道线速度不一样，所以编址的方式也是不同的
+	 * 参考：https://segmentfault.com/a/1190000000653103
 	 */
-	uint16_t d_rpm;			/* rotational speed */
+	uint16_t d_rpm;			/* rotational speed 磁盘转速 */
 	uint16_t d_interleave;		/* hardware sector interleave */
 	uint16_t d_trackskew;		/* sector 0 skew, per track */
 	uint16_t d_cylskew;		/* sector 0 skew, per cylinder */
@@ -114,17 +131,18 @@ struct disklabel {
 	uint16_t d_checksum;		/* xor of data incl. partitions */
 
 			/* filesystem and partition information: */
-	uint16_t d_npartitions;	/* number of partitions in following */
-	uint32_t d_bbsize;		/* size of boot area at sn0, bytes */
-	uint32_t d_sbsize;		/* max size of fs superblock, bytes */
-	struct partition {		/* the partition table */
-		uint32_t p_size;	/* number of sectors in partition */
-		uint32_t p_offset;	/* starting sector */
-		uint32_t p_fsize;	/* filesystem basic fragment size */
-		uint8_t  p_fstype;	/* filesystem type, see below */
-		uint8_t  p_frag;	/* filesystem fragments per block */
-		uint16_t p_cpg;		/* filesystem cylinders per group */
-	} d_partitions[BSD_NPARTS_MIN];	/* actually may be more */
+	uint16_t d_npartitions;	/* number of partitions in following 下面所表示的分区数 */
+	uint32_t d_bbsize;		/* size of boot area at sn0, bytes - sn0 处引导区域的大小(字节) */
+	uint32_t d_sbsize;		/* max size of fs superblock, bytes 超级块的最大尺寸(字节)*/
+
+	struct partition {		/* the partition table 分区表 */
+		uint32_t p_size;	/* number of sectors in partition 分区所包含的扇区数 */
+		uint32_t p_offset;	/* starting sector 起始扇区 */
+		uint32_t p_fsize;	/* filesystem basic fragment size 文件系统块大小 */
+		uint8_t  p_fstype;	/* filesystem type, see below 文件系统类型*/
+		uint8_t  p_frag;	/* filesystem fragments per block 一个块中包含的碎片数(其实就是块，奇海中为1) */
+		uint16_t p_cpg;		/* filesystem cylinders per group 每个块组中包含的柱面数 */
+	} d_partitions[BSD_NPARTS_MIN];	/* actually may be more 实际可能会更多，这里只列出了最小数量 */
 };
 #ifdef CTASSERT
 CTASSERT(sizeof(struct disklabel) == 148 + BSD_NPARTS_MIN * 16);

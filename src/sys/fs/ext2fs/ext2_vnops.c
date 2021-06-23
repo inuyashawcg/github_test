@@ -205,6 +205,9 @@ static struct dirtemplate omastertemplate = {
 	0, DIRBLKSIZ - 12, 2, EXT2_FT_UNKNOWN, ".."
 };
 
+/*
+	记录 inode 相关的一些时间信息
+*/
 static void
 ext2_itimes_locked(struct vnode *vp)
 {
@@ -212,7 +215,9 @@ ext2_itimes_locked(struct vnode *vp)
 	struct timespec ts;
 
 	ASSERT_VI_LOCKED(vp, __func__);
-
+	/*
+		修改 inode 与时间相关的字段，最后更新一下属性信息
+	*/
 	ip = VTOI(vp);
 	if ((ip->i_flag & (IN_ACCESS | IN_CHANGE | IN_UPDATE)) == 0)
 		return;
@@ -242,7 +247,7 @@ ext2_itimes_locked(struct vnode *vp)
 void
 ext2_itimes(struct vnode *vp)
 {
-
+	/* 调用上面的函数，更新 inode 的时间数据 */
 	VI_LOCK(vp);
 	ext2_itimes_locked(vp);
 	VI_UNLOCK(vp);
@@ -250,17 +255,19 @@ ext2_itimes(struct vnode *vp)
 
 /*
  * Create a regular file
+ * 创建一个常规文件。从文件类型定义来看，ext2 中仍然包含有 block_device 文件，这个还是要注意
  */
 static int
 ext2_create(struct vop_create_args *ap)
 {
 	int error;
-
+	/* 创建一个 inode */
 	error =
 	    ext2_makeinode(MAKEIMODE(ap->a_vap->va_type, ap->a_vap->va_mode),
 	    ap->a_dvp, ap->a_vpp, ap->a_cnp);
 	if (error != 0)
 		return (error);
+	/* 判断是否利用将名字添加到 name cache */
 	if ((ap->a_cnp->cn_flags & MAKEENTRY) != 0)
 		cache_enter(ap->a_dvp, *ap->a_vpp, ap->a_cnp);
 	return (0);
@@ -269,17 +276,22 @@ ext2_create(struct vop_create_args *ap)
 static int
 ext2_open(struct vop_open_args *ap)
 {
-
+	/*
+		如果打开的文件是字符设备或者块设备，则返回“不支持该操作”
+	*/
 	if (ap->a_vp->v_type == VBLK || ap->a_vp->v_type == VCHR)
 		return (EOPNOTSUPP);
 
 	/*
 	 * Files marked append-only must be opened for appending.
+	 * 标记为“仅附加”的文件必须打开才能附加
 	 */
 	if ((VTOI(ap->a_vp)->i_flags & APPEND) &&
 	    (ap->a_mode & (FWRITE | O_APPEND)) == FWRITE)
 		return (EPERM);
-
+	/*
+		为 vnode 分配一个 vm_object 用于管理page
+	*/
 	vnode_create_vobject(ap->a_vp, VTOI(ap->a_vp)->i_size, ap->a_td);
 
 	return (0);
@@ -288,7 +300,8 @@ ext2_open(struct vop_open_args *ap)
 /*
  * Close called.
  *
- * Update the times on the inode.
+ * Update the times on the inode. 
+ * 更新 inode 的时间信息
  */
 static int
 ext2_close(struct vop_close_args *ap)
@@ -302,6 +315,7 @@ ext2_close(struct vop_close_args *ap)
 	return (0);
 }
 
+/* 一般涉及到 access 的函数，都是对访问权限的检查 */
 static int
 ext2_access(struct vop_access_args *ap)
 {
@@ -317,6 +331,9 @@ ext2_access(struct vop_access_args *ap)
 	 * Disallow write attempts on read-only file systems;
 	 * unless the file is a socket, fifo, or a block or
 	 * character device resident on the file system.
+	 * 禁止在只读文件系统上尝试写操作；除非文件是驻留在文件系统上的
+	 * 套接字、fifo或块或字符设备
+	 * 
 	 */
 	if (accmode & VWRITE) {
 		switch (vp->v_type) {
@@ -331,21 +348,28 @@ ext2_access(struct vop_access_args *ap)
 		}
 	}
 
-	/* If immutable bit set, nobody gets to write it. */
+	/* If immutable bit set, nobody gets to write it. 
+		如果设置了不可变位，就没有人可以编写它
+	*/
 	if ((accmode & VWRITE) && (ip->i_flags & (SF_IMMUTABLE | SF_SNAPSHOT)))
 		return (EPERM);
 
+	/* 检查 vnode 的访问属性 */
 	error = vaccess(vp->v_type, ip->i_mode, ip->i_uid, ip->i_gid,
 	    ap->a_accmode, ap->a_cred, NULL);
 	return (error);
 }
 
+/*
+	获取vnode的属性信息(有一个专门的结构体进行存储，vattr)。里边基本上都是赋值操作，
+	对结构体的字段进行填充
+*/
 static int
 ext2_getattr(struct vop_getattr_args *ap)
 {
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
-	struct vattr *vap = ap->a_vap;
+	struct vattr *vap = ap->a_vap;	/* vnode属性信息 */
 
 	ext2_itimes(vp);
 	/*
@@ -380,6 +404,7 @@ ext2_getattr(struct vop_getattr_args *ap)
 
 /*
  * Set attribute vnode op. called from several syscalls
+ * 系统调用的时候会用到这个函数，用来设置 vnode 属性
  */
 static int
 ext2_setattr(struct vop_setattr_args *ap)
@@ -392,7 +417,7 @@ ext2_setattr(struct vop_setattr_args *ap)
 	int error;
 
 	/*
-	 * Check for unsettable attributes.
+	 * Check for unsettable attributes. 检查不可设置的属性
 	 */
 	if ((vap->va_type != VNON) || (vap->va_nlink != VNOVAL) ||
 	    (vap->va_fsid != VNOVAL) || (vap->va_fileid != VNOVAL) ||
@@ -401,7 +426,7 @@ ext2_setattr(struct vop_setattr_args *ap)
 		return (EINVAL);
 	}
 	if (vap->va_flags != VNOVAL) {
-		/* Disallow flags not supported by ext2fs. */
+		/* Disallow flags not supported by ext2fs. 禁用ext2不支持的标志 */
 		if (vap->va_flags & ~(SF_APPEND | SF_IMMUTABLE | UF_NODUMP))
 			return (EOPNOTSUPP);
 
@@ -435,7 +460,8 @@ ext2_setattr(struct vop_setattr_args *ap)
 		ip->i_flag |= IN_CHANGE;
 		if (ip->i_flags & (IMMUTABLE | APPEND))
 			return (0);
-	}
+	}	// end of VNOVAL
+
 	if (ip->i_flags & (IMMUTABLE | APPEND))
 		return (EPERM);
 	/*
@@ -470,14 +496,17 @@ ext2_setattr(struct vop_setattr_args *ap)
 	}
 	if (vap->va_atime.tv_sec != VNOVAL || vap->va_mtime.tv_sec != VNOVAL) {
 		if (vp->v_mount->mnt_flag & MNT_RDONLY)
-			return (EROFS);
+			return (EROFS);	/* 只读文件系统不允许写操作 */
 		/*
 		 * From utimes(2):
 		 * If times is NULL, ... The caller must be the owner of
 		 * the file, have permission to write the file, or be the
-		 * super-user.
+		 * super-user. 
+		 * 如果时间为null，调用者一定要是文件的拥有者，拥有写权限，或者是超级用户
+		 * 
 		 * If times is non-NULL, ... The caller must be the owner of
 		 * the file or be the super-user.
+		 * 如果时间不为null，调用者一定是文件的所有者或者是超级用户
 		 */
 		if ((error = VOP_ACCESS(vp, VADMIN, cred, td)) &&
 		    ((vap->va_vaflags & VA_UTIMES_NULL) == 0 ||
@@ -504,7 +533,7 @@ ext2_setattr(struct vop_setattr_args *ap)
 	if (vap->va_mode != (mode_t)VNOVAL) {
 		if (vp->v_mount->mnt_flag & MNT_RDONLY)
 			return (EROFS);
-		error = ext2_chmod(vp, (int)vap->va_mode, cred, td);
+		error = ext2_chmod(vp, (int)vap->va_mode, cred, td);	/* 修改文件权限 */
 	}
 	return (error);
 }
@@ -512,6 +541,7 @@ ext2_setattr(struct vop_setattr_args *ap)
 /*
  * Change the mode on a file.
  * Inode must be locked before calling.
+ * 修改文件的访问权限；inode 在被调用之前要被锁住
  */
 static int
 ext2_chmod(struct vnode *vp, int mode, struct ucred *cred, struct thread *td)
@@ -521,7 +551,7 @@ ext2_chmod(struct vnode *vp, int mode, struct ucred *cred, struct thread *td)
 
 	/*
 	 * To modify the permissions on a file, must possess VADMIN
-	 * for that file.
+	 * for that file. 要修改文件的权限，必须拥有该文件的 VADMIN
 	 */
 	if ((error = VOP_ACCESS(vp, VADMIN, cred, td)))
 		return (error);
@@ -529,6 +559,8 @@ ext2_chmod(struct vnode *vp, int mode, struct ucred *cred, struct thread *td)
 	 * Privileged processes may set the sticky bit on non-directories,
 	 * as well as set the setgid bit on a file with a group that the
 	 * process is not a member of.
+	 * 特权进程可能会在非目录项上设置粘性位，在一个组的文件上并且设置 setgid 位，
+	 * 并且进程并不是这个组的成员
 	 */
 	if (vp->v_type != VDIR && (mode & S_ISTXT)) {
 		error = priv_check_cred(cred, PRIV_VFS_STICKYFILE, 0);
@@ -540,6 +572,7 @@ ext2_chmod(struct vnode *vp, int mode, struct ucred *cred, struct thread *td)
 		if (error)
 			return (error);
 	}
+	/* 设置的是 vnode 对应的 inode 的属性信息 */
 	ip->i_mode &= ~ALLPERMS;
 	ip->i_mode |= (mode & ALLPERMS);
 	ip->i_flag |= IN_CHANGE;
@@ -549,11 +582,13 @@ ext2_chmod(struct vnode *vp, int mode, struct ucred *cred, struct thread *td)
 /*
  * Perform chown operation on inode ip;
  * inode must be locked prior to call.
+ * 在inode ip上执行chown操作；调用前必须锁定inode
  */
 static int
 ext2_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred,
     struct thread *td)
 {
+	/* 操作的主要对象还是 vnode 对应的 inode */
 	struct inode *ip = VTOI(vp);
 	uid_t ouid;
 	gid_t ogid;
@@ -573,6 +608,7 @@ ext2_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred,
 	 * To change the owner of a file, or change the group of a file
 	 * to a group of which we are not a member, the caller must
 	 * have privilege.
+	 * 更改文件的所有者或者组组所有者的时候，调用者必须要拥有权限
 	 */
 	if (uid != ip->i_uid || (gid != ip->i_gid &&
 	    !groupmember(gid, cred))) {
@@ -601,10 +637,12 @@ ext2_fsync(struct vop_fsync_args *ap)
 {
 	/*
 	 * Flush all dirty buffers associated with a vnode.
+	 * 刷新 vnode 所关联的所有的脏页；应该是操作的实际对象应该是 vnode 对应的
+	 * vm_object
 	 */
+	vop_stdfsync(ap);	/* 首先执行vfs提供的默认同步函数 */
 
-	vop_stdfsync(ap);
-
+	/* 对应的应该是数据写回磁盘的操作 */
 	return (ext2_update(ap->a_vp, ap->a_waitfor == MNT_WAIT));
 }
 
@@ -621,16 +659,22 @@ ext2_mknod(struct vop_mknod_args *ap)
 	ino_t ino;
 	int error;
 
+	/*
+		ext2_create 函数中也会调用到这个函数，要关注其实现机制；
+		大致的过程就是文件系统会通过一系列算法处理，找一个最为合适的柱面，从中分配一个
+		inode 给 对应的 vnode
+	*/
 	error = ext2_makeinode(MAKEIMODE(vap->va_type, vap->va_mode),
 	    ap->a_dvp, vpp, ap->a_cnp);
 	if (error)
 		return (error);
-	ip = VTOI(*vpp);
+	ip = VTOI(*vpp);	/* 后续处理还是针对 inode 进行 */
 	ip->i_flag |= IN_ACCESS | IN_CHANGE | IN_UPDATE;
 	if (vap->va_rdev != VNOVAL) {
 		/*
 		 * Want to be able to use this to make badblock
 		 * inodes, so don't truncate the dev number.
+		 * 希望能够使用它来生成badblock inode，所以不要截断dev编号
 		 */
 		if (!(ip->i_flag & IN_E4EXTENTS))
 			ip->i_rdev = vap->va_rdev;
@@ -639,6 +683,8 @@ ext2_mknod(struct vop_mknod_args *ap)
 	 * Remove inode, then reload it through VFS_VGET so it is
 	 * checked to see if it is an alias of an existing entry in
 	 * the inode cache.	 XXX I don't believe this is necessary now.
+	 * 删除inode，然后通过 VFS_VGET 重新加载它，以便检查它是否是 inode 缓存中
+	 * 现有项的别名。XXX - 我认为现在没有必要这样做
 	 */
 	(*vpp)->v_type = VNON;
 	ino = ip->i_number;	/* Save this before vgone() invalidates ip. */
@@ -656,19 +702,23 @@ static int
 ext2_remove(struct vop_remove_args *ap)
 {
 	struct inode *ip;
-	struct vnode *vp = ap->a_vp;
-	struct vnode *dvp = ap->a_dvp;
+	struct vnode *vp = ap->a_vp;	/* 应该表示我们要处理的对象 */
+	struct vnode *dvp = ap->a_dvp;	/* 所处理对象所在目录对应的 vnode */
 	int error;
 
+	/* 
+		首先检查 inode 属性。功能函数中存在许多 VTOI 操作，说明我们对于一下文件或者目录的
+		操作的最终载体都是 inode
+	*/
 	ip = VTOI(vp);
 	if ((ip->i_flags & (NOUNLINK | IMMUTABLE | APPEND)) ||
 	    (VTOI(dvp)->i_flags & APPEND)) {
 		error = EPERM;
 		goto out;
 	}
-	error = ext2_dirremove(dvp, ap->a_cnp);
+	error = ext2_dirremove(dvp, ap->a_cnp);	/* 移除掉一个目录项？ */
 	if (error == 0) {
-		ip->i_nlink--;
+		ip->i_nlink--;	/* 文件的链接计数-- */
 		ip->i_flag |= IN_CHANGE;
 	}
 out:
@@ -691,17 +741,23 @@ ext2_link(struct vop_link_args *ap)
 	if ((cnp->cn_flags & HASBUF) == 0)
 		panic("ext2_link: no name");
 #endif
-	ip = VTOI(vp);
+	ip = VTOI(vp);	/* 这里又出现了，说明对于文件的处理都是以 inode 为载体进行的 */
+	/* 判断文件的最大链接数是否小于规定的最大值 */
 	if ((nlink_t)ip->i_nlink >= EXT4_LINK_MAX) {
 		error = EMLINK;
 		goto out;
 	}
+	/* 判断文件属性，是否不能被更改 */
 	if (ip->i_flags & (IMMUTABLE | APPEND)) {
 		error = EPERM;
 		goto out;
 	}
-	ip->i_nlink++;
-	ip->i_flag |= IN_CHANGE;
+	ip->i_nlink++;	/* 链接计数++ */
+	/*
+		更新文件的更改时间属性。与 modify 属性的区别可能是，modify 连文件的内容也被修改了，
+		那么其他属性肯定也会变。而这里仅仅是改动了文件的属性，两者范围不同？
+	*/
+	ip->i_flag |= IN_CHANGE;	
 	error = ext2_update(vp, !DOINGASYNC(vp));
 	if (!error)
 		error = ext2_direnter(ip, tdvp, cnp);
@@ -713,6 +769,7 @@ out:
 	return (error);
 }
 
+/* increase link number*/
 static int
 ext2_inc_nlink(struct inode *ip)
 {
@@ -732,6 +789,7 @@ ext2_inc_nlink(struct inode *ip)
 	return (0);
 }
 
+/* delete link number */
 static void
 ext2_dec_nlink(struct inode *ip)
 {
@@ -767,6 +825,12 @@ ext2_dec_nlink(struct inode *ip)
 static int
 ext2_rename(struct vop_rename_args *ap)
 {
+	/*
+		tvp: target vnode pointer
+		tdvp: target directory vnode pointer
+		fvp: file vnode pointer
+		fdvp: file directory vnode pointer
+	*/
 	struct vnode *tvp = ap->a_tvp;
 	struct vnode *tdvp = ap->a_tdvp;
 	struct vnode *fvp = ap->a_fvp;
@@ -785,7 +849,9 @@ ext2_rename(struct vop_rename_args *ap)
 		panic("ext2_rename: no name");
 #endif
 	/*
-	 * Check for cross-device rename.
+	 * Check for cross-device rename. 检查跨设备重命名
+	 * 从注释来看，tdvp 表示的应该是重命名目标文件的 vnode，这里判断的是
+	 * 源文件和目标文件的挂载点是否一致
 	 */
 	if ((fvp->v_mount != tdvp->v_mount) ||
 	    (tvp && (fvp->v_mount != tvp->v_mount))) {
@@ -801,7 +867,7 @@ abortit:
 		vrele(fvp);
 		return (error);
 	}
-
+	/* 在很多情况下都需要对 inode 属性进行判断 */
 	if (tvp && ((VTOI(tvp)->i_flags & (NOUNLINK | IMMUTABLE | APPEND)) ||
 	    (VTOI(tdvp)->i_flags & APPEND))) {
 		error = EPERM;
@@ -811,17 +877,19 @@ abortit:
 	/*
 	 * Renaming a file to itself has no effect.  The upper layers should
 	 * not call us in that case.  Temporarily just warn if they do.
+	 * 将文件重命名为自身没有效果。上层不应该在这种情况下调用该函数。如果有，就暂时警告一下
 	 */
 	if (fvp == tvp) {
 		printf("ext2_rename: fvp == tvp (can't happen)\n");
 		error = 0;
 		goto abortit;
 	}
-
+	/* 现在要开始对fvp进行操作了，所以要加锁进行保护 */
 	if ((error = vn_lock(fvp, LK_EXCLUSIVE)) != 0)
 		goto abortit;
-	dp = VTOI(fdvp);
+	dp = VTOI(fdvp);	/* 同样的操作，更进一步说明对文件的操作还是以 inode 作为载体，vnode 只是个中间媒介 */
 	ip = VTOI(fvp);
+	/* 判断最大链接数是否超过了限制，并且判断文件系统是否具有只读属性 */
 	if (ip->i_nlink >= EXT4_LINK_MAX &&
 	    !EXT2_HAS_RO_COMPAT_FEATURE(ip->i_e2fs, EXT2F_ROCOMPAT_DIR_NLINK)) {
 		VOP_UNLOCK(fvp, 0);
@@ -834,9 +902,11 @@ abortit:
 		error = EPERM;
 		goto abortit;
 	}
+	/* 判断文件类型是不是目录文件 */
 	if ((ip->i_mode & IFMT) == IFDIR) {
 		/*
 		 * Avoid ".", "..", and aliases of "." for obvious reasons.
+		 * 出于明显的原因，请避免使用“.”、“..”和“.”的别名
 		 */
 		if ((fcnp->cn_namelen == 1 && fcnp->cn_nameptr[0] == '.') ||
 		    dp == ip || (fcnp->cn_flags | tcnp->cn_flags) & ISDOTDOT ||
@@ -846,7 +916,7 @@ abortit:
 			goto abortit;
 		}
 		ip->i_flag |= IN_RENAME;
-		oldparent = dp->i_number;
+		oldparent = dp->i_number;	/* 旧父目录对应的inode进行赋值操作 */
 		doingdirectory++;
 	}
 	vrele(fdvp);
@@ -854,6 +924,7 @@ abortit:
 	/*
 	 * When the target exists, both the directory
 	 * and target vnodes are returned locked.
+	 * 当目标存在时，目录和目标 vnode 都将返回并锁定
 	 */
 	dp = VTOI(tdvp);
 	xp = NULL;
@@ -1286,11 +1357,11 @@ static int
 ext2_mkdir(struct vop_mkdir_args *ap)
 {
 	struct m_ext2fs *fs;
-	struct vnode *dvp = ap->a_dvp;
+	struct vnode *dvp = ap->a_dvp;	/* 表示的应该是创建文件所在的目录对应的 vnode */
 	struct vattr *vap = ap->a_vap;
 	struct componentname *cnp = ap->a_cnp;
 	struct inode *ip, *dp;
-	struct vnode *tvp;
+	struct vnode *tvp;	/* target vnode */
 	struct dirtemplate dirtemplate, *dtp;
 	char *buf = NULL;
 	int error, dmode;
@@ -1299,23 +1370,29 @@ ext2_mkdir(struct vop_mkdir_args *ap)
 	if ((cnp->cn_flags & HASBUF) == 0)
 		panic("ext2_mkdir: no name");
 #endif
-	dp = VTOI(dvp);
+	dp = VTOI(dvp);	/* 文件所在目录对应的 inode */
+	/*
+		判断 dp 的链接数是否符合要求
+	*/
 	if ((nlink_t)dp->i_nlink >= EXT4_LINK_MAX &&
 	    !EXT2_HAS_RO_COMPAT_FEATURE(dp->i_e2fs, EXT2F_ROCOMPAT_DIR_NLINK)) {
 		error = EMLINK;
 		goto out;
 	}
+	/* dmode: directory mode? */
 	dmode = vap->va_mode & 0777;
 	dmode |= IFDIR;
 	/*
 	 * Must simulate part of ext2_makeinode here to acquire the inode,
 	 * but not have it entered in the parent directory. The entry is
 	 * made later after writing "." and ".." entries.
+	 * 必须在此处模拟 ext2_makeinode 的一部分以获取 inode，但不能将其输入父目录。
+	 * 条目在写入“.”和“..”项之后进行
 	 */
 	error = ext2_valloc(dvp, dmode, cnp->cn_cred, &tvp);
 	if (error)
 		goto out;
-	ip = VTOI(tvp);
+	ip = VTOI(tvp);	/* 目标文件对应的 inode */
 	fs = ip->i_e2fs;
 	ip->i_gid = dp->i_gid;
 #ifdef SUIDDIR
@@ -1342,7 +1419,7 @@ ext2_mkdir(struct vop_mkdir_args *ap)
 	ip->i_flag |= IN_ACCESS | IN_CHANGE | IN_UPDATE;
 	ip->i_mode = dmode;
 	tvp->v_type = VDIR;	/* Rest init'd in getnewvnode(). */
-	ip->i_nlink = 2;
+	ip->i_nlink = 2;	/* 一个是它本身，一个是.目录？ */
 	if (cnp->cn_flags & ISWHITEOUT)
 		ip->i_flags |= UF_OPAQUE;
 	error = ext2_update(tvp, 1);
@@ -1359,7 +1436,9 @@ ext2_mkdir(struct vop_mkdir_args *ap)
 	if (error)
 		goto bad;
 
-	/* Initialize directory with "." and ".." from static template. */
+	/* Initialize directory with "." and ".." from static template. 
+		从静态模板用“.”和“..”初始化目录
+	*/
 	if (EXT2_HAS_INCOMPAT_FEATURE(ip->i_e2fs,
 	    EXT2F_INCOMPAT_FTYPE))
 		dtp = &mastertemplate;
@@ -1415,7 +1494,9 @@ ext2_mkdir(struct vop_mkdir_args *ap)
 
 #endif /* UFS_ACL */
 
-	/* Directory set up, now install its entry in the parent directory. */
+	/* Directory set up, now install its entry in the parent directory. 
+		目录设置，现在将其条目安装在父目录中
+	*/
 	error = ext2_direnter(ip, dvp, cnp);
 	if (error) {
 		ext2_dec_nlink(dp);
@@ -1643,6 +1724,7 @@ ext2fifo_kqfilter(struct vop_kqfilter_args *ap)
 
 /*
  * Return POSIX pathconf information applicable to ext2 filesystems.
+ * 返回适用于ext2文件系统的POSIX pathconf信息
  */
 static int
 ext2_pathconf(struct vop_pathconf_args *ap)
@@ -1937,25 +2019,30 @@ static int
 ext2_makeinode(int mode, struct vnode *dvp, struct vnode **vpp,
     struct componentname *cnp)
 {
-	struct inode *ip, *pdir;
-	struct vnode *tvp;
+	struct inode *ip, *pdir;	/* present/parent directory inode ? */
+	struct vnode *tvp;	/* target vnode pointer */
 	int error;
 
-	pdir = VTOI(dvp);
+	pdir = VTOI(dvp);	/* 获取父目录对应的 inode？ */
 #ifdef INVARIANTS
 	if ((cnp->cn_flags & HASBUF) == 0)
 		panic("ext2_makeinode: no name");
 #endif
-	*vpp = NULL;
+	*vpp = NULL;	/* vpp初始化为空 */
 	if ((mode & IFMT) == 0)
-		mode |= IFREG;
-
+		mode |= IFREG;	/* 创建一个常规文件 */
+	/* 
+		组件名称中包含有认证信息，mode 是根据 vnode 属性计算出来的模式值。
+		dvp 表示的应该是所要当前目录所对应的 vnode(directory vnode)，新获取的 inode 对应到
+		tvp(target vnode pointer)
+	*/
 	error = ext2_valloc(dvp, mode, cnp->cn_cred, &tvp);
 	if (error) {
 		return (error);
 	}
-	ip = VTOI(tvp);
-	ip->i_gid = pdir->i_gid;
+	ip = VTOI(tvp);	/* target vnode 对应的 inode，应该就是 alloc 函数申请的 */
+	ip->i_gid = pdir->i_gid;	/* 貌似都是这种用法，利用父目录对应的 inode 给新的 inode gid 赋值 */
+	/* 后续对父目录 inode 的操作基本上就没了，主要还是对 target inode 操作 */
 #ifdef SUIDDIR
 	{
 		/*
@@ -1992,6 +2079,7 @@ ext2_makeinode(int mode, struct vnode *dvp, struct vnode **vpp,
 
 	/*
 	 * Make sure inode goes to disk before directory entry.
+	 * 确保inode在目录条目之前转到磁盘
 	 */
 	error = ext2_update(tvp, !DOINGASYNC(tvp));
 	if (error)
@@ -2005,7 +2093,7 @@ ext2_makeinode(int mode, struct vnode *dvp, struct vnode **vpp,
 			goto bad;
 	}
 #endif /* UFS_ACL */
-
+	/* 对当前的目录项对应的 vnode 进行操作 */
 	error = ext2_direnter(ip, dvp, cnp);
 	if (error)
 		goto bad;
@@ -2017,6 +2105,7 @@ bad:
 	/*
 	 * Write error occurred trying to update the inode
 	 * or the directory so must deallocate the inode.
+	 * 尝试更新 inode 或目录时发生写入错误，因此必须取消分配 inode
 	 */
 	ip->i_nlink = 0;
 	ip->i_flag |= IN_CHANGE;
@@ -2035,8 +2124,8 @@ ext2_read(struct vop_read_args *ap)
 	struct uio *uio;
 	struct m_ext2fs *fs;
 	struct buf *bp;
-	daddr_t lbn, nextlbn;
-	off_t bytesinfile;
+	daddr_t lbn, nextlbn;	/* logical block number */
+	off_t bytesinfile;	/* 在文件中的偏移量(以字节为单位) */
 	long size, xfersize, blkoffset;
 	int error, orig_resid, seqcount;
 	int ioflag;
@@ -2058,15 +2147,15 @@ ext2_read(struct vop_read_args *ap)
 	} else if (vp->v_type != VREG && vp->v_type != VDIR)
 		panic("%s: type %d", "ext2_read", vp->v_type);
 #endif
-	orig_resid = uio->uio_resid;
+	orig_resid = uio->uio_resid;	/* 剩余未处理的字节数 */
 	KASSERT(orig_resid >= 0, ("ext2_read: uio->uio_resid < 0"));
 	if (orig_resid == 0)
-		return (0);
+		return (0);	/* 处理完毕，返回0 */
 	KASSERT(uio->uio_offset >= 0, ("ext2_read: uio->uio_offset < 0"));
 	fs = ip->i_e2fs;
 	if (uio->uio_offset < ip->i_size &&
 	    uio->uio_offset >= fs->e2fs_maxfilesize)
-		return (EOVERFLOW);
+		return (EOVERFLOW);	/* 如果传输的数据量大于规定的最大文件size，返回错误码 */
 
 	for (error = 0, bp = NULL; uio->uio_resid > 0; bp = NULL) {
 		if ((bytesinfile = ip->i_size - uio->uio_offset) <= 0)
@@ -2205,7 +2294,11 @@ ext2_write(struct vop_write_args *ap)
 	/*
 	 * Maybe this should be above the vnode op call, but so long as
 	 * file servers have no limits, I don't think it matters.
+	 * 也许这应该在vnode op调用之上，但是只要文件服务器没有限制，我认为这无关紧要
 	 */
+	/*
+		文件大小限制判断
+	*/
 	if (vn_rlimit_fsize(vp, uio, uio->uio_td))
 		return (EFBIG);
 
@@ -2219,17 +2312,28 @@ ext2_write(struct vop_write_args *ap)
 		flags |= IO_SYNC;
 
 	for (error = 0; uio->uio_resid > 0;) {
-		lbn = lblkno(fs, uio->uio_offset);
-		blkoffset = blkoff(fs, uio->uio_offset);
-		xfersize = fs->e2fs_fsize - blkoffset;
+		lbn = lblkno(fs, uio->uio_offset);	/* 求出逻辑块号(offset / block_size)，可以理解为定位到要修改的块 */
+		blkoffset = blkoff(fs, uio->uio_offset);	/* 求出在数据块中的偏移 */
+		xfersize = fs->e2fs_fsize - blkoffset;	/* 整个数据块被分割后剩下的区域大小 */
+		/*
+			如果剩余需要处理的数据的字节数小于剩余块区域的大小，那就直接对剩下的块区域进行赋值，
+			也就是说明我们还需要处理的数据在最后一个块中就可存放完成，而不需要再重新申请数据块
+		*/
 		if (uio->uio_resid < xfersize)
 			xfersize = uio->uio_resid;
+		/*
+			i_size 表示的是文件以字节为单位的大小。这里需要考虑一种情况，就是文件占用的数据块中，最后一个数据块是没有
+			填满的，所以通过数据块计算的文件的大小是要大于文件的实际大小的。这里其实就相当于是对文件的大小进行了扩展
+		*/
 		if (uio->uio_offset + xfersize > ip->i_size)
 			vnode_pager_setsize(vp, uio->uio_offset + xfersize);
 
 		/*
 		 * We must perform a read-before-write if the transfer size
 		 * does not cover the entire buffer.
+		 * 如果传输大小不能覆盖整个缓冲区，则必须先读后写。缓冲区应该也是以页作为最小操作单元。如果我们的数据操作
+		 * 是在某个文件的中间，但是这个文件中的一些内容已经在这个页上存在，我们需要将其进行替换，可能就需要先把原有
+		 * 的数据读出来，把内容替换之后在重新写入磁盘对应的位置
 		 */
 		if (fs->e2fs_bsize > xfersize)
 			flags |= BA_CLRBUF;
@@ -2242,9 +2346,11 @@ ext2_write(struct vop_write_args *ap)
 
 		if ((ioflag & (IO_SYNC | IO_INVAL)) == (IO_SYNC | IO_INVAL))
 			bp->b_flags |= B_NOCACHE;
+
 		if (uio->uio_offset + xfersize > ip->i_size)
 			ip->i_size = uio->uio_offset + xfersize;
 		size = blksize(fs, ip, lbn) - bp->b_resid;
+
 		if (size < xfersize)
 			xfersize = size;
 
@@ -2256,11 +2362,16 @@ ext2_write(struct vop_write_args *ap)
 		 * garbage data from the pages instantiated for the buffer.
 		 * If we do not, a failed uiomove() during a write can leave
 		 * the prior contents of the pages exposed to a userland mmap.
+		 * 如果缓冲区还没有被填充，并且在尝试填充时遇到错误，那么我们必须从为缓冲区实例化的
+		 * 页面中清除所有垃圾数据。如果不这样做，则在写入期间失败的 uiomove 会将页面的先前
+		 * 内容暴露给userland mmap
 		 *
 		 * Note that we need only clear buffers with a transfer size
 		 * equal to the block size because buffers with a shorter
 		 * transfer size were cleared above by the call to ext2_balloc()
 		 * with the BA_CLRBUF flag set.
+		 * 请注意，我们只需要清除传输大小等于块大小的缓冲区，因为传输大小较短的缓冲区是通过
+		 * 调用 ext2_balloc 并设置 BA_CLRBUF 标志来清除的
 		 *
 		 * If the source region for uiomove identically mmaps the
 		 * buffer, uiomove() performed the NOP copy, and the buffer
@@ -2303,7 +2414,8 @@ ext2_write(struct vop_write_args *ap)
 		}
 		if (error || xfersize == 0)
 			break;
-	}
+	}	// end of for uio
+
 	/*
 	 * If we successfully wrote any data, and we are not the superuser
 	 * we clear the setuid and setgid bits as a precaution against

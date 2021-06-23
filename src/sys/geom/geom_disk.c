@@ -845,6 +845,15 @@ g_disk_ident_adjust(char *ident, size_t size)
 	strlcpy(ident, newid, size);
 }
 
+/* 
+	- disk结构体是动态分配并由内核维护的，也就是说我们不能自己分配disk结构，只能调用disk_alloc函数 
+	- 分配号disk结构之后并不意味着系统就可以使用该存储设备，还需要初始化该结构(也就是必须要定义必要字段)
+		并调用 disk_create 函数。其中，version参数的值必须总是设定为 DISK_VERSION。需要注意的是，一旦
+		create函数返回，此设备就“活”了，其各个例程就可以随时调用了。因此，我们只有在驱动程序完全就绪的时候
+		才应该调用 disk_create 函数
+	- 如果不再需要disk结构了，就要调用 disk_destory 函数释放它。当然，我们需要手动释放在 open 期间申请
+		的所有的资源，因此此时close函数将不会被调用
+*/
 struct disk *
 disk_alloc(void)
 {

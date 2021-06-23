@@ -63,6 +63,7 @@ tmpfs_fifo_close(struct vop_close_args *v)
 
 /*
  * vnode operations vector used for fifos stored in a tmpfs file system.
+ * 用于存储在tmpfs文件系统中的fifo的vnode操作向量
  */
 struct vop_vector tmpfs_fifoop_entries = {
 	.vop_default =			&fifo_specops,

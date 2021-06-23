@@ -70,6 +70,7 @@ __FBSDID("$FreeBSD: releng/12.0/sys/fs/pseudofs/pseudofs_vnops.c 341085 2018-11-
 
 /*
  * Returns the fileno, adjusted for target pid
+ * 返回 fileno，根据目标 pid 进行调整
  */
 static uint32_t
 pn_fileno(struct pfs_node *pn, pid_t pid)
@@ -84,6 +85,7 @@ pn_fileno(struct pfs_node *pn, pid_t pid)
 
 /*
  * Returns non-zero if given file is visible to given thread.
+ * 如果给定的文件对给定的线程可见，则返回非零
  */
 static int
 pfs_visible_proc(struct thread *td, struct pfs_node *pn, struct proc *proc)
@@ -105,6 +107,10 @@ pfs_visible_proc(struct thread *td, struct pfs_node *pn, struct proc *proc)
 	return (1);
 }
 
+/*
+	相比较于上述函数，该函数多了一个 pid_t 类型的参数，推测应该是判断是否存在某个特定 pid 的
+	线程是否存在，接着判断给定的文件对于该线程是否是可见的
+*/
 static int
 pfs_visible(struct thread *td, struct pfs_node *pn, pid_t pid,
     bool allproc_locked, struct proc **p)
@@ -139,6 +145,10 @@ static int
 pfs_access(struct vop_access_args *va)
 {
 	struct vnode *vn = va->a_vp;
+	/*
+		v_data 是 vnode 的私有数据，在这里表示的是 pfs_vdata 类型，也就是说不同的文件系统，该成员
+		表示的数据类型是不同的
+	*/
 	struct pfs_vdata *pvd = vn->v_data;
 	struct vattr vattr;
 	int error;
@@ -149,6 +159,7 @@ pfs_access(struct vop_access_args *va)
 	error = VOP_GETATTR(vn, &vattr, va->a_cred);
 	if (error)
 		PFS_RETURN (error);
+	/* vnode 访问权限检查 */
 	error = vaccess(vn->v_type, vattr.va_mode, vattr.va_uid,
 	    vattr.va_gid, va->a_accmode, va->a_cred, NULL);
 	PFS_RETURN (error);
@@ -191,7 +202,7 @@ pfs_close(struct vop_close_args *va)
 }
 
 /*
- * Get file attributes
+ * Get file attributes 获取文件属性
  */
 static int
 pfs_getattr(struct vop_getattr_args *va)
@@ -312,7 +323,7 @@ pfs_ioctl(struct vop_ioctl_args *va)
 }
 
 /*
- * Perform getextattr
+ * Perform getextattr 执行 getextattr
  */
 static int
 pfs_getextattr(struct vop_getextattr_args *va)
@@ -348,6 +359,8 @@ pfs_getextattr(struct vop_getextattr_args *va)
 
 /*
  * Convert a vnode to its component name
+ * 将vnode转换为其组件名称，其实就是把整个路径信息以 '/' 为分隔符进行拆分，
+ * 每一个部分应该就代表了一个 vnode
  */
 static int
 pfs_vptocnp(struct vop_vptocnp_args *ap)
@@ -698,6 +711,7 @@ ret:
 
 /*
  * Iterate through directory entries
+ * 遍历目录项
  */
 static int
 pfs_iterate(struct thread *td, struct proc *proc, struct pfs_node *pd,
@@ -937,7 +951,7 @@ pfs_readlink(struct vop_readlink_args *va)
 }
 
 /*
- * Reclaim a vnode
+ * Reclaim a vnode 回收vnode
  */
 static int
 pfs_reclaim(struct vop_reclaim_args *va)

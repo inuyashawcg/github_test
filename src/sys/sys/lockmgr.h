@@ -172,7 +172,7 @@ _lockmgr_args_rw(struct lock *lk, u_int flags, struct rwlock *ilk,
 #define	LK_DOWNGRADE	0x010000
 #define	LK_DRAIN	0x020000
 #define	LK_EXCLOTHER	0x040000
-#define	LK_EXCLUSIVE	0x080000
+#define	LK_EXCLUSIVE	0x080000	/* 专用的 */
 #define	LK_RELEASE	0x100000
 #define	LK_SHARED	0x200000
 #define	LK_UPGRADE	0x400000

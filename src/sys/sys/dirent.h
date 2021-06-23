@@ -57,6 +57,8 @@ typedef	__off_t		off_t;
  * contained in the entry.  These are followed by the name padded to an 8
  * byte boundary with null bytes.  All names are guaranteed null terminated.
  * The maximum length of a name in a directory is MAXNAMLEN.
+ * 一个目录项会在起始位置会有一个 dirent，里边会包含有 inode number，目录项的大小，目录项所包含的
+ * 名称的长度值，8字节对齐，未对齐部分填充null。所有名称都保证以null结尾。名字长度最大不超过255
  *
  * Explicit padding between the last member of the header (d_namlen) and
  * d_name avoids ABI padding at the end of dirent on LP64 architectures.
@@ -64,18 +66,18 @@ typedef	__off_t		off_t;
  */
 
 struct dirent {
-	ino_t      d_fileno;		/* file number of entry */
-	off_t      d_off;		/* directory offset of entry */
-	__uint16_t d_reclen;		/* length of this record */
-	__uint8_t  d_type;		/* file type, see below */
-	__uint8_t  d_pad0;
-	__uint16_t d_namlen;		/* length of string in d_name */
-	__uint16_t d_pad1;
+	ino_t      d_fileno;		/* file number of entry - entry的文件号*/
+	off_t      d_off;		/* directory offset of the next entry 下一个目录项的目录偏移 */
+	__uint16_t d_reclen;		/* length of this record 该目录项的长度 */
+	__uint8_t  d_type;		/* file type, see below 文件类型 */
+	__uint8_t  d_pad0;	/* 用于字节对齐的填充 */
+	__uint16_t d_namlen;		/* length of string in d_name 名字长度 */
+	__uint16_t d_pad1;	/* 字节对齐填充 */
 #if __BSD_VISIBLE
 #define	MAXNAMLEN	255
 	char	d_name[MAXNAMLEN + 1];	/* name must be no longer than this */
 #else
-	char	d_name[255 + 1];	/* name must be no longer than this */
+	char	d_name[255 + 1];	/* name must be no longer than this 文件名长度最多不能超过 256 bytes */
 #endif
 };
 
@@ -93,6 +95,7 @@ struct freebsd11_dirent {
 
 /*
  * File types
+ * 对应 struct dirent 中的 d_type 成员
  */
 #define	DT_UNKNOWN	 0
 #define	DT_FIFO		 1

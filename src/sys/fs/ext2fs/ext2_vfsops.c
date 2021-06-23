@@ -126,9 +126,13 @@ ext2_mount(struct mount *mp)
 	td = curthread;
 	opts = mp->mnt_optnew;
 
+	/*
+		判断 mp 更新后的操作是不是符合 ext2_opts 的限定范围
+	*/
 	if (vfs_filteropt(opts, ext2_opts))
 		return (EINVAL);
 
+	/* 判断文件系统路径长度是否符合要求 */
 	vfs_getopt(opts, "fspath", (void **)&path, NULL);
 	/* Double-check the length of path.. */
 	if (strlen(path) >= MAXMNTLEN)
@@ -142,35 +146,39 @@ ext2_mount(struct mount *mp)
 	/*
 	 * If updating, check whether changing from read-only to
 	 * read/write; if there is no device name, that's all we do.
+	 * 对照下面代码注释可以看到，这里是要判断当我们对文件系统的操作是不是真正的挂载，或者说
+	 * 仅仅是对文件系统的属性进行更新。如果是的话，执行该分支；如果不是的话，执行下面的分支
 	 */
 	if (mp->mnt_flag & MNT_UPDATE) {
 		ump = VFSTOEXT2(mp);
-		fs = ump->um_e2fs;
+		fs = ump->um_e2fs;	// 通过ext2_mount结构获取超级块，对文件系统属性的操作主要针对的就是超级块
 		error = 0;
+		// 如果是文件系统不是只读模式(为1应该表示只读)，并且更新的属性仍然保持只读，执行该分支代码
 		if (fs->e2fs_ronly == 0 &&
 		    vfs_flagopt(opts, "ro", NULL, 0)) {
-			error = VFS_SYNC(mp, MNT_WAIT);
+			error = VFS_SYNC(mp, MNT_WAIT);	// 对文件系统属性进行更新
 			if (error)
 				return (error);
-			flags = WRITECLOSE;
-			if (mp->mnt_flag & MNT_FORCE)
-				flags |= FORCECLOSE;
-			error = ext2_flushfiles(mp, flags, td);
+			flags = WRITECLOSE;	// 由于文件系统是只读的，所以flag要设置为对写操作关闭
+			if (mp->mnt_flag & MNT_FORCE)	// 如果mount的时候还具有 MNT_FORCE 属性
+				flags |= FORCECLOSE;	// flags 需要包含 FORCECLOSE 属性
+			error = ext2_flushfiles(mp, flags, td);	// 该函数主要涉及的是vnode操作，对移植影响不大
 			if (error == 0 && fs->e2fs_wasvalid &&
-			    ext2_cgupdate(ump, MNT_WAIT) == 0) {
+			    ext2_cgupdate(ump, MNT_WAIT) == 0) {	// MNT_WAIT: 同步等待I/O完成, group update？
 				fs->e2fs->e2fs_state |= E2FS_ISCLEAN;
-				ext2_sbupdate(ump, MNT_WAIT);
+				ext2_sbupdate(ump, MNT_WAIT);	// superblock update，奇海是否需要设置等待？
 			}
 			fs->e2fs_ronly = 1;
 			vfs_flagopt(opts, "ro", &mp->mnt_flag, MNT_RDONLY);
 			g_topology_lock();
-			g_access(ump->um_cp, 0, -1, 0);
+			g_access(ump->um_cp, 0, -1, 0);	// geom 层代码，所以 tptfs inode 要包含这个成员 
 			g_topology_unlock();
 		}
+		// 如果前面的操作没有错误，并且 mnt_flag 中包含有 MNT_RELOAD 属性，则重载文件系统数据
 		if (!error && (mp->mnt_flag & MNT_RELOAD))
 			error = ext2_reload(mp, td);
 		if (error)
-			return (error);
+			return (error);	// 如果重载出错，那么就直接返回
 		devvp = ump->um_devvp;
 		if (fs->e2fs_ronly && !vfs_flagopt(opts, "ro", NULL, 0)) {
 			if (ext2_check_sb_compat(fs->e2fs, devvp->v_rdev, 0))
@@ -184,7 +192,7 @@ ext2_mount(struct mount *mp)
 			error = VOP_ACCESS(devvp, VREAD | VWRITE,
 			    td->td_ucred, td);
 			if (error)
-				error = priv_check(td, PRIV_VFS_MOUNT_PERM);
+				error = priv_check(td, PRIV_VFS_MOUNT_PERM);	/* 线程特权属性检查 */
 			if (error) {
 				VOP_UNLOCK(devvp, 0);
 				return (error);
@@ -219,11 +227,12 @@ ext2_mount(struct mount *mp)
 			/* Process export requests in vfs_mount.c. */
 			return (error);
 		}
-	}
+	}	// end if MNT_UPDATE
 
 	/*
 	 * Not an update, or updating the name: look up the name
 	 * and verify that it refers to a sensible disk device.
+	 * 不是更新，也不是更新名称：查找名称并验证它是否引用了可感知的磁盘设备
 	 */
 	if (fspec == NULL)
 		return (EINVAL);
@@ -241,6 +250,7 @@ ext2_mount(struct mount *mp)
 	/*
 	 * If mount by non-root, then verify that user has necessary
 	 * permissions on the device.
+	 * 判断用户是不是非root模式挂载，如果是的话，用户将拥有关于 device 的必要的权限
 	 *
 	 * XXXRW: VOP_ACCESS() enough?
 	 */
@@ -255,6 +265,7 @@ ext2_mount(struct mount *mp)
 		return (error);
 	}
 
+	/* 如果不是 mount update 的场景 */
 	if ((mp->mnt_flag & MNT_UPDATE) == 0) {
 		error = ext2_mountfs(devvp, mp);
 	} else {
@@ -273,7 +284,7 @@ ext2_mount(struct mount *mp)
 
 	/*
 	 * Note that this strncpy() is ok because of a check at the start
-	 * of ext2_mount().
+	 * of ext2_mount(). 最后进行挂载路径检查
 	 */
 	strncpy(fs->e2fs_fsmnt, path, MAXMNTLEN);
 	fs->e2fs_fsmnt[MAXMNTLEN - 1] = '\0';
@@ -281,17 +292,27 @@ ext2_mount(struct mount *mp)
 	return (0);
 }
 
+/*
+	compatibility: 兼容性，该函数应该是检查超级块的兼容性，其实就是检查文件系统的属性；
+	主要就是对比 superblock 中的一些字段。所以在奇海操作系统设计中，这些字段应该是要被保留的
+*/
 static int
 ext2_check_sb_compat(struct ext2fs *es, struct cdev *dev, int ronly)
 {
 	uint32_t i, mask;
 
+	/* 判断魔数 */
 	if (es->e2fs_magic != E2FS_MAGIC) {
 		printf("ext2fs: %s: wrong magic number %#x (expected %#x)\n",
 		    devtoname(dev), es->e2fs_magic, E2FS_MAGIC);
 		return (1);
 	}
+	/* 判断文件的修订级别是否符合要求 */
 	if (es->e2fs_rev > E2FS_REV0) {
+		/* 
+			判断文件系统属性的兼容性；两个代码分支都包含有一个for循环，其实就是遍历一些保存ext2文件系统
+			所支持的静态数组，判断当前属性是否页包含在内。如果没有的话，应该是要返回错误
+		*/
 		mask = es->e2fs_features_incompat & ~(EXT2F_INCOMPAT_SUPP);
 		if (mask) {
 			printf("WARNING: mount of %s denied due to "
@@ -320,6 +341,9 @@ ext2_check_sb_compat(struct ext2fs *es, struct cdev *dev, int ronly)
 	return (0);
 }
 
+/*
+	计算块组的位置，奇海操作系统中删除了该特性，所以函数直接移除
+*/
 static e4fs_daddr_t
 cg_location(struct m_ext2fs *fs, int number)
 {
@@ -337,7 +361,7 @@ cg_location(struct m_ext2fs *fs, int number)
 		return (logical_sb + number + 1);
 
 	if (EXT2_HAS_INCOMPAT_FEATURE(fs, EXT2F_INCOMPAT_64BIT))
-		descpb = fs->e2fs_bsize / sizeof(struct ext2_gd);
+		descpb = fs->e2fs_bsize / sizeof(struct ext2_gd);	/* 一个block中包含多少个组描述符 */
 	else
 		descpb = fs->e2fs_bsize / E2FS_REV0_GD_SIZE;
 
@@ -353,6 +377,7 @@ cg_location(struct m_ext2fs *fs, int number)
 /*
  * This computes the fields of the m_ext2fs structure from the
  * data in the ext2fs structure read in.
+ * 对从磁盘中读取的数据进行计算，然后更新到内存对应的结构体当中
  */
 static int
 compute_sb_data(struct vnode *devvp, struct ext2fs *es,
@@ -508,14 +533,16 @@ compute_sb_data(struct vnode *devvp, struct ext2fs *es,
  * Reload all incore data for a filesystem (used after running fsck on
  * the root filesystem and finding things to fix). The filesystem must
  * be mounted read-only.
+ * 重新加载文件系统的所有堆内数据（在根文件系统上运行fsck并找到要修复的内容后使用）。
+ * 文件系统必须以只读方式装入。
  *
  * Things to do to update the mount:
- *	1) invalidate all cached meta-data.
- *	2) re-read superblock from disk.
- *	3) invalidate all cluster summary information.
- *	4) invalidate all inactive vnodes.
- *	5) invalidate all cached file data.
- *	6) re-read inode data for all active vnodes.
+ *	1) invalidate all cached meta-data. 使所有缓存的元数据无效
+ *	2) re-read superblock from disk. 从磁盘上重新读取超级块
+ *	3) invalidate all cluster summary information. 使所有群集摘要信息无效
+ *	4) invalidate all inactive vnodes. 使所有不活动的vnode无效
+ *	5) invalidate all cached file data. 使所有缓存的文件数据无效
+ *	6) re-read inode data for all active vnodes. 重新读取所有活动vnode的inode数据
  * XXX we are missing some steps, in particular # 3, this has to be reviewed.
  */
 static int
@@ -530,13 +557,18 @@ ext2_reload(struct mount *mp, struct thread *td)
 	int error, i;
 	int32_t *lp;
 
+	/* 如果不包含(还是包含？感觉应该是不包含)只读挂载属性，则返回无效 */
 	if ((mp->mnt_flag & MNT_RDONLY) == 0)
 		return (EINVAL);
 	/*
 	 * Step 1: invalidate all cached meta-data.
+	 * 挂载点所对应的vnode
 	 */
 	devvp = VFSTOEXT2(mp)->um_devvp;
 	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
+	/*
+		vinvalbuf：vnode invalid buffer，将 vnode 对应的 bufobj 中关联的 buffer 失效
+	*/
 	if (vinvalbuf(devvp, 0, 0, 0) != 0)
 		panic("ext2_reload: dirty1");
 	VOP_UNLOCK(devvp, 0);
@@ -544,6 +576,9 @@ ext2_reload(struct mount *mp, struct thread *td)
 	/*
 	 * Step 2: re-read superblock from disk.
 	 * constants have been adjusted for ext2
+	 * SBLOCK = 2，这里猜测应该表示的是超级块在磁盘中的块号；SBSIZE = 1024，表示应该是超级块的大小，
+	 * 奇海操作系统应该设置为4096(可能还需要填充字节)
+	 * devvp 表示的应该是挂载点的目录对应的 vnode
 	 */
 	if ((error = bread(devvp, SBLOCK, SBSIZE, NOCRED, &bp)) != 0)
 		return (error);
@@ -567,6 +602,7 @@ ext2_reload(struct mount *mp, struct thread *td)
 
 	/*
 	 * Step 3: invalidate all cluster summary information.
+	 * 这一步涉及到的是块组的操作，奇海系统中可以省略掉该步骤
 	 */
 	if (fs->e2fs_contigsumsize > 0) {
 		lp = fs->e2fs_maxcluster;
@@ -583,15 +619,21 @@ loop:
 		/*
 		 * Step 4: invalidate all cached file data.
 		 */
-		if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK, td)) {
-			MNT_VNODE_FOREACH_ALL_ABORT(mp, mvp);
+		if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK, td)) {	/* 从空闲队列中获取一个 vnode */
+			/*
+				如果遍历队列的所有元素，发现没有可用的，那就跳转到loop，继续搜索
+			*/
+			MNT_VNODE_FOREACH_ALL_ABORT(mp, mvp);	
 			goto loop;
 		}
+		/* 清除掉vnode所关联的所有缓存数据 */
 		if (vinvalbuf(vp, 0, 0, 0))
 			panic("ext2_reload: dirty2");
 
 		/*
 		 * Step 5: re-read inode data for all active vnodes.
+		 * ino_to_fsba 通过 i_number 得到 inode 本身所在的数据块的块号，这里获取的应该是逻辑块号；
+		 * 再通过 fsbtodb 宏将逻辑块号转换成磁盘块号 
 		 */
 		ip = VTOI(vp);
 		error = bread(devvp, fsbtodb(fs, ino_to_fsba(fs, ip->i_number)),
@@ -602,6 +644,7 @@ loop:
 			MNT_VNODE_FOREACH_ALL_ABORT(mp, mvp);
 			return (error);
 		}
+		/* 用 ext2 磁盘上的 inode 数据实例化一个 inode */
 		ext2_ei2i((struct ext2fs_dinode *)((char *)bp->b_data +
 		    EXT2_INODE_SIZE(fs) * ino_to_fsbo(fs, ip->i_number)), ip);
 		brelse(bp);
@@ -622,7 +665,7 @@ ext2_mountfs(struct vnode *devvp, struct mount *mp)
 	struct m_ext2fs *fs;
 	struct ext2fs *es;
 	struct cdev *dev = devvp->v_rdev;
-	struct g_consumer *cp;
+	struct g_consumer *cp;	/* 消费者 */
 	struct bufobj *bo;
 	struct csum *sump;
 	int error;
@@ -652,17 +695,26 @@ ext2_mountfs(struct vnode *devvp, struct mount *mp)
 
 	bo = &devvp->v_bufobj;
 	bo->bo_private = cp;
+	/*
+		这里要特别关注，注册的 buffer operations 是 geom 层代码，也就是说我们挂载的过程中涉及到的
+		buffer 操作都是调用 geom 层提供的相关的代码。从这部分代码逻辑来看，挂载的作用非常类似初始化，
+		会填充一些重要的数据结构
+	*/
 	bo->bo_ops = g_vfs_bufops;
 	if (devvp->v_rdev->si_iosize_max != 0)
-		mp->mnt_iosize_max = devvp->v_rdev->si_iosize_max;
-	if (mp->mnt_iosize_max > MAXPHYS)
+		mp->mnt_iosize_max = devvp->v_rdev->si_iosize_max;	/* 设置集群io所能支持的最大的size */
+	if (mp->mnt_iosize_max > MAXPHYS)	/* 如果大于最大的物理IO所支持的范围，则要重新定义 */
 		mp->mnt_iosize_max = MAXPHYS;
 
 	bp = NULL;
 	ump = NULL;
+	/* 这里才是真正读取超级块的内容，前面的只是去分析缓存中是否有超级块对应的页的存在 */
 	if ((error = bread(devvp, SBLOCK, SBSIZE, NOCRED, &bp)) != 0)
 		goto out;
-	es = (struct ext2fs *)bp->b_data;
+	es = (struct ext2fs *)bp->b_data;	/* 此时 b_data 中包含的数据是超级块 */
+	/*
+		检查超级块的属性是不是只读的，如果是，那这个参数是无效的
+	*/
 	if (ext2_check_sb_compat(es, dev, ronly) != 0) {
 		error = EINVAL;		/* XXX needs translation */
 		goto out;
@@ -685,14 +737,16 @@ ext2_mountfs(struct vnode *devvp, struct mount *mp)
 	 * I don't know whether this is the right strategy. Note that
 	 * we dynamically allocate both an m_ext2fs and an ext2fs
 	 * while Linux keeps the super block in a locked buffer.
+	 * 我不知道这是不是正确的策略。请注意，我们动态地分配了一个 m_ext2fs 和一个 ext2fs，
+	 * 而 Linux 将超级块保存在一个锁定的缓冲区中
 	 */
 	ump->um_e2fs = malloc(sizeof(struct m_ext2fs),
 	    M_EXT2MNT, M_WAITOK | M_ZERO);
 	ump->um_e2fs->e2fs = malloc(sizeof(struct ext2fs),
 	    M_EXT2MNT, M_WAITOK);
-	mtx_init(EXT2_MTX(ump), "EXT2FS", "EXT2FS Lock", MTX_DEF);
-	bcopy(es, ump->um_e2fs->e2fs, (u_int)sizeof(struct ext2fs));
-	if ((error = compute_sb_data(devvp, ump->um_e2fs->e2fs, ump->um_e2fs)))
+	mtx_init(EXT2_MTX(ump), "EXT2FS", "EXT2FS Lock", MTX_DEF);	/* 初始化 ext2 文件系统锁 */
+	bcopy(es, ump->um_e2fs->e2fs, (u_int)sizeof(struct ext2fs));	/* 将从磁盘读取到的超级块数据进行拷贝 */
+	if ((error = compute_sb_data(devvp, ump->um_e2fs->e2fs, ump->um_e2fs)))	/* 猜测是计算校验和 */
 		goto out;
 
 	/*
@@ -700,6 +754,8 @@ ext2_mountfs(struct vnode *devvp, struct mount *mp)
 	 * array.  In FFS this is done by newfs; however, the superblock
 	 * in ext2fs doesn't have these variables, so we can calculate
 	 * them here.
+	 * 计算群集摘要数组的最大连续块和大小。在FFS中，这是由 newfs 完成的；但是，ext2fs 中的
+	 * 超级块没有这些变量，所以我们可以在这里计算它们
 	 */
 	e2fs_maxcontig = MAX(1, MAXPHYS / ump->um_e2fs->e2fs_bsize);
 	ump->um_e2fs->e2fs_contigsumsize = MIN(e2fs_maxcontig, EXT2_MAXCONTIG);
@@ -726,6 +782,7 @@ ext2_mountfs(struct vnode *devvp, struct mount *mp)
 	/*
 	 * If the fs is not mounted read-only, make sure the super block is
 	 * always written back on a sync().
+	 * 如果 fs 不是以只读方式装载的，请确保超级块总是通过 sync 写回
 	 */
 	fs->e2fs_wasvalid = fs->e2fs->e2fs_state & E2FS_ISCLEAN ? 1 : 0;
 	if (ronly == 0) {
@@ -753,9 +810,10 @@ ext2_mountfs(struct vnode *devvp, struct mount *mp)
 	ump->um_bptrtodb = fs->e2fs->e2fs_log_bsize + 1;
 	ump->um_seqinc = EXT2_FRAGS_PER_BLOCK(fs);
 	if (ronly == 0)
-		ext2_sbupdate(ump, MNT_WAIT);
+		ext2_sbupdate(ump, MNT_WAIT);	/* 通过ump结构体更新磁盘超级块数据 */
 	/*
 	 * Initialize filesystem stat information in mount struct.
+	 * 在struct mount 上初始化文件系统的一些属性信息
 	 */
 	MNT_ILOCK(mp);
 	mp->mnt_kern_flag |= MNTK_LOOKUP_SHARED | MNTK_EXTENDED_SHARED |
@@ -804,6 +862,17 @@ ext2_unmount(struct mount *mp, int mntflags)
 	ump = VFSTOEXT2(mp);
 	fs = ump->um_e2fs;
 	ronly = fs->e2fs_ronly;
+	/*
+		个人分析：ext2_cgupdate 应该就是对组描述符块进行数据更新。它应该也分几种更新方式，比如 MNT_WAIT
+		表示的就是同步等待方式。什么意思呢，猜测是把需要更新的数据通过 bwrite 等方式写入到磁盘中(该函数调用
+		了bwrite 和 bawrite)，这个过程是需要消耗时间的，所以肯定会牵涉到等待，要么就采用异步的方式，发送完
+		请求之后，剩下的事情我就不管了，继续执行，等结果返回之后再做相应的操作。
+		执行完之后，系统可能就认为文件系统已经把要做的事情做完了，然后设置文件系统 superblock(超级块保留着
+		文件系统的主要信息，所以操作系统对文件系统的操作可以理解为就是对超级块的操作)中的表示某个属性的成员，
+		更新完之后再继续执行其他操作
+		类比其他模块，机制应该都是类似的，因为系统不管对哪个模块进行操作，都会有时间上的损失，这样就肯定会涉及
+		到等待机制
+	*/
 	if (ronly == 0 && ext2_cgupdate(ump, MNT_WAIT) == 0) {
 		if (fs->e2fs_wasvalid)
 			fs->e2fs->e2fs_state |= E2FS_ISCLEAN;
@@ -833,6 +902,8 @@ ext2_unmount(struct mount *mp, int mntflags)
 
 /*
  * Flush out all the files in a filesystem.
+ * Flush out: 清除、冲洗，个人理解应该是文件系统中所有文件的属性(flag)进行刷新
+ * 单独用一个线程来做？看实际使用情况，应该是利用当前线程
  */
 static int
 ext2_flushfiles(struct mount *mp, int flags, struct thread *td)
@@ -1130,6 +1201,9 @@ ext2_fhtovp(struct mount *mp, struct fid *fhp, int flags, struct vnode **vpp)
 
 /*
  * Write a superblock and associated information back to disk.
+ * ext2fs 中磁盘和内存中的 superblock 结构体中的数据是不一样的，所以这里才会同时出现两个结构体。
+ * 作用其实就是将内存中的超级块结构体数据赋值到磁盘超级块。因为奇海操作系统内存和磁盘的数据是一致的，
+ * 所以这里不需要进行任何赋值操作
  */
 static int
 ext2_sbupdate(struct ext2mount *mp, int waitfor)
@@ -1142,6 +1216,10 @@ ext2_sbupdate(struct ext2mount *mp, int waitfor)
 	es->e2fs_bcount = fs->e2fs_bcount & 0xffffffff;
 	es->e2fs_rbcount = fs->e2fs_rbcount & 0xffffffff;
 	es->e2fs_fbcount = fs->e2fs_fbcount & 0xffffffff;
+	/*
+		如果文件系统不支持64位，那么要将数据右移32位。因为奇海操作系统只考虑64位的情况，所以该操作
+		也是要省略的
+	*/ 
 	if (EXT2_HAS_INCOMPAT_FEATURE(fs, EXT2F_INCOMPAT_64BIT)) {
 		es->e4fs_bcount_hi = fs->e2fs_bcount >> 32;
 		es->e4fs_rbcount_hi = fs->e2fs_rbcount >> 32;
@@ -1162,12 +1240,21 @@ ext2_sbupdate(struct ext2mount *mp, int waitfor)
 	 * The buffers for group descriptors, inode bitmaps and block bitmaps
 	 * are not busy at this point and are (hopefully) written by the
 	 * usual sync mechanism. No need to write them here.
+	 * 用于组描述符、inode位图和块位图的缓冲区此时并不繁忙，并且（希望）由通常的同步机制编写，
+	 * 不用在这里写
 	 */
 	return (error);
 }
+
+/*  
+	group update? 从代码实现上来看，该函数就是对 group 相关数据进行操作。在奇海系统中，我们不再
+	保留与 group 相关的数据，所以这个函数可以忽略掉。mount 过程中涉及到该函数的判断也要做相应修改。
+	其次，在 unmount 函数中也会用到该函数
+*/
 int
 ext2_cgupdate(struct ext2mount *mp, int waitfor)
 {
+	/* fs 表示的是 in-memory superblock */
 	struct m_ext2fs *fs = mp->um_e2fs;
 	struct buf *bp;
 	int i, j, g_count = 0, error = 0, allerror = 0;
@@ -1179,6 +1266,7 @@ ext2_cgupdate(struct ext2mount *mp, int waitfor)
 	    EXT2_HAS_RO_COMPAT_FEATURE(fs, EXT2F_ROCOMPAT_METADATA_CKSUM))
 		ext2_gd_csum_set(fs);
 
+	/* e2fs_gdbcount 表示ext2文件系统组描述符的数量 */
 	for (i = 0; i < fs->e2fs_gdbcount; i++) {
 		bp = getblk(mp->um_devvp, fsbtodb(fs,
 		    cg_location(fs, i)),

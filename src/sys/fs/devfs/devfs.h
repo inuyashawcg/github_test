@@ -88,13 +88,13 @@ struct devfs_rule {
 	int	dr_icond;
 #define	DRC_DSWFLAGS	0x001
 #define	DRC_PATHPTRN	0x002
-	int	dr_dswflags;			/* cdevsw flags to match. 要匹配的cdevsw标志 */
+	int	dr_dswflags;			/* cdevsw flags to match. 要匹配的 cdevsw 标志 */
 #define	DEVFS_MAXPTRNLEN	200
 	char	dr_pathptrn[DEVFS_MAXPTRNLEN];	/* Pattern to match path. 匹配路径的模式 */
 
 	/*
 	 * Things to change.  dr_iacts determines which of the other
-	 * variables we should process. 需要改变的事情。dr_iacts决定了我们应该处理哪些其他变量。
+	 * variables we should process. 需要改变的事情。dr_iacts 决定了我们应该处理哪些其他变量。
 	 */
 	int	dr_iacts;
 #define	DRA_BACTS	0x001
@@ -138,7 +138,9 @@ TAILQ_HEAD(devfs_dlist_head, devfs_dirent);
 
 /* 
 	dirent: directory entry? FreeBSD文件系统好像是将文件和目录进行了分类，单独处理。
-	感觉还是因为每个文件系统对于文件的管理方式有差异
+	感觉还是因为每个文件系统对于文件的管理方式有差异。这里其实就是基类和派生类的问题， dirent
+	可以当做是所有文件系统中的目录项的一个基类，不同的文件系统对目录的特殊化管理就可以在此基础上
+	进行派生
 */ 
 struct devfs_dirent {
 	struct cdev_priv	*de_cdp;
@@ -169,14 +171,19 @@ struct devfs_dirent {
 	uid_t			de_uid;
 	gid_t			de_gid;
 	struct label		*de_label;	// 好像表示的是存储的格式
-	struct timespec 	de_atime;
+	struct timespec 	de_atime;	// 应该表示的是文件创建、修改的时间
 	struct timespec 	de_mtime;
 	struct timespec 	de_ctime;
 	struct vnode 		*de_vnode;	// 对应的vnode
 	char 			*de_symlink;	// 符号链接
 };
 
-// devfs 挂载点配置信息
+/*
+	devfs 挂载点配置信息
+	这里的设计思路跟上述类似，里边也是包含了一个 mount 结构体指针。为什么要这么来设计呢，应该就是借鉴
+	C++ 中的类继承机制。不同的文件系统挂载点所包含的信息也是不同的，所以 Qihai 对 mount 进行封装时，
+	还是以 mount 作为基类，不同的文件系统的挂载点对其进行派生 
+*/ 
 struct devfs_mount {
 	u_int			dm_idx;	// mount index
 	struct mount		*dm_mount;	// 对应的mount结构体

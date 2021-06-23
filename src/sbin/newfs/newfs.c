@@ -85,7 +85,7 @@ __FBSDID("$FreeBSD: releng/12.0/sbin/newfs/newfs.c 335597 2018-06-24 05:40:42Z e
 
 int	Eflag;			/* Erase previous disk contents */
 int	Lflag;			/* add a volume label */
-int	Nflag;			/* run without writing file system */
+int	Nflag;			/* run without writing file system 在不写入文件系统的情况下运行 */
 int	Oflag = 2;		/* file system format (1 => UFS1, 2 => UFS2) */
 int	Rflag;			/* regression test */
 int	Uflag;			/* enable soft updates for file system */
@@ -95,6 +95,11 @@ int	Jflag;			/* enable gjournal for file system */
 int	lflag;			/* enable multilabel for file system */
 int	nflag;			/* do not create .snap directory */
 int	tflag;			/* enable TRIM */
+/*
+	从代码逻辑可以看出，fssize 是通过解析 newfs 指令中的参数 -s 获取到的。查阅 newfs 
+	用户手册可以看到，它表示的是文件系统以扇区为单位的大小。所以 fssize 表示的是文件系统
+	总的扇区数
+*/
 intmax_t fssize;		/* file system size */
 off_t	mediasize;		/* device size */
 int	sectorsize;		/* bytes/sector */

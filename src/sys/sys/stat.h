@@ -157,16 +157,17 @@ struct freebsd11_stat {
 #define	__STAT_TIME_T_EXT	1
 #endif
 
+/* 主要是用来表示文件的基本属性信息 */
 struct stat {
-	dev_t     st_dev;		/* inode's device */
-	ino_t	  st_ino;		/* inode's number */
-	nlink_t	  st_nlink;		/* number of hard links */
-	mode_t	  st_mode;		/* inode protection mode */
+	dev_t     st_dev;		/* inode's device 索引节点对应的设备 */
+	ino_t	  st_ino;		/* inode's number 索引节点号 */
+	nlink_t	  st_nlink;		/* number of hard links 硬链接数 */
+	mode_t	  st_mode;		/* inode protection mode 文件访问权限 */
 	__int16_t st_padding0;
 	uid_t	  st_uid;		/* user ID of the file's owner */
 	gid_t	  st_gid;		/* group ID of the file's group */
-	__int32_t st_padding1;
-	dev_t     st_rdev;		/* device type */
+	__int32_t st_padding1;	/* 填充数据位 */
+	dev_t     st_rdev;		/* device type 设备类型 */
 #ifdef	__STAT_TIME_T_EXT
 	__int32_t st_atim_ext;
 #endif
@@ -182,11 +183,11 @@ struct stat {
 #ifdef	__STAT_TIME_T_EXT
 	__int32_t st_btim_ext;
 #endif
-	struct	timespec st_birthtim;	/* time of file creation */
-	off_t	  st_size;		/* file size, in bytes */
-	blkcnt_t st_blocks;		/* blocks allocated for file */
-	blksize_t st_blksize;		/* optimal blocksize for I/O */
-	fflags_t  st_flags;		/* user defined flags for file */
+	struct	timespec st_birthtim;	/* time of file creation 文件创建的时间 */
+	off_t	  st_size;		/* file size, in bytes 以字节为单位的文件大小 */
+	blkcnt_t st_blocks;		/* blocks allocated for file 文件申请的数据块 */
+	blksize_t st_blksize;		/* optimal blocksize for I/O 最佳的 I/O 块大小 */
+	fflags_t  st_flags;		/* user defined flags for file 文件的用户定义标志 */
 	__uint64_t st_gen;		/* file generation number */
 	__uint64_t st_spare[10];
 };
@@ -306,7 +307,7 @@ struct nstat {
  */
 #define	UF_SETTABLE	0x0000ffff	/* mask of owner changeable flags */
 #define	UF_NODUMP	0x00000001	/* do not dump file */
-#define	UF_IMMUTABLE	0x00000002	/* file may not be changed */
+#define	UF_IMMUTABLE	0x00000002	/* file may not be changed 文件不能被更改*/
 #define	UF_APPEND	0x00000004	/* writes to file may only append */
 #define	UF_OPAQUE	0x00000008	/* directory is opaque wrt. union */
 #define	UF_NOUNLINK	0x00000010	/* file may not be removed or renamed */
@@ -333,7 +334,7 @@ struct nstat {
  */
 #define	SF_SETTABLE	0xffff0000	/* mask of superuser changeable flags */
 #define	SF_ARCHIVED	0x00010000	/* file is archived */
-#define	SF_IMMUTABLE	0x00020000	/* file may not be changed */
+#define	SF_IMMUTABLE	0x00020000	/* file may not be changed 文件不能更改 */
 #define	SF_APPEND	0x00040000	/* writes to file may only append */
 #define	SF_NOUNLINK	0x00100000	/* file may not be removed or renamed */
 #define	SF_SNAPSHOT	0x00200000	/* snapshot inode */

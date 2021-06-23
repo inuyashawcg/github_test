@@ -61,6 +61,8 @@ LIST_HEAD(workhead, worklist);
  * are stored once in a global variable. If other subsystems wanted
  * to use these hooks, a pointer to a set of bio_ops could be added
  * to each buffer.
+ * 它们当前仅由软依赖代码使用，因此在全局变量中存储一次。如果其他子系统想要使用这些钩子，
+ * 可以向每个缓冲区添加一个指向一组 bio_ops 的指针。
  */
 extern struct bio_ops {
 	void	(*io_start)(struct buf *);
@@ -74,75 +76,97 @@ struct vm_page;
 
 typedef uint32_t b_xflags_t;
 
-/*
+/* 
  * The buffer header describes an I/O operation in the kernel.
+ * 缓冲区头描述一个内核中的 I/O 操作
  *
  * NOTES:
  *	b_bufsize, b_bcount.  b_bufsize is the allocation size of the
  *	buffer, either DEV_BSIZE or PAGE_SIZE aligned.  b_bcount is the
  *	originally requested buffer size and can serve as a bounds check
  *	against EOF.  For most, but not all uses, b_bcount == b_bufsize.
- *
+ * 
+ * b_bufsize 表示的是申请的 buffer 的大小，DEV_BSIZE 或者 PAGE_SIZE 对齐；
+ * b_bcount 表示的是最初请求的 buffer 的大小，可以用于针对 EOF 的边界检查。
+ * 大多数情况下，但不是所有，两者是相等的
+ * 
+ * 
  *	b_dirtyoff, b_dirtyend.  Buffers support piecemeal, unaligned
  *	ranges of dirty data that need to be written to backing store.
  *	The range is typically clipped at b_bcount ( not b_bufsize ).
- *
+ *  缓冲区支持需要写入后备存储器的零碎、未对齐的脏数据范围。范围通常在 b_bcount
+ * （而不是b\u bufsize）处剪裁
+ *  
+ * 
  *	b_resid.  Number of bytes remaining in I/O.  After an I/O operation
  *	completes, b_resid is usually 0 indicating 100% success.
- *
+ *	I/O中剩余的字节数。I/O操作完成后，b_resid 通常为0，表示100%成功
+ *  
  *	All fields are protected by the buffer lock except those marked:
  *		V - Protected by owning bufobj lock
  *		Q - Protected by the buf queue lock
  *		D - Protected by an dependency implementation specific lock
  */
+/*
+	bufobj 可以认为是 buf 的一个基类，其中包含了一些锁、buffer operations 等成员；
+	内核实现了 buffer cache 的 KVM 抽象，允许它将可能完全不同的的 vm_page 合并到连续的 KVM 中，
+	以供(主要是文件系统)设备和设备I/O使用。这个抽象所支持的 block size 从 DEV_BSIZE(通常是512字节)
+	延伸到几个页或者更多。它还支持相对原始的字节粒度有效范围和当前硬编码供NFS使用的脏范围。实现VM缓冲区抽象
+	的代码主要集中在 vfs_bio.c 文件当中
+	处理缓冲区指针（struct buf）时要记住的最重要的一点是，底层页面直接从缓冲区缓存映射。在该方案中不会发生
+	数据复制，尽管某些文件系统（如UFS）在处理文件片段时确实需要进行少量复制；第二，由于底层页映射的缘故，b_data
+	(表示的应该是真正的数据)一般是 page aligned，而不是 block aligned。当我们有 VM buffer 表示一些 b_offset
+	和 b_size 时，buffer 真正开始的地方其实是 b_data + (b_offset & PAGE_MASK) 而不仅仅是 b_data。最后，
+	VM system 的核心 buffer cache 支持 DEV_BSIZE 页中的有效位和脏位(m->valid,m->dirty)
+*/
 struct buf {
-	struct bufobj	*b_bufobj;
-	long		b_bcount;
+	struct bufobj	*b_bufobj;	
+	long		b_bcount;	/* 请求的 buffer 区域的大小 */
 	void		*b_caller1;
 	caddr_t		b_data;
 	int		b_error;
-	uint16_t	b_iocmd;	/* BIO_* bio_cmd from bio.h */
+	uint16_t	b_iocmd;	/* BIO_* bio_cmd from bio.h 指定bio的用途，读写或者获取属性等 */
 	uint16_t	b_ioflags;	/* BIO_* bio_flags from bio.h */
-	off_t		b_iooffset;
-	long		b_resid;
+	off_t		b_iooffset;	/* 数据偏移量？ */
+	long		b_resid;	/* 剩余未处理的数据量 */
 	void	(*b_iodone)(struct buf *);
 	void	(*b_ckhashcalc)(struct buf *);
 	uint64_t	b_ckhash;	/* B_CKHASH requested check-hash */
-	daddr_t b_blkno;		/* Underlying physical block number. */
-	off_t	b_offset;		/* Offset into file. */
+	daddr_t b_blkno;		/* Underlying physical block number. 底层物理块号 */
+	off_t	b_offset;		/* Offset into file. 文件中的偏移量 */
 	TAILQ_ENTRY(buf) b_bobufs;	/* (V) Buffer's associated vnode. */
 	uint32_t	b_vflags;	/* (V) BV_* flags */
-	uint8_t		b_qindex;	/* (Q) buffer queue index */
-	uint8_t		b_domain;	/* (Q) buf domain this resides in */
-	uint16_t	b_subqueue;	/* (Q) per-cpu q if any */
+	uint8_t		b_qindex;	/* (Q) buffer queue index 缓存队列索引 */
+	uint8_t		b_domain;	/* (Q) buf domain this resides in 驻留的buf域 */
+	uint16_t	b_subqueue;	/* (Q) per-cpu q if any 多cpu */
 	uint32_t	b_flags;	/* B_* flags. */
-	b_xflags_t b_xflags;		/* extra flags */
-	struct lock b_lock;		/* Buffer lock */
-	long	b_bufsize;		/* Allocated buffer size. */
-	int	b_runningbufspace;	/* when I/O is running, pipelining */
-	int	b_kvasize;		/* size of kva for buffer */
-	int	b_dirtyoff;		/* Offset in buffer of dirty region. */
-	int	b_dirtyend;		/* Offset of end of dirty region. */
-	caddr_t	b_kvabase;		/* base kva for buffer */
-	daddr_t b_lblkno;		/* Logical block number. */
-	struct	vnode *b_vp;		/* Device vnode. */
-	struct	ucred *b_rcred;		/* Read credentials reference. */
-	struct	ucred *b_wcred;		/* Write credentials reference. */
+	b_xflags_t b_xflags;		/* extra flags 额外标志 */
+	struct lock b_lock;		/* Buffer lock 缓存区锁 */
+	long	b_bufsize;		/* Allocated buffer size. 分配的缓存区大小 */
+	int	b_runningbufspace;	/* when I/O is running, pipelining 当I/O运行时，执行流水线 */
+	int	b_kvasize;		/* size of kva for buffer 缓存的内核虚拟地址大小 */
+	int	b_dirtyoff;		/* Offset in buffer of dirty region. 脏区在缓冲区中的偏移 */
+	int	b_dirtyend;		/* Offset of end of dirty region. 脏区结束地址在缓冲区中的偏移 */
+	caddr_t	b_kvabase;		/* base kva for buffer 缓冲区的内核虚拟地址的基地址 */
+	daddr_t b_lblkno;		/* Logical block number. 逻辑块号 */
+	struct	vnode *b_vp;		/* Device vnode. 设备vnode*/
+	struct	ucred *b_rcred;		/* Read credentials reference. 读取凭证引用 */
+	struct	ucred *b_wcred;		/* Write credentials reference. 写入凭证引用 */
 	union {
 		TAILQ_ENTRY(buf) b_freelist; /* (Q) */
 		struct {
 			void	(*b_pgiodone)(void *, vm_page_t *, int, int);
 			int	b_pgbefore;
 			int	b_pgafter;
-		};
+		};s
 	};
 	union	cluster_info {
 		TAILQ_HEAD(cluster_list_head, buf) cluster_head;
 		TAILQ_ENTRY(buf) cluster_entry;
 	} b_cluster;
-	struct	vm_page *b_pages[btoc(MAXPHYS)];
-	int		b_npages;
-	struct	workhead b_dep;		/* (D) List of filesystem dependencies. */
+	struct	vm_page *b_pages[btoc(MAXPHYS)]; /* 对应的虚拟页 */
+	int		b_npages;	/* 对应的页的数量 */
+	struct	workhead b_dep;		/* (D) List of filesystem dependencies. 文件系统依赖项列表 */
 	void	*b_fsprivate1;
 	void	*b_fsprivate2;
 	void	*b_fsprivate3;
@@ -168,11 +192,15 @@ struct buf {
  *			B_ASYNC is set, but some subsystems, such as NFS, like 
  *			to know what is best for the caller so they can
  *			optimize the I/O.
+ 				无论是否设置了B_ASYNC，bp上的VOP调用通常都是异步的，但是一些子系统（如NFS）
+				希望知道什么对调用方最有利，以便优化I/O
  *
  *	B_PAGING	Indicates that bp is being used by the paging system or
  *			some paging system and that the bp is not linked into
  *			the b_vp's clean/dirty linked lists or ref counts.
  *			Buffer vp reassignments are illegal in this case.
+ 				指示bp正被分页系统或某些分页系统使用，并且bp未链接到 b_vp的干净/脏链表或ref计数中。
+				在这种情况下，缓冲区vp重新分配是非法的。
  *
  *	B_CACHE		This may only be set if the buffer is entirely valid.
  *			The situation where B_DELWRI is set and B_CACHE is
@@ -184,9 +212,14 @@ struct buf {
  *
  *			The 'entire buffer' is defined to be the range from
  *			0 through b_bcount.
+
+ 				只有当缓冲区完全可用的时候才可能会被设置。设置了 B_DELWRI 并且清除了 B_CACHE 的情况
+				必须通过 getblk()提交到磁盘，这样也可以清除 B_DELWRI。如果 B_CACHE 清除，则调用者
+				需要清除 BIO_ERROR 和 B_INVAL，设置 BIO_READ，并启动 I/O
  *
  *	B_MALLOC	Request that the buffer be allocated from the malloc
  *			pool, DEV_BSIZE aligned instead of PAGE_SIZE aligned.
+				请求从 malloc 池中分配缓冲区，以 DEV_BSIZE 而不是 PAGE_SIZE 对齐
  *
  *	B_CLUSTEROK	This flag is typically set for B_DELWRI buffers
  *			by filesystems that allow clustering when the buffer
@@ -194,51 +227,58 @@ struct buf {
  *			with other adjacent dirty buffers.  Note the clustering
  *			may not be used with the stage 1 data write under NFS
  *			but may be used for the commit rpc portion.
+ 				此标志通常由文件系统为 B_DELWRI 缓冲区设置，这些文件系统允许在缓冲区
+				完全脏时进行群集，并指示它可能与其他相邻的脏缓冲区进行群集。注意：集群
+				不能用于NFS下的阶段1数据写入，但可以用于提交rpc部分
  *
  *	B_VMIO		Indicates that the buffer is tied into an VM object.
  *			The buffer's data is always PAGE_SIZE aligned even
  *			if b_bufsize and b_bcount are not.  ( b_bufsize is 
  *			always at least DEV_BSIZE aligned, though ).
+ 				指示缓冲区绑定到VM对象。缓冲区的数据总是页大小对齐，即使 b_bufsize 和 b_bcount
+				不对齐(b_bufsize 始终至少与 DEV_BSIZE 对齐）。
  *
  *	B_DIRECT	Hint that we should attempt to completely free
  *			the pages underlying the buffer.  B_DIRECT is
  *			sticky until the buffer is released and typically
  *			only has an effect when B_RELBUF is also set.
+ 				提示我们应该尝试完全释放缓冲区下面的页面。在释放缓冲区之前，B_DIRECT 是粘性的，
+				并且通常仅在同时设置 B_RELBUF 时才起作用。
  *
  */
 
 #define	B_AGE		0x00000001	/* Move to age queue when I/O done. */
-#define	B_NEEDCOMMIT	0x00000002	/* Append-write in progress. */
-#define	B_ASYNC		0x00000004	/* Start I/O, do not wait. */
+#define	B_NEEDCOMMIT	0x00000002	/* Append-write in progress. 进程中追加写入 */
+#define	B_ASYNC		0x00000004	/* Start I/O, do not wait. 不等待，直接开启I/O */
 #define	B_DIRECT	0x00000008	/* direct I/O flag (pls free vmio) */
-#define	B_DEFERRED	0x00000010	/* Skipped over for cleaning */
-#define	B_CACHE		0x00000020	/* Bread found us in the cache. */
-#define	B_VALIDSUSPWRT	0x00000040	/* Valid write during suspension. */
-#define	B_DELWRI	0x00000080	/* Delay I/O until buffer reused. */
-#define	B_CKHASH	0x00000100	/* checksum hash calculated on read */
-#define	B_DONE		0x00000200	/* I/O completed. */
-#define	B_EINTR		0x00000400	/* I/O was interrupted */
-#define	B_NOREUSE	0x00000800	/* Contents not reused once released. */
-#define	B_REUSE		0x00001000	/* Contents reused, second chance. */
-#define	B_INVAL		0x00002000	/* Does not contain valid info. */
-#define	B_BARRIER	0x00004000	/* Write this and all preceding first. */
-#define	B_NOCACHE	0x00008000	/* Do not cache block after use. */
-#define	B_MALLOC	0x00010000	/* malloced b_data */
-#define	B_CLUSTEROK	0x00020000	/* Pagein op, so swap() can count it. */
+#define	B_DEFERRED	0x00000010	/* Skipped over for cleaning 跳过数据更新/脏页写回磁盘？ */
+#define	B_CACHE		0x00000020	/* Bread found us in the cache. 才缓存中可以找到？ */
+#define	B_VALIDSUSPWRT	0x00000040	/* Valid write during suspension.暂停期间的有效写入 */
+#define	B_DELWRI	0x00000080	/* Delay I/O until buffer reused. 延迟I/O直到缓冲区被重用 */
+#define	B_CKHASH	0x00000100	/* checksum hash calculated on read 读取时计算的校验和哈希 */
+#define	B_DONE		0x00000200	/* I/O completed. io操作完成 */
+#define	B_EINTR		0x00000400	/* I/O was interrupted io操作被中断 */
+#define	B_NOREUSE	0x00000800	/* Contents not reused once released. 内容发布后不可重复使用 */
+#define	B_REUSE		0x00001000	/* Contents reused, second chance. 内容重复使用，第二次机会 */
+#define	B_INVAL		0x00002000	/* Does not contain valid info. 不包含有效信息 */
+#define	B_BARRIER	0x00004000	/* Write this and all preceding first. 先写这个和前面所有的 */
+#define	B_NOCACHE	0x00008000	/* Do not cache block after use. 使用后不缓存块 */
+#define	B_MALLOC	0x00010000	/* malloced b_data 为b_data字段申请空间 */
+#define	B_CLUSTEROK	0x00020000	/* Pagein op, so swap() can count it. pagein操作，所以swap可以计算它 */
 #define	B_00040000	0x00040000	/* Available flag. */
 #define	B_00080000	0x00080000	/* Available flag. */
 #define	B_00100000	0x00100000	/* Available flag. */
 #define	B_00200000	0x00200000	/* Available flag. */
-#define	B_RELBUF	0x00400000	/* Release VMIO buffer. */
+#define	B_RELBUF	0x00400000	/* Release VMIO buffer. 释放VMIO buffer */
 #define	B_FS_FLAG1	0x00800000	/* Available flag for FS use. */
-#define	B_NOCOPY	0x01000000	/* Don't copy-on-write this buf. */
-#define	B_INFREECNT	0x02000000	/* buf is counted in numfreebufs */
-#define	B_PAGING	0x04000000	/* volatile paging I/O -- bypass VMIO */
-#define B_MANAGED	0x08000000	/* Managed by FS. */
-#define B_RAM		0x10000000	/* Read ahead mark (flag) */
+#define	B_NOCOPY	0x01000000	/* Don't copy-on-write this buf. 别抄袭我写的东西 */
+#define	B_INFREECNT	0x02000000	/* buf is counted in numfreebufs 该buf被计算到了numfreebufs当中 */
+#define	B_PAGING	0x04000000	/* volatile paging I/O -- bypass VMIO 易失性分页I/O—绕过VMIO */
+#define B_MANAGED	0x08000000	/* Managed by FS. 被文件系统管理？ */
+#define B_RAM		0x10000000	/* Read ahead mark (flag) 预读标记 */
 #define B_VMIO		0x20000000	/* VMIO flag */
 #define B_CLUSTER	0x40000000	/* pagein op, so swap() can count it */
-#define B_REMFREE	0x80000000	/* Delayed bremfree */
+#define B_REMFREE	0x80000000	/* Delayed bremfree 延迟bremfree操作 */
 
 #define PRINT_BUF_FLAGS "\20\40remfree\37cluster\36vmio\35ram\34managed" \
 	"\33paging\32infreecnt\31nocopy\30b23\27relbuf\26b21\25b20" \
@@ -252,12 +292,14 @@ struct buf {
  * BX_FSPRIV reserves a set of eight flags that may be used by individual
  * filesystems for their own purpose. Their specific definitions are
  * found in the header files for each filesystem that uses them.
+ * BX_FSPRIV 保留了一组八个标志，每个文件系统都可以使用它们来实现自己的目的。
+ * 它们的特定定义可以在每个使用它们的文件系统的头文件中找到
  */
-#define	BX_VNDIRTY	0x00000001	/* On vnode dirty list */
+#define	BX_VNDIRTY	0x00000001	/* On vnode dirty list 对应vnode脏页链表 */
 #define	BX_VNCLEAN	0x00000002	/* On vnode clean list */
-#define	BX_BKGRDWRITE	0x00000010	/* Do writes in background */
-#define BX_BKGRDMARKER	0x00000020	/* Mark buffer for splay tree */
-#define	BX_ALTDATA	0x00000040	/* Holds extended data */
+#define	BX_BKGRDWRITE	0x00000010	/* Do writes in background 后台执行写操作？ */
+#define BX_BKGRDMARKER	0x00000020	/* Mark buffer for splay tree slpay tree(伸展树)标记缓冲区 */
+#define	BX_ALTDATA	0x00000040	/* Holds extended data 保存扩展数据 */
 #define	BX_FSPRIV	0x00FF0000	/* filesystem-specific flags mask */
 
 #define	PRINT_BUF_XFLAGS "\20\7altdata\6bkgrdmarker\5bkgrdwrite\2clean\1dirty"
@@ -385,13 +427,14 @@ struct buf_queue_head {
 };
 
 /*
- * This structure describes a clustered I/O. 
+ * This structure describes a clustered I/O. 此结构描述集群I/O
+ * 意思可能是把一些有某种联系的io进行合并，然后统一执行io操作
  */
 struct cluster_save {
 	long	bs_bcount;		/* Saved b_bcount. */
 	long	bs_bufsize;		/* Saved b_bufsize. */
-	int	bs_nchildren;		/* Number of associated buffers. */
-	struct buf **bs_children;	/* List of associated buffers. */
+	int	bs_nchildren;		/* Number of associated buffers. 关联的buffer的数量 */
+	struct buf **bs_children;	/* List of associated buffers. buffer队列 */
 };
 
 #ifdef _KERNEL
@@ -516,6 +559,10 @@ void	bwillwrite(void);
 int	buf_dirty_count_severe(void);
 void	bremfree(struct buf *);
 void	bremfreef(struct buf *);	/* XXX Force bremfree, only for nfs. */
+/*
+	在一个场景中，传入的是 blkno = SBLOCK = 2，size = SBSIZE = 1024，
+	cred = NOCRED，获取到的数据放到 bpp 当中，vp的话猜测应该是挂载点对应的 vnode
+*/
 #define bread(vp, blkno, size, cred, bpp) \
 	    breadn_flags(vp, blkno, size, NULL, NULL, 0, cred, 0, NULL, bpp)
 #define bread_gb(vp, blkno, size, cred, gbflags, bpp) \

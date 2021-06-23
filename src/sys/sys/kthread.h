@@ -62,7 +62,9 @@ void	kproc_start(const void *);
 int	kproc_suspend(struct proc *, int);
 void	kproc_suspend_check(struct proc *);
 
-/* create a thread inthe given process. create the process if needed */
+/* create a thread inthe given process. create the process if needed 
+	在给定进程中创建线程。如果需要，创建进程
+*/
 int     kproc_kthread_add(void (*)(void *), void *,
 	    struct proc **,
 	    struct thread **,

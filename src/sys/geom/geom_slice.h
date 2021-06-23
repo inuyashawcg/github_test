@@ -40,6 +40,12 @@
 #ifndef _GEOM_GEOM_SLICE_H_
 #define _GEOM_GEOM_SLICE_H_
 
+/*
+	slice跟磁盘标签(label)联系比较紧密，专门为每个磁盘保留的一个特殊区域，用于存储有关磁盘的控制器、
+	几何参数和分片的信息。为磁盘设置标签意味着将分片信息写入磁盘。更改磁盘分片后，通常要为磁盘设置标签。
+	如果创建分片后未能为磁盘设置标签，则无法使用分片，因为 OS 不能识别这些分片
+	注意 - 改变磁盘标签会损坏磁盘中的所有数据。
+*/
 struct g_slice {
 	off_t	offset;
 	off_t	length;

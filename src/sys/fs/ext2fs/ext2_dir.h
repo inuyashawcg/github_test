@@ -51,10 +51,10 @@ enum slotstatus {
 
 struct ext2fs_searchslot {
 	enum slotstatus slotstatus;
-	doff_t	slotoffset;		/* offset of area with free space */
-	int	slotsize;		/* size of area at slotoffset */
-	int	slotfreespace;		/* amount of space free in slot */
-	int	slotneeded;		/* sizeof the entry we are seeking */
+	doff_t	slotoffset;		/* offset of area with free space 拥有空闲空间的区域的偏移 */
+	int	slotsize;		/* size of area at slotoffset slotoffset处的区域的大小 */
+	int	slotfreespace;		/* amount of space free in slot slot中可用的空闲区域的数量 */
+	int	slotneeded;		/* sizeof the entry we are seeking 我们需要找的entry的大小*/
 };
 
 /*
@@ -62,14 +62,16 @@ struct ext2fs_searchslot {
  * stored in intel byte order, and the name_len field could never be
  * bigger than 255 chars, it's safe to reclaim the extra byte for the
  * file_type field.
+ * 目录项的新版本。由于EXT2结构是以intel字节顺序存储的，并且 name_len 字段不能
+ * 大于255个字符，因此可以安全地回收 file_type 字段的额外字节
  */
 struct ext2fs_direct_2 {
-	uint32_t e2d_ino;		/* inode number of entry */
-	uint16_t e2d_reclen;		/* length of this record */
-	uint8_t	e2d_namlen;		/* length of string in e2d_name */
-	uint8_t	e2d_type;		/* file type */
+	uint32_t e2d_ino;		/* inode number of entry 目录项对应的 inode number */
+	uint16_t e2d_reclen;		/* length of this record 可以理解为指向像一个有效目录项的指针，本质是偏移量 */
+	uint8_t	e2d_namlen;		/* length of string in e2d_name 目录名字的长度 */
+	uint8_t	e2d_type;		/* file type 文件类型 */
 	char	e2d_name[EXT2FS_MAXNAMLEN];	/* name with
-						 * length<=EXT2FS_MAXNAMLEN */
+						 * length<=EXT2FS_MAXNAMLEN 文件名 */
 };
 
 struct ext2fs_direct_tail {
@@ -87,13 +89,14 @@ struct ext2fs_direct_tail {
 	(blocksize) - sizeof(struct ext2fs_direct_tail)))
 
 /*
- * Maximal count of links to a file
+ * Maximal count of links to a file 指向文件的最大链接数
  */
 #define	EXT4_LINK_MAX	65000
 
 /*
  * Ext2 directory file types.  Only the low 3 bits are used.  The
  * other bits are reserved for now.
+ * Ext2 所有的文件类型，仅仅低位的3个bit被使用，其他位现在被保留
  */
 #define	EXT2_FT_UNKNOWN		0
 #define	EXT2_FT_REG_FILE	1
@@ -106,9 +109,9 @@ struct ext2fs_direct_tail {
 #define	EXT2_FT_MAX		8
 
 /*
- * EXT2_DIR_PAD defines the directory entries boundaries
+ * EXT2_DIR_PAD defines the directory entries boundaries - EXT2_DIR_PAD 定义目录项边界
  *
- * NOTE: It must be a multiple of 4
+ * NOTE: It must be a multiple of 4	它必须是4的倍数
  */
 #define	EXT2_DIR_PAD		 	4
 #define	EXT2_DIR_ROUND			(EXT2_DIR_PAD - 1)

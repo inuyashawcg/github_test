@@ -67,8 +67,8 @@ TAILQ_HEAD(buflists, buf);
 
 /* A Buffer list & trie */
 struct bufv {
-	struct buflists	bv_hd;		/* Sorted blocklist */
-	struct pctrie	bv_root;	/* Buf trie */
+	struct buflists	bv_hd;		/* Sorted blocklist 已经排序的block链表 */
+	struct pctrie	bv_root;	/* Buf trie 基树(radix tree)根指针 */
 	int		bv_cnt;		/* Number of buffers */
 };
 
@@ -94,21 +94,21 @@ struct buf_ops {
 /*
  * Locking notes:
  * 'S' is sync_mtx
- * 'v' is the vnode lock which embeds the bufobj.
- * '-' Constant and unchanging after initialization.
+ * 'v' is the vnode lock which embeds the bufobj. 嵌入bufobj的vnode锁
+ * '-' Constant and unchanging after initialization. 初始化后不变
  */
 struct bufobj {
 	struct rwlock	bo_lock;	/* Lock which protects "i" things 读写锁 */
 	struct buf_ops	*bo_ops;	/* - Buffer operations 对buffer可以执行的操作 */
-	struct vm_object *bo_object;	/* v Place to store VM object */
-	LIST_ENTRY(bufobj) bo_synclist;	/* S dirty vnode list */
-	void		*bo_private;	/* private pointer */
-	struct bufv	bo_clean;	/* i Clean buffers 干净缓存 */
-	struct bufv	bo_dirty;	/* i Dirty buffers 脏缓存 */
+	struct vm_object *bo_object;	/* v Place to store VM object 指向 vm_object 的一个指针，要理清两者关系 */
+	LIST_ENTRY(bufobj) bo_synclist;	/* S dirty vnode list 脏的vnode链表 */
+	void		*bo_private;	/* private pointer 私有指针，应该是指向一些私有数据 */
+	struct bufv	bo_clean;	/* i Clean buffers 干净缓存，通过基树来管理的一个缓冲区链表 */
+	struct bufv	bo_dirty;	/* i Dirty buffers 脏缓存，同上 */
 	long		bo_numoutput;	/* i Writes in progress */
 	u_int		bo_flag;	/* i Flags */
 	int		bo_domain;	/* - Clean queue affinity 清除队列相关性 */
-	int		bo_bsize;	/* - Block size for i/o */
+	int		bo_bsize;	/* - Block size for i/o 块大小 */
 };
 
 /*

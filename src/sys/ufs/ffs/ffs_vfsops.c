@@ -785,6 +785,7 @@ ffs_mountfs(devvp, mp, td)
 		return (EBUSY);
 	}
 	g_topology_lock();
+	/* 获取一个新的 geom 实例 */
 	error = g_vfs_open(devvp, &cp, "ffs", ronly ? 0 : 1);
 	g_topology_unlock();
 	if (error != 0) {

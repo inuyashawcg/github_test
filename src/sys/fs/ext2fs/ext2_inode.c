@@ -66,6 +66,11 @@
  * later if not now.  If we write now, then clear both IN_MODIFIED and
  * IN_LAZYMOD to reflect the presumably successful write, and if waitfor is
  * set, then wait for the write to complete.
+ * 分别更新 IN_ACCESS、IN_UPDATE 和 IN_CHANGE 标志所对应的访问、修改和改变的时间。
+ * 如果 IN_MODIFIED 标志被设置的话，则将 inode 写入到磁盘当中(可以在初始化的时候设置，
+ * 可以通过 timestamp 进行更新)。如果现在不写入，则设置 IN_LAZYMOD 强制延迟写入。
+ * 如果我们现在写入，则清除IN_MODIFIED和IN_LAZYMOD以反映可能成功的写入，如果设置了waitfor，
+ * 则等待写入完成
  */
 int
 ext2_update(struct vnode *vp, int waitfor)
@@ -77,7 +82,7 @@ ext2_update(struct vnode *vp, int waitfor)
 
 	ASSERT_VOP_ELOCKED(vp, "ext2_update");
 	ext2_itimes(vp);
-	ip = VTOI(vp);
+	ip = VTOI(vp);	/* vnode 对应的 inode */
 	if ((ip->i_flag & IN_MODIFIED) == 0 && waitfor == 0)
 		return (0);
 	ip->i_flag &= ~(IN_LAZYACCESS | IN_LAZYMOD | IN_MODIFIED);
@@ -90,6 +95,7 @@ ext2_update(struct vnode *vp, int waitfor)
 		brelse(bp);
 		return (error);
 	}
+	/* 将内存格式转换成磁盘格式，然后调用 bwrite 函数将数据更新到磁盘 */
 	error = ext2_i2ei(ip, (struct ext2fs_dinode *)((char *)bp->b_data +
 	    EXT2_INODE_SIZE(fs) * ino_to_fsbo(fs, ip->i_number)));
 	if (error) {
@@ -114,8 +120,11 @@ ext2_update(struct vnode *vp, int waitfor)
  * lastbn.  If level is greater than SINGLE, the block is an indirect block
  * and recursive calls to indirtrunc must be used to cleanse other indirect
  * blocks.
+ * 释放与 inode ip 关联并存储在间接块 bn 中的块。区块按后进先出顺序免费，最多（但不包括）最后
+ * 一个 bn。如果 level 大于 SINGLE，则该块是一个间接块，必须使用对 indirtrunc 的递归调用来
+ * 清除其他间接块
  *
- * NB: triple indirect blocks are untested.
+ * NB: triple indirect blocks are untested. 三重间接块未经测试
  */
 static int
 ext2_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
@@ -133,6 +142,7 @@ ext2_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 	 * Calculate index in current block of last
 	 * block to be kept.  -1 indicates the entire
 	 * block so we need not calculate the index.
+	 * 计算当前块中要保留的最后一个块的索引，-1表示整个块，因此我们不需要计算索引
 	 */
 	factor = 1;
 	for (i = SINGLE; i < level; i++)
@@ -220,14 +230,15 @@ ext2_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 
 /*
  * Truncate the inode oip to at most length size, freeing the
- * disk blocks.
+ * disk blocks. 
+ * 将 inode oip 截断为最大长度大小，释放磁盘块
  */
 static int
 ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
     struct thread *td)
 {
 	struct vnode *ovp = vp;
-	e4fs_daddr_t lastblock;
+	e4fs_daddr_t lastblock;	/* 最后一个数据块 */
 	struct inode *oip;
 	e4fs_daddr_t bn, lbn, lastiblock[EXT2_NIADDR], indir_lbn[EXT2_NIADDR];
 	uint32_t oldblks[EXT2_NDADDR + EXT2_NIADDR];
@@ -235,7 +246,7 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	struct m_ext2fs *fs;
 	struct buf *bp;
 	int offset, size, level;
-	e4fs_daddr_t count, nblocks, blocksreleased = 0;
+	e4fs_daddr_t count, nblocks, blocksreleased = 0;	/* 释放掉的数据块的个数 */
 	int error, i, allerror;
 	off_t osize;
 #ifdef INVARIANTS
@@ -247,12 +258,14 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	bo = &ovp->v_bufobj;
 #endif
 
-	fs = oip->i_e2fs;
-	osize = oip->i_size;
+	fs = oip->i_e2fs;	/* 超级块 */
+	osize = oip->i_size;	/* 文件大小 */
 	/*
 	 * Lengthen the size of the file. We must ensure that the
 	 * last byte of the file is allocated. Since the smallest
 	 * value of osize is 0, length will be at least 1.
+	 * 延长文件的大小。我们必须确保文件的最后一个字节已分配。由于 osize 的最小值
+	 * 为0，因此长度至少为1
 	 */
 	if (osize < length) {
 		if (length > oip->i_e2fs->e2fs_maxfilesize)
@@ -284,6 +297,8 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	 * partial block following the end of the file must be
 	 * zero'ed in case it ever become accessible again because
 	 * of subsequent file growth.
+	 * 缩短文件的大小。如果文件未被截断到块边界，则文件结尾后的部分块的内容必须为零，
+	 * 以防由于后续文件增长而再次访问该文件
 	 */
 	/* I don't understand the comment above */
 	offset = blkoff(fs, length);
@@ -297,6 +312,7 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 			return (error);
 		oip->i_size = length;
 		size = blksize(fs, oip, lbn);
+		/* 将未达到边界的数据都置0，所以offset可以理解为在数据块中的数据偏移量 */
 		bzero((char *)bp->b_data + offset, (u_int)(size - offset));
 		allocbuf(bp, size);
 		if (bp->b_bufsize == fs->e2fs_bsize)
@@ -543,8 +559,13 @@ ext2_ext_truncate(struct vnode *vp, off_t length, int flags,
 }
 
 /*
- * Truncate the inode ip to at most length size, freeing the
+ * Truncate(截断) the inode ip to at most length size, freeing the
  * disk blocks.
+ * 文件截断可以理解为删除那些我们不需要的数据块；
+ * 所谓的截断文件指的是：一个特定长度的文件，我们从某个位置开始丢弃后面的数据，之前的数据依然保留。
+ * 对具体文件系统来说，截断数据主要意味着两件事情：1. 文件大小发生变化；2. 文件被截断部分之前占用
+ * 的数据块（对ext2和minix来说可能还包含间接块）释放，让其他文件可以使用。由于ext2和minix特殊的
+ * 映射方式，我们不仅需要截断数据块，还可能包括映射这些数据块的间接索引块
  */
 int
 ext2_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
@@ -554,10 +575,12 @@ ext2_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	int error;
 
 	ASSERT_VOP_LOCKED(vp, "ext2_truncate");
-
+	/* 文件长度小于0，无效参数 */
 	if (length < 0)
 		return (EINVAL);
-
+	/*
+		如果 vnode 对应的是链接文件，则需要判断一下 symlink length 是否符合要求
+	*/
 	ip = VTOI(vp);
 	if (vp->v_type == VLNK &&
 	    ip->i_size < vp->v_mount->mnt_maxsymlinklen) {

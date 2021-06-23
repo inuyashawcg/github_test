@@ -35,6 +35,7 @@
 
 /*
  * Sysctl subtree
+ * 声明一个 sysctl 子树
  */
 SYSCTL_DECL(_vfs_pfs);
 
@@ -42,10 +43,10 @@ SYSCTL_DECL(_vfs_pfs);
  * Vnode data
  */
 struct pfs_vdata {
-	struct pfs_node	*pvd_pn;
+	struct pfs_node	*pvd_pn;	/* 指向的 pfs_node */
 	pid_t		 pvd_pid;
-	struct vnode	*pvd_vnode;
-	struct pfs_vdata*pvd_prev, *pvd_next;
+	struct vnode	*pvd_vnode;	/* 对应的 vnode */
+	struct pfs_vdata*pvd_prev, *pvd_next;	/* 链表管理 */
 	int		 pvd_dead:1;
 };
 

@@ -1513,6 +1513,7 @@ vm_page_remove(vm_page_t m)
  *
  *	Returns the page associated with the object/offset
  *	pair specified; if none is found, NULL is returned.
+ *	返回与指定的对象/偏移对关联的页；如果找不到，则返回NULL
  *
  *	The object must be locked.
  */

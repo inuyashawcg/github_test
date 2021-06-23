@@ -72,6 +72,7 @@
 /*
  * Machine independent interface for mapping physical addresses to peripheral
  * bus 'physical' addresses, and assisting with DMA operations.
+ * 与机器无关的接口，用于将物理地址映射到外围总线“物理”地址，并协助DMA操作
  *
  * XXX This file is always included from <machine/bus_dma.h> and should not
  *     (yet) be included directly.
@@ -82,10 +83,10 @@
  */
 #define	BUS_DMA_WAITOK		0x00	/* safe to sleep (pseudo-flag) */
 #define	BUS_DMA_NOWAIT		0x01	/* not safe to sleep */
-#define	BUS_DMA_ALLOCNOW	0x02	/* perform resource allocation now */
-#define	BUS_DMA_COHERENT	0x04	/* hint: map memory in a coherent(连贯的) way */
-#define	BUS_DMA_ZERO		0x08	/* allocate zero'ed memory */
-#define	BUS_DMA_BUS1		0x10	/* placeholders for bus functions... */
+#define	BUS_DMA_ALLOCNOW	0x02	/* perform resource allocation now 立刻执行资源申请 */
+#define	BUS_DMA_COHERENT	0x04	/* hint: map memory in a coherent way 提示：以连贯的方式映射内存*/
+#define	BUS_DMA_ZERO		0x08	/* allocate zero'ed memory 申请已经置零的内存 */
+#define	BUS_DMA_BUS1		0x10	/* placeholders for bus functions... 总线函数占位符 */
 #define	BUS_DMA_BUS2		0x20
 #define	BUS_DMA_BUS3		0x40
 #define	BUS_DMA_BUS4		0x80
@@ -129,7 +130,7 @@ struct uio;
  *
  *	Describes a single contiguous DMA transaction.  Values
  *	are suitable for programming into DMA registers.
- *	描述单个连续的DMA事务，它的值适合于编写到DMA寄存器。segment意思就是段，
+ *	描述单个连续的 DMA 事务，它的值适合于编写到 DMA 寄存器。segment 意思就是段，
  		所以这个结构体表示的就是一个地址空间段
  */
 typedef struct bus_dma_segment {

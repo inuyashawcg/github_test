@@ -498,15 +498,22 @@ tmpfs_write(struct vop_write_args *v)
 	uio = v->a_uio;
 	ioflag = v->a_ioflag;
 	error = 0;
+	/* vnode->v_data 强制类型转化为 tmpfs_node */
 	node = VP_TO_TMPFS_NODE(vp);
-	oldsize = node->tn_size;
+	oldsize = node->tn_size;	/* 获取文件原始大小 */
 
+	/* vnode 指定的文件类型要是普通文件(存储数据) */
 	if (uio->uio_offset < 0 || vp->v_type != VREG)
 		return (EINVAL);
-	if (uio->uio_resid == 0)
+	if (uio->uio_resid == 0)	/* 剩余传输字节数为0，返回 */
 		return (0);
-	if (ioflag & IO_APPEND)
+	/* 
+		如果是追加写入到结尾，那么就指定 uio_offset = tn_size，也就是说 uio_offset 
+		表示的是数据写入的起始位置？
+	*/
+	if (ioflag & IO_APPEND)	
 		uio->uio_offset = node->tn_size;
+	/* 写入位置+剩余字节数>规定的最大的文件大小，则报错文件过大 */
 	if (uio->uio_offset + uio->uio_resid >
 	  VFS_TO_TMPFS(vp->v_mount)->tm_maxfilesize)
 		return (EFBIG);

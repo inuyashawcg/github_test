@@ -53,7 +53,7 @@ struct g_vfs_softc {
 	struct mtx	 sc_mtx;
 	struct bufobj	*sc_bo;
 	int		 sc_active;
-	int		 sc_orphaned;
+	int		 sc_orphaned;	/* 判断是否禁用的标志 */
 };
 
 static struct buf_ops __g_vfs_bufops = {
@@ -64,8 +64,13 @@ static struct buf_ops __g_vfs_bufops = {
 	.bop_bdflush =	bufbdflush
 };
 
+/* 
+	在 g_vfs_open 中会定义一个 buffer 操作。简单搜索一下 g_vfs_bufops，ext2fs 对它进行了注册。
+	说明在 ext2 文件系统中，buffer 支持的操作就是 __g_vfs_bufops 中定义的这些
+*/
 struct buf_ops *g_vfs_bufops = &__g_vfs_bufops;
 
+/* g_vfs 模块中定义的是禁用函数 */
 static g_orphan_t g_vfs_orphan;
 
 static struct g_class g_vfs_class = {
@@ -76,6 +81,7 @@ static struct g_class g_vfs_class = {
 
 DECLARE_GEOM_CLASS(g_vfs_class, g_vfs);
 
+/* 清理掉consumer 所对应的 geom */
 static void
 g_vfs_destroy(void *arg, int flags __unused)
 {
@@ -224,9 +230,17 @@ g_vfs_orphan(struct g_consumer *cp)
 
 	/*
 	 * Do not destroy the geom.  Filesystem will do that during unmount.
+	 * 消费者应该就是使用磁盘的对象，当我们挂载一个分区的时候，相当于就是使用了磁盘的一块区域，使用这块
+	 * 区域的对象会关联一个 geom 实例，并且作为消费者存在。当我们unmount分区的时候，相当于我们释放了
+	 * 对这块儿区域的使用使用权，与此同时就要将之前生成的 geom 实例给释放掉。这个函数是孤立操作，但是
+	 * 传入的参数却是一个消费者，所以要进一步思考
 	 */
 }
 
+/* 
+	传入的参数中包含了一个 vnode，然后是一个消费者，一个文件系统的名称。从功能定位上来说，文件系统应该是消费者，
+	而磁盘是提供者。所以，参数中的 consumer 应该是表示文件系统。wr 表示的是文件系统的读写权限
+*/
 int
 g_vfs_open(struct vnode *vp, struct g_consumer **cpp, const char *fsname, int wr)
 {
@@ -240,36 +254,45 @@ g_vfs_open(struct vnode *vp, struct g_consumer **cpp, const char *fsname, int wr
 	g_topology_assert();
 
 	*cpp = NULL;
-	bo = &vp->v_bufobj;
+	bo = &vp->v_bufobj;	// vnode 缓存 buffer object
 	if (bo->bo_private != vp)
 		return (EBUSY);
 
+	/*
+		首先判断 vnode 所对应的 cdev 是不是一个提供者，或者有提供者？
+		如果不为null，说明其具有这个属性，否则就直接返回错误码
+
+		pp 表示为 cdev 的 provider
+	*/
 	pp = g_dev_getprovider(vp->v_rdev);
 	if (pp == NULL)
 		return (ENOENT);
+
+	/* 利用 provider 的名称创建一个新的 geom */
 	gp = g_new_geomf(&g_vfs_class, "%s.%s", fsname, pp->name);
 	sc = g_malloc(sizeof(*sc), M_WAITOK | M_ZERO);
 	mtx_init(&sc->sc_mtx, "g_vfs", NULL, MTX_DEF);
-	sc->sc_bo = bo;
-	gp->softc = sc;
-	cp = g_new_consumer(gp);
-	g_attach(cp, pp);
-	error = g_access(cp, 1, wr, wr);
+	sc->sc_bo = bo;	/* softc 缓存指定为vnode缓存 */
+	gp->softc = sc;	/* geom softc 指定为 g_vfs_softc 类型 */
+	cp = g_new_consumer(gp);	/* 创建一个新的 consumer */
+	g_attach(cp, pp);	/* 将消费者和提供者进行关联 */
+	error = g_access(cp, 1, wr, wr);	/* 对消费者进行某些检测 */
 	if (error) {
 		g_wither_geom(gp, ENXIO);
 		return (error);
 	}
-	vnode_create_vobject(vp, pp->mediasize, curthread);
+	vnode_create_vobject(vp, pp->mediasize, curthread);	/* 为 vnode 分配内存空间 */
 	*cpp = cp;
-	cp->private = vp;
+	cp->private = vp;	/* consumer private 指针指向的是其对应的 vnode */
 	cp->flags |= G_CF_DIRECT_SEND | G_CF_DIRECT_RECEIVE;
 	bo->bo_ops = g_vfs_bufops;
-	bo->bo_private = cp;
-	bo->bo_bsize = pp->sectorsize;
+	bo->bo_private = cp;	/* vnode buffer object 的 private 指向对应的 consumer */
+	bo->bo_bsize = pp->sectorsize;	/* bufobj bo_bsize 指定为 provider 的 sectorsize */
 
 	return (error);
 }
 
+/* 对应文件系统的 unmount */
 void
 g_vfs_close(struct g_consumer *cp)
 {
@@ -285,6 +308,6 @@ g_vfs_close(struct g_consumer *cp)
 	gp->softc = NULL;
 	mtx_destroy(&sc->sc_mtx);
 	if (!sc->sc_orphaned || cp->provider == NULL)
-		g_wither_geom_close(gp, ENXIO);
+		g_wither_geom_close(gp, ENXIO);	/* 关闭 geom 并清理 */
 	g_free(sc);
 }

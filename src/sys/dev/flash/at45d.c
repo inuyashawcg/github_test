@@ -49,12 +49,12 @@ __FBSDID("$FreeBSD: releng/12.0/sys/dev/flash/at45d.c 329620 2018-02-20 03:51:09
 
 struct at45d_flash_ident
 {
-	const char	*name;
+	const char	*name;	/* 名称 */
 	uint32_t	jedec;
-	uint16_t	pagecount;
-	uint16_t	pageoffset;
-	uint16_t	pagesize;
-	uint16_t	pagesize2n;
+	uint16_t	pagecount;	/* 页数量 */
+	uint16_t	pageoffset;	/* 页偏移 */
+	uint16_t	pagesize;		/* 页大小 */
+	uint16_t	pagesize2n;	/* 页大小是否为2^N */
 };
 
 struct at45d_softc
@@ -107,6 +107,7 @@ static int at45d_wait_ready(device_t dev, uint8_t *status);
  * A sectorsize2n != 0 is used to indicate that a device optionally supports
  * 2^N byte pages.  If support for the latter is enabled, the sector offset
  * has to be reduced by one.
+ * sectorsize2n！=0用于指示设备可选地支持2^N字节页。如果启用了对后者的支持，则扇区偏移量必须减少1
  */
 static const struct at45d_flash_ident at45d_flash_devices[] = {
 	{ "AT45DB011B", 0x1f2200, 512, 9, 264, 256 },
@@ -139,6 +140,9 @@ at45d_get_status(device_t dev, uint8_t *status)
 	return (err);
 }
 
+/*
+	获取设备厂商信息，需要开中断
+*/
 static int
 at45d_get_mfg_info(device_t dev, uint8_t *resp)
 {
@@ -147,6 +151,7 @@ at45d_get_mfg_info(device_t dev, uint8_t *resp)
 	int err;
 
 	memset(&cmd, 0, sizeof(cmd));
+	/* 所有的SPI都是全双工数据传输，所以要申请两个数据缓冲区 */
 	memset(txBuf, 0, sizeof(txBuf));
 	memset(rxBuf, 0, sizeof(rxBuf));
 
@@ -161,6 +166,9 @@ at45d_get_mfg_info(device_t dev, uint8_t *resp)
 	return (0);
 }
 
+/*
+	等待设备就绪，需要开中断
+*/
 static int
 at45d_wait_ready(device_t dev, uint8_t *status)
 {
@@ -174,7 +182,7 @@ at45d_wait_ready(device_t dev, uint8_t *status)
 		if (now.tv_sec > tout.tv_sec)
 			err = ETIMEDOUT;
 		else
-			err = at45d_get_status(dev, status);
+			err = at45d_get_status(dev, status);	/* 持续调用该函数，直到返回值为0x80(设备空闲且可接收下一条指令) */
 	} while (err == 0 && (*status & 0x80) == 0);
 	return (err);
 }
@@ -194,10 +202,17 @@ at45d_attach(device_t dev)
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
-	AT45D_LOCK_INIT(sc);
+	AT45D_LOCK_INIT(sc);	/* 初始化锁，用于保护块输入输出队列 */
 
 	/* We'll see what kind of flash we have later... */
-	sc->config_intrhook.ich_func = at45d_delayed_attach;
+	/* 
+		把 at45d_delayed_attach 函数调度(config_intrhook_establish)一中断就执行。
+		最初的自动配置阶段(也就是系统刚刚启动之后)还未开中断，但是，某些驱动程序(如at45d)执行设备
+		初始化操作时却需要中断。这种情况下，我们可以使用 config_intrhook_establish 函数。该函数
+		可指定函数调度成一开中断(且根目录挂载之前)就执行。如果此时系统已经过了改点，相应的函数就会被
+		直接调用	
+	 */
+	sc->config_intrhook.ich_func = at45d_delayed_attach;	
 	sc->config_intrhook.ich_arg = sc;
 	if (config_intrhook_establish(&sc->config_intrhook) != 0) {
 		device_printf(dev, "config_intrhook_establish failed\n");
@@ -213,6 +228,9 @@ at45d_detach(device_t dev)
 	return (EBUSY) /* XXX */;
 }
 
+/*
+	该函数可以认为是实现了 at45d_attach 函数的另一半。也就是说，它用于完成设备的初始化操作
+*/
 static void
 at45d_delayed_attach(void *xsc)
 {
@@ -229,9 +247,9 @@ at45d_delayed_attach(void *xsc)
 
 	if (at45d_wait_ready(sc->dev, &status) != 0)
 		device_printf(sc->dev, "Error waiting for device-ready.\n");
-	else if (at45d_get_mfg_info(sc->dev, buf) != 0)
+	else if (at45d_get_mfg_info(sc->dev, buf) != 0)	/* 获取厂商ID，数据保存到buf */
 		device_printf(sc->dev, "Failed to get ID.\n");
-	else {
+	else {	/* 判断获取到的数据是否能够匹配给定数据 */
 		jedec = buf[0] << 16 | buf[1] << 8 | buf[2];
 		for (i = 0; i < nitems(at45d_flash_devices); i++) {
 			if (at45d_flash_devices[i].jedec == jedec) {
@@ -252,7 +270,7 @@ at45d_delayed_attach(void *xsc)
 			pagesize = ident->pagesize;
 		sc->pagesize = pagesize;
 
-		sc->disk = disk_alloc();
+		sc->disk = disk_alloc();	/* 分配并定义disk */
 		sc->disk->d_open = at45d_open;
 		sc->disk->d_close = at45d_close;
 		sc->disk->d_strategy = at45d_strategy;
@@ -262,10 +280,10 @@ at45d_delayed_attach(void *xsc)
 		sc->disk->d_sectorsize = pagesize;
 		sc->disk->d_mediasize = pagesize * ident->pagecount;
 		sc->disk->d_unit = device_get_unit(sc->dev);
-		disk_create(sc->disk, DISK_VERSION);
-		bioq_init(&sc->bio_queue);
+		disk_create(sc->disk, DISK_VERSION);	/* 创建设备结点 */
+		bioq_init(&sc->bio_queue);	/* 初始化输入输出队列 */
 		kproc_create(&at45d_task, sc, &sc->p, 0, 0,
-		    "task: at45d flash");
+		    "task: at45d flash");	/* 创建一个新的内核进程以执行 at45d_task 函数 */
 		device_printf(sc->dev, "%s, %d bytes per page, %d pages\n",
 		    ident->name, pagesize, ident->pagecount);
 	}
@@ -287,6 +305,11 @@ at45d_close(struct disk *dp)
 	return (0);
 }
 
+/*
+	每当at45d接收到一个bio时，就会调用一次 at45d_strategy 函数
+	多数策略例程所实现的功能都是类似的。它们并不会实际处理bio结构，而只是将它们放到块输入输出队列中
+	以供其他函数或者线程使用
+*/
 static void
 at45d_strategy(struct bio *bp)
 {
@@ -295,7 +318,7 @@ at45d_strategy(struct bio *bp)
 	sc = (struct at45d_softc *)bp->bio_disk->d_drv1;
 	AT45D_LOCK(sc);
 	bioq_disksort(&sc->bio_queue, bp);
-	wakeup(sc);
+	wakeup(sc);	/* 调用 at45d_task 函数来实际处理该bio结构 */
 	AT45D_UNLOCK(sc);
 }
 
@@ -324,9 +347,9 @@ at45d_task(void *arg)
 	for (;;) {
 		AT45D_LOCK(sc);
 		do {
-			bp = bioq_takefirst(&sc->bio_queue);
+			bp = bioq_takefirst(&sc->bio_queue);	/* 首先判断队列是否为空 */
 			if (bp == NULL)
-				msleep(sc, &sc->sc_mtx, PRIBIO, "jobqueue", 0);
+				msleep(sc, &sc->sc_mtx, PRIBIO, "jobqueue", 0);	/* 如果为空，函数将休眠 */
 		} while (bp == NULL);
 		AT45D_UNLOCK(sc);
 
@@ -361,7 +384,7 @@ at45d_task(void *arg)
 				berr = EINVAL;
 				goto out;
 			}
-			addr = page << sc->pageoffset;
+			addr = page << sc->pageoffset;	/* 计算待读入或者写出的数据的偏移量(主存中的位置) */
 			if (bp->bio_cmd == BIO_WRITE) {
 				if (len != sc->pagesize) {
 					txBuf[0] = BUFFER_TRANSFER;
@@ -428,7 +451,7 @@ at45d_task(void *arg)
 			bp->bio_error = berr;
 		}
 		bp->bio_resid = resid;
-		biodone(bp);
+		biodone(bp);	/* 该函数通知内核以块为中心的输入输出请求bp已成功得到服务 */
 	}
 }
 

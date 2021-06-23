@@ -809,6 +809,8 @@ vfs_suser(struct mount *mp, struct thread *td)
  * the search one past where the previous search terminated is both a
  * micro-optimization and a defense against returning the same fsid to
  * different mounts.
+ * 请记住，可能有几个挂载并行运行。从上一次搜索结束的地方开始搜索，既是一种微优化，也是一种
+ * 防御措施，可以防止将相同的fsid返回到不同的装载
  */
 void
 vfs_getnewfsid(struct mount *mp)
@@ -1502,7 +1504,7 @@ getnewvnode_drop_reserve(void)
 
 /*
  * Return the next vnode from the free list.
- * 从VFS中的 vnode free list中拿到一个vnode分配给某个文件系统实例
+ * 从 VFS 中的 vnode free list 中拿到一个 vnode 分配给某个文件系统实例
  */
 int
 getnewvnode(const char *tag, struct mount *mp, struct vop_vector *vops,
@@ -1515,8 +1517,8 @@ getnewvnode(const char *tag, struct mount *mp, struct vop_vector *vops,
 	int error __unused;
 
 	CTR3(KTR_VFS, "%s: mp %p with tag %s", __func__, mp, tag);
-	vp = NULL;
-	td = curthread;
+	vp = NULL;	/* 初始化指针为NULL */
+	td = curthread;	/* 指定当前线程 */
 	if (td->td_vp_reserv > 0) {
 		td->td_vp_reserv -= 1;
 		goto alloc;
@@ -2123,6 +2125,7 @@ buf_vlist_add(struct buf *bp, struct bufobj *bo, b_xflags_t xflags)
 
 /*
  * Look up a buffer using the buffer tries.
+ * 从函数参数命名可以看出，这里给定的logical block number
  */
 struct buf *
 gbincore(struct bufobj *bo, daddr_t lblkno)
@@ -2130,9 +2133,14 @@ gbincore(struct bufobj *bo, daddr_t lblkno)
 	struct buf *bp;
 
 	ASSERT_BO_LOCKED(bo);
+	/* 
+		在 bufobj 管理的干净缓存树上查找与 logical block number 相关的buf。
+		更准确的来讲，应该是查找一个空的buf给相应的块号来使用
+	*/
 	bp = BUF_PCTRIE_LOOKUP(&bo->bo_clean.bv_root, lblkno);
 	if (bp != NULL)
 		return (bp);
+	/* 如果没有，就从脏树上去找 */
 	return BUF_PCTRIE_LOOKUP(&bo->bo_dirty.bv_root, lblkno);
 }
 
@@ -3169,16 +3177,21 @@ vinactive(struct vnode *vp, struct thread *td)
 
 /*
  * Remove any vnodes in the vnode table belonging to mount point mp.
+ * 移除挂载点 vnode 表中的任何一个 vnode
  *
  * If FORCECLOSE is not specified, there should not be any active ones,
  * return error if any are found (nb: this is a user error, not a
  * system error). If FORCECLOSE is specified, detach any active vnodes
  * that are found.
+ * 如果未指定 FORCECLOSE，则不应存在任何活动的，如果发现任何活动的，则返回错误（注意：
+ * 这是用户错误，而不是系统错误）。如果指定了 FORCECLOSE，则分离找到的所有活动 vnode
  *
  * If WRITECLOSE is set, only flush out regular file vnodes open for
  * writing.
+ * 如果 WRITECLOSE 被设置的话，仅仅需要冲洗为写操作打开的常规文件的 vnode
  *
  * SKIPSYSTEM causes any vnodes marked VV_SYSTEM to be skipped.
+ * SKIPSYSTEM 标识将导致所有标记为 VV_SYSTEM 的 vnode 被跳过
  *
  * `rootrefs' specifies the base reference count for the root vnode
  * of this filesystem. The root vnode is considered busy if its
@@ -3186,6 +3199,10 @@ vinactive(struct vnode *vp, struct thread *td)
  * will call vrele() on the root vnode exactly rootrefs times.
  * If the SKIPSYSTEM or WRITECLOSE flags are specified, rootrefs must
  * be zero.
+ * rootrefs 指定了文件系统 root vnode 的基本引用次数。如果它的 v_usecount 超过了这个值，
+ * 我们就认为 root vnode 处于忙碌状态。返回成功时，vflush 函数将调用 root vnode 上的 vrele
+ * 函数正好 rootrefs 次。如果 SKIPSYSTEM 和 WRITECLOSE 都被设置的话，rootrefs 将被设置
+ * 为0
  */
 #ifdef DIAGNOSTIC
 static int busyprt = 0;		/* print out busy vnodes */
@@ -3207,8 +3224,10 @@ vflush(struct mount *mp, int rootrefs, int flags, struct thread *td)
 		/*
 		 * Get the filesystem root vnode. We can vput() it
 		 * immediately, since with rootrefs > 0, it won't go away.
+		 * 获取文件系统根vnode。我们可以立即使用vput，因为rootrefs>0时，它不会消失
 		 */
 		if ((error = VFS_ROOT(mp, LK_EXCLUSIVE, &rootvp)) != 0) {
+			/* VFS_ROOT 属于 vnode 操作范畴，暂时不考虑，作用就是获取root vnode */
 			CTR2(KTR_VFS, "%s: vfs_root lookup failed with %d",
 			    __func__, error);
 			return (error);

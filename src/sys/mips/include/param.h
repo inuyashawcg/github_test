@@ -134,8 +134,8 @@
 #define	CACHE_LINE_SIZE		(1 << CACHE_LINE_SHIFT)
 
 #define	PAGE_SHIFT		12		/* LOG2(PAGE_SIZE) */
-#define	PAGE_SIZE		(1<<PAGE_SHIFT) /* bytes/page */
-#define	PAGE_MASK		(PAGE_SIZE-1)
+#define	PAGE_SIZE		(1<<PAGE_SHIFT) /* bytes/page 页大小为4k */
+#define	PAGE_MASK		(PAGE_SIZE-1) /* 二进制: 1111 1111 1111 */
 
 #define	NPTEPG			(PAGE_SIZE/(sizeof (pt_entry_t)))
 #define	NPDEPG			(PAGE_SIZE/(sizeof (pd_entry_t)))

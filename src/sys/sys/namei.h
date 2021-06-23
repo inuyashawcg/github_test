@@ -56,9 +56,9 @@ struct componentname {
 		namei 会有不同的操作类型，包括查找、创建、销毁等等，所以 cn_nameiop 成员应该就是
 		表示结构体所应用的场景
 	*/
-	u_long	cn_nameiop;	/* namei operation */
-	u_int64_t cn_flags;	/* flags to namei */
-	struct	thread *cn_thread;/* thread requesting lookup */
+	u_long	cn_nameiop;	/* namei operation - namei所支持的一些操作 */
+	u_int64_t cn_flags;	/* flags to namei - namei属性标志 */
+	struct	thread *cn_thread;/* thread requesting lookup 发出查找请求的线程 */
 	struct	ucred *cn_cred;	/* credentials 证书 */
 	int	cn_lkflags;	/* Lock flags LK_EXCLUSIVE or LK_SHARED */
 	/*
@@ -66,10 +66,10 @@ struct componentname {
 	 */
 	char	*cn_pnbuf;	/* pathname buffer 路径名缓存 */
 	char	*cn_nameptr;	/* pointer to looked up name 指向查找名的指针 */
-	long	cn_namelen;	/* length of looked up component */
+	long	cn_namelen;	/* length of looked up component 组件名的长度 */
 };
 
-/* 声明了vnode的队列，貌似是用于name的搜索 */
+/* 声明了 vnode 的队列，貌似是用于name的搜索 */
 struct nameicap_tracker;
 TAILQ_HEAD(nameicap_tracker_head, nameicap_tracker);
 
@@ -82,7 +82,7 @@ struct nameidata {
 	 */
 	const	char *ni_dirp;		/* pathname pointer 指向路径名指针，查找文件？？ */
 	enum	uio_seg ni_segflg;	/* location of pathname 标定指向的是用户空间还是内核空间 */
-	cap_rights_t ni_rightsneeded;	/* rights required to look up vnode 请求查找vnode的权限 */
+	cap_rights_t ni_rightsneeded;	/* rights required to look up vnode 请求查找 vnode 的权限 */
 	/*
 	 * Arguments to lookup.
 	 */
@@ -112,9 +112,9 @@ struct nameidata {
 	 * Lookup parameters: this structure describes the subset of
 	 * information from the nameidata structure that is passed
 	 * through the VOP interface.
-	 * 查找参数：此结构描述通过VOP接口传递的nameidata结构中的信息子集
+	 * 查找参数：此结构描述通过VOP接口传递的 nameidata 结构中的信息子集
 	 * 
-	 * nameidata 跟 componentname 是包含关系，componentname 主要是name的相关属性和缓存处理等
+	 * nameidata 跟 componentname 是包含关系，componentname 主要是 name 的相关属性和缓存处理等
 	 */
 	struct componentname ni_cnd;
 	struct nameicap_tracker_head ni_cap_tracker;

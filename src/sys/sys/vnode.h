@@ -152,7 +152,7 @@ struct vnode {
 	union {
 		struct mount	*v_mountedhere;	/* v ptr to mountpoint (VDIR) 指向mount结构体 */
 		struct unpcb	*v_unpcb;	/* v unix domain net (VSOCK) */
-		struct cdev	*v_rdev; 	/* v device (VCHR, VBLK) */
+		struct cdev	*v_rdev; 	/* v device (VCHR, VBLK) 仅仅针对的是字符设备或者是块设备文件 */
 		struct fifoinfo	*v_fifoinfo;	/* v fifo (VFIFO) */
 	};
 
@@ -275,7 +275,7 @@ struct xvnode {
 	在干净链表
  */
 #define	VI_MOUNT	0x0020	/* Mount in progress */
-#define	VI_DOOMED	0x0080	/* This vnode is being recycled 此vnode正在回收 */
+#define	VI_DOOMED	0x0080	/* This vnode is being recycled 此 vnode 正在回收 */
 #define	VI_FREE		0x0100	/* This vnode is on the freelist */
 #define	VI_ACTIVE	0x0200	/* This vnode is on the active list */
 #define	VI_DOINGINACT	0x0800	/* VOP_INACTIVE is in progress */
@@ -306,27 +306,27 @@ struct xvnode {
  * vnode属性设计成class的时候可以直接作为成员变量，考虑访问控制
  */
 struct vattr {
-	enum vtype	va_type;	/* vnode type (for create) */
-	u_short		va_mode;	/* files access mode and type */
-	u_short		va_padding0;
+	enum vtype	va_type;	/* vnode type (for create) vnode 的类型 */
+	u_short		va_mode;	/* files access mode and type 文件的访问模式和类型 */
+	u_short		va_padding0;	// 字节对齐填充
 	uid_t		va_uid;		/* owner user id */
 	gid_t		va_gid;		/* owner group id */
-	nlink_t		va_nlink;	/* number of references to file */
-	dev_t		va_fsid;	/* filesystem id */
-	ino_t		va_fileid;	/* file id */
-	u_quad_t	va_size;	/* file size in bytes */
+	nlink_t		va_nlink;	/* number of references to file 文件引用次数 */
+	dev_t		va_fsid;	/* filesystem id 文件系统标志 */
+	ino_t		va_fileid;	/* file id 文件id？ */
+	u_quad_t	va_size;	/* file size in bytes 以字节为单位的文件的大小 */
 	long		va_blocksize;	/* blocksize preferred for i/o 优先用于i/o的块大小 */
-	struct timespec	va_atime;	/* time of last access */
-	struct timespec	va_mtime;	/* time of last modification */
-	struct timespec	va_ctime;	/* time file changed */
-	struct timespec	va_birthtime;	/* time file created */
+	struct timespec	va_atime;	/* time of last access 最后一次访问的时间 */
+	struct timespec	va_mtime;	/* time of last modification 最后一次修改的时间 */
+	struct timespec	va_ctime;	/* time file changed 文件改变的时间 */
+	struct timespec	va_birthtime;	/* time file created 文件创建的时间 */
 	u_long		va_gen;		/* generation number of file 文件的生成号 */
-	u_long		va_flags;	/* flags defined for file */
-	dev_t		va_rdev;	/* device the special file represents */
+	u_long		va_flags;	/* flags defined for file 文件标志 */
+	dev_t		va_rdev;	/* device the special file represents 特殊文件表示的设备 */
 	u_quad_t	va_bytes;	/* bytes of disk space held by file 文件管理的磁盘空间大小(bytes) */
 	u_quad_t	va_filerev;	/* file modification number 文件修改号 */
-	u_int		va_vaflags;	/* operations flags, see below */
-	long		va_spare;	/* remain quad aligned */
+	u_int		va_vaflags;	/* operations flags, see below 文件支持的操作的标识 */
+	long		va_spare;	/* remain quad aligned 保持字节对齐 */
 };
 
 /*
@@ -342,14 +342,14 @@ struct vattr {
  * NB: IO_NDELAY and IO_DIRECT are linked to fcntl.h
  */
 #define	IO_UNIT		0x0001		/* do I/O as atomic unit */
-#define	IO_APPEND	0x0002		/* append write to end */
+#define	IO_APPEND	0x0002		/* append write to end 追加写入到结尾 */
 #define	IO_NDELAY	0x0004		/* FNDELAY flag set in file table */
 #define	IO_NODELOCKED	0x0008		/* underlying node already locked */
 #define	IO_ASYNC	0x0010		/* bawrite rather then bdwrite */
 #define	IO_VMIO		0x0020		/* data already in VMIO space */
-#define	IO_INVAL	0x0040		/* invalidate after I/O */
+#define	IO_INVAL	0x0040		/* invalidate after I/O - I/O后失效 */
 #define	IO_SYNC		0x0080		/* do I/O synchronously */
-#define	IO_DIRECT	0x0100		/* attempt to bypass buffer cache */
+#define	IO_DIRECT	0x0100		/* attempt to bypass buffer cache 尝试绕过缓冲区缓存 */
 #define	IO_NOREUSE	0x0200		/* VMIO data won't be reused */
 #define	IO_EXT		0x0400		/* operate on external attributes */
 #define	IO_NORMAL	0x0800		/* operate on regular data */
@@ -430,17 +430,22 @@ extern u_int ncsizefactor;
  * Convert between vnode types and inode formats (since POSIX.1
  * defines mode word of stat structure in terms of inode formats).
  * 
- * 在vnode类型和inode格式之间转换
+ * vttoif: vnode table to inode formats，本质上就是文件类型标识的转换
  */
 extern enum vtype	iftovt_tab[];
 extern int		vttoif_tab[];
 #define	IFTOVT(mode)	(iftovt_tab[((mode) & S_IFMT) >> 12])
 #define	VTTOIF(indx)	(vttoif_tab[(int)(indx)])
+/*
+	从实际应用来看，indx 传入的其实是 vnode 类型的索引值，目前包含的是7种类型，包括块设备文件。
+	这里要思考一个问题，块设备文件其实还是有的，只是说块设备驱动的实现方式是转变成了字符设备驱动
+	的方式，但是生成的设备文件节点类型还是块设备
+*/
 #define	MAKEIMODE(indx, mode)	(int)(VTTOIF(indx) | (mode))
 
 /*
  * Flags to various vnode functions. 
- * 各种vnode函数的标志
+ * 各种 vnode 函数的标志
  */
 #define	SKIPSYSTEM	0x0001	/* vflush: skip vnodes marked VSYSTEM */
 #define	FORCECLOSE	0x0002	/* vflush: force file closure 强制关闭文件 */

@@ -150,6 +150,9 @@ disk_err(struct bio *bp, const char *what, int blkdone, int nl)
  *
  */
 
+/*
+	块输入输出队列是静态分配并由内核维护的结构。要初始化输入输出队列，就必须要调用 bioq_init
+*/
 void
 bioq_init(struct bio_queue_head *head)
 {
@@ -161,6 +164,9 @@ bioq_init(struct bio_queue_head *head)
 	head->batched = 0;
 }
 
+/*
+	该函数用于从队列中移除一个请求。如果用该函数移除队列头，那效果与bio_takefirst函数一致
+*/
 void
 bioq_remove(struct bio_queue_head *head, struct bio *bp)
 {
@@ -175,6 +181,9 @@ bioq_remove(struct bio_queue_head *head, struct bio *bp)
 	head->total--;
 }
 
+/*
+	该函数用于清除所有队列中的请求并导致它们返回错误码error
+*/
 void
 bioq_flush(struct bio_queue_head *head, struct devstat *stp, int error)
 {
@@ -184,6 +193,10 @@ bioq_flush(struct bio_queue_head *head, struct devstat *stp, int error)
 		biofinish(bp, stp, error);
 }
 
+/*
+	该函数将一个请求插入到队列头。此外，它还将创建一个“栅栏”以便所有后续由 bioq_disksort 执行
+	的插入操作都会在此请求之后才结束
+*/
 void
 bioq_insert_head(struct bio_queue_head *head, struct bio *bp)
 {
@@ -195,6 +208,10 @@ bioq_insert_head(struct bio_queue_head *head, struct bio *bp)
 	head->batched = 0;
 }
 
+/*
+	作用类似于上述函数，只是它将请求插入到队列尾部。请注意，该函数也会创建栅栏。一般而言，我们应该
+	使用栅栏来保证前面所有的请求先于后面的请求得到服务
+*/
 void
 bioq_insert_tail(struct bio_queue_head *head, struct bio *bp)
 {
@@ -205,6 +222,7 @@ bioq_insert_tail(struct bio_queue_head *head, struct bio *bp)
 	head->last_offset = bp->bio_offset;
 }
 
+/* 要返回队列的头结点(也就是下一个待处理的请求)，调用 bioq_first 函数 */
 struct bio *
 bioq_first(struct bio_queue_head *head)
 {
@@ -212,6 +230,7 @@ bioq_first(struct bio_queue_head *head)
 	return (TAILQ_FIRST(&head->queue));
 }
 
+/* 用于返回并移除队列的头结点 */
 struct bio *
 bioq_takefirst(struct bio_queue_head *head)
 {
@@ -236,11 +255,14 @@ bioq_bio_key(struct bio_queue_head *head, struct bio *bp)
 }
 
 /*
- * Seek sort for disks.
+ * Seek sort for disks. 要实现按序插入操作，可调用 bioq_disksort 函数
  *
  * Sort all requests in a single queue while keeping
  * track of the current position of the disk with last_offset.
  * See above for details.
+ * 需要注意的是，对于引入请求调度机制的存储设备(例如，SATA本地命令队列。SCSI标记命令队列等)，
+ * bioq_disksort 字段是没有意义的。因为这些设备都会在内存对请求进行重新排序。因此，简单的
+ * 先进先出(FIFO)输入输出队列(使用bioq_insert_tail)就足够了
  */
 void
 bioq_disksort(struct bio_queue_head *head, struct bio *bp)

@@ -86,6 +86,7 @@ typedef u_int vm_eflags_t;
  *	Objects which live in maps may be either VM objects, or
  *	another map (called a "sharing map") which denotes read-write
  *	sharing with other maps.
+ 		存在于映射中的对象可以是VM对象，也可以是表示与其他映射进行读写共享的另一个映射（称为“共享映射”）
  */
 union vm_map_object {
 	struct vm_object *vm_object;	/* object object */
@@ -102,6 +103,9 @@ union vm_map_object {
 	以及用户导出的继承和保护信息。还包括虚拟复制操作的控制信息。
 	- 表示一段连续的虚拟地址范围，这些地址共享保护权限和继承属性，并且使用相同的
 	后备存储对象
+	- 主要作用还是用于内存分配以及在缺页的时候实现快速查找。结构体中包含有起始地址和终止地址，
+	说明它表示的就是一块虚拟内存地址空间。而 vm_map 中会包含有一个 vm_map_entry 链表，说明
+	vm_map 管理的是一大块虚拟内存地址空间，然后有拆分成了许多小块，每个小块用一个 entry 来表示
  */
 struct vm_map_entry {
 	struct vm_map_entry *prev;	/* previous entry */
@@ -109,20 +113,23 @@ struct vm_map_entry {
 	struct vm_map_entry *left;	/* left child in binary search tree */
 	struct vm_map_entry *right;	/* right child in binary search tree */
 	vm_offset_t start;		/* start address 指定了entry所表示的虚拟内存空间的大小 */
-	vm_offset_t end;		/* end address */
+	vm_offset_t end;		/* end address 结束地址 */
 	vm_offset_t next_read;		/* vaddr of the next sequential read 下一次顺序读取的vaddr */
 	vm_size_t adj_free;		/* amount of adjacent free space 相邻可用空间量 */
 	vm_size_t max_free;		/* max free space in subtree 子树中的最大可用空间 */
-	union vm_map_object object;	/* object I point to */
+	/*
+		每个 entry 会对应一个 object，这个貌似跟虚拟文件系统有很大的关联，需要看一下
+	*/
+	union vm_map_object object;	/* object I point to 所关联的object */
 	vm_ooffset_t offset;		/* offset into object 在object中的偏移量 */
-	vm_eflags_t eflags;		/* map entry flags */
-	vm_prot_t protection;		/* protection code */
+	vm_eflags_t eflags;		/* map entry flags 标志符 */
+	vm_prot_t protection;		/* protection code 保护代码 */
 	vm_prot_t max_protection;	/* maximum protection */
 	vm_inherit_t inheritance;	/* inheritance 继承 */
 	uint8_t read_ahead;		/* pages in the read-ahead window 预读窗口中的页面 */
 	int wired_count;		/* can be paged if = 0 如果=0，则可以分页 */
 	struct ucred *cred;		/* tmp storage for creator ref */
-	struct thread *wiring_thread;
+	struct thread *wiring_thread;	/* 对应的线程 */
 };
 
 #define MAP_ENTRY_NOSYNC		0x0001
@@ -179,8 +186,8 @@ vm_map_entry_system_wired_count(vm_map_entry_t entry)
  *	organized both as a binary search tree and as a doubly-linked
  *	list.  Both structures are ordered based upon the start and
  *	end addresses contained within each map entry.
- 	vm_map是一组映射条目。这些地图条目被组织为二叉搜索树和双链表。这两种结构都是
-	 基于每个映射条目中包含的起始地址和结束地址排序的。
+ *	vm_map是一组映射条目。这些地图条目被组织为二叉搜索树和双链表。这两种结构都是
+ * 	基于每个映射条目中包含的起始地址和结束地址排序的。
  *
  *	Counterintuitively, the map's min offset value is stored in
  *	map->header.end, and its max offset value is stored in
@@ -190,22 +197,24 @@ vm_map_entry_system_wired_count(vm_map_entry_t entry)
  *	as sentinels for sequential search of the doubly-linked list.
  *	Sleator and Tarjan's top-down splay algorithm is employed to
  *	control height imbalance in the binary search tree.
-	列表头具有max start value和min end value作为双链表顺序搜索的哨兵。
-	采用Sleator和Tarjan自顶向下的splay算法控制二叉搜索树的高度不平衡。
+ *	列表头具有max start value和min end value作为双链表顺序搜索的哨兵。
+ *	采用Sleator和Tarjan自顶向下的splay算法控制二叉搜索树的高度不平衡。
  *
  *	List of locks
  *	(c)	const until freed
-	表示与机器地址无关的虚拟地址空间的最高层数据结构
+ *	表示与机器地址无关的虚拟地址空间的最高层数据结构
  */
 struct vm_map {
-	/* entry 才是真正对应虚拟地址空间的结构体，这里用一个链表来统一管理 */
+	/* 
+		entry 才是真正对应虚拟地址空间的结构体，这里用一个链表来统一管理。entry中包含有起始地址，结束地址等信息
+	*/
 	struct vm_map_entry header;	/* List of entries */
 /*
 	map min_offset	header.end	(c)
 	map max_offset	header.start	(c)
 */
-	struct sx lock;			/* Lock for map data */
-	struct mtx system_mtx;
+	struct sx lock;			/* Lock for map data 共享锁 */
+	struct mtx system_mtx;	/* 系统锁 */
 	int nentries;			/* Number of entries 应该是 map_entry 的数量 */
 	vm_size_t size;			/* virtual size 该结构体所管理的总的虚拟地址空间的大小 */
 	u_int timestamp;		/* Version number */
@@ -213,8 +222,8 @@ struct vm_map {
 	u_char system_map;		/* (c) Am I a system map? */
 	vm_flags_t flags;		/* flags for this vm_map */
 	vm_map_entry_t root;		/* Root of a binary search tree 应该是用于搜索page */
-	pmap_t pmap;			/* (c) Physical map */
-	int busy;
+	pmap_t pmap;			/* (c) Physical map 指向对应的 pmap 结构？*/
+	int busy;	/* 是否正在被占用？ */
 };
 
 /*
@@ -261,27 +270,31 @@ vm_map_modflags(vm_map_t map, vm_flags_t set, vm_flags_t clear)
  * Shareable process virtual address space.
  * vmspace 所表示的是进程的虚拟地址空间，一个进程中包含多个段，比如text、data、stack等等，用于
  * 保存相应的数据信息
+ * vmspace 结构体中最重要的就是 vm_map 和 vm_pmap。pmap 是跟平台相关，vm_map 结构体管理的是虚拟地址空间段。
+ * 同时，vm_map 还管理着虚拟地址空间和物理地址空间的映射关系
  *
  * List of locks
  *	(c)	const until freed
  */
 struct vmspace {
-	struct vm_map vm_map;	/* VM address map */
-	struct shmmap_state *vm_shm;	/* SYS5 shared memory private data XXX */
-	segsz_t vm_swrss;	/* resident set size before last swap */
-	segsz_t vm_tsize;	/* text size (pages) XXX */
-	segsz_t vm_dsize;	/* data size (pages) XXX */
-	segsz_t vm_ssize;	/* stack size (pages) */
-	caddr_t vm_taddr;	/* (c) user virtual address of text */
-	caddr_t vm_daddr;	/* (c) user virtual address of data */
+	struct vm_map vm_map;	/* VM address map 虚拟地址映射 */
+	struct shmmap_state *vm_shm;	/* SYS5 shared memory private data XXX 共享内存私有数据 */
+	segsz_t vm_swrss;	/* resident set size before last swap 上次交换前的驻留集大小 */
+	segsz_t vm_tsize;	/* text size (pages) XXX text 段的大小 (以页为单位) */
+	segsz_t vm_dsize;	/* data size (pages) XXX data 段的大小 (以页为单位)*/
+	segsz_t vm_ssize;	/* stack size (pages) 堆栈大小(页为单位) */
+	caddr_t vm_taddr;	/* (c) user virtual address of text - text 段的用户虚拟地址空间 */
+	caddr_t vm_daddr;	/* (c) user virtual address of data - data 段的用户虚拟地址空间 */
 	caddr_t vm_maxsaddr;	/* user VA at max stack growth 限制用户虚拟地址空间的上限 */
-	volatile int vm_refcnt;	/* number of references */
+	volatile int vm_refcnt;	/* number of references 引用计数 */
 	/*
 	 * Keep the PMAP last, so that CPU-specific variations of that
 	 * structure on a single architecture don't result in offset
 	 * variations of the machine-independent fields in the vmspace.
+	 * 将PMAP放在最后，这样在单个体系结构上该结构的CPU特定变化就不会导致vmspace中与机器无关的字段的偏移量变化
+	 * 
 	 */
-	struct pmap vm_pmap;	/* private physical map - CPU相关物理内存 */
+	struct pmap vm_pmap;	/* private physical map - CPU相关物理内存，不同平台的定义是不一样的 */
 };
 
 #ifdef	_KERNEL

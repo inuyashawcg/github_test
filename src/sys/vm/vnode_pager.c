@@ -399,9 +399,12 @@ vnode_pager_haspage(vm_object_t object, vm_pindex_t pindex, int *before,
  * Lets the VM system know about a change in size for a file.
  * We adjust our own internal size and flush any cached pages in
  * the associated object that are affected by the size change.
- *
+ * 让虚拟文件系统知道一个文件的大小被改变了。我们调整自己的内部大小，并刷新关联
+ * 对象中受大小更改影响的任何缓存页
+ * 
  * Note: this routine may be invoked as a result of a pager put
  * operation (possibly at object termination time), so we must be careful.
+ * 注意：这个例程可能会作为寻呼机put操作的结果被调用（可能是在对象终止时），所以我们必须小心
  */
 void
 vnode_pager_setsize(struct vnode *vp, vm_ooffset_t nsize)

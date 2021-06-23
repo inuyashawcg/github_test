@@ -79,9 +79,11 @@ SYSCTL_INT(_vfs_e2fs, OID_AUTO, dircheck, CTLFLAG_RW, &dirchk, 0, "");
    DIRBLKSIZE in ffs is DEV_BSIZE (in most cases 512)
    while it is the native blocksize in ext2fs - thus, a #define
    is no longer appropriate
+	 ext2fs 本地 blocksize 大小为512字节
 */
 #undef  DIRBLKSIZ
 
+/* file type to directory type ? */
 static u_char ext2_ft_to_dt[] = {
 	DT_UNKNOWN,		/* EXT2_FT_UNKNOWN */
 	DT_REG,			/* EXT2_FT_REG_FILE */
@@ -121,6 +123,7 @@ static int	ext2_is_dot_entry(struct componentname *cnp);
 static int	ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp,
 		    struct componentname *cnp, ino_t *dd_ino);
 
+/* 通过组件名称判断是不是 . 目录项 */
 static int
 ext2_is_dot_entry(struct componentname *cnp)
 {
@@ -132,6 +135,8 @@ ext2_is_dot_entry(struct componentname *cnp)
 
 /*
  * Vnode op for reading directories.
+ * 读取目录项的 vnode operations
+ * 应用程序应该是构造出一个 vop_readdir_args 结构体
  */
 int
 ext2_readdir(struct vop_readdir_args *ap)
@@ -140,28 +145,31 @@ ext2_readdir(struct vop_readdir_args *ap)
 	struct uio *uio = ap->a_uio;
 	struct buf *bp;
 	struct inode *ip;
-	struct ext2fs_direct_2 *dp, *edp;
+	struct ext2fs_direct_2 *dp, *edp;	/* 可能表示的是起始和终止目录项 */
 	u_long *cookies;
 	struct dirent dstdp;
 	off_t offset, startoffset;
 	size_t readcnt, skipcnt;
 	ssize_t startresid;
 	u_int ncookies;
-	int DIRBLKSIZ = VTOI(ap->a_vp)->i_e2fs->e2fs_bsize;
+	int DIRBLKSIZ = VTOI(ap->a_vp)->i_e2fs->e2fs_bsize;	/* in-memory superblock -> block size */
 	int error;
 
-	if (uio->uio_offset < 0)
+	/* uio 数据是不可能小于0的，为0的时候说明数据传输已经完毕 */
+	if (uio->uio_offset < 0)	
 		return (EINVAL);
-	ip = VTOI(vp);
+	ip = VTOI(vp);	/* 关联vnode和inode */
 	if (ap->a_ncookies != NULL) {
 		if (uio->uio_resid < 0)
 			ncookies = 0;
 		else
-			ncookies = uio->uio_resid;
-		if (uio->uio_offset >= ip->i_size)
+			ncookies = uio->uio_resid;	/* ncookies 赋值为 uio 剩余字节数 */
+		if (uio->uio_offset >= ip->i_size)	/* 如果uio_offset偏移量已经大于文件大小，令剩余处理字节数为0 */
 			ncookies = 0;
-		else if (ip->i_size - uio->uio_offset < ncookies)
-			ncookies = ip->i_size - uio->uio_offset;
+		else if (ip->i_size - uio->uio_offset < ncookies)	
+			ncookies = ip->i_size - uio->uio_offset;	/* 如果文件中剩余字节数已经小于需要uio处理的字节数，那就以剩余
+																												文件字节数作为需要处理的字节数 */
+
 		ncookies = ncookies / (offsetof(struct ext2fs_direct_2,
 		    e2d_namlen) + 4) + 1;
 		cookies = malloc(ncookies * sizeof(*cookies), M_TEMP, M_WAITOK);
@@ -170,22 +178,29 @@ ext2_readdir(struct vop_readdir_args *ap)
 	} else {
 		ncookies = 0;
 		cookies = NULL;
-	}
+	}	// end if ap->a_ncookies != NULL
+
 	offset = startoffset = uio->uio_offset;
-	startresid = uio->uio_resid;
+	startresid = uio->uio_resid;	/* 仍然需要被处理的数据 */
 	error = 0;
 	while (error == 0 && uio->uio_resid > 0 &&
-	    uio->uio_offset < ip->i_size) {
+	    uio->uio_offset < ip->i_size) {	/* uio_offset 要小于 i_size(文件大小) */
+		/* bp 中保存着从物理块中读取到的数据 */
 		error = ext2_blkatoff(vp, uio->uio_offset, NULL, &bp);
 		if (error)
 			break;
+		/* 如果请求的数据大小 b_count + offset > 文件大小 i_size，则取小值 */
 		if (bp->b_offset + bp->b_bcount > ip->i_size)
 			readcnt = ip->i_size - bp->b_offset;
 		else
-			readcnt = bp->b_bcount;
+			readcnt = bp->b_bcount;	/* 否则就取 b_count */
+		/*
+			uio offset 应该是程序打算读取的数据的起始位置在文件中的偏移量，b_offset 应该是
+			buf 目前对应在文件中的偏移，相减之后就可以确定真正要读取的数据在文件中的起始位置
+		*/
 		skipcnt = (size_t)(uio->uio_offset - bp->b_offset) &
 		    ~(size_t)(DIRBLKSIZ - 1);
-		offset = bp->b_offset + skipcnt;
+		offset = bp->b_offset + skipcnt;	/* 相当于是做了一步跳转 */
 		dp = (struct ext2fs_direct_2 *)&bp->b_data[skipcnt];
 		edp = (struct ext2fs_direct_2 *)&bp->b_data[readcnt];
 		while (error == 0 && uio->uio_resid > 0 && dp < edp) {
@@ -273,6 +288,8 @@ nextentry:
  * This is a very central and rather complicated routine.
  * If the file system is not maintained in a strict tree hierarchy,
  * this can result in a deadlock situation (see comments in code below).
+ * 将路径名的组件转换为指向锁定inode的指针。这是一个非常核心和相当复杂的程序。
+ * 如果文件系统没有在严格的树层次结构中维护，这可能会导致死锁情况
  *
  * The cnp->cn_nameiop argument is LOOKUP, CREATE, RENAME, or DELETE depending
  * on whether the name is to be looked up, created, renamed, or deleted.
@@ -301,7 +318,6 @@ nextentry:
 int
 ext2_lookup(struct vop_cachedlookup_args *ap)
 {
-
 	return (ext2_lookup_ino(ap->a_dvp, ap->a_vpp, ap->a_cnp, NULL));
 }
 
@@ -309,28 +325,28 @@ static int
 ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp, struct componentname *cnp,
     ino_t *dd_ino)
 {
-	struct inode *dp;		/* inode for directory being searched */
-	struct buf *bp;			/* a buffer of directory entries */
-	struct ext2fs_direct_2 *ep;	/* the current directory entry */
-	int entryoffsetinblock;		/* offset of ep in bp's buffer */
+	struct inode *dp;		/* inode for directory being searched 正在搜索的目录的inode */
+	struct buf *bp;			/* a buffer of directory entries 目录项的缓冲区 */
+	struct ext2fs_direct_2 *ep;	/* the current directory entry 当前目录项 */
+	int entryoffsetinblock;		/* offset of ep in bp's buffer ep在bp中的偏移 */
 	struct ext2fs_searchslot ss;
 	doff_t i_diroff;		/* cached i_diroff value */
 	doff_t i_offset;		/* cached i_offset value */
-	int numdirpasses;		/* strategy for directory search */
-	doff_t endsearch;		/* offset to end directory search */
-	doff_t prevoff;			/* prev entry dp->i_offset */
-	struct vnode *pdp;		/* saved dp during symlink work */
-	struct vnode *tdp;		/* returned by VFS_VGET */
-	doff_t enduseful;		/* pointer past last used dir slot */
-	u_long bmask;			/* block offset mask */
+	int numdirpasses;		/* strategy for directory search 目录查找策略 */
+	doff_t endsearch;		/* offset to end directory search 目录查找终止位置的偏移量 */
+	doff_t prevoff;			/* prev entry dp->i_offset 上一个entry的offset */
+	struct vnode *pdp;		/* saved dp during symlink work 符号链接时候保存的vnode指针 */
+	struct vnode *tdp;		/* returned by VFS_VGET 宏定义返回的vnode指针 */
+	doff_t enduseful;		/* pointer past last used dir slot 指向最后一次使用的目录slot后？ */
+	u_long bmask;			/* block offset mask 块偏移标志，应高是用于计算数据在块中所占大小，偏移等 */
 	int error;
-	struct ucred *cred = cnp->cn_cred;
+	struct ucred *cred = cnp->cn_cred;	/* 用户凭证 */
 	int flags = cnp->cn_flags;
-	int nameiop = cnp->cn_nameiop;
+	int nameiop = cnp->cn_nameiop;	/* 判断文件操作，创建、重命名等等 */
 	ino_t ino, ino1;
 	int ltype;
 	int entry_found = 0;
-
+	/* 需要确定 block size 的大小，所以在 in-memory inode 中保存了一个指向超级块的指针 */
 	int DIRBLKSIZ = VTOI(vdp)->i_e2fs->e2fs_bsize;
 
 	if (vpp != NULL)
@@ -339,8 +355,8 @@ ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp, struct componentname *cnp
 	dp = VTOI(vdp);
 	bmask = VFSTOEXT2(vdp->v_mount)->um_mountp->mnt_stat.f_iosize - 1;
 restart:
-	bp = NULL;
-	ss.slotoffset = -1;
+	bp = NULL;	/* buf置空 */
+	ss.slotoffset = -1;	/* 空闲区域偏移初始化为-1 */
 
 	/*
 	 * We now have a segment name to search for, and a directory to search.
@@ -349,12 +365,14 @@ restart:
 	 * file and at end of pathname, in which case
 	 * we watch for a place to put the new file in
 	 * case it doesn't already exist.
+	 * 禁止对插槽的搜索，除非创建文件并在路径名的末尾，在这种情况下，我们将监视放置
+	 * 新文件的位置，以防它不存在
 	 */
-	i_diroff = dp->i_diroff;
-	ss.slotstatus = FOUND;
-	ss.slotfreespace = ss.slotsize = ss.slotneeded = 0;
+	i_diroff = dp->i_diroff;	/* 用于查找目录中的最后一个entry */
+	ss.slotstatus = FOUND;	/* 把search slot的状态设置为 found */
+	ss.slotfreespace = ss.slotsize = ss.slotneeded = 0;	/* slot相关属性全置空 */
 	if ((nameiop == CREATE || nameiop == RENAME) &&
-	    (flags & ISLASTCN)) {
+	    (flags & ISLASTCN)) {	
 		ss.slotstatus = NONE;
 		ss.slotneeded = EXT2_DIR_REC_LEN(cnp->cn_namelen);
 		/*
@@ -364,13 +382,17 @@ restart:
 	}
 	/*
 	 * Try to lookup dir entry using htree directory index.
+	 * 通过 htree 树的索引查找目录项
 	 *
 	 * If we got an error or we want to find '.' or '..' entry,
 	 * we will fall back to linear search.
+	 * 如果出现错误或要查找“.”或“..”条目，我们将退回到线性搜索；
+	 * 也就是说，目录项的查找目前有两种方式：树搜索和线性搜索；
+	 * 当目录项不是 . 并且在 htree 中包含有对应的结点
 	 */
 	if (!ext2_is_dot_entry(cnp) && ext2_htree_has_idx(dp)) {
-		numdirpasses = 1;
-		entryoffsetinblock = 0;
+		numdirpasses = 1;	/* 采用策略1 */
+		entryoffsetinblock = 0;	/* entry在块中的偏移量赋值为0 */
 		switch (ext2_htree_lookup(dp, cnp->cn_nameptr, cnp->cn_namelen,
 		    &bp, &entryoffsetinblock, &i_offset, &prevoff,
 		    &enduseful, &ss)) {
@@ -448,7 +470,7 @@ searchloop:
 			ep = (struct ext2fs_direct_2 *)((char *)bp->b_data +
 			    (entryoffsetinblock & bmask));
 foundentry:
-			ino = ep->e2d_ino;
+			ino = ep->e2d_ino;	/* inode number 赋值 */
 			goto found;
 		}
 	}
@@ -523,12 +545,12 @@ notfound:
 
 found:
 	if (dd_ino != NULL)
-		*dd_ino = ino;
-	if (numdirpasses == 2)
+		*dd_ino = ino;	/* inode number指针赋值 */
+	if (numdirpasses == 2)	/* 判断是否采用策略2 */
 		nchstats.ncs_pass2++;
 	/*
 	 * Check that directory length properly reflects presence
-	 * of this entry.
+	 * of this entry. 检查目录长度是否正确反映了此条目的存在
 	 */
 	if (entryoffsetinblock + EXT2_DIR_REC_LEN(ep->e2d_namlen)
 	    > dp->i_size) {
@@ -924,13 +946,18 @@ out:
  * be written, which was left locked by namei. Remaining parameters
  * (dp->i_offset, dp->i_count) indicate how the space for the new
  * entry is to be obtained.
+ * 
+ * 在调用namei之后，使用nameidata中的参数编写一个目录条目。参数ip是新的目录项所对应的
+ * inode。dvp是将要被写入的目录项所对应的指针，它被namei锁住。其余参数（dp->i_offset，dp->i_count）
+ * 指示如何获取新条目的空间
+ * 
  */
 int
 ext2_direnter(struct inode *ip, struct vnode *dvp, struct componentname *cnp)
 {
 	struct inode *dp;
-	struct ext2fs_direct_2 newdir;
-	int DIRBLKSIZ = ip->i_e2fs->e2fs_bsize;
+	struct ext2fs_direct_2 newdir;	/* 目录项 */
+	int DIRBLKSIZ = ip->i_e2fs->e2fs_bsize;	/* 指定块大小 */
 	int error;
 
 
@@ -938,16 +965,18 @@ ext2_direnter(struct inode *ip, struct vnode *dvp, struct componentname *cnp)
 	if ((cnp->cn_flags & SAVENAME) == 0)
 		panic("ext2_direnter: missing name");
 #endif
-	dp = VTOI(dvp);
+	dp = VTOI(dvp);	/* directory inode */
 	newdir.e2d_ino = ip->i_number;
 	newdir.e2d_namlen = cnp->cn_namelen;
 	if (EXT2_HAS_INCOMPAT_FEATURE(ip->i_e2fs,
 	    EXT2F_INCOMPAT_FTYPE))
-		newdir.e2d_type = DTTOFT(IFTODT(ip->i_mode));
+		newdir.e2d_type = DTTOFT(IFTODT(ip->i_mode));	/* directory type to file type */
 	else
 		newdir.e2d_type = EXT2_FT_UNKNOWN;
+	/* 将名字从 componentname 结构中拷贝到目录项结构 */
 	bcopy(cnp->cn_nameptr, newdir.e2d_name, (unsigned)cnp->cn_namelen + 1);
 
+	/* 目录项应该是通过 htree 来进行管理的 */
 	if (ext2_htree_has_idx(dp)) {
 		error = ext2_htree_add_entry(dvp, &newdir, cnp);
 		if (error) {
@@ -964,6 +993,7 @@ ext2_direnter(struct inode *ip, struct vnode *dvp, struct componentname *cnp)
 			/*
 			 * Making indexed directory when one block is not
 			 * enough to save all entries.
+			 * 当一个块不足以保存所有条目时生成索引目录
 			 */
 			return ext2_htree_create_index(dvp, cnp, &newdir);
 		}
@@ -1099,22 +1129,27 @@ ext2_dirremove(struct vnode *dvp, struct componentname *cnp)
 	int error;
 
 	dp = VTOI(dvp);
+	/* 判断目录中的 free slot 数量是否为0，这就从另外一个角度说明 dp 表示的目录项 */
 	if (dp->i_count == 0) {
 		/*
 		 * First entry in block: set d_ino to zero.
+		 * 通过 ext2_blkatoff 函数将获取到的目录项结构体存放到 ep 当中，读取的整个
+		 * 块的数据存放到 bp 当中
 		 */
 		if ((error =
 		    ext2_blkatoff(dvp, (off_t)dp->i_offset, (char **)&ep,
 		    &bp)) != 0)
 			return (error);
-		ep->e2d_ino = 0;
+		ep->e2d_ino = 0;	/* 将该目录项对应的 inode 号设置为0 */
+		/* 计算checksum，验证读取的数据是否正确 */
 		ext2_dirent_csum_set(dp, (struct ext2fs_direct_2 *)bp->b_data);
 		error = bwrite(bp);
 		dp->i_flag |= IN_CHANGE | IN_UPDATE;
 		return (error);
 	}
 	/*
-	 * Collapse new free space into previous entry.
+	 * Collapse new free space into previous entry.将新的可用空间折叠到上一个条目中
+	 * 这里可以参考 Linux 中关于目录项的处理方式
 	 */
 	if ((error = ext2_blkatoff(dvp, (off_t)(dp->i_offset - dp->i_count),
 	    (char **)&ep, &bp)) != 0)
@@ -1222,6 +1257,7 @@ ext2_dirempty(struct inode *ip, ino_t parentino, struct ucred *cred)
  * Check if source directory is in the path of the target directory.
  * Target is supplied locked, source is unlocked.
  * The target is always vput before returning.
+ * 在检查在目标目录中是否存在我们想要找的目录项
  */
 int
 ext2_checkpath(struct inode *source, struct inode *target, struct ucred *cred)

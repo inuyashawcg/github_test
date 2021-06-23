@@ -43,6 +43,13 @@
 
 /*
  * Super block for an ext2fs file system.
+ * 结构中包含有一些关于版本信息的描述：
+ * 	- e2fs_magic
+ * 	- e2fs_rev
+ * 应该还是有用的。就比如说奇海的文件系统不断更新，可能在某个版本中突然就出现了一个
+ * 全新的特性，旧版本不支持。这个时候就需要一个字段来专门存放这个信息，告诉用户如果
+ * 想要使用某个特性，或者奇海系统目前支持的最低版本的文件系统是多少，等等。并且也就
+ * 占用了几个字节，影响不大
  */
 struct ext2fs {
 	uint32_t  e2fs_icount;		/* Inode count 索引节点的总数 */
@@ -71,11 +78,18 @@ struct ext2fs {
 	uint16_t  e2fs_ruid;		/* default uid for reserved blocks 保留块的缺省UID */
 	uint16_t  e2fs_rgid;		/* default gid for reserved blocks 保留块的缺省GID */
 	/* EXT2_DYNAMIC_REV superblocks */
-	uint32_t  e2fs_first_ino;	/* first non-reserved inode 第一个非保留的索引节点号 */
+	uint32_t  e2fs_first_ino;	/* first non-reserved inode 第一个非保留的索引节点 */
 	uint16_t  e2fs_inode_size;	/* size of inode structure 磁盘上索引节点结构的大小 */
 	uint16_t  e2fs_block_group_nr;	/* block grp number of this sblk 这个超级块的块组号 */
 	uint32_t  e2fs_features_compat;	/* compatible feature set 具有兼容特点的位图 */
+	/*
+		ext2fs 有时候会涉及到判断32位和64位的兼容性。比如当文件系统不支持64位的时候，就要设置该成员
+		并且执行一些移位操作。
+	*/
 	uint32_t  e2fs_features_incompat; /* incompatible feature set 具有非兼容特点的位图 */
+	/*
+		其中一种应用场景就是 checksum 检查，此时会设置只读属性，防止校验和数据被修改
+	*/
 	uint32_t  e2fs_features_rocompat; /* RO-compatible feature set 只读兼容特点的位图 */
 	uint8_t	  e2fs_uuid[16];	/* 128-bit uuid for volume 128位文件系统标识符 */
 	char      e2fs_vname[16];	/* volume name 卷名？ */
@@ -159,37 +173,43 @@ struct m_ext2fs {
 	struct ext2fs * e2fs;
 	char     e2fs_fsmnt[MAXMNTLEN];/* name mounted on */
 	char     e2fs_ronly;	  /* mounted read-only flag */
-	char     e2fs_fmod;	  /* super block modified flag */
-	uint64_t e2fs_bcount;	  /* blocks count */
-	uint64_t e2fs_rbcount;	  /* reserved blocks count */
-	uint64_t e2fs_fbcount;	  /* free blocks count */
+	char     e2fs_fmod;	  /* super block modified flag 超级块修改标志 */
+	uint64_t e2fs_bcount;	  /* blocks count 块计数 */
+	uint64_t e2fs_rbcount;	  /* reserved blocks count 保留块的数量 */
+	uint64_t e2fs_fbcount;	  /* free blocks count 空闲块计数 */
 	uint32_t e2fs_bsize;	  /* Block size */
-	uint32_t e2fs_bshift;	  /* calc of logical block no */
+	uint32_t e2fs_bshift;	  /* calc of logical block no 用于计算逻辑块号 */
 	uint32_t e2fs_bpg;	  /* Number of blocks per group */
 	int64_t  e2fs_qbmask;	  /* = s_blocksize -1 */
-	uint32_t e2fs_fsbtodb;	  /* Shift to get disk block */
+	uint32_t e2fs_fsbtodb;	  /* Shift to get disk block 从文件系统逻辑块计算磁盘块 */
 	uint32_t e2fs_ipg;	  /* Number of inodes per group */
-	uint32_t e2fs_ipb;	  /* Number of inodes per block */
+	uint32_t e2fs_ipb;	  /* Number of inodes per block 每个block包含有多少个inode */
 	uint32_t e2fs_itpg;	  /* Number of inode table per group */
+	/* 下面三个参数都跟 fragment 有关，说明 ext2 也是包含有 fragment 设计，类比 UFS */
 	uint32_t e2fs_fsize;	  /* Size of fragments per block */
 	uint32_t e2fs_fpb;	  /* Number of fragments per block */
 	uint32_t e2fs_fpg;	  /* Number of fragments per group */
-	uint32_t e2fs_gdbcount;	  /* Number of group descriptors */
+	uint32_t e2fs_gdbcount;	  /* Number of group descriptors 组描述符的数量 */
 	uint32_t e2fs_gcount;	  /* Number of groups */
-	uint32_t e2fs_isize;	  /* Size of inode */
-	uint32_t e2fs_total_dir;  /* Total number of directories */
+	uint32_t e2fs_isize;	  /* Size of inode inode 大小 */
+	uint32_t e2fs_total_dir;  /* Total number of directories 文件系统目录总数 */
+	/*
+		uint8_t 类型的一个数组，用于记录每个块组中包含的目录的数量
+	*/
 	uint8_t	*e2fs_contigdirs; /* (u) # of contig. allocated dirs */
 	char     e2fs_wasvalid;	  /* valid at mount time */
 	off_t    e2fs_maxfilesize;
 	struct   ext2_gd *e2fs_gd; /* Group Descriptors */
-	int32_t  e2fs_contigsumsize;    /* size of cluster summary array */
+	int32_t  e2fs_contigsumsize;    /* size of cluster summary array 块组操作的时候会用到这个字段 */
 	int32_t *e2fs_maxcluster;       /* max cluster in each cyl group */
 	struct   csum *e2fs_clustersum; /* cluster summary in each cyl group */
 	int32_t  e2fs_uhash;	  /* 3 if hash should be signed, 0 if not */
 	uint32_t e2fs_csum_seed;  /* sb checksum seed */
 };
 
-/* cluster summary information */
+/* cluster summary information 
+	这个结构体应该也是可以保留的，
+*/
 
 struct csum {
 	int8_t   cs_init; /* cluster summary has been initialized */
@@ -198,11 +218,12 @@ struct csum {
 
 /*
  * The second extended file system magic number
+ * ext2 文件系统的魔数，看起来应该是指定的
  */
 #define	E2FS_MAGIC		0xEF53
 
 /*
- * Revision levels
+ * Revision levels 修订级别
  */
 #define	E2FS_REV0		0	/* The good old (original) format */
 #define	E2FS_REV1		1	/* V2 format w/ dynamic inode sizes */
@@ -248,6 +269,7 @@ struct csum {
 #define	EXT2F_INCOMPAT_JOURNAL_DEV	0x0008
 #define	EXT2F_INCOMPAT_META_BG		0x0010
 #define	EXT2F_INCOMPAT_EXTENTS		0x0040
+/* incompatible：不相容的，不支持的。这个宏的意思应该是不支持64位 */
 #define	EXT2F_INCOMPAT_64BIT		0x0080
 #define	EXT2F_INCOMPAT_MMP		0x0100
 #define	EXT2F_INCOMPAT_FLEX_BG		0x0200
@@ -373,28 +395,38 @@ static const struct ext2_feature incompat[] = {
 /* ext2 file system block group descriptor 组描述符 
 	分配新的索引节点和数据块时，会用到 ext2bgd_nbfree、ext2bgd_nifree 和 ext2bgd_ndirs，
 	这些字段确定在最合适的块中给每个数据结构进行分配
+	从 newfs 工具的实现代码来看，格式化的时候需要用到块组结构体中的成员，但是在奇海操作系统的设计
+	中已经将块组结构直接移除了。奇海其实可以看作是一个单块组的文件系统，所以对于数据块的处理还是要
+	参考块组的实现机制。所以，奇海系统可以考虑将块组中的一些重要字段直接放到超级块当中。这样，可以
+	在使用块组的地方引用超级块结构
 */
 
 struct ext2_gd {
-	uint32_t ext2bgd_b_bitmap;	/* blocks bitmap block 块位图的块号 */
-	uint32_t ext2bgd_i_bitmap;	/* inodes bitmap block 索引节点位图的块号 */
-	uint32_t ext2bgd_i_tables;	/* inodes table block  第一个索引节点块表的块号 */
-	uint16_t ext2bgd_nbfree;	/* number of free blocks 组中空闲块的个数 */
-	uint16_t ext2bgd_nifree;	/* number of free inodes 组中空闲节点的个数 */
-	uint16_t ext2bgd_ndirs;		/* number of directories 组中目录的个数 */
+	uint32_t ext2bgd_b_bitmap;	/* blocks bitmap block 块位图的块号，位置提示 */
+	uint32_t ext2bgd_i_bitmap;	/* inodes bitmap block 索引节点位图的块号，位置提示 */
+	uint32_t ext2bgd_i_tables;	/* inodes table block  第一个索引节点块表的块号，位置提示 */
+	/* 该参数可以对应奇海文件系统空闲索块个数 */
+	uint16_t ext2bgd_nbfree;	/* number of free blocks 块组中空闲块的个数 */
+	/* 对应奇海文件系统空闲索引节点个数 */
+	uint16_t ext2bgd_nifree;	/* number of free inodes 块组中空闲节点的个数 */
+	/* 对应奇海文件系统中目录项个数 */
+	uint16_t ext2bgd_ndirs;		/* number of directories 块组中目录的个数 */
 
 	/* ext4特有成员 */
 	uint16_t ext4bgd_flags;		/* block group flags */
 	uint32_t ext4bgd_x_bitmap;	/* snapshot exclusion bitmap loc. */
-	uint16_t ext4bgd_b_bmap_csum;	/* block bitmap checksum */
-	uint16_t ext4bgd_i_bmap_csum;	/* inode bitmap checksum */
-	uint16_t ext4bgd_i_unused;	/* unused inode count */
+	uint16_t ext4bgd_b_bmap_csum;	/* block bitmap checksum 数据块位图 checksum */
+	uint16_t ext4bgd_i_bmap_csum;	/* inode bitmap checksum 索引节点位图 checksum */
+	uint16_t ext4bgd_i_unused;	/* unused inode count 未使用的inode数量 */
 	uint16_t ext4bgd_csum;		/* group descriptor checksum */
 	uint32_t ext4bgd_b_bitmap_hi;	/* high bits of blocks bitmap block */
 	uint32_t ext4bgd_i_bitmap_hi;	/* high bits of inodes bitmap block */
 	uint32_t ext4bgd_i_tables_hi;	/* high bits of inodes table block */
 	uint16_t ext4bgd_nbfree_hi;	/* high bits of number of free blocks */
 	uint16_t ext4bgd_nifree_hi;	/* high bits of number of free inodes */
+	/*
+		块组描述符结构体中的字段，所以表示的信息应该仅仅是描述块组是，而不是整个文件系统
+	*/
 	uint16_t ext4bgd_ndirs_hi;	/* high bits of number of directories */
 	uint16_t ext4bgd_i_unused_hi;	/* high bits of unused inode count */
 	uint32_t ext4bgd_x_bitmap_hi;   /* high bits of snapshot exclusion */

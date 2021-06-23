@@ -101,7 +101,7 @@ ufs_disk_fillout_blank(struct uufsd *disk, const char *name)
 	int fd, ret;
 
 	ERROR(disk, NULL);
-
+	/* 通过name获取到文件的属性信息，保存至stat */
 	oname = name;
 again:	if ((ret = stat(name, &st)) < 0) {
 		if (*name != '/') {
@@ -113,15 +113,18 @@ again:	if ((ret = stat(name, &st)) < 0) {
 		 * The given object doesn't exist, but don't panic just yet -
 		 * it may be still mount point listed in /etc/fstab, but without
 		 * existing corresponding directory.
+		 * 给定的对象不存在，但不要惊慌-它可能仍然是 /etc/fstab 中列出的挂载点，但没有
+		 * 相应的目录
 		 */
 		name = oname;
 	}
+	/* 判断文件是不是 regular file 类型 */
 	if (ret >= 0 && S_ISREG(st.st_mode)) {
 		/* Possibly a disk image, give it a try.  */
 		;
 	} else if (ret >= 0 && S_ISCHR(st.st_mode)) {
 		/* This is what we need, do nothing. */
-		;
+		;	/* getfsfile 是由 file table 提供的函数，可直接使用 */
 	} else if ((fs = getfsfile(name)) != NULL) {
 		/*
 		 * The given mount point is listed in /etc/fstab.

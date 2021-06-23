@@ -59,6 +59,14 @@
         "uio.h": "c",
         "__mutex_base": "c",
         "shared_mutex": "c",
-        "mutex": "c"
+        "mutex": "c",
+        "cstddef": "c",
+        "netfwd": "c",
+        "ext2_extern.h": "c",
+        "string.h": "c",
+        "newfs.h": "c",
+        "dir.h": "c",
+        "disklabel.h": "c",
+        "climits": "cpp"
     }
 }

@@ -261,7 +261,7 @@
  *		The default is 16384, roughly 2x the block size used by a
  *		normal UFS filesystem.
  */
-#define MAXBSIZE	65536	/* must be power of 2 */
+#define MAXBSIZE	65536	/* must be power of 2  - 16k */
 #ifndef	MAXBCACHEBUF
 #define	MAXBCACHEBUF	MAXBSIZE /* must be a power of 2 >= MAXBSIZE */
 #endif
@@ -290,7 +290,7 @@
 #define	isclr(a,i)							\
 	((((const unsigned char *)(a))[(i)/NBBY] & (1<<((i)%NBBY))) == 0)
 
-/* Macros for counting and rounding. */
+/* Macros for counting and rounding. 用于计数和舍入的宏 */
 #ifndef howmany
 #define	howmany(x, y)	(((x)+((y)-1))/(y))
 #endif

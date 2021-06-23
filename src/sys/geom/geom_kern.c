@@ -77,10 +77,14 @@ int g_notaste;
  * Things are procesed in a FIFO order, but these threads could be
  * part of I/O prioritization by deciding which bios/bioqs to service
  * in what order.
+ * 事件是按 FIFO 顺序处理的，但是这些线程可以作为I/O优先级的一部分，通过决定以什么顺序服务哪些bios/bioq。
+ * 从上面的表述来看，应该是对 I/O 队列的处理进行优化
  *
  * We have only one thread in each direction, it is believed that until
  * a very non-trivial workload in the UP/DOWN path this will be enough,
  * but more than one can actually be run without problems.
+ * 我们在每个方向上只有一个线程，相信在 UP/DOWN 路径中有一个非常重要的工作负载之前，这就足够了，
+ * 但实际上不止一个线程可以毫无问题地运行
  *
  * Holding the "mymutex" is a debugging feature:  It prevents people
  * from sleeping in the UP/DOWN I/O path by mistake or design (doing
@@ -93,7 +97,7 @@ g_up_procbody(void *arg)
 {
 
 	thread_lock(g_up_td);
-	sched_prio(g_up_td, PRIBIO);
+	sched_prio(g_up_td, PRIBIO);	// 按照优先级对 I/O 队列进行排序
 	thread_unlock(g_up_td);
 	for(;;) {
 		g_io_schedule_up(g_up_td);
@@ -117,7 +121,7 @@ g_event_procbody(void *arg)
 {
 
 	thread_lock(g_event_td);
-	sched_prio(g_event_td, PRIBIO);
+	sched_prio(g_event_td, PRIBIO);	// 按照优先级对事件进行排序
 	thread_unlock(g_event_td);
 	g_run_events();
 	/* NOTREACHED */

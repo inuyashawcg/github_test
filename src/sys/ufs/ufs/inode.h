@@ -93,7 +93,7 @@ struct inode {
 		struct ufs2_dinode *din2;	/* UFS2 on-disk dinode. */
 	} dinode_u;
 
-	ino_t	  i_number;	/* The identity of the inode. */
+	ino_t	  i_number;	/* The identity of the inode. inode编号*/
 	u_int32_t i_flag;	/* flags, see below */
 	int	  i_effnlink;	/* i_nlink when I/O completes */
 
@@ -101,15 +101,15 @@ struct inode {
 	/*
 	 * Side effects; used during directory lookup. 目录查找的时候会用到
 	 */
-	int32_t	  i_count;	/* Size of free slot in directory. */
-	doff_t	  i_endoff;	/* End of useful stuff in directory. */
-	doff_t	  i_diroff;	/* Offset in dir, where we found last entry. */
-	doff_t	  i_offset;	/* Offset of free space in directory. */
+	int32_t	  i_count;	/* Size of free slot in directory. 目录中可用插槽的大小 */
+	doff_t	  i_endoff;	/* End of useful stuff in directory. 目录中有用内容的结尾 */
+	doff_t	  i_diroff;	/* Offset in dir, where we found last entry. 目录中最后一个entry所在的位置 */
+	doff_t	  i_offset;	/* Offset of free space in directory. 目录中可用空间的偏移量 */
 
 	int	i_nextclustercg; /* last cg searched for cluster */
 
 	/*
-	 * Data for extended attribute modification.
+	 * Data for extended attribute modification. 扩展属性修改数据
  	 */
 	u_char	  *i_ea_area;	/* Pointer to malloced copy of EA area */
 	unsigned  i_ea_len;	/* Length of i_ea_area */

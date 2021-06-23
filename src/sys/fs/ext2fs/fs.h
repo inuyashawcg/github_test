@@ -45,6 +45,7 @@
  * Each disk drive contains some number of file systems.
  * A file system consists of a number of cylinder groups.
  * Each cylinder group has inodes and data.
+ * 每个磁盘驱动器都包含一些文件系统。文件系统由许多柱面组组成。每个柱面组都有索引节点和数据。
  *
  * A file system is described by its super-block, which in turn
  * describes the cylinder groups.  The super-block is critical
@@ -52,9 +53,13 @@
  * catastrophic loss.  This is done at `newfs' time and the critical
  * super-block data does not change, so the copies need not be
  * referenced further unless disaster strikes.
+ * 文件系统由它的超级块来描述，超级块又描述了柱面组。超级块是关键数据，在每个柱面组中复制，以防止
+ * 灾难性损失。这是在“newfs”时间完成的，并且关键超级块数据不会更改，因此除非发生灾难，否则不需要
+ * 进一步引用副本
  *
  * The first boot and super blocks are given in absolute disk addresses.
  * The byte-offset forms are preferred, as they don't imply a sector size.
+ * 第一个引导和超级块以绝对磁盘地址给出。字节偏移量形式是首选的，因为它们并不意味着扇区大小
  */
 #define	SBSIZE		1024
 #define	SBLOCK		2
@@ -99,14 +104,44 @@
 /*
  * Turn file system block numbers into disk block addresses.
  * This maps file system blocks to device size blocks.
+ * 将文件系统块号转换为磁盘块地址。这会将文件系统块映射到设备大小块
+ * 所以推测一下，e2fs_fsbtodb 字段就是用来计算磁盘块地址的。这个字段会在 compute_sb_data 函数
+ * 中被赋值为 e2fs_log_bsize + 1。而 e2fs_log_bsize 字段表示的是一个对数，参考 ext2fs 中的
+ * 注释。
+ * 磁盘的一个扇区通常是512字节，ext2 块大小通常是定义为1024字节，根据公式
+ * 	block size = 1024*(2 ^ e2fs_log_bsize) 
+ * 可以看出，e2fs_log_bsize (on-disk)的值应该是等于0的，那 e2fs_fsbtodb (in_memory)的值为1。
+ * 参数 b 其实是我们传入的文件系统层面的块号，左移一位，相当于是块号扩大2倍，刚好对应的是磁盘的扇区号
  */
 #define	fsbtodb(fs, b)	((daddr_t)(b) << (fs)->e2fs_fsbtodb)
 #define	dbtofsb(fs, b)	((b) >> (fs)->e2fs_fsbtodb)
 
-/* get group containing inode */
+/* get group containing inode 
+	e2fs_ipg 表示的是每个 group 中包含的 inode 的数量，x 表示的是 inode 编号，
+	取模操作后，就可以算出来 inode 是在哪个 group 当中，相当于是获取到了 group 的 index
+*/
 #define	ino_to_cg(fs, x)	(((x) - 1) / (fs->e2fs_ipg))
 
-/* get block containing inode from its number x */
+/* get block containing inode from its number x - 从编号中获取包含 inode 的块
+	ino_to_fsba: inode to filesystem block address ？？
+	vfsops 文件中的一个应用场景中 x 传入的是 i_number，fs 传入的是 in-memory superblock
+
+	宏的处理流程:
+		- 通过 ino_to_cg 宏获取 inode 所在块组的索引
+		- 在 e2fs_gd 中获取这个块组的组描述符
+		- e2fs_gd_get_i_tables 获取每个块组中存放索引节点表的第一个块的块号
+		- % 取余操作，e2fs_ipg 字段表示的是每个组中的 inode 个数，最终获取的是该
+			inode 在这个块组中的偏移量
+		- 再用偏移量 / 每个块中包含的 inode 数量，确定这个 inode 存放在哪个块
+	所以，这个宏确定的是 inode 结构体本身所在的数据块，而不是 inode 管理的数据所在的数据块。
+
+	这个宏实现的功能在奇海文件系统中实现起来就很简单，首先 superblock 一定要保存 inode 表的
+	第一个块的块号(直接给出或者计算都可以)；由于文件系统总共只有一个 inode 表，所以直接用
+		inode number / 每个 block 包含 inode 的个数，就可以直接计算出来 inode 所在块号；
+	里面涉及到那个对数感觉不用改，直接拿来用就可以？
+	奇海磁盘中会包含有多个备份，所以还需要确定我们需要修改的到底是哪一个，所以虚拟分页跟磁盘块
+	不是一一对应的关系，这个还要进一步考虑
+*/
 #define	ino_to_fsba(fs, x)                                              \
         (e2fs_gd_get_i_tables(&(fs)->e2fs_gd[ino_to_cg((fs), (x))]) +   \
         (((x) - 1) % (fs)->e2fs->e2fs_ipg) / (fs)->e2fs_ipb)
@@ -134,6 +169,7 @@
 #define	lblktosize(fs, blk)	/* calculates (blk * fs->fs_bsize) */ \
 	((blk) << (fs->e2fs_bshift))
 
+/* 计算逻辑块号 */
 #define	lblkno(fs, loc)		/* calculates (loc / fs->fs_bsize) */ \
 	((loc) >> (fs->e2fs_bshift))
 
@@ -146,18 +182,20 @@
 	/* was (((size) + (fs)->fs_qfmask) & (fs)->fs_fmask) */
 
 /*
- * Determining the size of a file block in the file system.
+ * Determining the size of a file block in the file system. 确定文件系统中文件块的大小
  * easy w/o fragments
  */
 #define	blksize(fs, ip, lbn) ((fs)->e2fs_fsize)
 
 /*
  * INOPB is the number of inodes in a secondary storage block.
+ * INOPB是辅助存储块中的索引节点数
  */
 #define	INOPB(fs)	(fs->e2fs_ipb)
 
 /*
  * NINDIR is the number of indirects in a file system block.
+ * NINDIR是文件系统块中的间接块数
  */
 #define	NINDIR(fs)	(EXT2_ADDR_PER_BLOCK(fs))
 

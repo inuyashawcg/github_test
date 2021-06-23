@@ -37,6 +37,8 @@
  * normal purposes and bad blocks are normally linked to inode 1, thus
  * the root inode is 2.
  * Inode 3 to 10 are reserved in ext2fs.
+ * root inode 是文件系统的根。inode0 不能被用于普通的意图，并且 bad blocks 通常被链接到 inode1，
+ * 因此 root inode 是 2
  */
 #define	EXT2_BADBLKINO		((ino_t)1)
 #define	EXT2_ROOTINO		((ino_t)2)
@@ -57,19 +59,21 @@
  * EXT4_HUGE_FILE with some restrictions imposed by the lack of write
  * support.
  */
-#define	EXT2_SECRM		0x00000001	/* Secure deletion */
-#define	EXT2_UNRM		0x00000002	/* Undelete */
-#define	EXT2_COMPR		0x00000004	/* Compress file */
-#define	EXT2_SYNC		0x00000008	/* Synchronous updates */
-#define	EXT2_IMMUTABLE		0x00000010	/* Immutable file */
-#define	EXT2_APPEND		0x00000020 /* Writes to file may only append */
-#define	EXT2_NODUMP		0x00000040	/* Do not dump file */
-#define	EXT2_NOATIME		0x00000080	/* Do not update atime */
-#define	EXT3_INDEX		0x00001000	/* Hash-indexed directory */
-#define	EXT4_IMAGIC		0x00002000	/* AFS directory */
-#define	EXT4_JOURNAL_DATA	0x00004000 /* File data should be journaled */
-#define	EXT4_NOTAIL		0x00008000 /* File tail should not be merged */
-#define	EXT4_DIRSYNC		0x00010000	/* Dirsync behaviour */
+#define	EXT2_SECRM		0x00000001	/* Secure deletion 安全删除 */
+#define	EXT2_UNRM		0x00000002	/* Undelete 取消删除 */
+#define	EXT2_COMPR		0x00000004	/* Compress file 压缩文件 */
+#define	EXT2_SYNC		0x00000008	/* Synchronous updates 同步更新 */
+#define	EXT2_IMMUTABLE		0x00000010	/* Immutable file 不可变文件 */
+#define	EXT2_APPEND		0x00000020 /* Writes to file may only append 对文件的写入只能附加 */
+#define	EXT2_NODUMP		0x00000040	/* Do not dump file 不要dump文件 */
+#define	EXT2_NOATIME		0x00000080	/* Do not update atime 不要更新atime */
+
+/* 下面的暂时不考虑 */
+#define	EXT3_INDEX		0x00001000	/* Hash-indexed directory hash索引目录 */
+#define	EXT4_IMAGIC		0x00002000	/* AFS directory AFS目录 */
+#define	EXT4_JOURNAL_DATA	0x00004000 /* File data should be journaled 文件数据需要被保存到日志 */
+#define	EXT4_NOTAIL		0x00008000 /* File tail should not be merged 不要合并文件尾 */
+#define	EXT4_DIRSYNC		0x00010000	/* Dirsync behaviour 目录同步行为 */
 #define	EXT4_TOPDIR		0x00020000 /* Top of directory hierarchies*/
 #define	EXT4_HUGE_FILE		0x00040000	/* Set to each huge file */
 #define	EXT4_EXTENTS		0x00080000	/* Inode uses extents */
@@ -122,7 +126,7 @@ struct ext2fs_dinode {
 	uint32_t	e2di_version;	/*  36: Low 32 bits inode version inode版本信息 */
 	uint32_t	e2di_blocks[EXT2_N_BLOCKS]; /* 40: disk blocks 指向数据块的指针 */
 	uint32_t	e2di_gen;	/* 100: generation number 文件版本(当网络文件系统访问文件的时候使用) */
-	uint32_t	e2di_facl;	/* 104: Low EA block 文件访问控制列表 */
+	uint32_t	e2di_facl;	/* 104: Low EA block 文件访问控制列表，貌似目前已经没有再被使用了 */
 	uint32_t	e2di_size_high;	/* 108: Upper bits of file size */
 	uint32_t	e2di_faddr;	/* 112: Fragment address (obsolete) */
 

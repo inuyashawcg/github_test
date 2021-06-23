@@ -133,7 +133,7 @@ void	ext2_gd_csum_set(struct m_ext2fs *);
 /* Flags to low-level allocation routines.
  * The low 16-bits are reserved for IO_ flags from vnode.h.
  */
-#define	BA_CLRBUF	0x00010000	/* Clear invalid areas of buffer. */
+#define	BA_CLRBUF	0x00010000	/* Clear invalid areas of buffer. 清除缓冲区的无效区域 */
 #define	BA_SEQMASK	0x7F000000	/* Bits holding seq heuristic. */
 #define	BA_SEQSHIFT	24
 #define	BA_SEQMAX	0x7F

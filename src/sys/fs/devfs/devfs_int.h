@@ -42,6 +42,11 @@
 struct devfs_dirent;
 struct devfs_mount;
 
+/*
+	cdev 的私有数据，cdev_privdata 要继承于 struct file？
+	struct file 中也包含有 cdev_privdata 指针，可能并不能这样来设计，而且这个结构体不是非常重要的，
+	可以直接保留
+*/
 struct cdev_privdata {
 	struct file		*cdpd_fp;	// 对应的file
 	void			*cdpd_data;	// cdev private data 
@@ -53,6 +58,7 @@ struct cdev_privdata {
 	cdev 私有数据？ cdevp_list 是用来存放 cdev_priv 结构体的一个队列，cdev_priv 中又包含
 	有指向 cdev 的指针。说明 cdev_priv 就是一个对 cdev 进行全方位管理的这么一个结构体，所以
 	devfs 在创建 cdev 的时候会一定会创建一个 cdev_priv
+	考虑一下是不是跟 cdev 是继承的关系？
 */
 struct cdev_priv {
 	struct cdev		cdp_c;	// 指向对应的cdev
@@ -103,6 +109,9 @@ extern struct mtx devmtx;
 extern struct mtx devfs_de_interlock;
 extern struct sx clone_drain_lock;
 extern struct mtx cdevpriv_mtx;
+/*
+	cdev_priv 类型的一个队列，所以要分析一下这个结构体到底是干什么用的
+*/
 extern TAILQ_HEAD(cdev_priv_list, cdev_priv) cdevp_list;
 
 #endif /* _KERNEL */

@@ -701,6 +701,7 @@ sbuf_putc(struct sbuf *s, int c)
 
 /*
  * Trim whitespace characters from end of an sbuf.
+ * 从sbuf结尾修剪空白字符
  */
 int
 sbuf_trim(struct sbuf *s)

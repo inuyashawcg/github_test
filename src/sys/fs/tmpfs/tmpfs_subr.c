@@ -101,6 +101,7 @@ static __inline int tmpfs_dirtree_cmp(struct tmpfs_dirent *a,
     struct tmpfs_dirent *b);
 RB_PROTOTYPE_STATIC(tmpfs_dir, tmpfs_dirent, uh.td_entries, tmpfs_dirtree_cmp);
 
+/* 判断 tmpfs 还有多少可用的内存空间 */
 size_t
 tmpfs_mem_avail(void)
 {
@@ -112,6 +113,7 @@ tmpfs_mem_avail(void)
 	return (avail);
 }
 
+/* 计算 tmpfs 已经使用了多少内存页 */
 size_t
 tmpfs_pages_used(struct tmpfs_mount *tmp)
 {
@@ -124,6 +126,7 @@ tmpfs_pages_used(struct tmpfs_mount *tmp)
 	return (meta_pages + tmp->tm_pages_used);
 }
 
+/* 当我们需要新申请一些内存页的时候，要通过这个函数来判断是否申请是否满足要求 */
 static size_t
 tmpfs_pages_check_avail(struct tmpfs_mount *tmp, size_t req_pages)
 {
@@ -137,6 +140,7 @@ tmpfs_pages_check_avail(struct tmpfs_mount *tmp, size_t req_pages)
 	return (1);
 }
 
+/* 增加结点的引用计数 */
 void
 tmpfs_ref_node(struct tmpfs_node *node)
 {
@@ -146,6 +150,9 @@ tmpfs_ref_node(struct tmpfs_node *node)
 	TMPFS_NODE_UNLOCK(node);
 }
 
+/*
+	注意，这里执行++操作的是 tmpfs_node->tn_refcount，而不是 vnode 的 reference
+*/
 void
 tmpfs_ref_node_locked(struct tmpfs_node *node)
 {
@@ -161,23 +168,32 @@ tmpfs_ref_node_locked(struct tmpfs_node *node)
  * Allocates a new node of type 'type' inside the 'tmp' mount point, with
  * its owner set to 'uid', its group to 'gid' and its mode set to 'mode',
  * using the credentials of the process 'p'.
+ * 使用进程“p”的凭据在“tmp”装入点内分配类型为“type”的新节点，其所有者设置为“uid”，
+ * 组设置为“gid”，模式设置为“mode”
  *
  * If the node type is set to 'VDIR', then the parent parameter must point
  * to the parent directory of the node being created.  It may only be NULL
  * while allocating the root node.
+ * 如果节点类型设置为“VDIR”，则parent参数必须指向正在创建的节点的父目录。分配根节点时，
+ * 它可能只有空。意思就是分配根目录的时候，它的父节点是null
  *
  * If the node type is set to 'VBLK' or 'VCHR', then the rdev parameter
  * specifies the device the node represents.
+ * 如果节点类型设置为“VBLK”或“VCHR”，则rdev参数指定节点所代表的设备
  *
  * If the node type is set to 'VLNK', then the parameter target specifies
  * the file name of the target file for the symbolic link that is being
  * created.
+ * 如果节点类型设置为“VLNK”，则参数target指定正在创建的符号链接的目标文件的文件名
  *
  * Note that new nodes are retrieved from the available list if it has
  * items or, if it is empty, from the node pool as long as there is enough
  * space to create them.
+ * 请注意，如果可用列表中有项，则从该列表中检索新节点；如果该列表为空，则从节点池中检索
+ * 新节点，只要有足够的空间来创建它们
  *
  * Returns zero on success or an appropriate error code on failure.
+ * 成功时返回零，失败时返回相应的错误代码
  */
 int
 tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
@@ -188,7 +204,10 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 	vm_object_t obj;
 
 	/* If the root directory of the 'tmp' file system is not yet
-	 * allocated, this must be the request to do it. */
+	 * allocated, this must be the request to do it. 
+	 * 如果尚未分配“tmp”文件系统的根目录，则必须请求分配
+	 * MPASS的作用就是生成assert，生成一些提示信息
+	 * */
 	MPASS(IMPLIES(tmp->tm_root == NULL, parent == NULL && type == VDIR));
 	KASSERT(tmp->tm_root == NULL || mp->mnt_writeopcount > 0,
 	    ("creating node not under vn_start_write"));
@@ -196,6 +215,9 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 	MPASS(IFF(type == VLNK, target != NULL));
 	MPASS(IFF(type == VBLK || type == VCHR, rdev != VNOVAL));
 
+	/*
+		判断节点数是不是超过限制，判断内存空间是否足够
+	*/
 	if (tmp->tm_nodes_inuse >= tmp->tm_nodes_max)
 		return (ENOSPC);
 	if (tmpfs_pages_check_avail(tmp, 1) == 0)
@@ -212,17 +234,22 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 		 * racy: if we did not see MNTK_UNMOUNT flag, then tmp
 		 * cannot be destroyed until node construction is
 		 * finished and the parent vnode unlocked.
-		 *
+		 * 为完全构造的装入点创建新的tmpfs节点时，必须有一个父节点，该vnode以独占方式锁定。
+		 * 因此，如果卸载是并行执行的，vflush() 将无法回收父vnode。因此，对 MNTK_UNMOUNT
+		 * 标志的检查是不快速的：如果我们没有看到 MNTK_UNMOUNT 标志，那么在节点构造完成并且
+		 * 父vnode解锁之前，tmp不能被销毁
+		 * 
 		 * Tmpfs does not need to instantiate new nodes during
-		 * unmount.
+		 * unmount. Tmpfs不需要在卸载期间实例化新节点
 		 */
 		return (EBUSY);
 	}
 
+	/* 通过 UMA 机制给 tmpfs_node 分配空间 */
 	nnode = (struct tmpfs_node *)uma_zalloc_arg(tmp->tm_node_pool, tmp,
 	    M_WAITOK);
 
-	/* Generic initialization. */
+	/* Generic initialization. 通用的初始化操作步骤 */
 	nnode->tn_type = type;
 	vfs_timestamp(&nnode->tn_atime);
 	nnode->tn_birthtime = nnode->tn_ctime = nnode->tn_mtime =
@@ -230,17 +257,21 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 	nnode->tn_uid = uid;
 	nnode->tn_gid = gid;
 	nnode->tn_mode = mode;
+	/* mount函数中会执行new_unrhdr，node分配的时候就调用 alloc_unr */
 	nnode->tn_id = alloc_unr(tmp->tm_ino_unr);
 	nnode->tn_refcount = 1;
 
-	/* Type-specific initialization. */
+	/* Type-specific initialization. 类型相关的初始化，把各种类型的文件
+		统一为 tmpfs_node 进行初始化(基类和派生类的关系)
+	*/
 	switch (nnode->tn_type) {
 	case VBLK:
 	case VCHR:
-		nnode->tn_rdev = rdev;
+		nnode->tn_rdev = rdev;	/* 字符设备或者块设备文件，仅仅处理 tn_rdev 成员 */
 		break;
 
 	case VDIR:
+		/* 如果是目录，那就要初始化 node 链表和一些相关操作 */
 		RB_INIT(&nnode->tn_dir.tn_dirhead);
 		LIST_INIT(&nnode->tn_dir.tn_dupindex);
 		MPASS(parent != nnode);
@@ -260,13 +291,14 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 		break;
 
 	case VLNK:
-		MPASS(strlen(target) < MAXPATHLEN);
+		MPASS(strlen(target) < MAXPATHLEN);	/* target: 要链接的目标文件 */
 		nnode->tn_size = strlen(target);
 		nnode->tn_link = malloc(nnode->tn_size, M_TMPFSNAME,
 		    M_WAITOK);
 		memcpy(nnode->tn_link, target, nnode->tn_size);
 		break;
 
+	/* regular file： 判断是否分配的内存页 */
 	case VREG:
 		obj = nnode->tn_reg.tn_aobj =
 		    vm_pager_allocate(OBJT_SWAP, NULL, 0, VM_PROT_DEFAULT, 0,
@@ -284,19 +316,23 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 	}
 
 	TMPFS_LOCK(tmp);
+	/* 将新创建的结点添加到已经被使用的结点链表头部 */
 	LIST_INSERT_HEAD(&tmp->tm_nodes_used, nnode, tn_entries);
+	
+	/* 刷新相关成员变量的值 */
 	nnode->tn_attached = true;
 	tmp->tm_nodes_inuse++;
 	tmp->tm_refcount++;
 	TMPFS_UNLOCK(tmp);
 
-	*node = nnode;
+	*node = nnode;	/* 返回新创建的 tmpfs_node 指针用于后续操作 */
 	return (0);
 }
 
 /*
  * Destroys the node pointed to by node from the file system 'tmp'.
  * If the node references a directory, no entries are allowed.
+ * 从文件系统“tmp”中销毁节点指向的节点。如果节点引用目录，则不允许任何条目
  */
 void
 tmpfs_free_node(struct tmpfs_mount *tmp, struct tmpfs_node *node)
@@ -360,7 +396,7 @@ tmpfs_free_node_locked(struct tmpfs_mount *tmp, struct tmpfs_node *node,
 				atomic_subtract_long(&tmp->tm_pages_used, uobj->size);
 			KASSERT((uobj->flags & OBJ_TMPFS) == 0,
 			    ("leaked OBJ_TMPFS node %p vm_obj %p", node, uobj));
-			vm_object_deallocate(uobj);
+			vm_object_deallocate(uobj);	/* vm object 释放相应的内存空间 */
 		}
 		break;
 
@@ -372,15 +408,17 @@ tmpfs_free_node_locked(struct tmpfs_mount *tmp, struct tmpfs_node *node,
 	 * If we are unmounting there is no need for going through the overhead
 	 * of freeing the inodes from the unr individually, so free them all in
 	 * one go later.
+	 * 如果我们正在卸载，就不需要单独从unr中释放inode的开销，所以稍后可以一次性释放它们
 	 */
 	if (!detach)
 		free_unr(tmp->tm_ino_unr, node->tn_id);
-	uma_zfree(tmp->tm_node_pool, node);
+	uma_zfree(tmp->tm_node_pool, node);	/* UMA 对象释放 */
 	TMPFS_LOCK(tmp);
 	tmpfs_free_tmp(tmp);
 	return (true);
 }
 
+/* 通过 name 和 name length 来计算 hash，主要是用于结点查找 */
 static __inline uint32_t
 tmpfs_dirent_hash(const char *name, u_int len)
 {
@@ -396,6 +434,7 @@ tmpfs_dirent_hash(const char *name, u_int len)
 	return (hash);
 }
 
+/* cookie 是目录结点的标志符 */
 static __inline off_t
 tmpfs_dirent_cookie(struct tmpfs_dirent *de)
 {
@@ -407,6 +446,7 @@ tmpfs_dirent_cookie(struct tmpfs_dirent *de)
 	return (de->td_cookie);
 }
 
+/* 下面这两个是用于红黑树相关属性判断？ */
 static __inline boolean_t
 tmpfs_dirent_dup(struct tmpfs_dirent *de)
 {
@@ -419,22 +459,26 @@ tmpfs_dirent_duphead(struct tmpfs_dirent *de)
 	return ((de->td_cookie & TMPFS_DIRCOOKIE_DUPHEAD) != 0);
 }
 
+/* 目录结点初始化 */
 void
 tmpfs_dirent_init(struct tmpfs_dirent *de, const char *name, u_int namelen)
 {
+	/* 计算出的 hash 值初始化 cookie 和 td_hash */
 	de->td_hash = de->td_cookie = tmpfs_dirent_hash(name, namelen);
-	memcpy(de->ud.td_name, name, namelen);
-	de->td_namelen = namelen;
+	memcpy(de->ud.td_name, name, namelen);	/* 初始化目录名 */
+	de->td_namelen = namelen;	/* 指定 namelen */
 }
 
 /*
  * Allocates a new directory entry for the node node with a name of name.
  * The new directory entry is returned in *de.
+ * 为名为name的节点分配新的目录项。新目录项以*de形式返回
  *
  * The link count of node is increased by one to reflect the new object
- * referencing it.
+ * referencing it. 节点的链接计数增加1，以反映引用它的新对象
  *
  * Returns zero on success or an appropriate error code on failure.
+ * 成功时返回零，失败时返回相应的错误代码
  */
 int
 tmpfs_alloc_dirent(struct tmpfs_mount *tmp, struct tmpfs_node *node,
@@ -442,6 +486,7 @@ tmpfs_alloc_dirent(struct tmpfs_mount *tmp, struct tmpfs_node *node,
 {
 	struct tmpfs_dirent *nde;
 
+	/* tmpfs 对于目录项和文件项，都是通过 UMA 机制来分配内存 */
 	nde = uma_zalloc(tmp->tm_dirent_pool, M_WAITOK);
 	nde->td_node = node;
 	if (name != NULL) {
@@ -450,7 +495,7 @@ tmpfs_alloc_dirent(struct tmpfs_mount *tmp, struct tmpfs_node *node,
 	} else
 		nde->td_namelen = 0;
 	if (node != NULL)
-		node->tn_links++;
+		node->tn_links++;	/* 引用计数++，free 的时候猜测是要先进行--操作 */
 
 	*de = nde;
 
@@ -460,11 +505,14 @@ tmpfs_alloc_dirent(struct tmpfs_mount *tmp, struct tmpfs_node *node,
 /*
  * Frees a directory entry.  It is the caller's responsibility to destroy
  * the node referenced by it if needed.
+ * 释放目录项。如果需要，调用者有责任销毁其引用的节点
  *
  * The link count of node is decreased by one to reflect the removal of an
  * object that referenced it.  This only happens if 'node_exists' is true;
  * otherwise the function will not access the node referred to by the
  * directory entry, as it may already have been released from the outside.
+ * 节点的链接计数减少1，以反映引用它的对象的删除。只有当“node_exists”为真时才会发生这种情况；
+ * 否则函数将不会访问目录项所引用的节点，因为它可能已经从外部释放了
  */
 void
 tmpfs_free_dirent(struct tmpfs_mount *tmp, struct tmpfs_dirent *de)
@@ -516,8 +564,11 @@ tmpfs_insmntque_dtr(struct vnode *vp, void *dtr_arg)
  * Allocates a new vnode for the node node or returns a new reference to
  * an existing one if the node had already a vnode referencing it.  The
  * resulting locked vnode is returned in *vpp.
+ * 为该节点分配新的vnode，或者如果该节点已有一个vnode引用它，则返回对现有vnode的新引用。
+ * 结果锁定的vnode在*vpp中返回
  *
  * Returns zero on success or an appropriate error code on failure.
+ * 执行成功返回0，失败则返回对应的错误码
  */
 int
 tmpfs_alloc_vp(struct mount *mp, struct tmpfs_node *node, int lkflag,
@@ -529,9 +580,13 @@ tmpfs_alloc_vp(struct mount *mp, struct tmpfs_node *node, int lkflag,
 	int error;
 
 	error = 0;
+	/*
+		这个宏不是 mount 到 tmpfs_mount 的强制类型转换，而是 mount->mnt_data 到 tmpfs_mount
+		的强制类型转换，所以如果以后要改成C++，还是注意分析要分析它们之间的关系，思考如何来设计 
+	*/
 	tm = VFS_TO_TMPFS(mp);
-	TMPFS_NODE_LOCK(node);
-	tmpfs_ref_node_locked(node);
+	TMPFS_NODE_LOCK(node);	/* 首先锁住 tmpfs_node 结点 */
+	tmpfs_ref_node_locked(node);	/* tmpfs_node 应用计数++，而不是 vnode */
 loop:
 	TMPFS_NODE_ASSERT_LOCKED(node);
 	if ((vp = node->tn_vnode) != NULL) {
@@ -542,7 +597,7 @@ loop:
 		    (lkflag & LK_NOWAIT) != 0)) {
 			VI_UNLOCK(vp);
 			TMPFS_NODE_UNLOCK(node);
-			error = ENOENT;
+			error = ENOENT;	/* 没有文件或者目录，所以上面的属性判断应该是针对文件是否存在 */
 			vp = NULL;
 			goto out;
 		}
@@ -555,10 +610,10 @@ loop:
 			}
 			goto loop;
 		}
-		TMPFS_NODE_UNLOCK(node);
-		error = vget(vp, lkflag | LK_INTERLOCK, curthread);
+		TMPFS_NODE_UNLOCK(node);	/* node解锁之后，再进行下面的操作 */
+		error = vget(vp, lkflag | LK_INTERLOCK, curthread);	/* 获取一个vnode */
 		if (error == ENOENT) {
-			TMPFS_NODE_LOCK(node);
+			TMPFS_NODE_LOCK(node);	/* 如果vget出错，重新锁住结点，跳转到loop */
 			goto loop;
 		}
 		if (error != 0) {
@@ -569,16 +624,21 @@ loop:
 		/*
 		 * Make sure the vnode is still there after
 		 * getting the interlock to avoid racing a free.
+		 * 要确认在得到 interlock 之后 vnode 依然在这里，避免操作free？
 		 */
 		if (node->tn_vnode == NULL || node->tn_vnode != vp) {
-			vput(vp);
-			TMPFS_NODE_LOCK(node);
+			vput(vp);	/* 减少 vnode 引用计数，而不是 tmpfs_node，与上面的操作区分 */
+			TMPFS_NODE_LOCK(node);	/* 再次锁住结点，跳转到loop */
 			goto loop;
 		}
 
 		goto out;
-	}
+	}	// end if (vnode != NULL)
 
+	/*
+		上面的逻辑代码都是针对 tmpfs_node 对应的 vnode 不为 NULL 的情况，后续就是针对 vnode
+		为 NULL 时的处理。不为空说明已经为其分配了vnode，要检查的是 vnode 当前的状态
+	*/
 	if ((node->tn_vpstate & TMPFS_VNODE_DOOMED) ||
 	    (node->tn_type == VDIR && node->tn_dir.tn_parent == NULL)) {
 		TMPFS_NODE_UNLOCK(node);
@@ -590,8 +650,16 @@ loop:
 	/*
 	 * otherwise lock the vp list while we call getnewvnode
 	 * since that can block.
+	 * 
+	 * mount 的时候会调用 uma_zcreate 函数，里面又注册了一个 tmpfs_node_ctor 函数。查阅 uma.h
+	 * 中的注释可以发现，当我们为 object 申请空间的时候，这个 tmpfs_node_ctor 会被调用，该函数会把
+	 * tn_vpstate 的值初始化为0，这样我们在执行 或/与 操作的时候就可以判断其是否包含有相关属性
 	 */
 	if (node->tn_vpstate & TMPFS_VNODE_ALLOCATING) {
+		/*
+			当结点属性为 TMPFS_VNODE_ALLOCATING 的时候，应该是表示还未完成，这个时候修改node状态为 TMPFS_VNODE_WANT，
+			把进程或线程睡眠，然后返回loop检查是否完成？
+		*/
 		node->tn_vpstate |= TMPFS_VNODE_WANT;
 		error = msleep((caddr_t) &node->tn_vpstate,
 		    TMPFS_NODE_MTX(node), 0, "tmpfs_alloc_vp", 0);
@@ -610,10 +678,12 @@ loop:
 		goto unlock;
 	MPASS(vp != NULL);
 
-	/* lkflag is ignored, the lock is exclusive */
+	/* lkflag is ignored, the lock is exclusive 
+		lkflag 被忽略，锁是独占的
+	*/
 	(void) vn_lock(vp, lkflag | LK_RETRY);
 
-	vp->v_data = node;
+	vp->v_data = node;	/* vnode private data 指定为 tmpfs_data */
 	vp->v_type = node->tn_type;
 
 	/* Type-specific initialization. */
@@ -635,7 +705,7 @@ loop:
 		VI_LOCK(vp);
 		KASSERT(vp->v_object == NULL, ("Not NULL v_object in tmpfs"));
 		vp->v_object = object;
-		object->un_pager.swp.swp_tmpfs = vp;
+		object->un_pager.swp.swp_tmpfs = vp;	/* swap page，内存管理相关 */
 		vm_object_set_flag(object, OBJ_TMPFS);
 		VI_UNLOCK(vp);
 		VM_OBJECT_WUNLOCK(object);
@@ -652,6 +722,7 @@ loop:
 	if (vp->v_type != VFIFO)
 		VN_LOCK_ASHARE(vp);
 
+	/* 将 vp 插入到 mp->mnt_nvnodelist 当中， */
 	error = insmntque1(vp, mp, tmpfs_insmntque_dtr, NULL);
 	if (error != 0)
 		vp = NULL;
@@ -689,6 +760,7 @@ out:
 /*
  * Destroys the association between the vnode vp and the node it
  * references.
+ * 销毁vnode vp与其引用的节点之间的关联
  */
 void
 tmpfs_free_vp(struct vnode *vp)
@@ -714,6 +786,10 @@ tmpfs_free_vp(struct vnode *vp)
  * If successful, *vpp holds a vnode to the newly created file and zero
  * is returned.  Otherwise *vpp is NULL and the function returns an
  * appropriate error code.
+ * 创建一个新的'type'类型的文件并添加到它的父目录'dvp'当中；这个添加通过利用'cnp'给定的组件名称
+ * 来完成。新文件的所有权根据调用者的凭据（通过“cnp”）自动分配，组根据父目录设置，模式由“vap”参数
+ * 确定。如果成功的话，*vpp将持有新创建的文档对应的vnode并且返回0；否则，*vpp 将会是 NULL并且函数
+ * 会返回对应的额错误码
  */
 int
 tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
@@ -727,7 +803,7 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 	struct tmpfs_node *parent;
 
 	ASSERT_VOP_ELOCKED(dvp, "tmpfs_alloc_file");
-	MPASS(cnp->cn_flags & HASBUF);
+	MPASS(cnp->cn_flags & HASBUF);	/* 判断是否含有 pathname buffer */
 
 	tmp = VFS_TO_TMPFS(dvp->v_mount);
 	dnode = VP_TO_TMPFS_DIR(dvp);
@@ -735,10 +811,12 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 
 	/* If the entry we are creating is a directory, we cannot overflow
 	 * the number of links of its parent, because it will get a new
-	 * link. */
+	 * link. 
+	 * 如果我们创建的条目是目录，我们就不能溢出父目录的链接数，因为它将获得一个新链接
+	 * */
 	if (vap->va_type == VDIR) {
 		/* Ensure that we do not overflow the maximum number of links
-		 * imposed by the system. */
+		 * imposed by the system. 确保我们不会溢出系统所施加的最大链接数 */
 		MPASS(dnode->tn_links <= TMPFS_LINK_MAX);
 		if (dnode->tn_links == TMPFS_LINK_MAX) {
 			return (EMLINK);
@@ -749,14 +827,20 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 	} else
 		parent = NULL;
 
-	/* Allocate a node that represents the new file. */
+	/* 
+		Allocate a node that represents the new file. 
+		这里新创建的结点是 tmpfs_node，而不是 vnode，这一点要注意。vnode 其实是 VFS 来统一管理的，
+		每个具体的文件系统只需要向虚拟文件系统来申请 vnode 即可。获取到的结点用于填充 node
+	*/
 	error = tmpfs_alloc_node(dvp->v_mount, tmp, vap->va_type,
 	    cnp->cn_cred->cr_uid, dnode->tn_gid, vap->va_mode, parent,
 	    target, vap->va_rdev, &node);
 	if (error != 0)
 		return (error);
 
-	/* Allocate a directory entry that points to the new file. */
+	/* Allocate a directory entry that points to the new file. 
+		获取到的目录结点填充de
+	*/
 	error = tmpfs_alloc_dirent(tmp, node, cnp->cn_nameptr, cnp->cn_namelen,
 	    &de);
 	if (error != 0) {
@@ -764,9 +848,12 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 		return (error);
 	}
 
-	/* Allocate a vnode for the new file. */
+	/* Allocate a vnode for the new file. 
+		再利用生成的 node 进一步去生成一个 directory
+	*/
 	error = tmpfs_alloc_vp(dvp->v_mount, node, LK_EXCLUSIVE, vpp);
 	if (error != 0) {
+		/* 如果执行出错，执行下列清理步骤 */
 		tmpfs_free_dirent(tmp, de);
 		tmpfs_free_node(tmp, node);
 		return (error);
@@ -777,7 +864,7 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 	 * cannot fail. */
 	if (cnp->cn_flags & ISWHITEOUT)
 		tmpfs_dir_whiteout_remove(dvp, cnp);
-	tmpfs_dir_attach(dvp, de);
+	tmpfs_dir_attach(dvp, de);	/* 将新生成的目录结点对应到相应的vnode */
 	return (0);
 }
 
@@ -816,7 +903,9 @@ tmpfs_dir_next(struct tmpfs_node *dnode, struct tmpfs_dir_cursor *dc)
 	return (dc->tdc_current);
 }
 
-/* Lookup directory entry in RB-Tree. Function may return duphead entry. */
+/* Lookup directory entry in RB-Tree. Function may return duphead entry. 
+	在红黑树上查找目录结点，函数有可能会返回一个 duphead 条目
+*/
 static struct tmpfs_dirent *
 tmpfs_dir_xlookup_hash(struct tmpfs_node *dnode, uint32_t hash)
 {
@@ -827,7 +916,9 @@ tmpfs_dir_xlookup_hash(struct tmpfs_node *dnode, uint32_t hash)
 	return (de);
 }
 
-/* Lookup directory entry by cookie, initialize directory cursor accordingly. */
+/* Lookup directory entry by cookie, initialize directory cursor accordingly. 
+	通过 cookie 来查找目录项，相应地初始化目录游标
+*/
 static struct tmpfs_dirent *
 tmpfs_dir_lookup_cookie(struct tmpfs_node *node, off_t cookie,
     struct tmpfs_dir_cursor *dc)
@@ -890,8 +981,11 @@ out:
  * 'cnp' describes the name of the entry to look for.  Note that the .
  * and .. components are not allowed as they do not physically exist
  * within directories.
- *
+ * 通过 tmpfs_node 查找其对应的目录项。'cnp'表示的是需要查找的目录项的名称。注意
+ * . 和 .. 两个名称是不被允许，因为它们实际上不存在于目录中
+ * 
  * Returns a pointer to the entry when found, otherwise NULL.
+ * 如果查找到了就返回对应的指针，否则返回NULL
  */
 struct tmpfs_dirent *
 tmpfs_dir_lookup(struct tmpfs_node *node, struct tmpfs_node *f,
@@ -929,6 +1023,7 @@ tmpfs_dir_lookup(struct tmpfs_node *node, struct tmpfs_node *f,
 /*
  * Attach duplicate-cookie directory entry nde to dnode and insert to dupindex
  * list, allocate new cookie value.
+ * 将重复的cookie目录条目nde附加到dnode并插入到dupindex列表，分配新的cookie值
  */
 static void
 tmpfs_dir_attach_dup(struct tmpfs_node *dnode,
@@ -997,6 +1092,7 @@ tmpfs_dir_attach_dup(struct tmpfs_node *dnode,
  * Attaches the directory entry de to the directory represented by vp.
  * Note that this does not change the link count of the node pointed by
  * the directory entry, as this is done by tmpfs_alloc_dirent.
+ * 将目录项 de 关联到对应的 vnode。
  */
 void
 tmpfs_dir_attach(struct vnode *vp, struct tmpfs_dirent *de)
@@ -1357,8 +1453,11 @@ tmpfs_dir_whiteout_remove(struct vnode *dvp, struct componentname *cnp)
  * Resizes the aobj associated with the regular file pointed to by 'vp' to the
  * size 'newsize'.  'vp' must point to a vnode that represents a regular file.
  * 'newsize' must be positive.
- *
+ * 将与vp指向的常规文件相关联的 aobj 调整大小为 newsize，vp必须指向一个表示常规文件的 vnode，
+ * newsize 必须是正值
+ * 
  * Returns zero on success or an appropriate error code on failure.
+ * 成功返回0，失败返回对应的错误码
  */
 int
 tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
@@ -1366,8 +1465,8 @@ tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
 	struct tmpfs_mount *tmp;
 	struct tmpfs_node *node;
 	vm_object_t uobj;
-	vm_page_t m;
-	vm_pindex_t idx, newpages, oldpages;
+	vm_page_t m;	/* struct vm_page* */
+	vm_pindex_t idx, newpages, oldpages;	/* unsigned long */
 	off_t oldsize;
 	int base, rv;
 
@@ -1375,7 +1474,7 @@ tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
 	MPASS(newsize >= 0);
 
 	node = VP_TO_TMPFS_NODE(vp);
-	uobj = node->tn_reg.tn_aobj;
+	uobj = node->tn_reg.tn_aobj;	/* 常规文件对应的是 vm_object_t 类型成员 */
 	tmp = VFS_TO_TMPFS(vp->v_mount);
 
 	/*
@@ -1383,6 +1482,10 @@ tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
 	 * store them.  It may happen that we do not need to do anything
 	 * because the last allocated page can accommodate the change on
 	 * its own.
+	 * 将新旧大小转换为存储它们所需的页数。可能发生的是，我们不需要做任何事情，
+	 * 因为最后分配的页面可以自己适应更改。考虑如果一个文件连一个 page 都没占满的情况，
+	 * 这个时候如果除4096然后取整，得到的结果应该是0，而实际上这个文件占用的 page 
+	 * 是一个，所以加上 PAGE_MASK 就可以防止这种情况的发生
 	 */
 	oldsize = node->tn_size;
 	oldpages = OFF_TO_IDX(oldsize + PAGE_MASK);
@@ -1402,9 +1505,11 @@ tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
 	if (newsize < oldsize) {
 		/*
 		 * Zero the truncated part of the last page.
+		 * 将最后一页的截断部分归零
 		 */
 		base = newsize & PAGE_MASK;
 		if (base != 0) {
+				/* 计算 page index，利用的是 newsize */
 			idx = OFF_TO_IDX(newsize);
 retry:
 			m = vm_page_lookup(uobj, idx);
@@ -1458,7 +1563,7 @@ retry:
 			    newpages);
 			vm_object_page_remove(uobj, newpages, 0, 0);
 		}
-	}
+	} // end if (newsize < oldsize)，上面只处理这种情形
 	uobj->size = newpages;
 	VM_OBJECT_WUNLOCK(uobj);
 
@@ -1833,6 +1938,9 @@ tmpfs_update(struct vnode *vp)
 	tmpfs_itimes(vp, NULL, NULL);
 }
 
+/*
+	truncate: 截断
+*/
 int
 tmpfs_truncate(struct vnode *vp, off_t length)
 {

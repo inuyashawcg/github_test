@@ -75,12 +75,24 @@ struct cdev {
 	int		si_drv0;
 	int		si_refcount;
 	LIST_ENTRY(cdev)	si_list;
-	LIST_ENTRY(cdev)	si_clone;
+	LIST_ENTRY(cdev)	si_clone;	// 克隆对象列表
 	LIST_HEAD(, cdev)	si_children;	// 管理目录下所包含的文件或二级目录？
-	LIST_ENTRY(cdev)	si_siblings;
-	struct cdev *si_parent;	// 上级目录？
+	LIST_ENTRY(cdev)	si_siblings;	// silbings: 兄弟姐妹
+	struct cdev *si_parent;	// 父级对象
 	struct mount	*si_mountpt;	// 挂载点
+
+	/* 
+		si_drv2 在 geom 层中表示的 consumer，si_drv1 表示的是 provider
+		cdev 通过这两个指针连表示自己是提供者还是消费者，或者既是消费者又是提供者；
+		还是说它有提供者和消费者？
+	*/
 	void		*si_drv1, *si_drv2;
+	/*
+		在 linux 系统中，也包含有一个相同命名的 cdev 结构体，其中有一个成员是 
+			const struct file_operations *ops
+		非常直接地把文件操作表包含了进来，应该就是对应这里的 cdevsw。这个结构体是
+		在 devfs 文件系统中将其与文件操作关联到了一起
+	*/
 	struct cdevsw	*si_devsw;	// 操作函数表
 	int		si_iosize_max;	/* maximum I/O size (for physio &al) */
 	u_long		si_usecount;

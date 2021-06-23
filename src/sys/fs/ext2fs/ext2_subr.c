@@ -61,21 +61,23 @@
  * Return buffer with the contents of block "offset" from the beginning of
  * directory "ip".  If "res" is non-zero, fill it in with a pointer to the
  * remaining space in the directory.
+ * 从目录“ip”开始返回块“offset”内容的缓冲区。如果“res”不为零，则用指向目录中剩余空间的指针填充它
  */
 int
 ext2_blkatoff(struct vnode *vp, off_t offset, char **res, struct buf **bpp)
 {
 	struct inode *ip;
-	struct m_ext2fs *fs;
+	struct m_ext2fs *fs;	/* in-memory superblock */
 	struct buf *bp;
 	e2fs_lbn_t lbn;
 	int error, bsize;
 
 	ip = VTOI(vp);
 	fs = ip->i_e2fs;
-	lbn = lblkno(fs, offset);
-	bsize = blksize(fs, ip, lbn);
+	lbn = lblkno(fs, offset);	/* 计算 inode 所在的逻辑块号 */
+	bsize = blksize(fs, ip, lbn);	/* 应该是blocksize？ */
 
+	/* 根据逻辑块号读取对应逻辑块中的数据，然后保存到buf当中 */
 	if ((error = bread(vp, lbn, bsize, NOCRED, &bp)) != 0) {
 		brelse(bp);
 		return (error);
@@ -85,6 +87,10 @@ ext2_blkatoff(struct vnode *vp, off_t offset, char **res, struct buf **bpp)
 		brelse(bp);
 		return (error);
 	}
+	/* 
+		一个块中包含有多个目录项，每个目录项都有相对于块的起始地址的偏移量，
+		然后根据偏移量获取我们所要找的目录项，并将数据存放到 res 当中
+	*/
 	if (res)
 		*res = (char *)bp->b_data + blkoff(fs, offset);
 

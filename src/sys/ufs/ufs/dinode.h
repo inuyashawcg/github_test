@@ -88,6 +88,7 @@
 
 /*
  * The size of physical and logical block numbers and time fields in UFS.
+ * UFS中物理和逻辑块号以及时间字段的大小
  */
 typedef	int32_t	ufs1_daddr_t;
 typedef	int64_t	ufs2_daddr_t;
@@ -125,31 +126,35 @@ typedef int64_t ufs_time_t;
 #define	UFS_NIADDR	3		/* Indirect addresses in inode. */
 
 struct ufs2_dinode {
-	u_int16_t	di_mode;	/*   0: IFMT, permissions; see below. */
-	int16_t		di_nlink;	/*   2: File link count. */
-	u_int32_t	di_uid;		/*   4: File owner. */
-	u_int32_t	di_gid;		/*   8: File group. */
-	u_int32_t	di_blksize;	/*  12: Inode blocksize. */
-	u_int64_t	di_size;	/*  16: File byte count. */
-	u_int64_t	di_blocks;	/*  24: Blocks actually held. */
-	ufs_time_t	di_atime;	/*  32: Last access time. */
-	ufs_time_t	di_mtime;	/*  40: Last modified time. */
-	ufs_time_t	di_ctime;	/*  48: Last inode change time. */
-	ufs_time_t	di_birthtime;	/*  56: Inode creation time. */
-	int32_t		di_mtimensec;	/*  64: Last modified time. */
+	u_int16_t	di_mode;	/*   0: IFMT, permissions; see below. 文件的类型和访问模式 */
+	int16_t		di_nlink;	/*   2: File link count. 文件的链接数 */
+	u_int32_t	di_uid;		/*   4: File owner. 文件所有者 */
+	u_int32_t	di_gid;		/*   8: File group. 文件所属组 */
+	u_int32_t	di_blksize;	/*  12: Inode blocksize. 物理块大小？ */
+	u_int64_t	di_size;	/*  16: File byte count. 文件的字节数 */
+	u_int64_t	di_blocks;	/*  24: Blocks actually held. 实际持有的块 */
+	ufs_time_t	di_atime;	/*  32: Last access time. 最后一次访问的时间 */
+	ufs_time_t	di_mtime;	/*  40: Last modified time. 最后一次修改的时间 */
+	ufs_time_t	di_ctime;	/*  48: Last inode change time. 系统更新inode结点的时间 */
+	ufs_time_t	di_birthtime;	/*  56: Inode creation time. inode创建的时间 */
+	int32_t		di_mtimensec;	/*  64: Last modified time. 最后修改的时间(second？) */
 	int32_t		di_atimensec;	/*  68: Last access time. */
 	int32_t		di_ctimensec;	/*  72: Last inode change time. */
 	int32_t		di_birthnsec;	/*  76: Inode creation time. */
-	u_int32_t	di_gen;		/*  80: Generation number. */
+	/*
+		每次把inode分配给一个新文件的时候，系统会给inode指派一个随机选择的数字；NFS通过它判断
+		是否访问了已经被删除的文件
+	*/
+	u_int32_t	di_gen;		/*  80: Generation number. 文件的生成号 */
 	u_int32_t	di_kernflags;	/*  84: Kernel flags. */
 	u_int32_t	di_flags;	/*  88: Status flags (chflags). */
-	u_int32_t	di_extsize;	/*  92: External attributes size. */
-	ufs2_daddr_t	di_extb[UFS_NXADDR];/* 96: External attributes block. */
+	u_int32_t	di_extsize;	/*  92: External attributes size. 扩展属性大小 */
+	ufs2_daddr_t	di_extb[UFS_NXADDR];/* 96: External attributes block. 数组中存放的是64位块指针，下同 */
 	ufs2_daddr_t	di_db[UFS_NDADDR]; /* 112: Direct disk blocks. */
 	ufs2_daddr_t	di_ib[UFS_NIADDR]; /* 208: Indirect disk blocks. */
 	u_int64_t	di_modrev;	/* 232: i_modrev for NFSv4 */
-	uint32_t	di_freelink;	/* 240: SUJ: Next unlinked inode. */
-	uint32_t	di_spare[3];	/* 244: Reserved; currently unused */
+	uint32_t	di_freelink;	/* 240: SUJ: Next unlinked inode. 下一个未链接的inode */
+	uint32_t	di_spare[3];	/* 244: Reserved; currently unused 保留；当前未使用 */
 };
 
 /*

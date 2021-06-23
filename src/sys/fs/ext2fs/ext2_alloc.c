@@ -367,38 +367,50 @@ fail:
 
 /*
  * Allocate an inode in the filesystem.
- *
+ * 在文件系统中申请一个 inode 结构
+ * 通过实际应用场景可知，pvp 表示的很可能是当前目录所对应的 vnode，vpp 表示的可能是我们
+ * 所要创建的文件或者文件夹所对应的 vnode
  */
 int
 ext2_valloc(struct vnode *pvp, int mode, struct ucred *cred, struct vnode **vpp)
 {
 	struct timespec ts;
 	struct inode *pip;
-	struct m_ext2fs *fs;
+	struct m_ext2fs *fs;	/* in-memory superblock */
 	struct inode *ip;
-	struct ext2mount *ump;
+	struct ext2mount *ump;	/* ext2_mount */
 	ino_t ino, ipref;
 	int error, cg;
 
+	/* 初始时的一些赋值操作 */
 	*vpp = NULL;
-	pip = VTOI(pvp);
-	fs = pip->i_e2fs;
-	ump = pip->i_ump;
+	pip = VTOI(pvp);	/* 当前目录所对应的 inode 信息 */
+	fs = pip->i_e2fs;	/* 获取超级块信息 */
+	ump = pip->i_ump;	/* 获取挂载点信息 */
 
 	EXT2_LOCK(ump);
+	/* 首先判断空闲 inode 的数量是否为0 */
 	if (fs->e2fs->e2fs_ficount == 0)
 		goto noinodes;
 	/*
 	 * If it is a directory then obtain a cylinder group based on
 	 * ext2_dirpref else obtain it using ino_to_cg. The preferred inode is
 	 * always the next inode.
+	 * 
+	 * 如果这是一个目录，那么通过 ext2_dirpref 获得一个柱面组，否则通过 ino_to_cg 来获取。
+	 * 首选 inode 总是下一个 inode。从下面的代码逻辑可以看出，文件系统对目录的分配有一套策略，
+	 * 给人的感觉是目录要平均分配到不同的块组当中，而不是说先集中使用同一个块组进行存储
 	 */
 	if ((mode & IFMT) == IFDIR) {
-		cg = ext2_dirpref(pip);
+		cg = ext2_dirpref(pip);	/* 通过一套策略找到最适合存放该目录的一个块组 */
 		if (fs->e2fs_contigdirs[cg] < 255)
-			fs->e2fs_contigdirs[cg]++;
+			fs->e2fs_contigdirs[cg]++;	/* 该块组中包含的目录数量++ */
 	} else {
+		/* 如果是对普通文件的操作，就直接根据 inode number 来计算块组号 */
 		cg = ino_to_cg(fs, pip->i_number);
+		/*
+			如果处理的不是目录项，就要执行--操作？
+		*/
 		if (fs->e2fs_contigdirs[cg] > 0)
 			fs->e2fs_contigdirs[cg]--;
 	}
@@ -412,7 +424,7 @@ ext2_valloc(struct vnode *pvp, int mode, struct ucred *cred, struct vnode **vpp)
 		ext2_vfree(pvp, ino, mode);
 		return (error);
 	}
-	ip = VTOI(*vpp);
+	ip = VTOI(*vpp);	/* 获取的 inode 对应到了 vpp 当中 */
 
 	/*
 	 * The question is whether using VGET was such good idea at all:
@@ -473,6 +485,9 @@ e2fs_gd_get_i_bitmap(struct ext2_gd *gd)
 	    gd->ext2bgd_i_bitmap);
 }
 
+/*
+	貌似是获取这个块组中索引节点表的第一个块的块号
+*/
 uint64_t
 e2fs_gd_get_i_tables(struct ext2_gd *gd)
 {
@@ -545,7 +560,7 @@ e2fs_gd_set_i_unused(struct ext2_gd *gd, uint32_t val)
 }
 
 /*
- * Find a cylinder to place a directory.
+ * Find a cylinder to place a directory. 找到一个柱面来放置一个目录
  *
  * The policy implemented by this algorithm is to allocate a
  * directory inode in the same cylinder group as its parent
@@ -553,15 +568,18 @@ e2fs_gd_set_i_unused(struct ext2_gd *gd, uint32_t val)
  * and data. Restrict the number of directories which may be
  * allocated one after another in the same cylinder group
  * without intervening allocation of files.
+ * 该算法实现的策略是在与父目录相同的柱面组中分配一个目录inode，同时为其
+ * 文件 inode 和数据预留空间。限制可以在同一个柱面组中一个接一个地分配的目录
+ * 的数量，而不干预文件的分配
  *
  * If we allocate a first level directory then force allocation
  * in another cylinder group.
- *
+ * ext2_dirpref： ext2 directory preference(偏爱)?
  */
 static u_long
 ext2_dirpref(struct inode *pip)
 {
-	struct m_ext2fs *fs;
+	struct m_ext2fs *fs;	/* in-memory superblock */
 	int cg, prefcg, cgsize;
 	uint64_t avgbfree, minbfree;
 	u_int avgifree, avgndir, curdirsize;
@@ -571,26 +589,41 @@ ext2_dirpref(struct inode *pip)
 
 	mtx_assert(EXT2_MTX(pip->i_ump), MA_OWNED);
 	fs = pip->i_e2fs;
-
+	/*
+		空闲索引节点数 / 块组数 = 平均每个块组拥有的空闲索引节点数
+		空闲块数 / 块组数 = 平均每个块组拥有的空闲块数
+		总的目录数 / 块组数 = 平均每个块组拥有的目录数
+	*/
 	avgifree = fs->e2fs->e2fs_ficount / fs->e2fs_gcount;
 	avgbfree = fs->e2fs_fbcount / fs->e2fs_gcount;
 	avgndir = fs->e2fs_total_dir / fs->e2fs_gcount;
 
 	/*
 	 * Force allocation in another cg if creating a first level dir.
+	 * 如果创建一个一级目录，那就强制在另外一个块组中进行申请
 	 */
 	ASSERT_VOP_LOCKED(ITOV(pip), "ext2fs_dirpref");
-	if (ITOV(pip)->v_vflag & VV_ROOT) {
-		prefcg = arc4random() % fs->e2fs_gcount;
-		mincg = prefcg;
-		minndir = fs->e2fs_ipg;
+	if (ITOV(pip)->v_vflag & VV_ROOT) {	/* 如果 inode 对应的 vnode 关联的是根目录 */
+		prefcg = arc4random() % fs->e2fs_gcount;	/* 随机产生一个数字 / 块组数，随机选取根目录放哪个块组？ */
+		mincg = prefcg;	/* 可以认为是一个组号 */
+		minndir = fs->e2fs_ipg;	/* 每个组拥有的 inode 数量 */
+		/* 通过块组号遍历所有的块组 */
 		for (cg = prefcg; cg < fs->e2fs_gcount; cg++)
+			/*
+					该块组中的目录数量 < 块组拥有的 inode 数量(初始情况)，动态变化；
+					空闲 inode 的数量 >= 平均每个块组拥有的空闲 inode 数量；
+					空闲块数 >= 平均每个组拥有的空闲块数；
+					满足上述三个条件，更新 mincg 和 minndir；其用意就是从所有的组中选出一个最合适的组用于存放目录项？
+			*/
 			if (e2fs_gd_get_ndirs(&fs->e2fs_gd[cg]) < minndir &&
 			    e2fs_gd_get_nifree(&fs->e2fs_gd[cg]) >= avgifree &&
 			    e2fs_gd_get_nbfree(&fs->e2fs_gd[cg]) >= avgbfree) {
 				mincg = cg;
 				minndir = e2fs_gd_get_ndirs(&fs->e2fs_gd[cg]);
 			}
+		/*
+			上述循环首先查找的是后一部分的块组，下面的分支在遍历查找前一部分块组
+		*/
 		for (cg = 0; cg < prefcg; cg++)
 			if (e2fs_gd_get_ndirs(&fs->e2fs_gd[cg]) < minndir &&
 			    e2fs_gd_get_nifree(&fs->e2fs_gd[cg]) >= avgifree &&
@@ -599,10 +632,11 @@ ext2_dirpref(struct inode *pip)
 				minndir = e2fs_gd_get_ndirs(&fs->e2fs_gd[cg]);
 			}
 		return (mincg);
-	}
+	}	// end if VV_ROOT，下面处理不是根目录的情况
 	/*
 	 * Count various limits which used for
 	 * optimal allocation of a directory inode.
+	 * 计算用于优化目录inode分配的各种限制
 	 */
 	maxndir = min(avgndir + fs->e2fs_ipg / 16, fs->e2fs_ipg);
 	minifree = avgifree - avgifree / 4;
@@ -655,6 +689,7 @@ ext2_dirpref(struct inode *pip)
 
 /*
  * Select the desired position for the next block in a file.
+ * 为文件中的下一个块选择所需的位置
  *
  * we try to mimic what Remy does in inode_getblk/block_getblk
  *
@@ -709,19 +744,23 @@ ext2_blkpref(struct inode *ip, e2fs_lbn_t lbn, int indx, e2fs_daddr_t *bap,
  *   1) allocate the block in its requested cylinder group.
  *   2) quadradically rehash on the cylinder group number.
  *   3) brute force search for a free block.
+ * 		在请求的柱面组中分配一个块；
+ * 		刷新柱面组编号；
+ * 		暴力搜索一个空闲块
+ * 		
  */
 static e4fs_daddr_t
 ext2_hashalloc(struct inode *ip, int cg, long pref, int size,
     daddr_t (*allocator) (struct inode *, int, daddr_t, int))
 {
 	struct m_ext2fs *fs;
-	e4fs_daddr_t result;
+	e4fs_daddr_t result;	/* 64位 */
 	int i, icg = cg;
 
 	mtx_assert(EXT2_MTX(ip->i_ump), MA_OWNED);
 	fs = ip->i_e2fs;
 	/*
-	 * 1: preferred cylinder group
+	 * 1: preferred cylinder group 首选的柱面组
 	 */
 	result = (*allocator)(ip, cg, pref, size);
 	if (result)
@@ -1200,9 +1239,11 @@ ext2_zero_inode_table(struct inode *ip, int cg)
 
 /*
  * Determine whether an inode can be allocated.
+ * 确定是否可以分配inode
  *
  * Check to see if an inode is available, and if it is,
  * allocate it using tode in the specified cylinder group.
+ * 检查 inode 是否可用，如果可用，则在指定的柱面组中使用 tode 分配它
  */
 static daddr_t
 ext2_nodealloccg(struct inode *ip, int cg, daddr_t ipref, int mode)
@@ -1216,11 +1257,17 @@ ext2_nodealloccg(struct inode *ip, int cg, daddr_t ipref, int mode)
 	ipref--;	/* to avoid a lot of (ipref -1) */
 	if (ipref == -1)
 		ipref = 0;
-	fs = ip->i_e2fs;
-	ump = ip->i_ump;
+	fs = ip->i_e2fs;	/* superblock */
+	ump = ip->i_ump;	/* 挂载点信息 */
+
+	/* 如果空闲的 inode 数量刚好等于0，直接返回0 */
 	if (e2fs_gd_get_nifree(&fs->e2fs_gd[cg]) == 0)
 		return (0);
 	EXT2_UNLOCK(ump);
+
+	/* 
+		如果还有空闲的 inode，指向下面的代码分支，将获取到的数据存放到buf当中 
+	*/
 	error = bread(ip->i_devvp, fsbtodb(fs,
 	    e2fs_gd_get_i_bitmap(&fs->e2fs_gd[cg])),
 	    (int)fs->e2fs_bsize, NOCRED, &bp);
@@ -1235,6 +1282,7 @@ ext2_nodealloccg(struct inode *ip, int cg, daddr_t ipref, int mode)
 			memset(bp->b_data, 0, fs->e2fs_bsize);
 			fs->e2fs_gd[cg].ext4bgd_flags &= ~EXT2_BG_INODE_UNINIT;
 		}
+		/* 下面的操作主要就是对读取的数据计算checksum，判断准确性 */
 		ext2_gd_i_bitmap_csum_set(fs, cg, bp);
 		error = ext2_zero_inode_table(ip, cg);
 		if (error) {
@@ -1253,11 +1301,13 @@ ext2_nodealloccg(struct inode *ip, int cg, daddr_t ipref, int mode)
 		/*
 		 * Another thread allocated the last i-node in this
 		 * group while we were waiting for the buffer.
+		 * 当我们在等待buf的时候，另外一个线程申请了最后一个这个块组中可用的 inode
 		 */
 		brelse(bp);
 		EXT2_LOCK(ump);
 		return (0);
 	}
+	/* 将从磁盘读取到的 buf 中的数据提取出来 */
 	ibp = (char *)bp->b_data;
 	if (ipref) {
 		ipref %= fs->e2fs->e2fs_ipg;

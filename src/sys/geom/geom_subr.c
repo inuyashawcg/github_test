@@ -65,10 +65,19 @@ __FBSDID("$FreeBSD: releng/12.0/sys/geom/geom_subr.c 332070 2018-04-05 13:56:40Z
 #include <sys/kdb.h>
 #endif
 
+/* 全局的 g_class 队列 */
 struct class_list_head g_classes = LIST_HEAD_INITIALIZER(g_classes);
+
+/* 全局 geom 队列 */
 static struct g_tailq_head geoms = TAILQ_HEAD_INITIALIZER(geoms);
+
+/*
+	g_wait_event 会在 wakeup 函数中被调用，而 wakeup 函数的主要功能是唤醒休眠在执行标志符上的所有线程，
+	所以这些应该都是线程相关标志符
+*/
 char *g_wait_event, *g_wait_up, *g_wait_down, *g_wait_sim;
 
+/* 通过 g_load_class 函数实现逻辑来看，该结构体作用就是传参 */
 struct g_hh00 {
 	struct g_class		*mp;
 	struct g_provider	*pp;
@@ -79,6 +88,7 @@ struct g_hh00 {
 
 /*
  * This event offers a new class a chance to taste all preexisting providers.
+ * 这项活动提供了一个新的a级机会品尝所有现有的提供者
  */
 static void
 g_load_class(void *arg, int flag)
@@ -101,9 +111,15 @@ g_load_class(void *arg, int flag)
 		g_free(hh);
 		hh = NULL;
 	}
+	/* 
+		使用参数列表发送格式化输出到标准输出 stdout，其实就是对数量不定的参数
+		进行标准化操作
+	*/
 	g_trace(G_T_TOPOLOGY, "g_load_class(%s)", mp->name);
 	KASSERT(mp->name != NULL && *mp->name != '\0',
 	    ("GEOM class has no name"));
+
+	/* 扫描全局 g_class 队列，判断当前 g_class 是否已经存在 */
 	LIST_FOREACH(mp2, &g_classes, class) {
 		if (mp2 == mp) {
 			printf("The GEOM class %s is already loaded.\n",
@@ -129,8 +145,14 @@ g_load_class(void *arg, int flag)
 	LIST_FOREACH(mp2, &g_classes, class) {
 		if (mp == mp2)
 			continue;
+		/* mp2 为一个 g_class，geom 是它的一个 g_geom 的实例队列 */
 		LIST_FOREACH(gp, &mp2->geom, geom) {
 			LIST_FOREACH(pp, &gp->provider, provider) {
+				/* 
+					mp 是一个新创建的 g_class，pp 是 g_geom provider 队列的元素，
+					taste 是在创建新的类或者新的提供者的时候才会被使用的，这里是尝试
+					往提供者队列中添加新的提供者？
+				*/
 				mp->taste(mp, pp, 0);
 				g_topology_assert();
 			}
@@ -162,7 +184,9 @@ retry:
 				g_topology_unlock();
 				return (EBUSY);
 			}
-		/* If the geom is withering, wait for it to finish. */
+		/* If the geom is withering, wait for it to finish. 
+			如果 geom 正在破灭，我们等它完成相应的动作
+		*/
 		if (gp->flags & G_GEOM_WITHER) {
 			g_topology_sleep(mp, 1);
 			goto retry;
@@ -229,15 +253,21 @@ g_modevent(module_t mod, int type, void *data)
 	switch (type) {
 	case MOD_LOAD:
 		g_trace(G_T_TOPOLOGY, "g_modevent(%s, LOAD)", mp->name);
-		hh = g_malloc(sizeof *hh, M_WAITOK | M_ZERO);
+		hh = g_malloc(sizeof *hh, M_WAITOK | M_ZERO);	// 为 g_hh00 动态分配内存空间
 		hh->mp = mp;
 		/*
 		 * Once the system is not cold, MOD_LOAD calls will be
 		 * from the userland and the g_event thread will be able
 		 * to acknowledge their completion.
+		 * 如果系统不是处于 cold 状态，MOD_LOAD 请求将会来自于用户空间，并且 g_event 能够确认
+		 * 它们已经完成
 		 */
 		if (cold) {
 			hh->post = 1;
+			/* 
+				将事件添加到事件全局队列当中，第一个参数就是function，应该是定义了事件被处理
+				时应该执行的操作，这里的话就是添加一个 g_class
+			*/
 			error = g_post_event(g_load_class, hh, M_WAITOK, NULL);
 		} else {
 			error = g_waitfor_event(g_load_class, hh, M_WAITOK,
@@ -329,9 +359,17 @@ g_retaste(struct g_class *mp)
 	return (error);
 }
 
+/*
+	mp类必须有效（在GEOM中注册）
+	必须要保持拓扑(topology)锁
+*/
 struct g_geom *
 g_new_geomf(struct g_class *mp, const char *fmt, ...)
 {
+	/*
+		每一个文件系统可能是要对应一个g_geom。磁盘一般都会有分区，每个分区又通过不同的文件系统来管理，
+		geom 又是将内核上层的 I/O 请求进行转换，所以 geom 应该是一个类似于载体的数据结构
+	*/
 	struct g_geom *gp;
 	va_list ap;
 	struct sbuf *sb;
@@ -350,8 +388,11 @@ g_new_geomf(struct g_class *mp, const char *fmt, ...)
 	LIST_INIT(&gp->consumer);
 	LIST_INIT(&gp->provider);
 	LIST_INIT(&gp->aliases);
+
+	/* 在全局队列和 g_class 中都要注册新的geom */
 	LIST_INSERT_HEAD(&mp->geom, gp, geom);
 	TAILQ_INSERT_HEAD(&geoms, gp, geoms);
+
 	strcpy(gp->name, sbuf_data(sb));
 	sbuf_delete(sb);
 	/* Fill in defaults from class */
@@ -392,6 +433,17 @@ g_destroy_geom(struct g_geom *gp)
 
 /*
  * This function is called (repeatedly) until the geom has withered away.
+ * 这个函数被反复调用，直到geom消失
+ * 当你获得机会的时候，可以调用这个函数将 geom 和它所关联的 consumer 和 provider 全部释放。
+ * GEOM 会在给定的 geom 中的每个 provider 设置一个错误(利用禁用进程)并且等待一个机会销毁 geom。
+ * 当消费者的访问计数变为0，消费者就会自动解除绑定并销毁。当一个提供者上的所有消费者都被销毁之后，
+ * 该提供者就会被销毁；当所有提供者也被销毁之后，那么 geom 也会被销毁。
+ * 这是一个自动的“垃圾收集”，避免在所有的类中包含重复的代码。在调用它之前，应该释放字段 softc 并将其
+ * 设置为 NULL。请注意，g_wither_geom 函数不能保证 geom 会立即被销毁，这主要是因为 geom 的使用者
+ * 和提供者的访问计数可能不是0。这就是为什么对给定类中的每个geom调用此函数不足以确保可以卸载该类的原因
+ * 
+ * - error 一定是非零值
+ * - 拓扑锁一定要被持有
  */
 void
 g_wither_geom(struct g_geom *gp, int error)
@@ -403,6 +455,7 @@ g_wither_geom(struct g_geom *gp, int error)
 	g_trace(G_T_TOPOLOGY, "g_wither_geom(%p(%s))", gp, gp->name);
 	if (!(gp->flags & G_GEOM_WITHER)) {
 		gp->flags |= G_GEOM_WITHER;
+		/* 遍历geom整个provider链表，然后把所有的元素都禁用掉 */
 		LIST_FOREACH(pp, &gp->provider, provider)
 			if (!(pp->flags & G_PF_ORPHAN))
 				g_orphan_provider(pp, error);
@@ -424,6 +477,7 @@ g_wither_provider(struct g_provider *pp, int error)
 
 /*
  * This function is called (repeatedly) until the has withered away.
+ * 这个函数被（反复）调用，直到函数消失
  */
 void
 g_wither_geom_close(struct g_geom *gp, int error)
@@ -694,6 +748,12 @@ g_resize_provider(struct g_provider *pp, off_t size)
 #define	_PATH_DEV	"/dev/"
 #endif
 
+/*
+	通过名称去查找 provider 并且返回它所绑定的 struct g_provider。老版本中函数参数仅仅是一个
+	名称，不包括路径，但是这里感觉像是包括完整路径的
+	- 拓扑锁一定要持有
+	- 如果没有找到对于的 provider，返回null
+*/
 struct g_provider *
 g_provider_by_name(char const *arg)
 {
@@ -819,6 +879,18 @@ redo_rank(struct g_geom *gp)
 	return (0);
 }
 
+/*
+	attach/detach GEOM consumers	to/from	providers
+
+	函数的作用是：将给定的使用者cp附加到给定的提供者pp，从而在使用者和提供者之间
+		建立一个通讯通道，允许更改访问计数并执行I/O操作
+
+	注意:
+		- 使用者不能attach到提供者
+		- 该操作不能形成拓扑环
+		- 必须要保持拓扑锁
+		- 函数执行成功后返回0
+*/
 int
 g_attach(struct g_consumer *cp, struct g_provider *pp)
 {
@@ -829,9 +901,9 @@ g_attach(struct g_consumer *cp, struct g_provider *pp)
 	G_VALID_PROVIDER(pp);
 	g_trace(G_T_TOPOLOGY, "g_attach(%p, %p)", cp, pp);
 	KASSERT(cp->provider == NULL, ("attach but attached"));
-	cp->provider = pp;
+	cp->provider = pp;	/* 更新cp的提供者指针 */
 	cp->flags &= ~G_CF_ORPHAN;
-	LIST_INSERT_HEAD(&pp->consumers, cp, consumers);
+	LIST_INSERT_HEAD(&pp->consumers, cp, consumers);	/* 插入提供者的消费者队列 */
 	error = redo_rank(cp->geom);
 	if (error) {
 		LIST_REMOVE(cp, consumers);
@@ -841,6 +913,14 @@ g_attach(struct g_consumer *cp, struct g_provider *pp)
 	return (error);
 }
 
+/*
+	函数的作用是：将给定的使用者cp与其对应的提供者分离，从而中断它们之间的通信通道
+	注意：
+		- 消费者一定要是已经attach到提供者
+		- 访问计数一定要是0
+		- 一定不能要有处于活跃状态的请求
+		- 拓扑锁一定要保持
+*/
 void
 g_detach(struct g_consumer *cp)
 {
@@ -870,6 +950,19 @@ g_detach(struct g_consumer *cp)
  *
  * Access-check with delta values.  The question asked is "can provider
  * "cp" change the access counters by the relative amounts dc[rwe] ?"
+ * 
+ * 该函数主要就是管理打开、关闭或者改变消费者跟提供者之间的联系。参数dcr、dcw和dce表示
+ * 相对的读、写和独占访问计数更改。读写访问计数是不言自明的，独占访问计数拒绝其他相关方的
+ * 写访问。提供者的访问计数是所有连接的使用者的访问计数之和
+ * 在消费者 attach 到提供者之后，g_access 函数需要在开启 I/O 请求之前被调用
+ * 注意:
+ * 	- 消费者必须要attach到提供者
+ * 	- 预期的更改不能导致负的访问计数
+ * 	- 没有任何操作是不被允许的(dcr = dcw =	dce = 0)
+ * 	- 提供者的geom必须定义一个访问方法（例如gp-access）
+ * 	- 必须保持拓扑锁
+ * g_access 函数在执行成功之后返回0，否则就会返回错误码。当dcr、dcw和dce小于或者等于0的时候，
+ * 函数是不会返回错误的
  */
 
 int

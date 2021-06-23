@@ -45,6 +45,9 @@
 
 #include <machine/_limits.h>
 
+/*
+	描述文件是否支持ioctl，fcntl等属性
+*/
 struct filecaps {
 	cap_rights_t	 fc_rights;	/* per-descriptor capability rights 每描述符功能权限 */
 	u_long		*fc_ioctls;	/* per-descriptor allowed ioctls */
@@ -56,7 +59,7 @@ struct filecaps {
 struct filedescent {
 	struct file	*fde_file;	/* file structure for open file 文件指针 */
 	struct filecaps	 fde_caps;	/* per-descriptor rights 属性信息 */
-	uint8_t		 fde_flags;	/* per-process open file flags 文件打开标志 */
+	uint8_t		 fde_flags;	/* per-process open file flags 每个进程打开文件标志 */
 	seq_t		 fde_seq;	/* keep file and caps in sync 保持文件和功能的同步 */
 };
 #define	fde_rights	fde_caps.fc_rights

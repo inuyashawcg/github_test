@@ -66,6 +66,7 @@ SYSCTL_INT(_vfs_pfs, OID_AUTO, trace, CTLFLAG_RW, &pfs_trace, 0,
 
 /*
  * Allocate and initialize a node
+ * 实例化一个伪文件系统结点
  */
 static struct pfs_node *
 pfs_alloc_node(struct pfs_info *pi, const char *name, pfs_type_t type)
@@ -75,8 +76,12 @@ pfs_alloc_node(struct pfs_info *pi, const char *name, pfs_type_t type)
 	KASSERT(strlen(name) < PFS_NAMELEN,
 	    ("%s(): node name is too long", __func__));
 
+	/* 申请存储空间 */
 	pn = malloc(sizeof *pn,
 	    M_PFSNODES, M_WAITOK|M_ZERO);
+	/*
+		初始化锁，填充name，声明文件类型，填充节点信息
+	*/
 	mtx_init(&pn->pn_mutex, "pfs_node", NULL, MTX_DEF | MTX_DUPOK);
 	strlcpy(pn->pn_name, name, sizeof pn->pn_name);
 	pn->pn_type = type;
@@ -86,6 +91,7 @@ pfs_alloc_node(struct pfs_info *pi, const char *name, pfs_type_t type)
 
 /*
  * Add a node to a directory
+ * 向一个目录添加一个结点，目录同样也是一个结点
  */
 static void
 pfs_add_node(struct pfs_node *parent, struct pfs_node *pn)
@@ -121,9 +127,10 @@ pfs_add_node(struct pfs_node *parent, struct pfs_node *pn)
 #endif
 
 	pn->pn_parent = parent;
-	pfs_fileno_alloc(pn);
+	pfs_fileno_alloc(pn);	/* 申请一个文件号 */
 
 	pfs_lock(parent);
+	/* 将新的结点插入链表(数据结构与算法既视感-。-) */
 	pn->pn_next = parent->pn_nodes;
 	if ((parent->pn_flags & PFS_PROCDEP) != 0)
 		pn->pn_flags |= PFS_PROCDEP;
@@ -132,7 +139,8 @@ pfs_add_node(struct pfs_node *parent, struct pfs_node *pn)
 }
 
 /*
- * Detach a node from its aprent
+ * Detach a node from its aprent 将节点与其面板分离
+ * 其实就是从将一个结点从链表中删除
  */
 static void
 pfs_detach_node(struct pfs_node *pn)
@@ -159,6 +167,7 @@ pfs_detach_node(struct pfs_node *pn)
 
 /*
  * Add . and .. to a directory
+ * 添加 . 和 .. 两个目录到当前目录当中
  */
 static void
 pfs_fixup_dir(struct pfs_node *parent)
@@ -173,6 +182,7 @@ pfs_fixup_dir(struct pfs_node *parent)
 
 /*
  * Create a directory
+ * 下面的函数是创建一个结点文件，这里是创建一个结点目录，本质上是一样的，都是结点
  */
 struct pfs_node	*
 pfs_create_dir(struct pfs_node *parent, const char *name,
@@ -210,7 +220,7 @@ pfs_create_file(struct pfs_node *parent, const char *name, pfs_fill_t fill,
 	pn->pn_destroy = destroy;
 	pn->pn_flags = flags;
 	pfs_add_node(parent, pn);
-
+	/* 少了添加 dot 和 dotdot 的步骤 */
 	return (pn);
 }
 
@@ -223,7 +233,7 @@ pfs_create_link(struct pfs_node *parent, const char *name, pfs_fill_t fill,
 		int flags)
 {
 	struct pfs_node *pn;
-
+	/* 跟上面函数仅仅是文件类型不同，一个 file，一个是 symlink */
 	pn = pfs_alloc_node(parent->pn_info, name, pfstype_symlink);
 	pn->pn_fill = fill;
 	pn->pn_attr = attr;
@@ -236,7 +246,7 @@ pfs_create_link(struct pfs_node *parent, const char *name, pfs_fill_t fill,
 }
 
 /*
- * Locate a node by name
+ * Locate a node by name 按照名称定位结点
  */
 struct pfs_node *
 pfs_find_node(struct pfs_node *parent, const char *name)
@@ -254,6 +264,7 @@ pfs_find_node(struct pfs_node *parent, const char *name)
 /*
  * Destroy a node and all its descendants.  If the node to be destroyed
  * has a parent, the parent's mutex must be held.
+ * 销毁节点及其所有子节点。如果要销毁的节点有父节点，则必须保留父节点的互斥锁
  */
 int
 pfs_destroy(struct pfs_node *pn)
@@ -384,14 +395,18 @@ pfs_init(struct pfs_info *pi, struct vfsconf *vfc)
 {
 	struct pfs_node *root;
 	int error;
-
+	/*
+		初始化锁和文件号管理结构体
+	*/
 	pfs_fileno_init(pi);
 
-	/* set up the root directory */
+	/* set up the root directory 
+		建立根节点 "/"，指定文件类型为 pfstype_root
+	*/
 	root = pfs_alloc_node(pi, "/", pfstype_root);
 	pi->pi_root = root;
-	pfs_fileno_alloc(root);
-	pfs_fixup_dir(root);
+	pfs_fileno_alloc(root);	/* 分配 file number */
+	pfs_fixup_dir(root);	/* 添加 . 和 .. 目录到当前目录下 */
 
 	/* construct file hierarchy */
 	error = (pi->pi_init)(pi, vfc);
@@ -408,6 +423,7 @@ pfs_init(struct pfs_info *pi, struct vfsconf *vfc)
 
 /*
  * Destroy a pseudofs instance
+ * 销毁一个 pseudofs 文件系统实例
  */
 int
 pfs_uninit(struct pfs_info *pi, struct vfsconf *vfc)

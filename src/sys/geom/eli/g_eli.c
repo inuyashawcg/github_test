@@ -57,6 +57,9 @@ __FBSDID("$FreeBSD: releng/12.0/sys/geom/eli/g_eli.c 336439 2018-07-18 00:56:25Z
 
 #include <crypto/intake.h>
 
+/*
+	eli: 加密
+*/
 FEATURE(geom_eli, "GEOM crypto module");
 
 MALLOC_DEFINE(M_ELI, "eli data", "GEOM_ELI Data");

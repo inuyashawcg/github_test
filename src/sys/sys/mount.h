@@ -55,13 +55,14 @@ typedef struct fsid { int32_t val[2]; } fsid_t;	/* filesystem id type */
 /*
  * File identifier.
  * These are unique per filesystem on a single machine.
+ * 文件标识符。这些标志符在简单机器上的每个文件系统中都是唯一的
  */
 #define	MAXFIDSZ	16
 
 struct fid {
-	u_short		fid_len;		/* length of data in bytes */
-	u_short		fid_data0;		/* force longword alignment */
-	char		fid_data[MAXFIDSZ];	/* data (variable length) */
+	u_short		fid_len;		/* length of data in bytes 数据长度(bytes) */
+	u_short		fid_data0;		/* force longword alignment 强制长单词对齐 */
+	char		fid_data[MAXFIDSZ];	/* data (variable length) 数据(可变长度) */
 };
 
 /*
@@ -74,8 +75,8 @@ struct statfs {
 	uint32_t f_version;		/* structure version number */
 	uint32_t f_type;		/* type of filesystem */
 	uint64_t f_flags;		/* copy of mount exported flags */
-	uint64_t f_bsize;		/* filesystem fragment size */
-	uint64_t f_iosize;		/* optimal transfer block size */
+	uint64_t f_bsize;		/* filesystem fragment size 文件系统片段大小 */
+	uint64_t f_iosize;		/* optimal transfer block size 最佳传送块尺寸 */
 	uint64_t f_blocks;		/* total data blocks in filesystem */
 	uint64_t f_bfree;		/* free blocks in filesystem */
 	int64_t	 f_bavail;		/* free blocks avail to non-superuser */
@@ -132,7 +133,7 @@ struct freebsd11_statfs {
 struct ostatfs {
 	long	f_spare2;		/* placeholder */
 	long	f_bsize;		/* fundamental filesystem block size */
-	long	f_iosize;		/* optimal transfer block size */
+	long	f_iosize;		/* optimal transfer block size 最佳传送块尺寸 */
 	long	f_blocks;		/* total data blocks in filesystem */
 	long	f_bfree;		/* free blocks in fs */
 	long	f_bavail;		/* free blocks avail to non-superuser */
@@ -149,7 +150,7 @@ struct ostatfs {
 	long	f_syncreads;		/* count of sync reads since mount */
 	long	f_asyncreads;		/* count of async reads since mount */
 	short	f_spares1;		/* unused spare */
-	char	f_mntfromname[OMNAMELEN];/* mounted filesystem */
+	char	f_mntfromname[OMNAMELEN];/* mounted filesystem 挂载的文件系统 */
 	short	f_spares2;		/* unused spare */
 	/*
 	 * XXX on machines where longs are aligned to 8-byte boundaries, there
@@ -217,7 +218,7 @@ struct mount {
 	int		mnt_lockref;		/* (i) Lock reference count */
 	int		mnt_secondary_writes;   /* (i) # of secondary writes */
 	int		mnt_secondary_accwrites;/* (i) secondary wr. starts */
-	struct thread	*mnt_susp_owner;	/* (i) thread owning suspension */
+	struct thread	*mnt_susp_owner;	/* (i) thread owning suspension - mount跟thread也有关系？ */
 #define	mnt_endzero	mnt_gjprovider
 	char		*mnt_gjprovider;	/* gjournal provider name */
 	struct mtx	mnt_listmtx;
@@ -357,7 +358,7 @@ void          __mnt_vnode_markerfree_active(struct vnode **mvp, struct mount *);
  */
 #define	MNT_UPDATE	0x0000000000010000ULL /* not real mount, just update */
 #define	MNT_DELEXPORT	0x0000000000020000ULL /* delete export host lists */
-#define	MNT_RELOAD	0x0000000000040000ULL /* reload filesystem data */
+#define	MNT_RELOAD	0x0000000000040000ULL /* reload filesystem data 重新加载文件系统数据 */
 #define	MNT_FORCE	0x0000000000080000ULL /* force unmount or readonly */
 #define	MNT_SNAPSHOT	0x0000000001000000ULL /* snapshot the filesystem */
 #define	MNT_NONBUSY	0x0000000004000000ULL /* check vnode use counts. */
@@ -403,7 +404,7 @@ void          __mnt_vnode_markerfree_active(struct vnode **mvp, struct mount *);
 #define	MNTK_MWAIT	0x02000000	/* waiting for unmount to finish */
 #define	MNTK_SUSPEND	0x08000000	/* request write suspension */
 #define	MNTK_SUSPEND2	0x04000000	/* block secondary writes */
-#define	MNTK_SUSPENDED	0x10000000	/* write operations are suspended */
+#define	MNTK_SUSPENDED	0x10000000	/* write operations are suspended 写入操作已挂起 */
 #define	MNTK_NULL_NOCACHE	0x20000000 /* auto disable cache for nullfs
 					      mounts over this fs */
 #define MNTK_LOOKUP_SHARED	0x40000000 /* FS supports shared lock lookups */
@@ -445,13 +446,15 @@ MNT_EXTENDED_SHARED(struct mount *mp)
 
 /*
  * Flags for various system call interfaces.
+ * 各种系统调用接口的标志
  *
  * waitfor flags to vfs_sync() and getfsstat()
+ * vfs_sync 和 getfsstat 的等待标志
  */
-#define MNT_WAIT	1	/* synchronously wait for I/O to complete */
+#define MNT_WAIT	1	/* synchronously wait for I/O to complete 同步等待I/O完成 */
 #define MNT_NOWAIT	2	/* start all I/O, but do not wait for it */
-#define MNT_LAZY	3	/* push data not written by filesystem syncer */
-#define MNT_SUSPEND	4	/* Suspend file system after sync */
+#define MNT_LAZY	3	/* push data not written by filesystem syncer 文件系统同步器未写入推送数据 */
+#define MNT_SUSPEND	4	/* Suspend file system after sync 同步后挂起文件系统 */
 
 /*
  * Generic file handle

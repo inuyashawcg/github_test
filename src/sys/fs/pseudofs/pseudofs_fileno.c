@@ -48,7 +48,9 @@ __FBSDID("$FreeBSD: releng/12.0/sys/fs/pseudofs/pseudofs_fileno.c 326268 2017-11
 #include <fs/pseudofs/pseudofs_internal.h>
 
 /*
- * Initialize fileno bitmap
+ * Initialize fileno bitmap - fileno: file node
+ * 初始化一个文件结点位图。函数所做的操作只有两步: 第一步就是初始化 pi_mutex 锁；第二步就是
+ * 新建一个 pi_unrhdr 对应结构体，应该是用来分配文件号？
  */
 void
 pfs_fileno_init(struct pfs_info *pi)
@@ -60,6 +62,7 @@ pfs_fileno_init(struct pfs_info *pi)
 
 /*
  * Tear down fileno bitmap
+ * 删除一个文件结点位图
  */
 void
 pfs_fileno_uninit(struct pfs_info *pi)

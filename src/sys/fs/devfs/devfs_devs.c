@@ -152,7 +152,7 @@ devfs_alloc(int flags)
 	return (cdev);
 }
 
-/* 应该是通过文件名查找对应的dev */
+/* 应该是通过文件名查找对应的 dev */
 int
 devfs_dev_exists(const char *name)
 {
@@ -169,6 +169,9 @@ devfs_dev_exists(const char *name)
 		遍历 cdevp_list 链表来进行的。内核代码软件设计的思路挺多都是这种。首先设计出一个涵盖各种
 		成员变量的复杂的结构体，用来全方位描述所要管理的对象；然后在构建一个队列，将所有需要管理的
 		对象通过描述结构体来进行统一管理
+		当我们在 /dev 下创建设备结点的时候，会将 cdev 通过 cdev_priv 注册到 cdevp_list，也就是说
+		cdevp_list 队列中包含着所有 cdev 的一些信息，包括 cdev 对应的名称。所以当我们想要通过名字查找 
+		/dev 下是否存在某个设备结点的时候，就可以通过遍历这个队列来进行，对应上面的说法
 	*/
 	TAILQ_FOREACH(cdp, &cdevp_list, cdp_list) {
 		if ((cdp->cdp_flags & CDP_ACTIVE) == 0)
@@ -751,7 +754,7 @@ devfs_populate(struct devfs_mount *dm)
 
 	/* 
 		devfs_generation 只有在 devfs_create 和 devfs_destory 的时候才会进行增删，
-		所以它记录的应该就是cdev的状态的一些变化。这个函数功能应该就是检测cdev状态不一致
+		所以它记录的应该就是 cdev 的状态的一些变化。这个函数功能应该就是检测 cdev 状态不一致
 		的时候，是哪里出了问题
 	*/
 	sx_assert(&dm->dm_lock, SX_XLOCKED);
@@ -780,6 +783,11 @@ devfs_cleanup(struct devfs_mount *dm)
  * devfs_create() and devfs_destroy() are called from kern_conf.c and
  * in both cases the devlock() mutex is held, so no further locking
  * is necessary and no sleeping allowed.
+ * 
+ * kern_conf.c 文件中包含有 make_dev 函数，也就是字符设备驱动中常常使用的创建设备
+ * 文件的函数。这个函数在最后会给 devfs_create 函数传入一个填充好的 cdev 指针，然后
+ * 该函数就把这个 cdev 注册到全局的管理队列 cdevp_list，推测 /dev 下的设备列表就是
+ * 通过遍历整个队列中的元素获得的
  */
 
 void
@@ -789,7 +797,7 @@ devfs_create(struct cdev *dev)
 
 	mtx_assert(&devmtx, MA_OWNED);
 
-	/* cdev关联的private data */
+	/* cdev 关联的 private data */
 	cdp = cdev2priv(dev);
 	cdp->cdp_flags |= CDP_ACTIVE;
 
@@ -800,6 +808,11 @@ devfs_create(struct cdev *dev)
 	 */
 	cdp->cdp_inode = alloc_unrl(devfs_inos);
 	dev_refl(dev);	// reference count + 1
+	/*
+		我们通过 make_dev 创建设备结点文件，完了却把 cdev_priv 注册到了全局队列当中，有点耐人寻味。
+		推测：文件系统会遍历这个队列来判断 /dev 下到底都有哪些设备结点，分析它们之间的包含关系又是什么
+		样的，最终形成一个树状结构
+	*/
 	TAILQ_INSERT_TAIL(&cdevp_list, cdp, cdp_list);
 	devfs_generation++;
 }
@@ -838,7 +851,8 @@ devfs_devs_init(void *junk __unused)
 		分配的元素和释放的元素，inode table？
 		每一个文件都会对应一个 inode，inode中会有一个随机分配的 identify number 来标识它。初始化函数
 		好像仅仅分配了一个 inode number。devfs 应该就是 /dev，本质上也是一个文件，所以它也会对应一个
-		inode，这里应该就是给 /dev 的 inode 分配一个随机数
+		inode，这里应该就是给 /dev 的 inode 分配一个随机数。
+		这一步就是为 devfs 创建一个新的 unrhdr 结构体来管理其中 number 的分配
 	*/
 	devfs_inos = new_unrhdr(DEVFS_ROOTINO + 1, INT_MAX, &devmtx);
 }

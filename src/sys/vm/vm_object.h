@@ -96,20 +96,35 @@ TAILQ_HEAD(pglist, vm_page);
 #define VM_PAGE_HAVE_PGLIST
 #endif
 
+/*
+	vm_object 表示的就是某一段虚拟内存是干什么用的，可以参考一下进程虚拟地址空间的分布来进行理解。一般一个进程
+	会包含几个段：text、data、bss 这些，它们其实分别对应的就是 vm_map_entry，这些段具体是落在哪些物理内存页
+	则是通过 vm_object 来管理的。
+	每个 entry 都代表我们可以用相同的方式来访问，就比如说对于进程来讲，代码段是只读的，所以我们就可以在 entry 
+	中设置只读权限，这样从 start 到 end 地址空间内的数据都只支持读操作
+	vm_object 有时候是对应到一个文件当中，当多个进程访问同一个文件的时候，它们对应访问的 vm_object 其实就是
+	同一个对象。对象管理文件在系统中的所有驻留页，不会把同一个文件的同一个页保存到多个物理页面当中
+*/
 struct vm_object {
-	struct rwlock lock;
-	TAILQ_ENTRY(vm_object) object_list; /* list of all objects */
-	LIST_HEAD(, vm_object) shadow_head; /* objects that this is a shadow for */
-	LIST_ENTRY(vm_object) shadow_list; /* chain of shadow objects */
+	struct rwlock lock;	/* 读写锁 */
+	TAILQ_ENTRY(vm_object) object_list; /* list of all objects 对象链表 */
+	LIST_HEAD(, vm_object) shadow_head; /* objects that this is a shadow for 作为 shadow 的对象 */
+	/*
+		类比一个场景: 系统中有多个进程同时访问一个对象，每一个进程都会对这个
+	*/
+	LIST_ENTRY(vm_object) shadow_list; /* chain of shadow objects - shadow 对象链表*/
 	struct pglist memq;		/* list of resident pages 常驻页列表 */
+	/*
+		radix tree(基数树)，用于高效利用内存和查找
+	*/
 	struct vm_radix rtree;		/* root of the resident page radix trie 常驻页的根 */
-	vm_pindex_t size;		/* Object size */
-	struct domainset_ref domain;	/* NUMA policy. */
+	vm_pindex_t size;		/* Object size 对象大小 */
+	struct domainset_ref domain;	/* NUMA policy. NUMA机制 */
 	int generation;			/* generation ID 应该是用于区分不同的object */
-	int ref_count;			/* How many refs?? */
-	int shadow_count;		/* how many objects that this is a shadow for 这是多少个对象的阴影 */
+	int ref_count;			/* How many refs?? 引用计数，可能会存在多个 entry 引用同一个 object 的情况 */
+	int shadow_count;		/* how many objects that this is a shadow for - shadow 对象数量计数 */
 	vm_memattr_t memattr;		/* default memory attribute for pages 页的默认内存属性 */
-	objtype_t type;			/* type of pager */
+	objtype_t type;			/* type of pager - pager类型 */
 	u_short flags;			/* see below */
 	u_short pg_color;		/* (c) color of first page in obj */
 	u_int paging_in_progress;	/* Paging (in or out) so don't collapse or destroy */
@@ -117,8 +132,12 @@ struct vm_object {
 	struct vm_object *backing_object; /* object that I'm a shadow of */
 	vm_ooffset_t backing_object_offset;/* Offset in backing object */
 	TAILQ_ENTRY(vm_object) pager_object_list; /* list of all objects of this pager type */
-	LIST_HEAD(, vm_reserv) rvq;	/* list of reservations */
+	LIST_HEAD(, vm_reserv) rvq;	/* list of reservations 驻留页的链表 */
 	void *handle;
+	/*
+		这里边包含的是表示 bm_object 所代表的类型，更确切一点是说用途，对应的是 
+		vnode / device / swap 等等这些
+	*/
 	union {
 		/*
 		 * VNode pager
@@ -133,7 +152,7 @@ struct vm_object {
 		/*
 		 * Device pager
 		 *
-		 *	devp_pglist - list of allocated pages
+		 *	devp_pglist - list of allocated pages 已经分配的页的链表
 		 */
 		struct {
 			TAILQ_HEAD(, vm_page) devp_pglist;
@@ -161,6 +180,8 @@ struct vm_object {
 		 *		     reclaimed and recreated, making
 		 *		     the handle changed and hash-chain
 		 *		     invalid.
+		 *	返回指向tmpfs vnode的指针，如果有的话，它使用vm对象作为后备存储。
+		 *	不能将句柄重新用于链接，因为可以回收和重新创建vnode，从而导致句柄更改和哈希链无效
 		 *
 		 *	swp_blks -   pc-trie of the allocated swap blocks.
 		 *
@@ -208,6 +229,7 @@ struct vm_object {
  *   maximum unsigned offset.
  */
 #define	IDX_TO_OFF(idx) (((vm_ooffset_t)(idx)) << PAGE_SHIFT)
+/*右移12位，相当于是除4096 */
 #define	OFF_TO_IDX(off) ((vm_pindex_t)(((vm_ooffset_t)(off)) >> PAGE_SHIFT))
 #define	UOFF_TO_IDX(off) (((vm_pindex_t)(off)) >> PAGE_SHIFT)
 #define	OBJ_MAX_SIZE	(UOFF_TO_IDX(UINT64_MAX) + 1)

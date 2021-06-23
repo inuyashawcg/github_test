@@ -307,6 +307,11 @@ g_dev_getprovider(struct cdev *dev)
 	g_topology_assert();
 	if (dev == NULL)
 		return (NULL);
+	/* 
+		设备操作符表必须要是 g_dev_cdevsw，设备文件有的是操作磁盘的，有的是不操作磁盘的，
+		所以它们的操作符表肯定也是不一样的。也就是说，对于磁盘设备文件的操作符表应该就是统一
+		的这个 g_dev_cdevsw
+	*/
 	if (dev->si_devsw != &g_dev_cdevsw)
 		return (NULL);
 	cp = dev->si_drv2;

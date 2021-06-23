@@ -74,6 +74,11 @@
  * with an arbitrarily large buffer, and return as much as we can.  We can
  * return an error code if the buffer is too small (EFBIG), then the program
  * can try a bigger buffer.
+ * 
+ * Map entry 几乎可以用 cat 这样的程序读取。然而，大型 map 需要特殊的程序来阅读。实现一个程序不容易，
+ * 它可以感知缓冲区的所需大小，然后以适当的大小进行读取。此操作不能是原子操作。我们能做的最好的事情是允许
+ * 程序使用任意大的缓冲区进行读取，并尽可能多地返回。如果缓冲区太小（EFBIG），我们可以返回错误代码，然后
+ * 程序可以尝试一个更大的缓冲区
  */
 int
 procfs_doprocmap(PFS_FILL_ARGS)

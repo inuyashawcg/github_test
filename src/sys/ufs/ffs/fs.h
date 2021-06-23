@@ -42,6 +42,9 @@
  * Each disk drive contains some number of filesystems.
  * A filesystem consists of a number of cylinder groups.
  * Each cylinder group has inodes and data.
+ * 每个磁盘驱动都会包含有一些文件系统相关的参数；
+ * 一个文件系统包含有多少块组；
+ * 一个块组包含有多少 inode 和数据
  *
  * A filesystem is described by its super-block, which in turn
  * describes the cylinder groups.  The super-block is critical
@@ -49,6 +52,9 @@
  * catastrophic loss.  This is done at `newfs' time and the critical
  * super-block data does not change, so the copies need not be
  * referenced further unless disaster strikes.
+ * 一个文件系统由超级块描述，超级块又描述了块组。超级块是关键数据，在每个块组中复制，
+ * 以防止灾难性损失。这是在“newfs”时间完成的，并且关键超级块数据不会更改，因此除非
+ * 发生灾难，否则不需要进一步引用副本
  *
  * For filesystem fs, the offsets of the various blocks of interest
  * are given in the super block as:
@@ -69,6 +75,13 @@
  * all cases the size of the superblock will be SBLOCKSIZE. All values are
  * given in byte-offset form, so they do not imply a sector size. The
  * SBLOCKSEARCH specifies the order in which the locations should be searched.
+ * 依赖于不同的架构和媒体设备，超级块会是四个位置中的任意一个。对于每个数据块都会计数的 tiny media，
+ * 超级块会被放置到分区的最前端(对应的可能是 SBLOCK_FLOPPY)。在历史上，UFS1将其放置在距离前面 8K 
+ * 的位置，以便为磁盘标签和一个小引导程序留出空间(也就是说磁盘的引导块会占用 8k 空间)。对于 UFS2，
+ * 超级块会从分区最前端移动 64k 位置，前面的空间用来存放磁盘标签和引导程序。对于真正的 piggy 的系统，
+ * 如果前面三个都出现了故障，那就将从 256k 处开始检查系统。所有的情况超级块的大小都将是 SBLOCKSIZE 。
+ * 所有值都是以字节偏移量形式给出的，因此它们并不意味着扇区大小。这个SBLOCKSEARCH指定搜索位置的顺序。
+ * 
  */
 #define	SBLOCK_FLOPPY	     0
 #define	SBLOCK_UFS1	  8192
@@ -274,10 +287,12 @@ struct csum_total {
 struct fs {
 	int32_t	 fs_firstfield;		/* historic filesystem linked list, */
 	int32_t	 fs_unused_1;		/*     used for incore super blocks */
+	/* 各个数据块组距离块组起始位置的的偏移量？ */
 	int32_t	 fs_sblkno;		/* offset of super-block in filesys */
 	int32_t	 fs_cblkno;		/* offset of cyl-block in filesys */
 	int32_t	 fs_iblkno;		/* offset of inode-blocks in filesys */
 	int32_t	 fs_dblkno;		/* offset of first data after cg */
+
 	int32_t	 fs_old_cgoffset;	/* cylinder group offset in cylinder */
 	int32_t	 fs_old_cgmask;		/* used to calc mod fs_ntrak */
 	int32_t  fs_old_time;		/* last time written */
@@ -355,7 +370,7 @@ struct fs {
 	ufs_time_t fs_time;		/* last time written */
 	int64_t	 fs_size;		/* number of blocks in fs */
 	int64_t	 fs_dsize;		/* number of data blocks in fs */
-	ufs2_daddr_t fs_csaddr;		/* blk addr of cyl grp summary area */
+	ufs2_daddr_t fs_csaddr;		/* blk addr of cyl grp summary area 块组汇总区的块地址 */
 	int64_t	 fs_pendingblocks;	/* (u) blocks being freed */
 	u_int32_t fs_pendinginodes;	/* (u) inodes being freed */
 	uint32_t fs_snapinum[FSMAXSNAP];/* list of snapshot inode numbers */
@@ -522,35 +537,41 @@ CTASSERT(sizeof(struct fs) == 1376);
 
 /*
  * Cylinder group block for a filesystem.
+ * cluster 是 Windows 文件系统中的概念，定义类似 linux 文件系统中的块。参考 mkfs 实现，
+ * acg.cg_nclusterblks = acg.cg_ndblk / sblock.fs_frag
+ * 簇包含的数据块个数 = 块组包含的数据块总数 / fragment个数，可以看作是数据集合。所以，块和簇
+ * 的关系可能也是分不同情况。相关结构体中的一些字段表示一个快中包含的簇的个数，推测簇的大小应该
+ * 是要小于块的，然后大于等于扇区。当我们的块大小设置为4096的时候，可能一个块就包含有多个簇，
+ * 因为簇的大小可能就是 1024 甚至 512，cluster * fragment = group block number？
  */
 #define	CG_MAGIC	0x090255
 struct cg {
 	int32_t	 cg_firstfield;		/* historic cyl groups linked list */
-	int32_t	 cg_magic;		/* magic number */
-	int32_t  cg_old_time;		/* time last written */
-	u_int32_t cg_cgx;		/* we are the cgx'th cylinder group */
-	int16_t	 cg_old_ncyl;		/* number of cyl's this cg */
-	int16_t  cg_old_niblk;		/* number of inode blocks this cg */
-	u_int32_t cg_ndblk;		/* number of data blocks this cg */
-	struct	 csum cg_cs;		/* cylinder summary information */
-	u_int32_t cg_rotor;		/* position of last used block */
-	u_int32_t cg_frotor;		/* position of last used frag */
-	u_int32_t cg_irotor;		/* position of last used inode */
+	int32_t	 cg_magic;		/* magic number 魔数 */
+	int32_t  cg_old_time;		/* time last written 最后一次写入的时间 */
+	u_int32_t cg_cgx;		/* we are the cgx'th cylinder group 块组索引值？ */
+	int16_t	 cg_old_ncyl;		/* number of cyl's this cg 每个块组包含多少个柱面 */
+	int16_t  cg_old_niblk;		/* number of inode blocks this cg 这个块组包含有多少个 inode */
+	u_int32_t cg_ndblk;		/* number of data blocks this cg 这个块组包含有多少个数据块 */
+	struct	 csum cg_cs;		/* cylinder summary information 块组统计信息(free inode/direcotry) */
+	u_int32_t cg_rotor;		/* position of last used block 最后一个被使用的块的位置*/
+	u_int32_t cg_frotor;		/* position of last used frag 最后一个被使用的 fragment 所在地址 */
+	u_int32_t cg_irotor;		/* position of last used inode 最后一个被使用的 inode */
 	u_int32_t cg_frsum[MAXFRAG];	/* counts of available frags */
-	int32_t	 cg_old_btotoff;	/* (int32) block totals per cylinder */
-	int32_t	 cg_old_boff;		/* (u_int16) free block positions */
+	int32_t	 cg_old_btotoff;	/* (int32) block totals per cylinder 每个块组包含的数据块个数 */
+	int32_t	 cg_old_boff;		/* (u_int16) free block positions 空闲块位置 */
 	u_int32_t cg_iusedoff;		/* (u_int8) used inode map */
-	u_int32_t cg_freeoff;		/* (u_int8) free block map */
-	u_int32_t cg_nextfreeoff;	/* (u_int8) next available space */
-	u_int32_t cg_clustersumoff;	/* (u_int32) counts of avail clusters */
+	u_int32_t cg_freeoff;		/* (u_int8) free block map 空闲块位图 */
+	u_int32_t cg_nextfreeoff;	/* (u_int8) next available space 下一个可使用的空间 */
+	u_int32_t cg_clustersumoff;	/* (u_int32) counts of avail clusters  */
 	u_int32_t cg_clusteroff;		/* (u_int8) free cluster map */
-	u_int32_t cg_nclusterblks;	/* number of clusters this cg */
-	u_int32_t cg_niblk;		/* number of inode blocks this cg */
-	u_int32_t cg_initediblk;		/* last initialized inode */
-	u_int32_t cg_unrefs;		/* number of unreferenced inodes */
+	u_int32_t cg_nclusterblks;	/* number of clusters this cg 该块组一共包含有多少个数据簇 */
+	u_int32_t cg_niblk;		/* number of inode blocks this cg 存放 inode 的数据块个数 */
+	u_int32_t cg_initediblk;		/* last initialized inode 最后一个被初始化的 inode */
+	u_int32_t cg_unrefs;		/* number of unreferenced inodes 未被初始化的 inode 数量*/
 	int32_t	 cg_sparecon32[1];	/* reserved for future use */
 	u_int32_t cg_ckhash;		/* check-hash of this cg */
-	ufs_time_t cg_time;		/* time last written */
+	ufs_time_t cg_time;		/* time last written 最后一次被写入的时间 */
 	int64_t	 cg_sparecon64[3];	/* reserved for future use */
 	u_int8_t cg_space[1];		/* space for cylinder group maps */
 /* actually longer */
@@ -579,14 +600,29 @@ struct cg {
 /*
  * Cylinder group macros to locate things in cylinder groups.
  * They calc filesystem addresses of cylinder group data structures.
+ * 柱面组宏用来定位柱面组中的事务；
+ * 它们计算柱面组数据结构的文件系统地址
  */
+/* 
+	ufs 磁盘数据结构应该是类似于 ext2 文件系统的基本数据结构。除了第一个引导块之外，整个磁盘被
+	划分成了从0开始编号的块组。所以，base address = fs->fs_fpg(每个块组拥有的fragment数) * c
+	(块组号)。如果我们要访问第一个块组，令 c = 0
+	fragment 感觉是可以当做块来进行处理的，因为磁盘还是以扇区为单位进行读写的。所以无论是簇还是块，
+	它们所代表的只是在文件系统层面逻辑上的数据集合，只是表示方式上有所差异，最终还是对应到磁盘的扇区。
+	所以，也才会有逻辑块/簇到磁盘扇区号的转换
+*/
 #define	cgbase(fs, c)	(((ufs2_daddr_t)(fs)->fs_fpg) * (c))
 #define	cgdata(fs, c)	(cgdmin(fs, c) + (fs)->fs_metaspace)	/* data zone */
 #define	cgmeta(fs, c)	(cgdmin(fs, c))				/* meta data */
 #define	cgdmin(fs, c)	(cgstart(fs, c) + (fs)->fs_dblkno)	/* 1st data */
+/* 块组起始块号 + inode表偏移(块) = inode表起始块号 */
 #define	cgimin(fs, c)	(cgstart(fs, c) + (fs)->fs_iblkno)	/* inode blk */
+/* 块组起始块号 + 超级块偏移(块) = 超级块起始块号 */
 #define	cgsblock(fs, c)	(cgstart(fs, c) + (fs)->fs_sblkno)	/* super blk */
+/* 块组起始块号 + 组描述符偏移(块) = 组描述符起始块号 */
 #define	cgtod(fs, c)	(cgstart(fs, c) + (fs)->fs_cblkno)	/* cg block */
+
+/* cgstart 得到的是逻辑块/簇号，可以认为是块组的起始块号 */
 #define	cgstart(fs, c)							\
        ((fs)->fs_magic == FS_UFS2_MAGIC ? cgbase(fs, c) :		\
        (cgbase(fs, c) + (fs)->fs_old_cgoffset * ((c) & ~((fs)->fs_old_cgmask))))
@@ -621,6 +657,7 @@ struct cg {
  * The following macros optimize certain frequently calculated
  * quantities by using shifts and masks in place of divisions
  * modulos and multiplications.
+ * 下面的宏通过使用移位和掩码代替除法、模和乘法来优化某些经常计算的量
  */
 #define	blkoff(fs, loc)		/* calculates (loc % fs->fs_bsize) */ \
 	((loc) & (fs)->fs_qbmask)
@@ -715,6 +752,7 @@ lbn_offset(struct fs *fs, int level)
 
 /*
  * Number of inodes in a secondary storage block/fragment.
+ * 辅助存储块/片段中的索引节点数
  */
 #define	INOPB(fs)	((fs)->fs_inopb)
 #define	INOPF(fs)	((fs)->fs_inopb >> (fs)->fs_fragshift)

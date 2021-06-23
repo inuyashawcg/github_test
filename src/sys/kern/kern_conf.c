@@ -220,7 +220,7 @@ devvn_refthread(struct vnode *vp, struct cdev **devp, int *ref)
 		/* 
 			vnode 对应的cdev，推测vnode对应的文件应该是一个字符设备结点文件
 		*/ 
-		dev = vp->v_rdev;	
+		dev = vp->v_rdev;	// vnode 对应的 cdev
 		if (dev == NULL)
 			return (NULL);
 		KASSERT((dev->si_flags & SI_ETERNAL) != 0,
@@ -829,6 +829,9 @@ make_dev_sv(struct make_dev_args *args1, struct cdev **dres,
 	dev->si_gid = args.mda_gid;
 	dev->si_mode = args.mda_mode;
 
+	/*  
+		将新创建的设备添加到 devfs 的 cdev 管理链表当中
+	*/
 	devfs_create(dev);
 	clean_unrhdrl(devfs_inos);
 	dev_unlock_and_free();

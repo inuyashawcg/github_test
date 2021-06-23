@@ -184,8 +184,9 @@ typedef uint32_t vm_page_bits_t;
 #define VM_PAGE_BITS_ALL 0xfffffffffffffffflu
 typedef uint64_t vm_page_bits_t;
 #endif
-/*
-	虚拟地址所使用的物理地址的最底层的数据结构
+
+/* 
+	virtual memory page 物理内存跟虚拟内存的对应
 */
 struct vm_page {
 	union {
@@ -199,21 +200,22 @@ struct vm_page {
 			u_long v;
 		} memguard;
 	} plinks;
-	TAILQ_ENTRY(vm_page) listq;	/* pages in same object (O) */
+
+	TAILQ_ENTRY(vm_page) listq;	/* pages in same object (O) 同一个 object 上关联的 pages */
 	vm_object_t object;		/* which object am I in (O,P) */
-	vm_pindex_t pindex;		/* offset into object (O,P) 指的应该是对象在磁盘中的偏移地址 */
-	vm_paddr_t phys_addr;		/* physical address of page (C) 它所要对应的物理地址 */
-	struct md_page md;		/* machine dependent stuff */
+	vm_pindex_t pindex;		/* offset into object (O,P) */
+	vm_paddr_t phys_addr;		/* physical address of page (C) 对应的物理地址 */
+	struct md_page md;		/* machine dependent stuff 依赖机器的字段 */
 	u_int wire_count;		/* wired down maps refs (P) */
 	volatile u_int busy_lock;	/* busy owners lock */
-	uint16_t hold_count;		/* page hold count (P) */
+	uint16_t hold_count;		/* page hold count (P) 页的引用次数 */
 	uint16_t flags;			/* page PG_* flags (P) */
-	uint8_t aflags;			/* access is atomic */
+	uint8_t aflags;			/* access is atomic 访问具有原子性 */
 	uint8_t oflags;			/* page VPO_* flags (O) */
-	uint8_t queue;			/* page queue index (Q) */
-	int8_t psind;			/* pagesizes[] index (O) */
+	uint8_t queue;			/* page queue index (Q) 页的队列索引 */
+	int8_t psind;			/* pagesizes[] index (O) 系统会对支持 page_size 组成的数组，该字段应该表示的是数组索引 */
 	int8_t segind;			/* vm_phys segment index (C) */
-	uint8_t	order;			/* index of the buddy queue (F) */
+	uint8_t	order;			/* index of the buddy queue (F) 伙伴队列的索引？ */
 	uint8_t pool;			/* vm_phys freepool index (F) */
 	u_char	act_count;		/* page usage count (P) */
 	/* NOTE that these must support one bit per DEV_BSIZE in a page */

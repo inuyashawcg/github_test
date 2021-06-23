@@ -1296,6 +1296,10 @@ done:
  *
  * Helper function for vm_mmap.  Perform sanity check specific for mmap
  * operations on cdevs.
+ * 参考:
+ * 	https://zhuanlan.zhihu.com/p/69555454
+ * Linux 系统中读写文件有两种方式，其中一种使用方式就是通过内存映射来完成。基本原理就是将文件
+ * 直接映射到进程/线程地址空间中，这样进程/线程就可以像访问普通内存区域那样对文件进行操作
  */
 int
 vm_mmap_cdev(struct thread *td, vm_size_t objsize, vm_prot_t prot,

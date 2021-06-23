@@ -67,7 +67,7 @@ __FBSDID("$FreeBSD: releng/12.0/sys/fs/tmpfs/tmpfs_vfsops.c 341085 2018-11-27 17
 #include <fs/tmpfs/tmpfs.h>
 
 /*
- * Default permission for root node
+ * Default permission for root node 根节点默认权限
  */
 #define TMPFS_DEFAULT_ROOT_MODE	(S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH)
 
@@ -82,6 +82,9 @@ static int	tmpfs_fhtovp(struct mount *, struct fid *, int,
 static int	tmpfs_statfs(struct mount *, struct statfs *);
 static void	tmpfs_susp_clean(struct mount *);
 
+/*
+	指定 tmpfs 所拥有的一些属性信息，mount的时候会判断挂载的文进系统是不是具有这些属性
+*/
 static const char *tmpfs_opts[] = {
 	"from", "size", "maxfilesize", "inodes", "uid", "gid", "mode", "export",
 	"union", "nonc", NULL
@@ -91,6 +94,10 @@ static const char *tmpfs_updateopts[] = {
 	"from", "export", NULL
 };
 
+/*
+	uma_zcreate 函数在创建存储区的时候会调用该函数，用于初始化一些数据。
+	这里的作用对象是 tmpfs_node
+*/
 static int
 tmpfs_node_ctor(void *mem, int size, void *arg, int flags)
 {
@@ -107,6 +114,7 @@ tmpfs_node_ctor(void *mem, int size, void *arg, int flags)
 	return (0);
 }
 
+/* 仅仅从来设置结点类型，应用场景同上 */
 static void
 tmpfs_node_dtor(void *mem, int size, void *arg)
 {
@@ -114,6 +122,7 @@ tmpfs_node_dtor(void *mem, int size, void *arg)
 	node->tn_type = VNON;
 }
 
+/* tmpfs_node 初始化，应用场景同上 */
 static int
 tmpfs_node_init(void *mem, int size, int flags)
 {
@@ -126,6 +135,9 @@ tmpfs_node_init(void *mem, int size, int flags)
 	return (0);
 }
 
+/*
+	UMA 机制释放一块内存区域的时候调用该函数，做一些清理工作
+*/
 static void
 tmpfs_node_fini(void *mem, int size)
 {
@@ -134,9 +146,14 @@ tmpfs_node_fini(void *mem, int size)
 	mtx_destroy(&node->tn_interlock);
 }
 
+/*
+	要点:
+		- 内存文件系统需要占用较多的内存空间，所以需要对其进行限制，保证操作系统能够正常运行
+*/
 static int
 tmpfs_mount(struct mount *mp)
 {
+	/* 计算一个page中能装多少 dirent 和 node */
 	const size_t nodes_per_page = howmany(PAGE_SIZE,
 	    sizeof(struct tmpfs_dirent) + sizeof(struct tmpfs_node));
 	struct tmpfs_mount *tmp;
@@ -147,7 +164,7 @@ tmpfs_mount(struct mount *mp)
 	u_quad_t pages;
 	off_t nodes_max, size_max, maxfilesize;
 
-	/* Root node attributes. */
+	/* Root node attributes. 根节点属性 */
 	uid_t root_uid;
 	gid_t root_gid;
 	mode_t root_mode;
@@ -168,6 +185,7 @@ tmpfs_mount(struct mount *mp)
 	}
 
 	vn_lock(mp->mnt_vnodecovered, LK_SHARED | LK_RETRY);
+	/* 获取挂载点对应的vnode的属性信息，然后跟指定的属性信息列表作对比 */
 	error = VOP_GETATTR(mp->mnt_vnodecovered, &va, mp->mnt_cred);
 	VOP_UNLOCK(mp->mnt_vnodecovered, 0);
 	if (error)
@@ -191,14 +209,20 @@ tmpfs_mount(struct mount *mp)
 	nonc = vfs_getopt(mp->mnt_optnew, "nonc", NULL, NULL) == 0;
 
 	/* Do not allow mounts if we do not have enough memory to preserve
-	 * the minimum reserved pages. */
+	 * the minimum reserved pages. 
+	 * 如果没有足够的内存来保留最小的保留页，则不允许装载。所以这个函数的作用应该是计算
+	 * tmpfs装载之后，操作系统剩余的内存页的数量
+	 * */
 	if (tmpfs_mem_avail() < TMPFS_PAGES_MINRESERVED)
 		return (ENOSPC);
 
 	/* Get the maximum number of memory pages this file system is
 	 * allowed to use, based on the maximum size the user passed in
 	 * the mount structure.  A value of zero is treated as if the
-	 * maximum available space was requested. */
+	 * maximum available space was requested. 
+	 * 根据用户在mount结构体中传递的最大size，获取这个文件系统被允许使用的最大内存页数量。
+	 * 如果值为零，则视为请求了最大可用空间
+	 * */
 	if (size_max == 0 || size_max > OFF_MAX - PAGE_SIZE ||
 	    (SIZE_MAX < OFF_MAX && size_max / PAGE_SIZE >= SIZE_MAX))
 		pages = SIZE_MAX;
@@ -218,33 +242,39 @@ tmpfs_mount(struct mount *mp)
 		nodes_max = INT_MAX;
 	MPASS(nodes_max >= 3);
 
-	/* Allocate the tmpfs mount structure and fill it. */
+	/* Allocate the tmpfs mount structure and fill it. 实例化 tmpfs_mount 结构体 */
 	tmp = (struct tmpfs_mount *)malloc(sizeof(struct tmpfs_mount),
 	    M_TMPFSMNT, M_WAITOK | M_ZERO);
 
-	mtx_init(&tmp->tm_allnode_lock, "tmpfs allnode lock", NULL, MTX_DEF);
-	tmp->tm_nodes_max = nodes_max;
-	tmp->tm_nodes_inuse = 0;
-	tmp->tm_refcount = 1;
-	tmp->tm_maxfilesize = maxfilesize > 0 ? maxfilesize : OFF_MAX;
-	LIST_INIT(&tmp->tm_nodes_used);
+	mtx_init(&tmp->tm_allnode_lock, "tmpfs allnode lock", NULL, MTX_DEF);	/* 初始化锁 */
+	tmp->tm_nodes_max = nodes_max;	/* 指定挂载点最大结点数 */
+	tmp->tm_nodes_inuse = 0;	/* 初始化被使用结点数为0 */
+	tmp->tm_refcount = 1;	/* 挂载点的引用次数 */
+	tmp->tm_maxfilesize = maxfilesize > 0 ? maxfilesize : OFF_MAX;	/* 文件最大是多少 */
+	LIST_INIT(&tmp->tm_nodes_used);	/* 初始化结点链表 */
 
-	tmp->tm_pages_max = pages;
-	tmp->tm_pages_used = 0;
-	tmp->tm_ino_unr = new_unrhdr(2, INT_MAX, &tmp->tm_allnode_lock);
+	tmp->tm_pages_max = pages;	/* 最大能够占用多少内存页 */
+	tmp->tm_pages_used = 0;	/* 初始化已经被占用的内存页数量为0 */
+	tmp->tm_ino_unr = new_unrhdr(2, INT_MAX, &tmp->tm_allnode_lock);	/* 分配inode编号，调用前面初始化的锁 */
 	tmp->tm_dirent_pool = uma_zcreate("TMPFS dirent",
 	    sizeof(struct tmpfs_dirent), NULL, NULL, NULL, NULL,
-	    UMA_ALIGN_PTR, 0);
+	    UMA_ALIGN_PTR, 0);	/* 创建目录UMA结构体 */
 	tmp->tm_node_pool = uma_zcreate("TMPFS node",
 	    sizeof(struct tmpfs_node), tmpfs_node_ctor, tmpfs_node_dtor,
-	    tmpfs_node_init, tmpfs_node_fini, UMA_ALIGN_PTR, 0);
-	tmp->tm_ronly = (mp->mnt_flag & MNT_RDONLY) != 0;
-	tmp->tm_nonc = nonc;
+	    tmpfs_node_init, tmpfs_node_fini, UMA_ALIGN_PTR, 0); /* 创建结点UMA结构体 */
+	tmp->tm_ronly = (mp->mnt_flag & MNT_RDONLY) != 0;	/* 设置文件系统访问属性 */
+	tmp->tm_nonc = nonc;	/* 设置是否使用 namecache 缓存机制 */
 
-	/* Allocate the root node. */
+	/* Allocate the root node. 根据上面获取到的属性信息实例化根节点 
+		这里申请的结点传入的参数是 tmpfs_node，而不是 vnode，也就是说申请的是tmpfs node，这一点要注意
+	*/
 	error = tmpfs_alloc_node(mp, tmp, VDIR, root_uid, root_gid,
 	    root_mode & ALLPERMS, NULL, NULL, VNOVAL, &root);
 
+	/*
+		一旦出错就必须要做相应处理，最典型的就是申请到的资源要释放掉。以后进行软件设计的时候要注意
+		这一点，不能忽略
+	*/
 	if (error != 0 || root == NULL) {
 		uma_zdestroy(tmp->tm_node_pool);
 		uma_zdestroy(tmp->tm_dirent_pool);
@@ -254,17 +284,27 @@ tmpfs_mount(struct mount *mp)
 	}
 	KASSERT(root->tn_id == 2,
 	    ("tmpfs root with invalid ino: %ju", (uintmax_t)root->tn_id));
-	tmp->tm_root = root;
+	tmp->tm_root = root;	/* 指定文件系统挂载的根节点 */
 
 	MNT_ILOCK(mp);
 	mp->mnt_flag |= MNT_LOCAL;
 	mp->mnt_kern_flag |= MNTK_LOOKUP_SHARED | MNTK_EXTENDED_SHARED;
 	MNT_IUNLOCK(mp);
 
+	/*
+		仔细看这一步的操作，是把 tmpfs_mount 赋值给 mount->mnt_data。mnt_data 在注释中说的表示 private data，
+		说明该成员存储的应该是不同的文件系统所对应的mount结构体。进一步推测，函数mount指针参数很可能是空的，通过挂载
+		相当于是做了一个实例化操作，然后虚拟文件系统再根据其中数据成员的内容判定该文件系统是哪种类型的、挂载到什么地方
+		等等，然后再进行 id 分配等操作
+	*/
 	mp->mnt_data = tmp;
 	mp->mnt_stat.f_namemax = MAXNAMLEN;
-	vfs_getnewfsid(mp);
-	vfs_mountedfrom(mp, "tmpfs");
+	/*
+		最后会调用 vfs 提供的一些接口，首先是给 tmpfs 分一个文件系统id，然后调用 vfs_mountedfrom，搜索一下可以发现，
+		很多文件系统mount操作都有相同的操作，所以这个应该就是 vfs 中的某个管理机制
+	*/
+	vfs_getnewfsid(mp);	/* 设置 mnt_stat->f_fsid.val[*] */
+	vfs_mountedfrom(mp, "tmpfs");	/* 设置 mnt_stat 成员中包含的挂载的文件系统名称 */
 
 	return 0;
 }
@@ -277,16 +317,20 @@ tmpfs_unmount(struct mount *mp, int mntflags)
 	struct tmpfs_node *node;
 	int error, flags;
 
+	/*
+		MNT_FORCE：强制 unmount
+	*/
 	flags = (mntflags & MNT_FORCE) != 0 ? FORCECLOSE : 0;
 	tmp = VFS_TO_TMPFS(mp);
 
-	/* Stop writers */
+	/* Stop writers 停止向挂载点写入数据 */
 	error = vfs_write_suspend_umnt(mp);
 	if (error != 0)
 		return (error);
 	/*
 	 * At this point, nodes cannot be destroyed by any other
 	 * thread because write suspension is started.
+	 * 此时，节点无法被任何其他线程销毁，因为写入暂停已启动
 	 */
 
 	for (;;) {
@@ -336,28 +380,32 @@ tmpfs_free_tmp(struct tmpfs_mount *tmp)
 	MPASS(tmp->tm_refcount > 0);
 	tmp->tm_refcount--;
 	if (tmp->tm_refcount > 0) {
-		TMPFS_UNLOCK(tmp);
+		TMPFS_UNLOCK(tmp);	/* 当引用计数大于0时，返回；后续肯定是要有其他操作 */
 		return;
 	}
 	TMPFS_UNLOCK(tmp);
 
+	/* UMA 和 unrhdr 释放过程参考这里 */
 	uma_zdestroy(tmp->tm_dirent_pool);
 	uma_zdestroy(tmp->tm_node_pool);
+
 	clear_unrhdr(tmp->tm_ino_unr);
 	delete_unrhdr(tmp->tm_ino_unr);
 
-	mtx_destroy(&tmp->tm_allnode_lock);
-	MPASS(tmp->tm_pages_used == 0);
+	mtx_destroy(&tmp->tm_allnode_lock);	/* 释放锁 */
+	MPASS(tmp->tm_pages_used == 0);	
 	MPASS(tmp->tm_nodes_inuse == 0);
 
-	free(tmp, M_TMPFSMNT);
+	free(tmp, M_TMPFSMNT);	/* free 掉 tmpfs_mount */
 }
 
 static int
 tmpfs_root(struct mount *mp, int flags, struct vnode **vpp)
 {
 	int error;
-
+	/*
+		tmpfs_alloc_vp 会创建一个新的 vnode，然后保存到 vpp
+	*/
 	error = tmpfs_alloc_vp(mp, VFS_TO_TMPFS(mp)->tm_root, flags, vpp);
 	if (error == 0)
 		(*vpp)->v_vflag |= VV_ROOT;
@@ -375,6 +423,12 @@ tmpfs_fhtovp(struct mount *mp, struct fid *fhp, int flags,
 
 	tmp = VFS_TO_TMPFS(mp);
 
+	/* 
+		强制类型转换: fid -> tmpfs_fid。对照两个结构体的成员构成，两者之间的对应关系应该是
+		fid_len -> tf_len;
+		fid_data0 -> tf_pad;
+		char fid_data[16] -> tf_id + tf_gen，后面两个成员数据长度加起来应该是 16 bytes
+	*/
 	tfhp = (struct tmpfs_fid *)fhp;
 	if (tfhp->tf_len != sizeof(struct tmpfs_fid))
 		return (EINVAL);
@@ -382,19 +436,24 @@ tmpfs_fhtovp(struct mount *mp, struct fid *fhp, int flags,
 	if (tfhp->tf_id >= tmp->tm_nodes_max)
 		return (EINVAL);
 
-	TMPFS_LOCK(tmp);
+	TMPFS_LOCK(tmp);	/* 对 tmpfs_mount 加锁，然后才能访问其中的成员链表 */
 	LIST_FOREACH(node, &tmp->tm_nodes_used, tn_entries) {
 		if (node->tn_id == tfhp->tf_id &&
 		    node->tn_gen == tfhp->tf_gen) {
 			tmpfs_ref_node(node);
+			/*
+				可能的应用场景就是: 用户通过 fid 参数来访问某个结点，然后VFS经过处理定位到了是 tmpfs 文件系统中的
+				结点，然后调用该函数匹配结点。如果找到了这个结点，并且处于被使用状态，引用计数++，表示又多了一个访问者
+			*/
 			break;
 		}
 	}
 	TMPFS_UNLOCK(tmp);
 
 	if (node != NULL) {
+		/* 如果找到了，就为该结点分配一个 vnode */
 		error = tmpfs_alloc_vp(mp, node, LK_EXCLUSIVE, vpp);
-		tmpfs_free_node(tmp, node);
+		tmpfs_free_node(tmp, node);	/* node 其实只是一个局部变量，使用完之后就可以释放掉 */
 	} else
 		error = EINVAL;
 	return (error);
@@ -409,6 +468,7 @@ tmpfs_statfs(struct mount *mp, struct statfs *sbp)
 
 	tmp = VFS_TO_TMPFS(mp);
 
+	/* 文件系统片段和数据传送块的大小都设置为 PAGE_SIZE */
 	sbp->f_iosize = PAGE_SIZE;
 	sbp->f_bsize = PAGE_SIZE;
 
@@ -438,7 +498,9 @@ tmpfs_sync(struct mount *mp, int waitfor)
 {
 	struct vnode *vp, *mvp;
 	struct vm_object *obj;
-
+	/*
+		MNT_SUSPEND：同步后挂起文件系统
+	*/
 	if (waitfor == MNT_SUSPEND) {
 		MNT_ILOCK(mp);
 		mp->mnt_kern_flag |= MNTK_SUSPEND2 | MNTK_SUSPENDED;
@@ -464,6 +526,9 @@ tmpfs_sync(struct mount *mp, int waitfor)
 			 * Unlocked read, avoid taking vnode lock if
 			 * not needed.  Lost update will be handled on
 			 * the next call.
+			 * 未锁定读取，如果不需要，请避免使用vnode锁。下次调用时将处理丢失的更新
+			 * OBJ_TMPFS_DIRTY 表示的应该是脏页，如果没有脏页，就继续返回循环起始位置；
+			 * 如果是脏页，就执行后续操作
 			 */
 			if ((obj->flags & OBJ_TMPFS_DIRTY) == 0) {
 				VI_UNLOCK(vp);
@@ -481,6 +546,7 @@ tmpfs_sync(struct mount *mp, int waitfor)
 
 /*
  * The presence of a susp_clean method tells the VFS to track writes.
+ * susp_clean 方法的存在告诉 VFS 跟踪写操作
  */
 static void
 tmpfs_susp_clean(struct mount *mp __unused)

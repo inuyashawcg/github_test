@@ -59,6 +59,18 @@
  * Bmap converts the logical block number of a file to its physical block
  * number on the disk. The conversion is done by using the logical block
  * number to index into the array of block pointers described by the dinode.
+ * 
+ * bmap是将一个文件的逻辑块号转换成它在磁盘上的物理块号。这种转换是通过使用逻辑块号索引到由
+ * dinode描述的块指针数组来完成的
+ * 
+ * 	struct vop_bmap_args {
+		struct vnode *a_vp;
+		daddr_t  a_bn;
+		struct bufobj **a_bop;
+		daddr_t *a_bnp;
+		int *a_runp;
+		int *a_runb;
+	}
  */
 int
 ext2_bmap(struct vop_bmap_args *ap)
@@ -69,19 +81,24 @@ ext2_bmap(struct vop_bmap_args *ap)
 	/*
 	 * Check for underlying vnode requests and ensure that logical
 	 * to physical mapping is requested.
+	 * 检查底层 vnode 请求并确保请求了逻辑到物理的映射
+	 * a_bop 表示的 bufboj 指针，a_vp 表示的是 vnode 指针，a_bnp: block number，应该还是逻辑块号(因为我们
+	 * 访问磁盘的话，应该不会准确知道这个文件存在磁盘上的哪个物理块中，直接操作的还是逻辑块号)
 	 */
 	if (ap->a_bop != NULL)
 		*ap->a_bop = &VTOI(ap->a_vp)->i_devvp->v_bufobj;
-	if (ap->a_bnp == NULL)
+	if (ap->a_bnp == NULL)	// 判断请求中是否有逻辑块号
 		return (0);
-
+	/*
+		a_vp 表示的是 vnode 指针，a_bn 表示的应该是 blkno
+	*/
 	if (VTOI(ap->a_vp)->i_flag & IN_E4EXTENTS)
 		error = ext4_bmapext(ap->a_vp, ap->a_bn, &blkno,
 		    ap->a_runp, ap->a_runb);
 	else
 		error = ext2_bmaparray(ap->a_vp, ap->a_bn, &blkno,
 		    ap->a_runp, ap->a_runb);
-	*ap->a_bnp = blkno;
+	*ap->a_bnp = blkno;	/* 最后利用局部变量 blkno 对 a_bnp 进行赋值 */
 	return (error);
 }
 
@@ -146,11 +163,17 @@ ext4_bmapext(struct vnode *vp, int32_t bn, int64_t *bnp, int *runp, int *runb)
  * are addressed by one less than the address of the first indirect block to
  * which they point.  Triple indirect blocks are addressed by one less than
  * the address of the first double indirect block to which they point.
+ * 这里讲的内容应该是文件的三级间接寻址 
  *
  * ext2_bmaparray does the bmap conversion, and if requested returns the
  * array of logical blocks which must be traversed to get to a block.
  * Each entry contains the offset into that block that gets you to the
  * next block and the disk address of the block (if it is assigned).
+ * ext2_bmaparray 执行 bmap 转换，如果请求，则返回逻辑块数组，必须遍历这些逻辑块才能得到块。
+ * 每个条目都包含到该块的偏移量，该偏移量使您到达下一个块，以及该块的磁盘地址（如果已分配）
+ * 
+ * bn: block number(从上层函数追下来，bn = 2)
+ * bnp: block number pointer
  */
 
 int
@@ -160,17 +183,18 @@ ext2_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, int *runp, int *runb)
 	struct buf *bp;
 	struct ext2mount *ump;
 	struct mount *mp;
-	struct indir a[EXT2_NIADDR + 1], *ap;
+	struct indir a[EXT2_NIADDR + 1], *ap;	/* a表示的应该是三级间接寻址 */
 	daddr_t daddr;
-	e2fs_lbn_t metalbn;
+	e2fs_lbn_t metalbn;	/* metadata logical block number */
 	int error, num, maxrun = 0, bsize;
-	int *nump;
+	int *nump;	/* 指向上面定义的变量 num */
 
 	ap = NULL;
-	ip = VTOI(vp);
-	mp = vp->v_mount;
+	ip = VTOI(vp);	/* vnode 对应的 inode */
+	mp = vp->v_mount;	/* 挂载点对应的 mount 结构 */
 	ump = VFSTOEXT2(mp);
 
+	/* 获取文件系统 block_size 大小 */
 	bsize = EXT2_BLOCK_SIZE(ump->um_e2fs);
 
 	if (runp) {
@@ -304,25 +328,33 @@ ext2_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, int *runp, int *runb)
  * Note, the logical block number of the inode single/double/triple indirect
  * block appears twice in the array, once with the offset into the i_ib and
  * once with the offset into the page itself.
+ * 创建一个逻辑块号/偏移对数组，表示访问数据块所需的间接块的路径。第一个“对”包含相应的单、双或
+ * 三个间接块的逻辑块号，以及inode间接块数组中的偏移量。注意，inode single/double/triple 
+ * 间接寻址块的逻辑块号在数组中出现两次，一次偏移量出现在 i_ib 中，另一次偏移量出现在页本身中
+ * 
+ * ext2fs get logical block number
  */
 int
 ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 {
 	long blockcnt;
-	e2fs_lbn_t metalbn, realbn;
+	e2fs_lbn_t metalbn, realbn;	/* 逻辑块 */
 	struct ext2mount *ump;
 	int i, numlevels, off;
 	int64_t qblockcnt;
 
+	/* 获取ext2 mount */
 	ump = VFSTOEXT2(vp->v_mount);
 	if (nump)
 		*nump = 0;
-	numlevels = 0;
+	numlevels = 0; /* 应该表示的是寻址的等级，1、2、3级直接或者间接寻址 */
 	realbn = bn;
 	if ((long)bn < 0)
 		bn = -(long)bn;
 
-	/* The first EXT2_NDADDR blocks are direct blocks. */
+	/* The first EXT2_NDADDR blocks are direct blocks. 
+		如果块号是在一级直接寻址范围内(也就是小于12)，就直接返回
+	*/
 	if (bn < EXT2_NDADDR)
 		return (0);
 
@@ -331,15 +363,21 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 	 * is done, blockcnt indicates the number of data blocks possible
 	 * at the previous level of indirection, and EXT2_NIADDR - i is the
 	 * number of levels of indirection needed to locate the requested block.
+	 * 确定间接寻址的级别数。完成此循环后，blockcnt表示上一级间接寻址可能的数据块数，
+	 * EXT2_NIADDR-i 表示定位请求块所需的间接寻址级别数。
 	 */
 	for (blockcnt = 1, i = EXT2_NIADDR, bn -= EXT2_NDADDR; ;
 	    i--, bn -= blockcnt) {
 		if (i == 0)
-			return (EFBIG);
+			return (EFBIG);	/* 返回错误码：文件太大 */
 		/*
 		 * Use int64_t's here to avoid overflow for triple indirect
 		 * blocks when longs have 32 bits and the block size is more
 		 * than 4K.
+		 * 当long有32位并且块大小超过4K时，在这里使用 int64_t 可以避免三重间接块溢出。
+		 * MNINDIR 表示每个块能包含有多少个块指针。第一次循环，blockcnt = 1，qblockcnt
+		 * 就表示一级间接寻址所包含的块数。如果 bn < qblockcnt，也就说明这个块也就用到了
+		 * 一级间接寻址(bn在循环开始赋值的时候就已经把直接寻址的12个块给去掉了)
 		 */
 		qblockcnt = (int64_t)blockcnt * MNINDIR(ump);
 		if (bn < qblockcnt)

@@ -62,6 +62,9 @@ typedef int pgo_populate_t(vm_object_t, vm_pindex_t, int, vm_prot_t,
     vm_pindex_t *, vm_pindex_t *);
 typedef void pgo_pageunswapped_t(vm_page_t);
 
+/* 
+	定义了 pager 所支持的一些操作。调页器接口主要是用于后备存储和物理内存之间的数据转移过程
+*/
 struct pagerops {
 	pgo_init_t		*pgo_init;		/* Initialize pager. */
 	pgo_alloc_t		*pgo_alloc;		/* Allocate pager. */

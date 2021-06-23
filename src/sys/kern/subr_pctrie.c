@@ -348,6 +348,7 @@ pctrie_insert(struct pctrie *ptree, uint64_t *val, pctrie_alloc_t allocfn)
 /*
  * Returns the value stored at the index.  If the index is not present,
  * NULL is returned.
+ * 从函数参数的命名来看，blkno 对应的是一个 index 值
  */
 uint64_t *
 pctrie_lookup(struct pctrie *ptree, uint64_t index)

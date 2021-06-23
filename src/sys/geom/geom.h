@@ -88,18 +88,33 @@ typedef void g_resize_t(struct g_consumer *cp);
  * The g_class structure describes a transformation class.  In other words
  * all BSD disklabel handlers share one g_class, all MBR handlers share
  * one common g_class and so on.
+ * g_class 用于描述一个转换类。换句话说，所有的BSD磁盘标签处理程序共享一个 g_class，所有的
+ * MBR 共享一个共同的 g_class
+ * 
  * Certain operations are instantiated(实例化) on the class, most notably the
  * taste and config_geom functions.
+ * 特定的操作用于实例化类，最典型的就是 taste和 config_geom
+ * 只有name字段是必须要设置的，其他的字段都是可选择的
  */
 struct g_class {
-	const char		*name;
+	const char		*name;	/* class name */
 	u_int			version;
-	u_int			spare0;
+	u_int			spare0;	// 闲置的、备用的
+
+	/*
+		指向用于teste事件处理的函数的指针。如果它是非空的，则在三种情况下调用它：
+			- 在类激活的时候，所有的提供者都要执行 taste 操作
+			- 当新的 provider 建立的时候，需要执行 teste 操作
+			- 在 provider 的最后一次写入操作关闭之后，需要重新执行 taste(在发送第一次写入打开事件“破坏”时)
+	*/
 	g_taste_t		*taste;
-	g_config_t		*config;
-	g_ctl_req_t		*ctlreq;
-	g_init_t		*init;
-	g_fini_t		*fini;
+	g_config_t		*config;	/* 该字段已经不再使用，它的功能已经被 ctlreq 字段替代 */
+	g_ctl_req_t		*ctlreq;	/* 用于处理来自用户空间的应用所关联的事件 */
+	g_init_t		*init;	/* 指向在类注册后立即调用的函数的指针 */
+	g_fini_t		*fini;	/* 指向在类注销之前调用的函数的指针 */
+	/*
+		指向一个 class 上每一个 geom 卸载时都会调用的函数。当这个字段没有被设置的时候，类是不能被卸载的
+	*/
 	g_ctl_destroy_geom_t	*destroy_geom;
 	/*
 	 * Default values for geom methods
@@ -117,6 +132,7 @@ struct g_class {
 	void			*spare2;
 	/*
 	 * The remaining elements are private
+	 * 其余的元素是私有的
 	 */
 	LIST_ENTRY(g_class)	class;
 	LIST_HEAD(,g_geom)	geom;
@@ -125,6 +141,7 @@ struct g_class {
 /*
  * The g_geom_alias is a list node for aliases for the geom name
  * for device node creation.
+ * g_geom_alias 是用于创建设备节点的geom名称别名的列表节点
  */
 struct g_geom_alias {
 	LIST_ENTRY(g_geom_alias) ga_next;
@@ -137,33 +154,46 @@ struct g_geom_alias {
 
 /*
  * The g_geom is an instance of a g_class.
+ * g_geom 是 g_class 的一个实体
+ * 
+ * 成员中包含了两个管理消费者和提供者的管理队列，所以 geom 应该是起到的是管理的作用，
+ * 类比 devclass
+ * 
+ * geom（不要混淆“geom”和“geom”）是geom类的一个实例。例如：在典型的i386 FreeBSD系统中，
+ * 每个磁盘将有一个MBR类geom。geom的名称其实并不重要，它只用于XML转储和调试目的。可以有许多
+ * geom具有相同的名称
  */
 struct g_geom {
 	char			*name;
-	struct g_class		*class;
+	struct g_class		*class;	/* 对应的g_class，感觉像是基类的设定 */
 	LIST_ENTRY(g_geom)	geom;
-	LIST_HEAD(,g_consumer)	consumer;
-	LIST_HEAD(,g_provider)	provider;
+	LIST_HEAD(,g_consumer)	consumer;	/* 消费者队列 */
+	LIST_HEAD(,g_provider)	provider;	/* 生产者队列 */
 	TAILQ_ENTRY(g_geom)	geoms;	/* XXX: better name */
 	int			rank;
-	g_start_t		*start;
-	g_spoiled_t		*spoiled;
+
+	/*
+		如果我们要使用在这个 geom 中的 providers，那么我们就必须要设置 start 字段；
+		如果我们打算使用 geom 中的 consumers，那么我们必须要设置 orphan 和 access
+	*/
+	g_start_t		*start;	/* 用于处理 I/O 的函数指针 */
+	g_spoiled_t		*spoiled;	/* 用于释放consumer */
 	g_attrchanged_t		*attrchanged;
 	g_dumpconf_t		*dumpconf;
-	g_access_t		*access;
-	g_orphan_t		*orphan;
-	g_ioctl_t		*ioctl;
+	g_access_t		*access;	/* access control */
+	g_orphan_t		*orphan;	/* 指向用于通知孤立 consumer 的函数的指针 */
+	g_ioctl_t		*ioctl;	/* 处理ioctl请求 */
 	g_provgone_t		*providergone;
 	g_resize_t		*resize;
 	void			*spare0;
 	void			*spare1;
-	void			*softc;
+	void			*softc;	/* Field for private use */
 	unsigned		flags;
 #define	G_GEOM_WITHER		0x01
 #define	G_GEOM_VOLATILE_BIO	0x02
 #define	G_GEOM_IN_ACCESS	0x04
 #define	G_GEOM_ACCESS_WAIT	0x08
-	LIST_HEAD(,g_geom_alias) aliases;
+	LIST_HEAD(,g_geom_alias) aliases;	/* geom 别名队列？ */
 };
 
 /*
@@ -172,21 +202,23 @@ struct g_geom {
  * XXX: should (possibly) be collapsed with sys/bio.h::bio_queue_head.
  */
 struct g_bioq {
-	TAILQ_HEAD(, bio)	bio_queue;
-	struct mtx		bio_queue_lock;
-	int			bio_queue_length;
+	TAILQ_HEAD(, bio)	bio_queue;	/* buffer I/O queue */
+	struct mtx		bio_queue_lock;	/* 队列锁 */
+	int			bio_queue_length;	/* 队列的长度 */
 };
 
 /*
  * A g_consumer is an attachment point for a g_provider.  One g_consumer
  * can only be attached to one g_provider, but multiple g_consumers
  * can be attached to one g_provider.
+ * 消费者是提供者的一个连接点，一个消费者只能被连接到一个提供者，但是多个消费者可以连接到
+ * 一个提供者
  */
 
 struct g_consumer {
-	struct g_geom		*geom;
-	LIST_ENTRY(g_consumer)	consumer;
-	struct g_provider	*provider;
+	struct g_geom		*geom;	// 指向所属的geom
+	LIST_ENTRY(g_consumer)	consumer;	// consumer管理队列
+	struct g_provider	*provider;	// 指向所属的 provider
 	LIST_ENTRY(g_consumer)	consumers;	/* XXX: better name */
 	int			acr, acw, ace;
 	int			flags;
@@ -194,22 +226,25 @@ struct g_consumer {
 #define G_CF_ORPHAN		0x4
 #define G_CF_DIRECT_SEND	0x10
 #define G_CF_DIRECT_RECEIVE	0x20
-	struct devstat		*stat;
+	struct devstat		*stat;	// 设备描述
 	u_int			nstart, nend;
 
-	/* Two fields for the implementing class to use */
+	/* Two fields for the implementing class to use 
+		实现类要使用的两个字段
+	*/
 	void			*private;
 	u_int			index;
 };
 
 /*
- * A g_provider is a "logical disk".
+ * A g_provider is a "logical disk". 提供者是一个逻辑磁盘
+ * 消费者和提供者的数据结构非常相似，继承于同一个基类？
  */
 struct g_provider {
 	char			*name;
-	LIST_ENTRY(g_provider)	provider;
-	struct g_geom		*geom;
-	LIST_HEAD(,g_consumer)	consumers;
+	LIST_ENTRY(g_provider)	provider;	// 管理队列
+	struct g_geom		*geom;	// 指向所属的 geom
+	LIST_HEAD(,g_consumer)	consumers;	// 消费者队列，类似总线管理设备
 	int			acr, acw, ace;
 	int			error;
 	TAILQ_ENTRY(g_provider)	orphan;
@@ -217,7 +252,7 @@ struct g_provider {
 	u_int			sectorsize;
 	u_int			stripesize;
 	u_int			stripeoffset;
-	struct devstat		*stat;
+	struct devstat		*stat;	// 设备描述
 	u_int			nstart, nend;
 	u_int			flags;
 #define G_PF_WITHER		0x2
@@ -235,6 +270,8 @@ struct g_provider {
  * Descriptor of a classifier. We can register a function and
  * an argument, which is called by g_io_request() on bio's
  * that are not previously classified.
+ * 分类器的描述符。我们可以注册一个函数和一个参数，该函数和参数由之前未分类的
+ * bio上的 g_io_request 调用
  */
 struct g_classifier_hook {
 	TAILQ_ENTRY(g_classifier_hook) link;
@@ -355,6 +392,7 @@ int g_use_g_write_data(void *, off_t, void *, int);
 
 extern struct sx topology_lock;
 
+/* linux 中包含有一个dump命令，用于备份文件系统，这里应该也是类似的作用 */
 struct g_kerneldump {
 	off_t		offset;
 	off_t		length;
@@ -411,6 +449,13 @@ g_free(void *ptr)
 #define g_topology_sleep(chan, timo)				\
 	sx_sleep(chan, &topology_lock, 0, "gtopol", timo)
 
+/* 
+	注意宏定义中的 g_modevent，里面会包含有一个添加 g_class 的操作，g_class 中包含的
+	主要就是一些函数定义(类似于vfs operations)。这里的设计思想感觉像是把某一类，或者说是
+	针对某些对象的功能函数做成一个模块加载到内核当中，其他模块如果要使用这些方法的话，就到
+	g_class全局链表中查找对应的模块
+	该宏定义既可以用编译方式，也可以用 kld 的方式去加载 GEOM 模块，这是注册类的官方的方法
+*/
 #define DECLARE_GEOM_CLASS(class, name) 			\
 	static moduledata_t name##_mod = {			\
 		#name, g_modevent, &class			\

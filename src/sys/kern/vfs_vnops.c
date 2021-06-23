@@ -2108,7 +2108,7 @@ int
 vn_rlimit_fsize(const struct vnode *vp, const struct uio *uio,
     struct thread *td)
 {
-
+	/* 首先判断文件类型是不是普通文件 */
 	if (vp->v_type != VREG || td == NULL)
 		return (0);
 	if ((uoff_t)uio->uio_offset + uio->uio_resid >

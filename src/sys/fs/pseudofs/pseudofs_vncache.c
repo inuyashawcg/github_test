@@ -265,7 +265,7 @@ pfs_vncache_free(struct vnode *vp)
 }
 
 /*
- * Purge the cache of dead entries
+ * Purge the cache of dead entries 清除缓存总死掉的entry
  *
  * This is extremely inefficient due to the fact that vgone() not only
  * indirectly modifies the vnode cache, but may also sleep.  We can
@@ -273,9 +273,13 @@ pfs_vncache_free(struct vnode *vp)
  * assumptions about the state of the cache after vgone() returns.  In
  * consequence, we must start over after every vgone() call, and keep
  * trying until we manage to traverse the entire cache.
+ * 这是非常低效的，因为 vgone() 不仅间接修改vnode缓存，而且还可能休眠。我们既不能在 vgone()
+ * 调用中保持 pfs_vncache_mutex，也不能对 vgone() 返回后缓存的状态进行任何假设。因此，
+ * 我们必须在每次 vgone() 调用之后重新开始，并继续尝试，直到我们能够遍历整个缓存为止。
  *
  * The only way to improve this situation is to change the data structure
  * used to implement the cache.
+ * 改善这种情况的唯一方法是更改用于实现缓存的数据结构
  */
 static void
 pfs_purge_locked(struct pfs_node *pn, bool force)
@@ -314,6 +318,7 @@ pfs_purge(struct pfs_node *pn)
 
 /*
  * Free all vnodes associated with a defunct process
+ * 释放与失效进程关联的所有 vnode
  */
 static void
 pfs_exit(void *arg, struct proc *p)

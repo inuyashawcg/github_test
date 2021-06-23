@@ -223,6 +223,10 @@ struct rusage_ext {
 struct thread {
 	struct mtx	*volatile td_lock; /* replaces sched lock */
 	struct proc	*td_proc;	/* (*) Associated process. */
+	/*
+		为什么要在结构体中包含有这么多的entry指针？因为这个结构体在不同的时间很可能会出现在
+		不同的管理队列当中，推测就是在不同的队列中会用到不同的指针
+	*/
 	TAILQ_ENTRY(thread) td_plist;	/* (*) All threads in this proc. */
 	TAILQ_ENTRY(thread) td_runq;	/* (t) Run queue. */
 	TAILQ_ENTRY(thread) td_slpq;	/* (t) Sleep queue. */
@@ -293,7 +297,7 @@ struct thread {
 	struct osd	td_osd;		/* (k) Object specific data. */
 	struct vm_map_entry *td_map_def_user; /* (k) Deferred entries. */
 	pid_t		td_dbg_forked;	/* (c) Child pid for debugger. */
-	u_int		td_vp_reserv;	/* (k) Count of reserved vnodes. */
+	u_int		td_vp_reserv;	/* (k) Count of reserved vnodes. 保留的 vnode 计数 */
 	int		td_no_sleeping;	/* (k) Sleeping disabled count. */
 	void		*td_su;		/* (k) FFS SU private */
 	sbintime_t	td_sleeptimo;	/* (t) Sleep timeout. */
@@ -556,32 +560,32 @@ do {									\
  * Process structure.
  */
 struct proc {
-	LIST_ENTRY(proc) p_list;	/* (d) List of all processes. */
-	TAILQ_HEAD(, thread) p_threads;	/* (c) all threads. */
-	struct mtx	p_slock;	/* process spin lock */
-	struct ucred	*p_ucred;	/* (c) Process owner's identity. */
-	struct filedesc	*p_fd;		/* (b) Open files. */
-	struct filedesc_to_leader *p_fdtol; /* (b) Tracking node */
+	LIST_ENTRY(proc) p_list;	/* (d) List of all processes. 通过队列来管理进程 */
+	TAILQ_HEAD(, thread) p_threads;	/* (c) all threads. 进程所包含的所有的线程 */
+	struct mtx	p_slock;	/* process spin lock 进程的自旋锁 */
+	struct ucred	*p_ucred;	/* (c) Process owner's identity. 进程所有者的通行证 */
+	struct filedesc	*p_fd;		/* (b) Open files. 文件描述符数组，管理所有打开的文件 */
+	struct filedesc_to_leader *p_fdtol; /* (b) Tracking node 跟踪节点 */
 	struct pstats	*p_stats;	/* (b) Accounting/statistics (CPU). */
-	struct plimit	*p_limit;	/* (c) Resource limits. */
-	struct callout	p_limco;	/* (c) Limit callout handle */
+	struct plimit	*p_limit;	/* (c) Resource limits. 资源限制 */
+	struct callout	p_limco;	/* (c) Limit callout handle 限制标注句柄(应该是资源相关) */
 	struct sigacts	*p_sigacts;	/* (x) Signal actions, state (CPU). */
 
 	int		p_flag;		/* (c) P_* flags. */
 	int		p_flag2;	/* (c) P2_* flags. */
 	enum {
-		PRS_NEW = 0,		/* In creation */
-		PRS_NORMAL,		/* threads can be run. */
+		PRS_NEW = 0,		/* In creation 进程创建中 */
+		PRS_NORMAL,		/* threads can be run. 进程可执行 */
 		PRS_ZOMBIE
-	} p_state;			/* (j/c) Process status. */
-	pid_t		p_pid;		/* (b) Process identifier. */
+	} p_state;			/* (j/c) Process status. 进程状态 */
+	pid_t		p_pid;		/* (b) Process identifier. 进程ID */
 	LIST_ENTRY(proc) p_hash;	/* (d) Hash chain. */
 	LIST_ENTRY(proc) p_pglist;	/* (g + e) List of processes in pgrp. */
-	struct proc	*p_pptr;	/* (c + e) Pointer to parent process. */
-	LIST_ENTRY(proc) p_sibling;	/* (e) List of sibling processes. */
-	LIST_HEAD(, proc) p_children;	/* (e) Pointer to list of children. */
-	struct proc	*p_reaper;	/* (e) My reaper. */
-	LIST_HEAD(, proc) p_reaplist;	/* (e) List of my descendants
+	struct proc	*p_pptr;	/* (c + e) Pointer to parent process. 指向父进程(一个进程对应一个父进程) */
+	LIST_ENTRY(proc) p_sibling;	/* (e) List of sibling processes. 同级进程列表 */
+	LIST_HEAD(, proc) p_children;	/* (e) Pointer to list of children. 指向子进程链表(一个进程可以派生多个子进程) */
+	struct proc	*p_reaper;	/* (e) My reaper(收割者). */
+	LIST_HEAD(, proc) p_reaplist;	/* (e) List of my descendants 我的后代名单
 					       (if I am reaper). */
 	LIST_ENTRY(proc) p_reapsibling;	/* (e) List of siblings - descendants of
 					       the same reaper. */
@@ -589,11 +593,13 @@ struct proc {
 	struct mtx	p_statmtx;	/* Lock for the stats */
 	struct mtx	p_itimmtx;	/* Lock for the virt/prof timers */
 	struct mtx	p_profmtx;	/* Lock for the profiling */
-	struct ksiginfo *p_ksi;	/* Locked by parent proc lock */
-	sigqueue_t	p_sigqueue;	/* (c) Sigs not delivered to a td. */
+	struct ksiginfo *p_ksi;	/* Locked by parent proc lock 依赖父进程的锁操作 */
+	sigqueue_t	p_sigqueue;	/* (c) Sigs not delivered to a td. 不会被传递给线程的 signals */
 #define p_siglist	p_sigqueue.sq_signals
 
-/* The following fields are all zeroed upon creation in fork. */
+/* The following fields are all zeroed upon creation in fork. 
+	在fork中创建时，以下字段都归零
+*/
 #define	p_startzero	p_oppid
 	pid_t		p_oppid;	/* (c + e) Save ppid in ptrace. XXX */
 	struct vmspace	*p_vmspace;	/* (b) Address space. */
@@ -604,11 +610,11 @@ struct proc {
 	struct rusage_ext p_rux;	/* (cu) Internal resource usage. */
 	struct rusage_ext p_crux;	/* (c) Internal child resource usage. */
 	int		p_profthreads;	/* (c) Num threads in addupc_task. */
-	volatile int	p_exitthreads;	/* (j) Number of threads exiting */
+	volatile int	p_exitthreads;	/* (j) Number of threads exiting 退出的线程数 */
 	int		p_traceflag;	/* (o) Kernel trace points. */
 	struct vnode	*p_tracevp;	/* (c + o) Trace to vnode. */
 	struct ucred	*p_tracecred;	/* (o) Credentials to trace with. */
-	struct vnode	*p_textvp;	/* (b) Vnode of executable. */
+	struct vnode	*p_textvp;	/* (b) Vnode of executable. 可执行文件的 vnode 数组？ */
 	u_int		p_lock;		/* (c) Proclock (prevent swap) count. */
 	struct sigiolst	p_sigiolst;	/* (c) List of sigio sources. */
 	int		p_sigparent;	/* (c) Signal to parent on exit. */
@@ -627,7 +633,7 @@ struct proc {
 	int		p_boundary_count;/* (j) Num threads at user boundary */
 	int		p_pendingcnt;	/* how many signals are pending */
 	struct itimers	*p_itimers;	/* (c) POSIX interval timers. */
-	struct procdesc	*p_procdesc;	/* (e) Process descriptor, if any. */
+	struct procdesc	*p_procdesc;	/* (e) Process descriptor, if any. 进程描述符（如果有） */
 	u_int		p_treeflag;	/* (e) P_TREE flags */
 	int		p_pendingexits; /* (c) Count of pending thread exits. */
 	struct filemon	*p_filemon;	/* (c) filemon-specific data. */
@@ -635,7 +641,9 @@ struct proc {
 /* End area that is zeroed on creation. */
 #define	p_endzero	p_magic
 
-/* The following fields are all copied upon creation in fork. */
+/* The following fields are all copied upon creation in fork. 
+	在fork中创建时，将复制以下字段
+*/
 #define	p_startcopy	p_endzero
 	u_int		p_magic;	/* (b) Magic number. */
 	int		p_osrel;	/* (x) osreldate for the
@@ -715,7 +723,7 @@ struct proc {
 #define	P_PROFIL	0x00020	/* Has started profiling. */
 #define	P_STOPPROF	0x00040	/* Has thread requesting to stop profiling. */
 #define	P_HADTHREADS	0x00080	/* Has had threads (no cleanup shortcuts) */
-#define	P_SUGID		0x00100	/* Had set id privileges since last exec. */
+#define	P_SUGID		0x00100	/* Had set id privileges since last exec. 自上次执行以来已设置id权限 */
 #define	P_SYSTEM	0x00200	/* System proc: no sigs, stats or swapping. */
 #define	P_SINGLE_EXIT	0x00400	/* Threads suspending should exit, not wait. */
 #define	P_TRACED	0x00800	/* Debugged process being traced. */

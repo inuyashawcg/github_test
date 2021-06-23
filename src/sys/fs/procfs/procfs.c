@@ -76,20 +76,21 @@ procfs_doprocfile(PFS_FILL_ARGS)
 
 	freepath = NULL;
 	PROC_LOCK(p);
-	textvp = p->p_textvp;
+	textvp = p->p_textvp;	/* 可执行文件 vnode */
 	vhold(textvp);
 	PROC_UNLOCK(p);
-	error = vn_fullpath(td, textvp, &fullpath, &freepath);
+	/* PFS_FILL_ARGS 定义中包含有 td 这个参数 */
+	error = vn_fullpath(td, textvp, &fullpath, &freepath);	/* 获取 vnode 对应的完整路径 */ 
 	vdrop(textvp);
 	if (error == 0)
-		sbuf_printf(sb, "%s", fullpath);
+		sbuf_printf(sb, "%s", fullpath);	/* 将路径按照字符串格式存放到 sbuf 当中 */
 	if (freepath != NULL)
 		free(freepath, M_TEMP);
 	return (error);
 }
 
 /*
- * Filler function for proc/curproc
+ * Filler function for proc/curproc	- proc/curproc 的填充函数
  */
 int
 procfs_docurproc(PFS_FILL_ARGS)
@@ -98,10 +99,11 @@ procfs_docurproc(PFS_FILL_ARGS)
 	return (0);
 }
 
+/* 设置 pfs_node 结点的属性信息 */
 static int
 procfs_attr(PFS_ATTR_ARGS, int mode) {
 
-	vap->va_mode = mode;
+	vap->va_mode = mode;	/* vnode attribute pointer */
 	if (p != NULL) {
 		PROC_LOCK_ASSERT(p, MA_OWNED);
 
@@ -136,6 +138,8 @@ procfs_attr_w(PFS_ATTR_ARGS)
 /*
  * Visibility: some files only exist for non-system processes
  * Non-static because linprocfs uses it.
+ * 可见性：一些文件仅仅存在与非系统进程
+ * 非静态，因为 linprocfs 在使用它
  */
 int
 procfs_notsystem(PFS_VIS_ARGS)
@@ -147,6 +151,7 @@ procfs_notsystem(PFS_VIS_ARGS)
 /*
  * Visibility: some files are only visible to process that can debug
  * the target process.
+ * 可见性：某些文件仅对能够调试目标进程的进程可见
  */
 int
 procfs_candebug(PFS_VIS_ARGS)
@@ -165,7 +170,7 @@ procfs_init(PFS_INIT_ARGS)
 	struct pfs_node *dir;
 	struct pfs_node *node;
 
-	root = pi->pi_root;
+	root = pi->pi_root;	/* 获取根目录 */
 
 	pfs_create_link(root, "curproc", procfs_docurproc,
 	    NULL, NULL, NULL, 0);

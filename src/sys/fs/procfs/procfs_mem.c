@@ -54,6 +54,8 @@
  * We do this by mapping the process's page into
  * the kernel and then doing a uiomove direct
  * from the kernel address space.
+ * 在目标进程内外复制数据。我们通过将进程的页面映射到内核，
+ * 然后直接从内核地址空间执行uiomove来实现这一点
  */
 int
 procfs_doprocmem(PFS_FILL_ARGS)

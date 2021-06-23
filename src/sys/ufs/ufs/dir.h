@@ -44,6 +44,9 @@
  * Theoretically, directories can be more than 2Gb in length, however, in
  * practice this seems unlikely. So, we define the type doff_t as a 32-bit
  * quantity to keep down the cost of doing lookup on a 32-bit machine.
+ * 
+ * 理论上，目录的长度可以超过 2GB，但实际上这似乎不太可能。因此，我们将 doff_t 类型定义为
+ * 32位数量，以降低在32位机器上执行查找的成本
  */
 #define	doff_t		int32_t
 #define	MAXDIRSIZE	(0x7fffffff)
@@ -52,6 +55,8 @@
  * A directory consists of some number of blocks of DIRBLKSIZ
  * bytes, where DIRBLKSIZ is chosen such that it can be transferred
  * to disk in a single atomic operation (e.g. 512 bytes on most machines).
+ * 一个目录由一定数量的 DIRBLKSIZ 字节块组成，其中 DIRBLKSIZ 的选择使得它可以在单个原子
+ * 操作中传输到磁盘（例如在大多数机器上是512字节）
  *
  * Each DIRBLKSIZ byte block contains some number of directory entry
  * structures, which are of variable length.  Each directory entry has
@@ -60,6 +65,10 @@
  * the entry.  These are followed by the name padded to a 4 byte boundary
  * with null bytes.  All names are guaranteed null terminated.
  * The maximum length of a name in a directory is UFS_MAXNAMLEN.
+ * 每一个 DIRBLKSIZ 大小的字节块都会包含有一些目录条目结构体，这些结构体是可变长度的。每一个
+ * 目录条目的前面都包含有一个目录结构体，包含有 inode number，条目的长度，条目名称的长度等等
+ * 信息。后面是名称，用空字节填充到4字节边界。所有名称都保证以null结尾。
+ * 目录中名称的最大长度是UFS_MAXNAMLEN
  *
  * The macro DIRSIZ(fmt, dp) gives the amount of space required to represent
  * a directory entry.  Free space in a directory is represented by
@@ -72,6 +81,10 @@
  * a directory block is free, then its dp->d_ino is set to 0.
  * Entries other than the first in a directory do not normally have
  * dp->d_ino set to 0.
+ * 宏 DIRSIZ(fmt, dp) 给出表示一个目录条目所需要的空间的大小。目录中的可用空间由
+ * dp->d_reclen>DIRSIZ（fmt，dp）的条目表示。目录块中的所有DIRBLKSIZ字节都由目录项声明。
+ * 这通常会导致目录中的最后一个条目有一个大的dp->d_reclen。如果目录块的第一个条目是空闲的，
+ * 则其 dp->d_ino 设置为0。除目录中第一个条目外，其他条目通常不会将 dp->d_ino 设置为0
  */
 #define	DIRBLKSIZ	DEV_BSIZE
 #define	UFS_MAXNAMLEN	255
@@ -110,7 +123,8 @@ struct	direct {
  * without the d_name field, plus enough space for the name with a terminating
  * null byte (dp->d_namlen+1), rounded up to a 4 byte boundary.
  *
- * 
+ * DIRSIZ 宏给出保存目录项的最小记录长度。这需要 struct direct 中不带 d_name字段的空间量，
+ * 再加上足够的空间来容纳带有终止空字节（dp->d_namlen+1）的名称，四舍五入到4字节边界
  */
 #define	DIRECTSIZ(namlen)						\
 	((__offsetof(struct direct, d_name) +				\
@@ -128,6 +142,7 @@ struct	direct {
 /*
  * Template for manipulating directories.  Should use struct direct's,
  * but the name field is UFS_MAXNAMLEN - 1, and this just won't do.
+ * 操作目录的模板。应该使用struct direct，但是name字段是 UFS_MAXNAMLEN-1，这样做不行
  */
 struct dirtemplate {
 	u_int32_t	dot_ino;

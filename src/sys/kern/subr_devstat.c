@@ -222,6 +222,10 @@ devstat_remove_entry(struct devstat *ds)
  *
  * See comments for devstat_end_transaction().  Ordering is very important
  * here.
+ * devstat_start_transaction 向 devstat 子系统注册事务的开始。或者，如果调用方
+ * 已有可用的 binuptime 值，则可以立即传入 *now。通常调用方现在只能传递 NULL，例程将收集
+ * 当前 binuptime 本身。繁忙计数随着每个事务的开始而递增。当设备从空闲变为繁忙时，系统
+ * 正常运行时间记录在 devstat 结构的 busy_from 字段中
  */
 void
 devstat_start_transaction(struct devstat *ds, const struct bintime *now)

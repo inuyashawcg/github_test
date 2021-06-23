@@ -36,7 +36,7 @@
 #include <sys/jail.h>
 
 /*
- * Opaque structures
+ * Opaque structures	不透明的结构
  */
 struct mntarg;
 struct mount;
@@ -50,7 +50,7 @@ struct vfsconf;
 struct vnode;
 
 /*
- * Limits and constants
+ * Limits and constants	极限和常数
  */
 #define PFS_NAMELEN		48
 #define PFS_FSNAMELEN		16	/* equal to MFSNAMELEN */
@@ -112,7 +112,7 @@ typedef int (*pfs_fill_t)(PFS_FILL_ARGS);
  * Attribute callback
  * Called with proc locked
  */
-struct vattr;
+struct vattr;	// vnode attribute
 #define PFS_ATTR_ARGS \
 	struct thread *td, struct proc *p, struct pfs_node *pn, \
 	struct vattr *vap
@@ -186,43 +186,53 @@ typedef int (*pfs_close_t)(PFS_CLOSE_ARGS);
 typedef int (*pfs_destroy_t)(PFS_DESTROY_ARGS);
 
 /*
- * pfs_info: describes a pseudofs instance
+ * pfs_info: describes a pseudofs instance	描述了一个 pseudofs 文件系统的一个实例
  *
  * The pi_mutex is only used to avoid using the global subr_unit lock
  * for unrhdr.  The rest of struct pfs_info is only modified during
  * vfs_init() and vfs_uninit() of the consumer filesystem.
+ * 
+ * pi_mutex 仅仅用于避免对 unrhdr 用全局的 subr_unit 锁。其他的部分仅仅在 vfs_init 和 
+ * vfs_uninit 函数中被改变
  */
 struct pfs_info {
-	char			 pi_name[PFS_FSNAMELEN];
-	pfs_init_t		 pi_init;
-	pfs_init_t		 pi_uninit;
+	char			 pi_name[PFS_FSNAMELEN];	/* 名称 */
+	pfs_init_t		 pi_init;	/* 初始化函数 */
+	pfs_init_t		 pi_uninit;	/* 非初始化函数 */
 
-	/* members below this line are initialized at run time */
-	struct pfs_node		*pi_root;
-	struct mtx		 pi_mutex;
-	struct unrhdr		*pi_unrhdr;
+	/* members below this line are initialized at run time 
+		下面的这些成员在运行期间被初始化
+	*/
+	struct pfs_node		*pi_root;	/* 根目录对应的 vnode？ */
+	struct mtx		 pi_mutex;	/* 数据锁 */
+	struct unrhdr		*pi_unrhdr;	/* file number */
 };
 
 /*
  * pfs_node: describes a node (file or directory) within a pseudofs
+ * 描述一个文件系统中的结点(文件或者是目录)
  *
  * - Fields marked (o) are protected by the node's own mutex.
  * - Fields marked (p) are protected by the node's parent's mutex.
  * - Remaining fields are not protected by any lock and are assumed to be
  *   immutable once the node has been created.
+ * 	其余字段不受任何锁的保护，并假定在创建节点后是不可变的
  *
  * To prevent deadlocks, if a node's mutex is to be held at the same time
  * as its parent's (e.g. when adding or removing nodes to a directory),
  * the parent's mutex must always be acquired first.  Unfortunately, this
  * is not enforcable by WITNESS.
+ * 为了防止死锁，如果节点的互斥锁与其父节点的互斥锁要同时保持（例如，在向目录添加或删除节点时），
+ * 则必须首先获取父节点的互斥锁。不幸的是，这对于 WITNESS 来说是不可执行的
  */
 struct pfs_node {
 	char			 pn_name[PFS_NAMELEN];
-	pfs_type_t		 pn_type;
+	pfs_type_t		 pn_type;	/* 用来定义文件的类型 */
 	int			 pn_flags;
 	struct mtx		 pn_mutex;
 	void			*pn_data;		/* (o) */
 
+	/* pfs_node 所支持的功能函数 */
 	pfs_fill_t		 pn_fill;
 	pfs_ioctl_t		 pn_ioctl;
 	pfs_close_t		 pn_close;
@@ -231,9 +241,17 @@ struct pfs_node {
 	pfs_getextattr_t	 pn_getextattr;
 	pfs_destroy_t		 pn_destroy;
 
+	/*
+		每个结点都对应一个 pfs_info？也就是说每个结点都可以当做是一个小的文件系统实例，初始化
+		操作不一致？
+	*/
 	struct pfs_info		*pn_info;
 	u_int32_t		 pn_fileno;		/* (o) */
 
+	/*
+		下面三个指针用来构成一个 pfs_node 链表，pn_parent 表示指向链表的上一个结点，
+		pn_nodes 指向本结点，pn_next 则是指向下一个结点
+	*/
 	struct pfs_node		*pn_parent;		/* (o) */
 	struct pfs_node		*pn_nodes;		/* (o) */
 	struct pfs_node		*pn_next;		/* (p) */
@@ -253,6 +271,7 @@ int		 pfs_uninit	(struct pfs_info *pi, struct vfsconf *vfc);
 
 /*
  * Directory structure construction and manipulation
+ * 目录结构构造与操作
  */
 struct pfs_node	*pfs_create_dir	(struct pfs_node *parent, const char *name,
 				 pfs_attr_t attr, pfs_vis_t vis,

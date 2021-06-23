@@ -323,7 +323,7 @@ vgapm_identify(driver_t *driver, device_t parent)
 {
 
 	if (device_get_flags(parent) != 0)
-		device_add_child(parent, "vgapm", 0);
+		device_add_child(parent, "vgapm", 0);	/* 仅仅是提供了一个名字而已，没有任何结构体实例 */
 }
 
 static int
