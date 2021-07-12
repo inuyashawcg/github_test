@@ -47,6 +47,7 @@ struct uufsd {
 	ufs2_daddr_t d_sblock;	/* superblock location */
 	struct csum *d_sbcsum;	/* Superblock summary info */
 	caddr_t d_inoblock;	/* inode block */
+	/* 应该是用于限定 inode number 取值范围 */
 	uint32_t d_inomin;	/* low inode (not ino_t for ABI compat) */
 	uint32_t d_inomax;	/* high inode (not ino_t for ABI compat) */
 	union {

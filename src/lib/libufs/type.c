@@ -182,22 +182,28 @@ again:	if ((ret = stat(name, &st)) < 0) {
 	return (0);
 }
 
+/*
+	其中一个应用场景就是对超级块数据的写入
+*/
 int
 ufs_disk_write(struct uufsd *disk)
 {
 	int fd;
 
 	ERROR(disk, NULL);
-
+	/* 首先判断是否为写入操作 */
 	if (disk->d_mine & MINE_WRITE)
 		return (0);
-
+	/* 判断设备能否正常打开*/
 	fd = open(disk->d_name, O_RDWR);
 	if (fd < 0) {
 		ERROR(disk, "failed to open disk for writing");
 		return (-1);
 	}
-
+	/* 
+		如果打开正常，再执行关闭操作，没有数据写入。所以这里应该只是单纯判断一下
+		设备是否正常。最后更新 disk 结构体中的成员
+	*/
 	close(disk->d_fd);
 	disk->d_fd = fd;
 	disk->d_mine |= MINE_WRITE;

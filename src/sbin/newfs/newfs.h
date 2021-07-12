@@ -101,6 +101,17 @@ extern int	minfree;	/* free space threshold */
 extern int	metaspace;	/* space held for metadata blocks */
 extern int	opt;		/* optimization preference (space or time) */
 extern int	density;	/* number of bytes per inode */
+/*
+  ufs 中采用了I/O成簇(clustering)策略，该策略通过把许多小请求合并成数量较少的大请求
+  来减少I/O请求的数量，从而提高系统性能。maxcontig成员主要应用于该策略；
+  当写一个文件的时候，分配例程尝试将 maxcontig(一般是128k) 的数据分配到连续的磁盘块中。
+  存放这些数据的缓冲区并不在填了数据之后立刻写入磁盘，它们的写出被推迟了。当数据达到 maxcontig
+  的限制，或者文件被关闭，再或者由于磁盘上的下一个连续的块被另外一个文件占用使得簇无法再扩大时，
+  才把缓冲区写出；
+  我们可以看到，上面的表述的一个重要信息就是簇策略针对的是对磁盘 I/O 的优化，也就是尽量减少
+  执行次数，增加每一次传输的数据量。奇海的话文件系统是内存管理的一部分，操作的对象就是虚拟页，
+  对数据的查找其实都是在内存中进行的。所以，磁盘文件系统中的一些机制可能就不再需要了
+*/
 extern int	maxcontig;	/* max contiguous blocks to allocate */
 extern int	maxbpg;		/* maximum blocks per file in a cyl group */
 extern int	avgfilesize;	/* expected average file size */

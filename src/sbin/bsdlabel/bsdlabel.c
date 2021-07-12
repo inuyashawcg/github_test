@@ -98,6 +98,9 @@ static void	usage(void);
 static struct disklabel *getvirginlabel(void);
 
 #define	DEFEDITOR	_PATH_VI
+/*
+	FreeBSD 目前支持8个分区
+*/
 #define	DEFPARTITIONS	8
 
 static char	*specname;
@@ -106,11 +109,14 @@ static char	tmpfil[] = PATH_TMPFILE;
 
 static struct	disklabel lab;
 static u_char	bootarea[BBSIZE];
-static off_t	mediasize;
-static ssize_t	secsize;
+static off_t	mediasize;	/* 可以认为是磁盘大小 */
+static ssize_t	secsize;	/* 磁盘扇区大小 */
 static char	blank[] = "";
 static char	unknown[] = "unknown";
 
+/* 
+	目前分区貌似就支持 /a b c d e f g h/ 8个命名，可能最大能到 z
+*/
 #define MAX_PART ('z')
 #define MAX_NUM_PARTS (1 + MAX_PART - 'a')
 static char    part_size_type[MAX_NUM_PARTS];
@@ -128,17 +134,20 @@ static uint32_t lba_offset;
 #ifndef LABELOFFSET
 #define LABELOFFSET -1
 #endif
+/*
+	label sector offset: 
+*/
 static int labelsoffset = LABELSECTOR;
 static int labeloffset = LABELOFFSET;
 static int bbsize = BBSIZE;
 
+/* disklabel 所支持的操作 */
 static enum {
 	UNSPEC, EDIT, READ, RESTORE, WRITE, WRITEBOOT
 } op = UNSPEC;
 
-
 static int	disable_write;   /* set to disable writing to disk label */
-static int	is_file;	/* work on a file (abs. pathname), "-f" opt. */
+static int	is_file;	/* work on a file (abs. pathname), "-f" opt. 用于-f选项 */
 
 int
 main(int argc, char *argv[])
@@ -156,6 +165,7 @@ main(int argc, char *argv[])
 				allfields = 1;
 				break;
 			case 'B':
+			/* 读取 /boot/boot 文件并将其写入磁盘当中 */
 				++installboot;
 				break;
 			case 'b':
@@ -165,6 +175,7 @@ main(int argc, char *argv[])
 				is_file=1;
 				break;
 			case 'm':
+			/* 奇海中还需要添加 riscv 选项或者 arm */
 				if (!strcmp(optarg, "i386") ||
 				    !strcmp(optarg, "amd64")) {
 					labelsoffset = 1;
@@ -175,6 +186,7 @@ main(int argc, char *argv[])
 				}
 				break;
 			case 'n':
+				/* n选项在修改磁盘之前立即停止bsdlabel程序，并显示结果而不是写入它 */
 				disable_write = 1;
 				break;
 			case 'R':
@@ -191,6 +203,7 @@ main(int argc, char *argv[])
 				/*
 				 * We accept and ignore -r for compatibility with
 				 * historical disklabel usage.
+				 * 我们接受并忽略-r以与历史磁盘标签用法兼容
 				 */
 				break;
 			case 'w':
@@ -207,13 +220,17 @@ main(int argc, char *argv[])
 
 	if (argc < 1)
 		usage();
+	/* -m 选项会对两个偏移量进行设置 */
 	if (labelsoffset < 0 || labeloffset < 0)
 		errx(1, "a -m <architecture> option must be specified");
 
-	/* Figure out the names of the thing we're working on */
+	/* Figure out the names of the thing we're working on 
+		判断我们操作的对象是否是一个文件
+	*/
 	if (is_file) {
 		specname = argv[0];
 	} else {
+		/* 如果不是文件类型，调用 geom 层接口进行路径解析 */
 		specname = g_device_path(argv[0]);
 		if (specname == NULL) {
 			warn("unable to get correct path for %s", argv[0]);
@@ -232,12 +249,13 @@ main(int argc, char *argv[])
 		}
 		close(fd);
 	}
-
+	/* 根据指令解析结果分析，并对op进行赋值操作 */
 	if (installboot && op == UNSPEC)
 		op = WRITEBOOT;
 	else if (op == UNSPEC)
 		op = READ;
 
+	/* 判断对 disklabel 做何种操作 */
 	switch(op) {
 
 	case UNSPEC:
@@ -294,6 +312,7 @@ main(int argc, char *argv[])
 			error = writelabel();
 		break;
 	}
+	/* 每种情况都会对应不同的功能函数 */
 	exit(error);
 }
 
@@ -302,14 +321,14 @@ fixlabel(struct disklabel *lp)
 {
 	struct partition *dp;
 	int i;
-
+	/* raw 分区是不能进行读写的分区，损坏？ */
 	for (i = 0; i < lp->d_npartitions; i++) {
 		if (i == RAW_PART)
 			continue;
 		if (lp->d_partitions[i].p_size)
 			return;
 	}
-
+	/* dp 表示分区表中的第一个分区 */
 	dp = &lp->d_partitions[0];
 	dp->p_offset = BBSIZE / secsize;
 	dp->p_size = lp->d_secperunit - dp->p_offset;
@@ -317,6 +336,7 @@ fixlabel(struct disklabel *lp)
 
 /*
  * Construct a prototype disklabel from /etc/disktab.
+ * 从 /etc/disktab 构建原型 disklab
  */
 static void
 makelabel(const char *type, struct disklabel *lp)
@@ -341,11 +361,12 @@ readboot(void)
 
 	if (xxboot == NULL)
 		xxboot = "/boot/boot";
-	fd = open(xxboot, O_RDONLY);
+	fd = open(xxboot, O_RDONLY);	/* 以 read-only 的模式打开 /boot/boot */
 	if (fd < 0)
 		err(1, "cannot open %s", xxboot);
 	fstat(fd, &st);
 	if (st.st_size <= BBSIZE) {
+		/* 数据存放到 bootarea 中 */
 		if (read(fd, bootarea, st.st_size) != st.st_size)
 			err(1, "read error %s", xxboot);
 		close(fd);
@@ -381,10 +402,10 @@ static int
 writelabel(void)
 {
 	int i, fd, serrno;
-	struct gctl_req *grq;
+	struct gctl_req *grq;	/* geom 层的数据结构 */
 	char const *errstr;
 	struct disklabel *lp = &lab;
-
+	/* 命令行 -n 选项设置 */
 	if (disable_write) {
 		warnx("write to disk label suppressed - label was as follows:");
 		display(stdout, NULL);
@@ -394,14 +415,16 @@ writelabel(void)
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
 	lp->d_checksum = 0;
-	lp->d_checksum = dkcksum(lp);
+	lp->d_checksum = dkcksum(lp);	/* disk checksum 计算 */
+	/* 判断是否要把 boot 写入到磁盘当中 */
 	if (installboot)
 		readboot();
 	for (i = 0; i < lab.d_npartitions; i++)
 		if (lab.d_partitions[i].p_size)
 			lab.d_partitions[i].p_offset += lba_offset;
 	bsd_disklabel_le_enc(bootarea + labeloffset + labelsoffset * lab.d_secsize,
-	    lp);
+	    lp);	/* 将lp中数据按照给出的偏移量(byte)写入到 bootarea 后面的位置，
+							最后调用 write 函数将 BBSIZE 大小的数据写入到磁盘中 */
 
 	fd = open(specname, O_RDWR);
 	if (fd < 0) {
@@ -467,6 +490,7 @@ writelabel(void)
 	return (0);
 }
 
+/* 获取文件相关参数 */
 static void
 get_file_parms(int f)
 {
@@ -478,12 +502,13 @@ get_file_parms(int f)
 	i = sb.st_mode & S_IFMT;
 	if (i != S_IFREG && i != S_IFLNK)
 		errx(4, "%s is not a valid file or link", specname);
-	secsize = DEV_BSIZE;
-	mediasize = sb.st_size;
+	secsize = DEV_BSIZE;	/* 设置 sector size 为 512 字节 */
+	mediasize = sb.st_size;	/* 文件大小，in-byte */
 }
 
 /*
  * Fetch disklabel for disk.
+ * 获取磁盘的标签
  */
 static int
 readlabel(int flag)
@@ -496,8 +521,9 @@ readlabel(int flag)
 	f = open(specname, O_RDONLY);
 	if (f < 0)
 		err(1, "%s", specname);
+
 	if (is_file)
-		get_file_parms(f);
+		get_file_parms(f);	/* 设置了扇区大小和文件字节大小 */
 	else {
 		mediasize = g_mediasize(f);
 		secsize = g_sectorsize(f);
@@ -507,13 +533,22 @@ readlabel(int flag)
 	if (mediasize > (off_t)0xffffffff * secsize)
 		errx(1,
 		    "disks with more than 2^32-1 sectors are not supported");
+	/* 
+		lseek 函数会移动文件读写位置，这里是把文件指针的位置移动到了文件开头位置
+	*/
 	(void)lseek(f, (off_t)0, SEEK_SET);
+	/*
+		从文件开头处读取 8192 字节的数据到 bootarea 中
+	*/
 	nbytes = read(f, bootarea, BBSIZE);
 	if (nbytes == -1)
 		err(4, "%s read", specname);
 	if (nbytes != BBSIZE)
 		errx(4, "couldn't read %d bytes from %s", BBSIZE, specname);
 	close (f);
+	/* 
+		调用 bsd 提供的接口函数将其转换成字节流进行操作，将数据传递给 lab 
+	*/
 	error = bsd_disklabel_le_dec(
 	    bootarea + (labeloffset + labelsoffset * secsize),
 	    &lab, MAXPARTITIONS);
@@ -527,6 +562,8 @@ readlabel(int flag)
 	 * Compensate for absolute block addressing by finding the
 	 * smallest partition offset and if the offset of the 'c'
 	 * partition is equal to that, subtract it from all offsets.
+	 * 通过找到最小的分区偏移量来补偿绝对块寻址，如果“c”分区的偏移量等于该
+	 * 偏移量，则从所有偏移量中减去它
 	 */
 	lba = ~0;
 	for (i = 0; i < lab.d_npartitions; i++) {
@@ -541,6 +578,7 @@ readlabel(int flag)
 		/*
 		 * Save the offset so that we can write the label
 		 * back with absolute block addresses.
+		 * 保存偏移量，以便我们可以用绝对块地址写回标签(基地址 + offset？)
 		 */
 		lba_offset = lba;
 	}
@@ -1480,15 +1518,19 @@ checklabel(struct disklabel *lp)
  * drivers that are able to fetch some initial device parameters
  * without even having access to a (BSD) disklabel, like SCSI disks,
  * most IDE drives, or vn devices.
+ * 在“原始”磁盘上操作时，请尝试从关联的设备驱动程序获取初始标签。这可能适用于所有能够
+ * 获取一些初始设备参数的设备驱动程序，这些驱动程序甚至不需要访问（BSD）磁盘标签，比如
+ * SCSI磁盘、大多数IDE驱动器或vn设备
  *
- * The device name must be given in its "canonical" form.
+ * The device name must be given in its "canonical" form. 
+ * 设备名称必须以其“规范”形式给出
  */
 static struct disklabel *
 getvirginlabel(void)
 {
 	static struct disklabel loclab;
 	struct partition *dp;
-	int f;
+	int f;	/* 文件描述符 */
 	u_int u;
 
 	if ((f = open(specname, O_RDONLY)) == -1) {

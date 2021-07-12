@@ -48,14 +48,20 @@
 /*
  * The label is in block 0 or 1, possibly offset from the beginning
  * to leave room for a bootstrap, etc.
+ * 标签位于块0或1中，可能从开始处偏移，以便为引导程序等留出空间
+ * 
  * XXX these should be defined per controller (or drive) elsewhere, not here!
  * XXX in actuality it can't even be per controller or drive. It should be
  * constant/fixed across storage hardware and CPU architectures. Disks can
  * travel from one machine to another and a label created on one machine
  * should be detectable and understood by the other.
+ * 这些应该在别处按控制器（或驱动器）定义，而不是在这里！实际上，它甚至不能是每个控制器或驱动器。
+ * 它应该在存储硬件和CPU体系结构之间保持不变/固定。磁盘可以从一台机器移动到另一台机器，在一台机器
+ * 上创建的标签应该可以被另一台机器检测到并理解
+ * 
  */
-#define LABELSECTOR	1			/* sector containing label */
-#define LABELOFFSET	0			/* offset of label in sector */
+#define LABELSECTOR	1			/* sector containing label 包含标签的扇区 */
+#define LABELOFFSET	0			/* offset of label in sector 标签在扇区中的偏移量 */
 
 #define DISKMAGIC	BSD_MAGIC		/* The disk magic number */
 
@@ -63,8 +69,10 @@
 #define	MAXPARTITIONS	BSD_NPARTS_MIN
 #endif
 
-/* Size of bootblock area in sector-size neutral bytes */
-#define BBSIZE		BSD_BOOTBLOCK_SIZE
+/* Size of bootblock area in sector-size neutral bytes 
+	引导块区域的大小（扇区大小中性字节）
+*/
+#define BBSIZE		BSD_BOOTBLOCK_SIZE	/* FreeBSD 中规定引导代码大小是 8192 字节 */
 
 #define	LABEL_PART	BSD_PART_RAW
 #define	RAW_PART	BSD_PART_RAW
@@ -80,7 +88,11 @@ dkcksum(struct disklabel *lp)
 	u_int16_t *start, *end;
 	u_int16_t sum = 0;
 
-	start = (u_int16_t *)lp;
+	start = (u_int16_t *)lp;	/* 数据结构头字节 */
+	/* 
+		数据结构尾字节。d_npartitions 表示的是分区个数。而数组索引是从0开始的，
+		所以刚好到最后一个存储的分区的尾字节的后一个字节
+	*/
 	end = (u_int16_t *)&lp->d_partitions[lp->d_npartitions];
 	while (start < end)
 		sum ^= *start++;
@@ -88,6 +100,7 @@ dkcksum(struct disklabel *lp)
 }
 
 #ifdef DKTYPENAMES
+/* disk type name */
 static const char *dktypenames[] = {
 	"unknown",
 	"SMD",
@@ -108,10 +121,12 @@ static const char *dktypenames[] = {
 	"jfs",
 	NULL
 };
+/* disk max type number */
 #define DKMAXTYPES	(sizeof(dktypenames) / sizeof(dktypenames[0]) - 1)
 #endif
 
 #ifdef	FSTYPENAMES
+/* filesystem types */
 static const char *fstypenames[] = {
 	"unused",
 	"swap",
@@ -156,6 +171,7 @@ static const char *fstypenames[] = {
 /*
  * Functions for proper encoding/decoding of struct disklabel into/from
  * bytestring.
+ * 用于将 struct disklabel 正确编码/解码到 bytestring 中或从 bytestring 中解码的函数
  */
 void bsd_partition_le_dec(u_char *ptr, struct partition *d);
 int bsd_disklabel_le_dec(u_char *ptr, struct disklabel *d, int maxpart);

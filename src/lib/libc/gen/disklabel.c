@@ -58,6 +58,7 @@ gettype(char *t, const char **names)
 	return (0);
 }
 
+/* 从 disktab 文件中查找对应的 disklabel 类型 */
 struct disklabel *
 getdiskbyname(const char *name)
 {

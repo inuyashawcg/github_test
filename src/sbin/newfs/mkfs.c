@@ -103,12 +103,22 @@ static void setblock(struct fs *, unsigned char *, int);
 static void wtfs(ufs2_daddr_t, int, char *);
 static u_int32_t newfs_random(void);
 
+/*
+	这里我们需要明确 tptfs superblock 中的字段表示的意义以及如何获取(或计算)。在该函数中
+	这些都是要体现出来的
+*/
 void
 mkfs(struct partition *pp, char *fsys)
 {
+	/*
+		fragsperinode - 每个 inode 所占用的 fragment 数量
+		optimalfpg - 每个块组所包含的 fragment 数量
+		origdensity - inode 数据密度
+		lastminfpg - 最后一个块组所拥有的 fragment 最小数量？
+	*/
 	int fragsperinode, optimalfpg, origdensity, minfpg, lastminfpg;
 	long i, j, csfrags;
-	uint cg;
+	uint cg;	/* 块组号？ */
 	time_t utime;
 	quad_t sizepb;
 	int width;
@@ -117,6 +127,7 @@ mkfs(struct partition *pp, char *fsys)
 	char tmpbuf[100];	/* XXX this will break in about 2,500 years */
 	struct fsrecovery *fsr;
 	char *fsrbuf;
+	/* 超级块 */
 	union {
 		struct fs fdummy;
 		char cdummy[SBLOCKSIZE];
@@ -127,19 +138,25 @@ mkfs(struct partition *pp, char *fsys)
 	/*
 	 * Our blocks == sector size, and the version of UFS we are using is
 	 * specified by Oflag.
+	 * Oflag 用于指定ufs版本信息
+	 * 从下文的代码实现来看，函数操作的对象就是 newfs 中定义的全局量 disk。要么直接操作
+	 * disk 中的成员，要么操作 disk->sblock
 	 */
-	disk.d_bsize = sectorsize;
-	disk.d_ufs = Oflag;
+	disk.d_bsize = sectorsize;	/* 指定扇区大小，newfs -S 来获取 */
+	disk.d_ufs = Oflag;	/* 指定ufs版本信息 */
+	/* 回归测试标识 */
 	if (Rflag)
 		utime = 1000000000;
 	else
-		time(&utime);
+		time(&utime);	/* 获取从boot开始到现在的时间 */
+
+	/* disk->fs(超级块)属性设置 */
 	sblock.fs_old_flags = FS_FLAGS_UPDATED;
-	sblock.fs_flags = 0;
+	sblock.fs_flags = 0;	/* 设置超级块flags，其实就是说明文件系统支持哪些操作或者属性 */
 	if (Uflag)
 		sblock.fs_flags |= FS_DOSOFTDEP;
 	if (Lflag)
-		strlcpy(sblock.fs_volname, volumelabel, MAXVOLLEN);
+		strlcpy(sblock.fs_volname, volumelabel, MAXVOLLEN);	/* 设置超级块volume name */
 	if (Jflag)
 		sblock.fs_flags |= FS_GJOURNAL;
 	if (lflag)
@@ -150,25 +167,26 @@ mkfs(struct partition *pp, char *fsys)
 	 * Validate the given file system size.
 	 * Verify that its last block can actually be accessed.
 	 * Convert to file system fragment sized units.
-	 * 验证给定的文件系统大小
-	 * 验证其最后一个块是否可以实际访问。可能最后一个块在大多数情况下不会被用到，所以用它来进行测试；
-	 * 	即使测试失败，也不会对磁盘造成重大损坏
-	 * 转换为文件系统片段大小的单位
+	 * - 验证给定的文件系统大小
+	 * - 验证其最后一个块是否可以实际访问。可能最后一个块在大多数情况下不会被用到，所以用它来进行测试；
+	 *   即使测试失败，也不会对磁盘造成重大损坏
+	 * - 转换为文件系统片段大小的单位
 	 */
 	if (fssize <= 0) {
-		printf("preposterous size %jd\n", (intmax_t)fssize);
+		printf("preposterous(荒谬的，不合理的) size %jd\n", (intmax_t)fssize);
 		exit(13);
 	}
 	wtfs(fssize - (realsectorsize / DEV_BSIZE), realsectorsize,
-	    (char *)&sblock);
+	    (char *)&sblock);	/* 对应注释中的将超级块数据写入最后一个数据块 */
 	/*
 	 * collect and verify the file system density info
 	 * 收集并验证文件系统密度信息。下面这些字段信息在奇海操作系统中都是没有的。
 	 * 这些步骤应该就可以省略
 	 */
-	sblock.fs_avgfilesize = avgfilesize;
-	sblock.fs_avgfpdir = avgfilesperdir;
-	if (sblock.fs_avgfilesize <= 0)
+	sblock.fs_avgfilesize = avgfilesize;	/* 设置超级块平均文件长度， newfs -g */
+	sblock.fs_avgfpdir = avgfilesperdir;	/* 设置每个目录下包含的文件数， newfs -h */
+	/* 对上述两个获取的属性进行判断 */
+	if (sblock.fs_avgfilesize <= 0)	
 		printf("illegal expected average file size %d\n",
 		    sblock.fs_avgfilesize), exit(14);
 	if (sblock.fs_avgfpdir <= 0)
@@ -180,8 +198,8 @@ restart:
 	 * collect and verify the block and fragment sizes
 	 * bsize 在 newfs.h 文件中有定义，其实是一个全局的变量，这里可以直接使用
 	 */
-	sblock.fs_bsize = bsize;
-	sblock.fs_fsize = fsize;
+	sblock.fs_bsize = bsize;	/* newfs -b */
+	sblock.fs_fsize = fsize;	/* newfs -f */
 	/* 检测 bsize 和 fsize 两者的大小是不是2的幂 */
 	if (!POWEROF2(sblock.fs_bsize)) {
 		printf("block size must be a power of 2, not %d\n",
@@ -235,7 +253,7 @@ restart:
 		sblock.fs_maxbsize = FS_MAXCONTIG * sblock.fs_bsize;
 		printf("Extent size reduced to %d\n", sblock.fs_maxbsize);
 	} else {
-		sblock.fs_maxbsize = maxbsize;
+		sblock.fs_maxbsize = maxbsize;	/* newfs -d */
 	}
 	/*
 	 * Maxcontig sets the default for the maximum number of blocks
@@ -246,14 +264,14 @@ restart:
 	 * 最大可达控制器或缓冲区允许的最大传输大小
 	 */
 	if (maxcontig == 0)
-		maxcontig = MAX(1, MAXPHYS / bsize);
+		maxcontig = MAX(1, MAXPHYS / bsize);	/* newfs -a */
 	sblock.fs_maxcontig = maxcontig;
 	if (sblock.fs_maxcontig < sblock.fs_maxbsize / sblock.fs_bsize) {
 		sblock.fs_maxcontig = sblock.fs_maxbsize / sblock.fs_bsize;
 		printf("Maxcontig raised to %d\n", sblock.fs_maxbsize);
 	}
 	if (sblock.fs_maxcontig > 1)
-		sblock.fs_contigsumsize = MIN(sblock.fs_maxcontig,FS_MAXCONTIG);
+		sblock.fs_contigsumsize = MIN(sblock.fs_maxcontig, FS_MAXCONTIG);
 	sblock.fs_bmask = ~(sblock.fs_bsize - 1);
 	sblock.fs_fmask = ~(sblock.fs_fsize - 1);
 	sblock.fs_qbmask = ~sblock.fs_bmask;
@@ -302,20 +320,28 @@ restart:
 		sblock.fs_old_postblformat = 1;
 		sblock.fs_old_nrpos = 1;
 	} else {
-		sblock.fs_sblockloc = SBLOCK_UFS2;	/* 设置超级块的大小 */
+		sblock.fs_sblockloc = SBLOCK_UFS2;	/* 设置超级块的位置，ufs中包含有多个超级块副本 */
 		sblock.fs_sblockactualloc = SBLOCK_UFS2;
 		sblock.fs_nindir = sblock.fs_bsize / sizeof(ufs2_daddr_t);	/* 间接块数 */
 		sblock.fs_inopb = sblock.fs_bsize / sizeof(struct ufs2_dinode);	/* 一个块中包含几个索引节点 */
 		sblock.fs_maxsymlinklen = ((UFS_NDADDR + UFS_NIADDR) *
 		    sizeof(ufs2_daddr_t));	/* 计算 inode 最大块寻址 */
 	}
-	/* 计算各个功能块的起始位置，看着像是块号 */
+	/*  
+		fs_sblockloc 表示的是 ufs 文件系统用的是哪个位置的超级块(上面赋值的时候可以看到，该字段赋值
+		的是 SBLOCK_UFS2，它表示的是超级块的偏移量，计算单位应该是 byte)。然后再调用 roundup 宏计算
+		所在的块号
+		howmany 宏看着像是把字节为单位的 offset 转换成 fragment/block 
+	*/
 	sblock.fs_sblkno =
 	    roundup(howmany(sblock.fs_sblockloc + SBLOCKSIZE, sblock.fs_fsize),
 		sblock.fs_frag);
+	/* 块组描述符起始块号 = 超级块起始块号 + 一个块？ */
 	sblock.fs_cblkno = sblock.fs_sblkno +
 	    roundup(howmany(SBLOCKSIZE, sblock.fs_fsize), sblock.fs_frag);
+	/* inode table 起始块号 = 快组描述符起始块号 + 一个块？ */
 	sblock.fs_iblkno = sblock.fs_cblkno + sblock.fs_frag;
+
 	/* 计算文件最大size，(直接块 + 间接块) * block size */
 	sblock.fs_maxfilesize = sblock.fs_bsize * UFS_NDADDR - 1;
 	for (sizepb = sblock.fs_bsize, i = 0; i < UFS_NIADDR; i++) {
@@ -451,7 +477,17 @@ restart:
 	if (optimalfpg != sblock.fs_fpg)
 		printf("Reduced frags per cylinder group from %d to %d %s\n",
 		   optimalfpg, sblock.fs_fpg, "to enlarge last cyl group");
+	/*
+		cgsize 的计算要看一下 CGSIZE 的定义，它里面包含了许多 metadata 数据。alloc 函数中会调用 bread 函数，
+		读取 cgsize 大小的数据到内存缓冲区，也就是说明一次 alloc 操作就会读取一个块组所有的元数据。这样就可以对
+		元数据进行读写操作
+	*/
 	sblock.fs_cgsize = fragroundup(&sblock, CGSIZE(&sblock));
+	/*
+		fs_iblkno 表示的是 inode table 的偏移量。fs_ipg 表示的是每个组拥有的 inode 数量，INOPF 用于计算
+		每个 block / fragment 中包含的 inode 数量，两者取模就可以得出 inode 一共会占用多少个 block / fragment,
+		所以，fs_dblkno 表示的和可能是用于文件存储的数据块的起始位置，根据下文判断也可能是 csum 数据段的起始位置？
+	*/
 	sblock.fs_dblkno = sblock.fs_iblkno + sblock.fs_ipg / INOPF(&sblock);
 	if (Oflag == 1) {
 		sblock.fs_old_spc = sblock.fs_fpg * sblock.fs_old_nspf;
@@ -463,28 +499,33 @@ restart:
 	/*
 	 * fill in remaining fields of the super block
 	 * 填写超级块的剩余字段。其中 csaddr 和 cssize 都是块组相关的块属性的一些定义。然后涉及到了一个
-	 * csum 结构，说明这个结构是表示块组的 checksum。奇海中
+	 * csum 结构，说明这个结构是表示块组的 checksum。感觉 ufs 中可能包含有 csum 的一个单独数据段，
+	 * 通过 cgdmin 算出 csum 的起始位置
 	 */
-	sblock.fs_csaddr = cgdmin(&sblock, 0);
+	sblock.fs_csaddr = cgdmin(&sblock, 0);	
 	sblock.fs_cssize =
-	    fragroundup(&sblock, sblock.fs_ncg * sizeof(struct csum));
+	    fragroundup(&sblock, sblock.fs_ncg * sizeof(struct csum));	/* csum 的大小 */
 	fscs = (struct csum *)calloc(1, sblock.fs_cssize);
 	if (fscs == NULL)
 		errx(31, "calloc failed");
-	/* fs_sbsize 表示的是文件系统的实际大小，应该是真正占用的字节数，而不是通过块计算出的 */
+
+	/* 
+		fs_sbsize 表示的是文件系统超级块的实际大小，应该是真正占用的字节数，而不是通过块计算出的。 
+	*/
 	sblock.fs_sbsize = fragroundup(&sblock, sizeof(struct fs));
 	if (sblock.fs_sbsize > SBLOCKSIZE)
 		sblock.fs_sbsize = SBLOCKSIZE;
 	if (sblock.fs_sbsize < realsectorsize)
 		sblock.fs_sbsize = realsectorsize;
-	sblock.fs_minfree = minfree;	/* 文件系统所能接受的最小空闲块所占比重 */
+	/* 文件系统所能接受的最小空闲块所占比重，tptfs 中可能不需要这个 */
+	sblock.fs_minfree = minfree;	
 	if (metaspace > 0 && metaspace < sblock.fs_fpg / 2)
 		sblock.fs_metaspace = blknum(&sblock, metaspace);	/* 块组相关 */
 	else if (metaspace != -1)
 		/* reserve half of minfree for metadata blocks */
 		sblock.fs_metaspace = blknum(&sblock,
 		    (sblock.fs_fpg * minfree) / 200);
-	if (maxbpg == 0)	/* 块组相关 */
+	if (maxbpg == 0)	/* 块组中单个文件所能分配的做大块数 */
 		sblock.fs_maxbpg = MAXBLKPG(sblock.fs_bsize);
 	else
 		sblock.fs_maxbpg = maxbpg;
@@ -499,21 +540,37 @@ restart:
 	sblock.fs_id[0] = (long)utime;
 	sblock.fs_id[1] = newfs_random();
 	sblock.fs_fsmnt[0] = '\0';
+	/* 应该是计算 csum 所占用的数据块数量 */
 	csfrags = howmany(sblock.fs_cssize, sblock.fs_fsize);
+	/*
+		fs_dsize - 文件系统 data block 的数量，可能表示用于数据存储的数据块
+		fs_size - 文件系统 block 数量
+		fs_sblkno - superblock 占用的块数
+		fs_ncg - 表示文件系统包含多少个块组
+		fs_dblkno - 推测表示的是用于文件数据存储的块区域的起始地址
+	*/
 	sblock.fs_dsize = sblock.fs_size - sblock.fs_sblkno -
 	    sblock.fs_ncg * (sblock.fs_dblkno - sblock.fs_sblkno);
+
+	/* 计算空闲块的数量 */
 	sblock.fs_cstotal.cs_nbfree =
 	    fragstoblks(&sblock, sblock.fs_dsize) -
 	    howmany(csfrags, sblock.fs_frag);
+
+	/* 计算空闲片的数量 */
 	sblock.fs_cstotal.cs_nffree =
 	    fragnum(&sblock, sblock.fs_size) +
 	    (fragnum(&sblock, csfrags) > 0 ?
 	     sblock.fs_frag - fragnum(&sblock, csfrags) : 0);
+
+	/* 计算空闲 inode 数量，方法就是所有的计算所有inode数量，然后减去root inode number */
 	sblock.fs_cstotal.cs_nifree =
 	    sblock.fs_ncg * sblock.fs_ipg - UFS_ROOTINO;
-	sblock.fs_cstotal.cs_ndir = 0;
+
+	sblock.fs_cstotal.cs_ndir = 0;	/* 文件系统包含的目录项置零 */
 	sblock.fs_dsize -= csfrags;
 	sblock.fs_time = utime;
+
 	if (Oflag == 1) {
 		sblock.fs_old_time = utime;
 		sblock.fs_old_dsize = sblock.fs_dsize;
@@ -559,7 +616,9 @@ restart:
 	}
 	/*
 	 * Wipe out old UFS1 superblock(s) if necessary.
-	 * 如有必要，清除旧的UFS1超级块
+	 * 如有必要，清除旧的UFS1超级块。之前也提到过，ufs 中包含有多个超级块的副本，每个副本都是
+	 * 在不同的位置，而且代表的意义也是不一样的。有的是表示 UFS2 类型，有的表示 UFS1 类型。
+	 * 所以才初始化磁盘的时候，如果有必要可以将 UFS1 类型的超级块数据给清除掉
 	 */
 	if (!Nflag && Oflag != 1 && realsectorsize <= SBLOCK_UFS1) {
 		i = bread(&disk, part_ofs + SBLOCK_UFS1 / disk.d_bsize, chdummy,
@@ -581,6 +640,7 @@ restart:
 			}
 		}
 	}
+	/* 将超级块数据写入到指定位置，不写入副本 */
 	if (!Nflag && sbput(disk.d_fd, &disk.d_fs, 0) != 0)
 		err(1, "sbput: %s", disk.d_error);
 	if (Xflag == 1) {
@@ -601,6 +661,7 @@ restart:
 	width = charsperline();
 	/*
 	 * Allocate space for two sets of inode blocks.
+	 * 为两组inode块分配空间，推测应该是为根目录创建的
 	 */
 	iobufsize = 2 * sblock.fs_bsize;
 	if ((iobuf = calloc(1, iobufsize)) == 0) {
@@ -609,6 +670,7 @@ restart:
 	}
 	/*
 	 * Write out all the cylinder groups and backup superblocks.
+	 * 遍历所有的块组并进行初始化操作
 	 */
 	for (cg = 0; cg < sblock.fs_ncg; cg++) {
 		if (!Nflag)
@@ -717,23 +779,33 @@ initcg(int cylno, time_t utime)
 	 * 确定柱面组的块边界；为在第一个柱面组中的超级块汇总信息申请空间
 	 */
 	cbase = cgbase(&sblock, cylno);	/* 计算出块组的起始位置块号 */
-	dmax = cbase + sblock.fs_fpg;	/* 计算块组终止位置块号，从而限定整个块组的范围 */
+	dmax = cbase + sblock.fs_fpg;	/* 计算块组终止位置 fragment number，从而限定整个块组的范围 */
 	if (dmax > sblock.fs_size)
 		dmax = sblock.fs_size;
 	dlower = cgsblock(&sblock, cylno) - cbase;	/* 计算块组中的超级块起始位置(块号) */
-	dupper = cgdmin(&sblock, cylno) - cbase;	/* 计算整个块组的终止位置 */
+	dupper = cgdmin(&sblock, cylno) - cbase;	/* 计算 data block 首地址，表示的应该是元数据区 */
+	/*
+		当我们处理的是块组0的时候，里边可能比其他块组多包含了一个关于组描述符的区域，保存的应该是所有的
+		块组的组描述符，应该是要占用几个块。fs_cssize 表示的应该是所有组描述符所占用的数据量大小(in bytes),
+		fs_fsize 表示的是 fragment size，所以这里可以计算出组描述符一共占用多少 fragment。
+		计算完成后更新dupper。也可以印证前面的猜测，初始化块组主要操作的就是块组的元数据，感觉应该是要包含 
+		inode table 数据区
+	*/
 	if (cylno == 0)
 		dupper += howmany(sblock.fs_cssize, sblock.fs_fsize);
 	cs = &fscs[cylno];	/* 获取csum，可以看出该数组保存的是所有块组的信息 */
 	memset(&acg, 0, sblock.fs_cgsize);	/* 块组字段置空 */
+
 	acg.cg_time = utime;	/* 更新最后一次被写入的时间 */
 	acg.cg_magic = CG_MAGIC;	/* 块组魔数 */
 	acg.cg_cgx = cylno;	/* 块组号 */
 	acg.cg_niblk = sblock.fs_ipg;	/* 每个块组中拥有的 inode 数量 */
 	acg.cg_initediblk = MIN(sblock.fs_ipg, 2 * INOPB(&sblock));	/* 最后一个被初始化的 inode */
 	acg.cg_ndblk = dmax - cbase;	/* 计算整个块组一共有多少个数据块 */
+
 	if (sblock.fs_contigsumsize > 0)
-		acg.cg_nclusterblks = acg.cg_ndblk / sblock.fs_frag;	/* 计算数据簇个数 */
+		acg.cg_nclusterblks = acg.cg_ndblk / sblock.fs_frag;	/* 簇大小 */
+	/*  start 表示的应该是块组描述符 */
 	start = &acg.cg_space[0] - (u_char *)(&acg.cg_firstfield);
 	if (Oflag == 2) {
 		/* 表示的应该是 inode map table 所占用的数据块的起始块号，字节数？ */
@@ -758,12 +830,16 @@ initcg(int cylno, time_t utime)
 	*/
 	acg.cg_freeoff = acg.cg_iusedoff + howmany(sblock.fs_ipg, CHAR_BIT);
 	acg.cg_nextfreeoff = acg.cg_freeoff + howmany(sblock.fs_fpg, CHAR_BIT);
+
 	if (sblock.fs_contigsumsize > 0) {
 		acg.cg_clustersumoff =
 		    roundup(acg.cg_nextfreeoff, sizeof(u_int32_t));
+
 		acg.cg_clustersumoff -= sizeof(u_int32_t);
+
 		acg.cg_clusteroff = acg.cg_clustersumoff +
 		    (sblock.fs_contigsumsize + 1) * sizeof(u_int32_t);
+				
 		acg.cg_nextfreeoff = acg.cg_clusteroff +
 		    howmany(fragstoblks(&sblock, sblock.fs_fpg), CHAR_BIT);
 	}
@@ -778,7 +854,8 @@ initcg(int cylno, time_t utime)
 	acg.cg_cs.cs_nifree += sblock.fs_ipg;	/* 初始化可用inode节点数为块组包含的所有inode */
 	/* 
 		通过 cg_inosused 宏找到inode位图的起始块号，然后将对应的i位设置为1，表明 inode 已经被使用。
-		最后再将块组 csum 中的空闲节点个数字段做--操作
+		最后再将块组 csum 中的空闲节点个数字段做--操作。
+		从判断条件可以看出，块组0中存放 root inode
 	*/
 	if (cylno == 0)
 		for (i = 0; i < (long)UFS_ROOTINO; i++) {
@@ -1045,7 +1122,11 @@ alloc(int size, int mode)
 {
 	int i, blkno, frag;
 	uint d;
-	/* 读取第0个块组的属性信息，存放到 acg 当中 */
+	/* 
+		读取第0个块组的属性信息，存放到 acg 当中；通过代码调试可以发现，fs_cgsize = 32768，
+		说明函数读取的不仅仅是快描述符，而是将对应的位图、表等 metadata 全部读取出来，acg 指针
+		指向这块内存区域，所以就可以通过 cg_blksfree 宏定位到对应的位图进行操作
+	*/
 	bread(&disk, part_ofs + fsbtodb(&sblock, cgtod(&sblock, 0)), (char *)&acg,
 	    sblock.fs_cgsize);
 	if (acg.cg_magic != CG_MAGIC) {	/* 判断块组魔数 */
@@ -1109,30 +1190,39 @@ iput(union dinode *ip, ino_t ino)
 	/* 宏cgtod 中的参数0，表示是块组号，所以这里读取的是第0个块组的组描述符 */
 	bread(&disk, part_ofs + fsbtodb(&sblock, cgtod(&sblock, 0)), (char *)&acg,
 	    sblock.fs_cgsize);
-	if (acg.cg_magic != CG_MAGIC) {
+	if (acg.cg_magic != CG_MAGIC) {	/* 判断块组魔数 */
 		printf("cg 0: bad magic number\n");
 		exit(31);
 	}
+	/* 因为我们要重新申请一个inode，所以空闲inode计数要做--操作 */
 	acg.cg_cs.cs_nifree--;
+	/* 
+		通过 inode number(貌似不是 genetic number)来确定在索引节点位图中的位置。感觉应该不是
+		操作索引节点表， 
+	*/
 	setbit(cg_inosused(&acg), ino);
+	/* 应该是快组描述符的写入操作 */
 	if (cgput(&disk, &acg) != 0)
 		err(1, "iput: cgput: %s", disk.d_error);
-	sblock.fs_cstotal.cs_nifree--;
-	fscs[0].cs_nifree--;
+	sblock.fs_cstotal.cs_nifree--;	/* 超级块数据更新 */
+	fscs[0].cs_nifree--;	/* 块组csum数据更新 */
+	/* inode 号不是随机生成的，应该是顺序生成的，否则这里无法进行大小比较 */
 	if (ino >= (unsigned long)sblock.fs_ipg * sblock.fs_ncg) {
 		printf("fsinit: inode value out of range (%ju).\n",
 		    (uintmax_t)ino);
 		exit(32);
 	}
+	/* 通过 inode number 计算出对应的 disk block number */
 	d = fsbtodb(&sblock, ino_to_fsba(&sblock, ino));
+	/* 读取该数据块存放的数据 */
 	bread(&disk, part_ofs + d, (char *)iobuf, sblock.fs_bsize);
-	if (sblock.fs_magic == FS_UFS1_MAGIC)
+	if (sblock.fs_magic == FS_UFS1_MAGIC)	/* 通过魔数判断文件系统类型 */
 		((struct ufs1_dinode *)iobuf)[ino_to_fsbo(&sblock, ino)] =
 		    ip->dp1;
 	else
 		((struct ufs2_dinode *)iobuf)[ino_to_fsbo(&sblock, ino)] =
 		    ip->dp2;
-	wtfs(d, sblock.fs_bsize, (char *)iobuf);
+	wtfs(d, sblock.fs_bsize, (char *)iobuf);	/* 应该是将更新后的数据写入 */
 }
 
 /*

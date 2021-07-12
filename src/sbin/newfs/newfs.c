@@ -99,24 +99,37 @@ int	tflag;			/* enable TRIM */
 	从代码逻辑可以看出，fssize 是通过解析 newfs 指令中的参数 -s 获取到的。查阅 newfs 
 	用户手册可以看到，它表示的是文件系统以扇区为单位的大小。所以 fssize 表示的是文件系统
 	总的扇区数
+	下面定义的这些参数可以大致反应出来我们磁盘格式化工具到底需要哪些参数，或者是要获取哪些
+	参数。这些参数在 mkfs 中看着都是要用到的
 */
-intmax_t fssize;		/* file system size */
-off_t	mediasize;		/* device size */
-int	sectorsize;		/* bytes/sector */
-int	realsectorsize;		/* bytes/sector in hardware */
-int	fsize = 0;		/* fragment size */
-int	bsize = 0;		/* block size */
-int	maxbsize = 0;		/* maximum clustering */
-int	maxblkspercg = MAXBLKSPERCG; /* maximum blocks per cylinder group */
-int	minfree = MINFREE;	/* free space threshold */
-int	metaspace;		/* space held for metadata blocks */
+intmax_t fssize;		/* file system size 文件系统大小(sectors) */
+off_t	mediasize;		/* device size 设备大小(bytes) */
+int	sectorsize;		/* bytes/sector 扇区大小 */
+int	realsectorsize;		/* bytes/sector in hardware 实际申请的扇区的大小 */
+int	fsize = 0;		/* fragment size 片大小 */
+int	bsize = 0;		/* block size 块大小 */
+int	maxbsize = 0;		/* maximum clustering I/O簇策略 */
+int	maxblkspercg = MAXBLKSPERCG; /* maximum blocks per cylinder group 每个块组最大能占用多少块 */
+int	minfree = MINFREE;	/* free space threshold 可用数据块所占最小比例 */
+int	metaspace;		/* space held for metadata blocks 元数据所占用的空间大小(块组相关) */
+/*
+	该参数是 ufs 文件系统功能优化会用到的东西，大概就是时间和空间的如何取舍的问题。简单理解为比如说我们
+	在文件系统中要采用一种策略，策略可以通过所占用空间大小和完成操作所用的时间作为评估标准。哪种标准对于
+	我们来说更能接受，我们就采用该标准来评估来我们的策略
+*/
 int	opt = DEFAULTOPT;	/* optimization preference (space or time) */
+/*
+	字面意思是一个 inode 对应多少数据块，其实就是对 inode 总体数量进行预测。因为文件系统在初始化的时候
+	需要确定 inode 位图以及数据结构所要占用的数据块的数量，这样才能确定每个数据区的相对位置。比如整个文件
+	系统一共有10000个数据块，我们假定每个 inode 平均占用4个数据块，那这样我们就需要申请大概2500个 inode，
+	这样就可以对 inode 所占用的空间做一个大致评估
+*/
 int	density;		/* number of bytes per inode */
-int	maxcontig = 0;		/* max contiguous blocks to allocate */
-int	maxbpg;			/* maximum blocks per file in a cyl group */
-int	avgfilesize = AVFILESIZ;/* expected average file size */
-int	avgfilesperdir = AFPDIR;/* expected number of files per directory */
-u_char	*volumelabel = NULL;	/* volume label for filesystem */
+int	maxcontig = 0;		/* max contiguous blocks to allocate 簇I/O */
+int	maxbpg;			/* maximum blocks per file in a cyl group 块组中每个文件最大能占用的块数 */
+int	avgfilesize = AVFILESIZ;/* expected average file size 预期的平均文件的大小 */
+int	avgfilesperdir = AFPDIR;/* expected number of files per directory 预期的每个目录下的文件数 */
+u_char	*volumelabel = NULL;	/* volume label for filesystem 文件系统卷标签 */
 struct uufsd disk;		/* libufs disk structure */
 
 static char	device[MAXPATHLEN];
@@ -149,12 +162,21 @@ main(int argc, char *argv[])
 	    "EJL:NO:RS:T:UXa:b:c:d:e:f:g:h:i:jk:lm:no:p:r:s:t")) != -1)
 		switch (ch) {
 		case 'E':
+			/*
+				在创建文件系统之前擦除磁盘上的内容。在超级块前保留的区域(引导块)的数据将不会
+				被擦除。擦除仅与闪存或精简配置的设备相关。擦除可能需要很长时间。如果设备不支持
+				BIO_DELETE，命令将失败。
+			*/
 			Eflag = 1;
 			break;
 		case 'J':
+			/*
+				通过gjournal在新文件系统上启用日志记录
+			*/
 			Jflag = 1;
 			break;
 		case 'L':
+			/* 添加一个卷名 */
 			volumelabel = optarg;
 			i = -1;
 			while (isalnum(volumelabel[++i]) ||
@@ -169,9 +191,11 @@ main(int argc, char *argv[])
 			Lflag = 1;
 			break;
 		case 'N':
+			/* 使文件系统参数打印出来而不真正创建文件系统 */
 			Nflag = 1;
 			break;
 		case 'O':
+			/* 用于指定文件系统版本(UFS1 / UFS2) */
 			if ((Oflag = atoi(optarg)) < 1 || Oflag > 2)
 				errx(1, "%s: bad file system format value",
 				    optarg);
@@ -180,6 +204,7 @@ main(int argc, char *argv[])
 			Rflag = 1;
 			break;
 		case 'S':
+			/* 指定扇区的大小 */
 			rval = expand_number_int(optarg, &sectorsize);
 			if (rval < 0 || sectorsize <= 0)
 				errx(1, "%s: bad sector size", optarg);
@@ -192,18 +217,25 @@ main(int argc, char *argv[])
 			/* fall through to enable soft updates */
 			/* FALLTHROUGH */
 		case 'U':
+			/* 在新文件系统上启用软更新 */
 			Uflag = 1;
 			break;
 		case 'X':
 			Xflag++;
 			break;
 		case 'a':
+			/* 指定在强制旋转延迟之前将布局的最大连续块数。默认值为 16(maxcontig) */
 			rval = expand_number_int(optarg, &maxcontig);
 			if (rval < 0 || maxcontig <= 0)
 				errx(1, "%s: bad maximum contiguous blocks",
 				    optarg);
 			break;
 		case 'b':
+			/*
+				文件系统的块大小，以字节为单位。它必须是2的幂。默认大小是32768字节，
+				允许的最小大小是4096字节。最佳 block:fragment 比率是8:1。其他比例
+				是可能的，但不推荐，并可能产生较差的结果
+			*/
 			rval = expand_number_int(optarg, &bsize);
 			if (rval < 0)
 				 errx(1, "%s: bad block size",
@@ -216,38 +248,63 @@ main(int argc, char *argv[])
 				    optarg, MAXBSIZE);
 			break;
 		case 'c':
+			/*
+				文件系统中每个柱面组的块数。默认值是计算其他参数允许的最大值。
+				此值取决于其他参数，特别是块大小和每个inode的字节数
+			*/
 			rval = expand_number_int(optarg, &maxblkspercg);
 			if (rval < 0 || maxblkspercg <= 0)
 				errx(1, "%s: bad blocks per cylinder group",
 				    optarg);
 			break;
 		case 'd':
+			/*
+				文件系统可以选择使用扩展数据块存储大文件。此参数指定可以使用的最大数据块大小。
+				默认值是文件系统块大小。它目前被限制为文件系统块大小的16倍的最大值和文件系统
+				块大小的最小值
+			*/
 			rval = expand_number_int(optarg, &maxbsize);
 			if (rval < 0 || maxbsize < MINBSIZE)
 				errx(1, "%s: bad extent block size", optarg);
 			break;
 		case 'e':
+			/*
+				指示在强制开始从另一个柱面组分配块之前，任何单个文件可以从柱面组中分配的最大块数。
+				默认值约为柱面组中总块数的四分之一
+			*/
 			rval = expand_number_int(optarg, &maxbpg);
 			if (rval < 0 || maxbpg <= 0)
 			  errx(1, "%s: bad blocks per file in a cylinder group",
 				    optarg);
 			break;
 		case 'f':
+			/*
+				文件系统的片段大小（字节）。它必须是 blocksize/8 和 blocksize 之间的二次幂。
+				默认值为4096字节
+			*/
 			rval = expand_number_int(optarg, &fsize);
 			if (rval < 0 || fsize <= 0)
 				errx(1, "%s: bad fragment size", optarg);
 			break;
 		case 'g':
+			/* 指定文件系统平均文件长度 */
 			rval = expand_number_int(optarg, &avgfilesize);
 			if (rval < 0 || avgfilesize <= 0)
 				errx(1, "%s: bad average file size", optarg);
 			break;
 		case 'h':
+			/* 文件系统中每个目录的预期平均文件数 */
 			rval = expand_number_int(optarg, &avgfilesperdir);
 			if (rval < 0 || avgfilesperdir <= 0)
 			       errx(1, "%s: bad average files per dir", optarg);
 			break;
 		case 'i':
+			/*
+				指定文件系统中inode的密度。默认值是为每个（2*frag大小）字节的数据空间
+				创建一个inode。如果需要较少的inode，则应使用较大的inode；要创建更多
+				inode，应该给出一个较小的数字。每个不同的文件都需要一个inode，因此该值
+				有效地指定了文件系统上的平均文件大小。
+			*/
 			rval = expand_number_int(optarg, &density);
 			if (rval < 0 || density <= 0)
 				errx(1, "%s: bad bytes per inode", optarg);
@@ -256,6 +313,12 @@ main(int argc, char *argv[])
 			lflag = 1;
 			break;
 		case 'k':
+			/*
+				为每个圆柱体组中的元数据块设置要保留的空间量。设置后，文件系统首选项例程
+				将尝试在每个柱面组的 inode 块之后立即保存指定的空间量，以供元数据块使用。
+				对元数据块进行聚类加速了随机文件访问，减少了 fsck 的运行时间。默认情况下，
+				newfs 将其设置为 minfree 保留空间的一半
+			*/
 			if ((metaspace = atoi(optarg)) < 0)
 				errx(1, "%s: bad metadata space %%", optarg);
 			if (metaspace == 0)
@@ -263,13 +326,22 @@ main(int argc, char *argv[])
 				metaspace = -1;
 			break;
 		case 'm':
+			/* 
+				正常用户预留空间的百分比；最小可用空间阈值。使用的默认值由 MINFREE <ufs/ffs/fs.h>定义，
+				当前为8%
+			*/
 			if ((minfree = atoi(optarg)) < 0 || minfree > 99)
 				errx(1, "%s: bad free space %%", optarg);
 			break;
 		case 'n':
+			/* 不要创建 .snap 文件，tptfs 中肯定是不需要的 */
 			nflag = 1;
 			break;
 		case 'o':
+			/*
+				（空间或时间）。可以指示文件系统尽量减少分配块所花费的时间，或者尽量减少磁盘上的空间碎片；
+				如果minfree的值大于或等于8%，则默认为优化时间。
+			*/
 			if (strcmp(optarg, "space") == 0)
 				opt = FS_OPTSPACE;
 			else if (strcmp(optarg, "time") == 0)
@@ -280,6 +352,10 @@ main(int argc, char *argv[])
 				    optarg);
 			break;
 		case 'r':
+			/*
+				在专用部分中指定的分区末尾的保留空间的大小，以扇区为单位。文件系统不会占用该空间；它可以被
+				其他用户使用，比如geom（4）。默认为0
+			*/
 			errno = 0;
 			reserved = strtoimax(optarg, &cp, 0);
 			if (errno != 0 || cp == optarg ||
@@ -287,11 +363,19 @@ main(int argc, char *argv[])
 				errx(1, "%s: bad reserved size", optarg);
 			break;
 		case 'p':
+			/*
+				在底层映像是文件的情况下要使用的分区名称（a..h），因此您不能通过文件系统访问各个分区。
+				也可以与设备一起使用，例如，newfs-p f /dev/da1s3 相当于 newfs /dev/da1s3f
+			*/
 			is_file = 1;
 			part_name = optarg[0];
 			break;
 
 		case 's':
+			/*
+				文件系统以扇区为单位的大小。此值默认为以特殊方式指定的原始分区的大小减去其末尾的保留空间（请参见-r）。
+				大小为0也可用于选择默认值。有效的大小值不能大于默认值，这意味着文件系统无法扩展到保留空间
+			*/
 			errno = 0;
 			fssize = strtoimax(optarg, &cp, 0);
 			if (errno != 0 || cp == optarg ||
@@ -299,6 +383,12 @@ main(int argc, char *argv[])
 				errx(1, "%s: bad file system size", optarg);
 			break;
 		case 't':
+			/*
+				启用“修剪启用”标志。如果已启用，并且基础设备支持BIO\u DELETE命令，则文件系统将为
+				每个释放的块向基础设备发送删除请求。trim enable标志通常为闪存设备设置，以减少写
+				放大，从而减少写限制闪存的磨损，并通常提高长期性能。精简配置的存储还可以通过将未使用
+				的块返回到全局池而受益
+			*/
 			tflag = 1;
 			break;
 		case '?':
@@ -320,44 +410,47 @@ main(int argc, char *argv[])
 		 * No path prefix; try prefixing _PATH_DEV.
 		 */
 		snprintf(device, sizeof(device), "%s%s", _PATH_DEV, special);
-		special = device;
+		special = device;	/* 应该是文件的完整路径名 */
 	}
 
 	if (is_file) {
 		/* bypass ufs_disk_fillout_blank */
 		bzero( &disk, sizeof(disk));
-		disk.d_bsize = 1;
-		disk.d_name = special;
-		disk.d_fd = open(special, O_RDONLY);
+		disk.d_bsize = 1;	/* bsize = 1 ?? */
+		disk.d_name = special;	/* 指定名称 */
+		disk.d_fd = open(special, O_RDONLY);	/* 以只读的方式打开设备文件 */
 		if (disk.d_fd < 0 ||
 		    (!Nflag && ufs_disk_write(&disk) == -1))
-			errx(1, "%s: ", special);
-	} else if (ufs_disk_fillout_blank(&disk, special) == -1 ||
+			errx(1, "%s: ", special);		/* 填充 disk 结构字段并且测试是否可以写入 */
+	} else if (ufs_disk_fillout_blank(&disk, special) == -1 ||	
 	    (!Nflag && ufs_disk_write(&disk) == -1)) {
 		if (disk.d_error != NULL)
 			errx(1, "%s: %s", special, disk.d_error);
 		else
 			err(1, "%s", special);
 	}
+	/* 获取文件状态 */
 	if (fstat(disk.d_fd, &st) < 0)
 		err(1, "%s", special);
+	/* 判断文件是否表示一个字符设备 */
 	if ((st.st_mode & S_IFMT) != S_IFCHR) {
 		warn("%s: not a character-special device", special);
 		is_file = 1;	/* assume it is a file */
-		dkname = special;
+		dkname = special;	/* 设置 diskname */
 		if (sectorsize == 0)
-			sectorsize = 512;
-		mediasize = st.st_size;
+			sectorsize = 512;	/* 设置扇区大小 */
+		mediasize = st.st_size;	/* device size，设备大小 */
 		/* set fssize from the partition */
 	} else {
 	    if (sectorsize == 0)
 		if (ioctl(disk.d_fd, DIOCGSECTORSIZE, &sectorsize) == -1)
 		    sectorsize = 0;	/* back out on error for safety */
 	    if (sectorsize && ioctl(disk.d_fd, DIOCGMEDIASIZE, &mediasize) != -1)
-		getfssize(&fssize, special, mediasize / sectorsize, reserved);
+		getfssize(&fssize, special, mediasize / sectorsize, reserved);	/* 获取文件系统大小(in sector) */
 	}
+
 	pp = NULL;
-	lp = getdisklabel();
+	lp = getdisklabel();	/* 获取磁盘标签，主要是分区信息 */
 	if (lp != NULL) {
 		if (!is_file) /* already set for files */
 			part_name = special[strlen(special) - 1];
@@ -366,7 +459,10 @@ main(int argc, char *argv[])
 			errx(1, "%s: can't figure out file system partition",
 					special);
 		cp = &part_name;
-		if (isdigit(*cp))
+		/*
+			获取分区表信息
+		*/
+		if (isdigit(*cp))	/* 测试分区名称第一个字符是不是十进制数字 */
 			pp = &lp->d_partitions[RAW_PART];
 		else
 			pp = &lp->d_partitions[*cp - 'a'];
@@ -376,16 +472,19 @@ main(int argc, char *argv[])
 		if (pp->p_fstype == FS_BOOT)
 			errx(1, "%s: `%c' partition overlaps boot program",
 			    special, *cp);
-		getfssize(&fssize, special, pp->p_size, reserved);
+		getfssize(&fssize, special, pp->p_size, reserved);	/* 获取分区大小(sectors) */
 		if (sectorsize == 0)
-			sectorsize = lp->d_secsize;
+			sectorsize = lp->d_secsize;	/* 每个扇区所包含的字节数 */
 		if (fsize == 0)
-			fsize = pp->p_fsize;
+			fsize = pp->p_fsize;	/* 获取fragment大小 */
 		if (bsize == 0)
-			bsize = pp->p_frag * pp->p_fsize;
+			bsize = pp->p_frag * pp->p_fsize;	/* 通过fragment大小计算块大小，tptfs中是相等的 */
 		if (is_file)
-			part_ofs = pp->p_offset;
+			part_ofs = pp->p_offset;	/* 从分区表中获取起始扇区的偏移量 */
 	}
+	/* 
+		当我们获取到的这些参数如果都是小于0的时候，要如何处理的方法 
+	*/
 	if (sectorsize <= 0)
 		errx(1, "%s: no default sector size", special);
 	if (fsize <= 0)
@@ -397,6 +496,7 @@ main(int argc, char *argv[])
 		fprintf(stderr, "because minfree is less than %d%%\n", MINFREE);
 		opt = FS_OPTSPACE;
 	}
+	/* 设置扇区的大小 */
 	realsectorsize = sectorsize;
 	if (sectorsize != DEV_BSIZE) {		/* XXX */
 		int secperblk = sectorsize / DEV_BSIZE;
@@ -406,6 +506,7 @@ main(int argc, char *argv[])
 		if (pp != NULL)
 			pp->p_size *= secperblk;
 	}
+	/* 处理完了相关的数据之后，开始真正创建文件系统 */
 	mkfs(pp, special);
 	ufs_disk_close(&disk);
 	if (!jflag)

@@ -75,6 +75,7 @@
  * all cases the size of the superblock will be SBLOCKSIZE. All values are
  * given in byte-offset form, so they do not imply a sector size. The
  * SBLOCKSEARCH specifies the order in which the locations should be searched.
+ * 
  * 依赖于不同的架构和媒体设备，超级块会是四个位置中的任意一个。对于每个数据块都会计数的 tiny media，
  * 超级块会被放置到分区的最前端(对应的可能是 SBLOCK_FLOPPY)。在历史上，UFS1将其放置在距离前面 8K 
  * 的位置，以便为磁盘标签和一个小引导程序留出空间(也就是说磁盘的引导块会占用 8k 空间)。对于 UFS2，
@@ -93,6 +94,7 @@
 
 /*
  * Max number of fragments per block. This value is NOT tweakable.
+ * 每个块的最大碎片数。此值不可调整
  */
 #define	MAXFRAG 	8
 
@@ -267,10 +269,10 @@ struct fsrecovery {
  * super block.
  */
 struct csum {
-	int32_t	cs_ndir;		/* number of directories */
-	int32_t	cs_nbfree;		/* number of free blocks */
-	int32_t	cs_nifree;		/* number of free inodes */
-	int32_t	cs_nffree;		/* number of free frags */
+	int32_t	cs_ndir;		/* number of directories - 9 */
+	int32_t	cs_nbfree;		/* number of free blocks - 16224 */
+	int32_t	cs_nifree;		/* number of free inodes - 80247 */
+	int32_t	cs_nffree;		/* number of free frags - 0 */
 };
 struct csum_total {
 	int64_t	cs_ndir;		/* number of directories */
@@ -285,27 +287,27 @@ struct csum_total {
  * Super block for an FFS filesystem.
  */
 struct fs {
-	int32_t	 fs_firstfield;		/* historic filesystem linked list, */
-	int32_t	 fs_unused_1;		/*     used for incore super blocks */
+	int32_t	 fs_firstfield;		/* historic filesystem linked list, - 0 */
+	int32_t	 fs_unused_1;		/*     used for incore super blocks - 0 */
 	/* 各个数据块组距离块组起始位置的的偏移量？ */
-	int32_t	 fs_sblkno;		/* offset of super-block in filesys */
-	int32_t	 fs_cblkno;		/* offset of cyl-block in filesys */
-	int32_t	 fs_iblkno;		/* offset of inode-blocks in filesys */
-	int32_t	 fs_dblkno;		/* offset of first data after cg */
+	int32_t	 fs_sblkno;		/* offset of super-block in filesys - 24 */
+	int32_t	 fs_cblkno;		/* offset of cyl-block in filesys - 32 */
+	int32_t	 fs_iblkno;		/* offset of inode-blocks in filesys - 40 */
+	int32_t	 fs_dblkno;		/* offset of first data after cg - 5056 */
 
-	int32_t	 fs_old_cgoffset;	/* cylinder group offset in cylinder */
-	int32_t	 fs_old_cgmask;		/* used to calc mod fs_ntrak */
-	int32_t  fs_old_time;		/* last time written */
-	int32_t	 fs_old_size;		/* number of blocks in fs */
-	int32_t	 fs_old_dsize;		/* number of data blocks in fs */
-	u_int32_t fs_ncg;		/* number of cylinder groups */
-	int32_t	 fs_bsize;		/* size of basic blocks in fs */
-	int32_t	 fs_fsize;		/* size of frag blocks in fs */
-	int32_t	 fs_frag;		/* number of frags in a block in fs */
+	int32_t	 fs_old_cgoffset;	/* cylinder group offset in cylinder - 0 */
+	int32_t	 fs_old_cgmask;		/* used to calc mod fs_ntrak - 0 */
+	int32_t  fs_old_time;		/* last time written - 0 */
+	int32_t	 fs_old_size;		/* number of blocks in fs - 0 */
+	int32_t	 fs_old_dsize;		/* number of data blocks in fs - 0 */
+	u_int32_t fs_ncg;		/* number of cylinder groups - 17 */
+	int32_t	 fs_bsize;		/* size of basic blocks in fs - 32768*/
+	int32_t	 fs_fsize;		/* size of frag blocks in fs - 4096 */
+	int32_t	 fs_frag;		/* number of frags in a block in fs - 8 */
 /* these are configuration parameters */
-	int32_t	 fs_minfree;		/* minimum percentage of free blocks */
-	int32_t	 fs_old_rotdelay;	/* num of ms for optimal next block */
-	int32_t	 fs_old_rps;		/* disk revolutions per second */
+	int32_t	 fs_minfree;		/* minimum percentage of free blocks - 8 */
+	int32_t	 fs_old_rotdelay;	/* num of ms for optimal next block - 0 */
+	int32_t	 fs_old_rps;		/* disk revolutions per second - 0 */
 /* these fields can be computed from the others */
 	int32_t	 fs_bmask;		/* ``blkoff'' calc of blk offsets */
 	int32_t	 fs_fmask;		/* ``fragoff'' calc of frag offsets */
@@ -368,8 +370,8 @@ struct fs {
 	int64_t	 fs_sblockloc;		/* byte offset of standard superblock */
 	struct	csum_total fs_cstotal;	/* (u) cylinder summary information */
 	ufs_time_t fs_time;		/* last time written */
-	int64_t	 fs_size;		/* number of blocks in fs */
-	int64_t	 fs_dsize;		/* number of data blocks in fs */
+	int64_t	 fs_size;		/* number of blocks in fs - 2621440 */
+	int64_t	 fs_dsize;		/* number of data blocks in fs - 2535871 */
 	ufs2_daddr_t fs_csaddr;		/* blk addr of cyl grp summary area 块组汇总区的块地址 */
 	int64_t	 fs_pendingblocks;	/* (u) blocks being freed */
 	u_int32_t fs_pendinginodes;	/* (u) inodes being freed */
@@ -546,28 +548,28 @@ CTASSERT(sizeof(struct fs) == 1376);
  */
 #define	CG_MAGIC	0x090255
 struct cg {
-	int32_t	 cg_firstfield;		/* historic cyl groups linked list */
-	int32_t	 cg_magic;		/* magic number 魔数 */
+	int32_t	 cg_firstfield;		/* historic cyl groups linked list - 0 */
+	int32_t	 cg_magic;		/* magic number 魔数 0x90255 */
 	int32_t  cg_old_time;		/* time last written 最后一次写入的时间 */
 	u_int32_t cg_cgx;		/* we are the cgx'th cylinder group 块组索引值？ */
 	int16_t	 cg_old_ncyl;		/* number of cyl's this cg 每个块组包含多少个柱面 */
 	int16_t  cg_old_niblk;		/* number of inode blocks this cg 这个块组包含有多少个 inode */
 	u_int32_t cg_ndblk;		/* number of data blocks this cg 这个块组包含有多少个数据块 */
 	struct	 csum cg_cs;		/* cylinder summary information 块组统计信息(free inode/direcotry) */
-	u_int32_t cg_rotor;		/* position of last used block 最后一个被使用的块的位置*/
-	u_int32_t cg_frotor;		/* position of last used frag 最后一个被使用的 fragment 所在地址 */
-	u_int32_t cg_irotor;		/* position of last used inode 最后一个被使用的 inode */
-	u_int32_t cg_frsum[MAXFRAG];	/* counts of available frags */
-	int32_t	 cg_old_btotoff;	/* (int32) block totals per cylinder 每个块组包含的数据块个数 */
-	int32_t	 cg_old_boff;		/* (u_int16) free block positions 空闲块位置 */
-	u_int32_t cg_iusedoff;		/* (u_int8) used inode map */
-	u_int32_t cg_freeoff;		/* (u_int8) free block map 空闲块位图 */
-	u_int32_t cg_nextfreeoff;	/* (u_int8) next available space 下一个可使用的空间 */
-	u_int32_t cg_clustersumoff;	/* (u_int32) counts of avail clusters  */
-	u_int32_t cg_clusteroff;		/* (u_int8) free cluster map */
-	u_int32_t cg_nclusterblks;	/* number of clusters this cg 该块组一共包含有多少个数据簇 */
-	u_int32_t cg_niblk;		/* number of inode blocks this cg 存放 inode 的数据块个数 */
-	u_int32_t cg_initediblk;		/* last initialized inode 最后一个被初始化的 inode */
+	u_int32_t cg_rotor;		/* position of last used block 最后一个被使用的块的位置 - 30544 */
+	u_int32_t cg_frotor;		/* position of last used frag 最后一个被使用的 fragment 所在地址 - 30544*/
+	u_int32_t cg_irotor;		/* position of last used inode 最后一个被使用的 inode - 8 */
+	u_int32_t cg_frsum[MAXFRAG];	/* counts of available frags - {0, 0, 0, 0, 0, 0, 0, 0} */
+	int32_t	 cg_old_btotoff;	/* (int32) block totals per cylinder 每个块组包含的数据块个数 - 0*/
+	int32_t	 cg_old_boff;		/* (u_int16) free block positions 空闲块位置 - 0 */
+	u_int32_t cg_iusedoff;		/* (u_int8) used inode map - 168 */
+	u_int32_t cg_freeoff;		/* (u_int8) free block map 空闲块位图 - 10200 */
+	u_int32_t cg_nextfreeoff;	/* (u_int8) next available space 下一个可使用的空间 - 32758 */
+	u_int32_t cg_clustersumoff;	/* (u_int32) counts of avail clusters - 30240 */
+	u_int32_t cg_clusteroff;		/* (u_int8) free cluster map - 30252 */
+	u_int32_t cg_nclusterblks;	/* number of clusters this cg 该块组一共包含有多少个数据簇 - 20042 */
+	u_int32_t cg_niblk;		/* number of inode blocks this cg 存放 inode 的数据块个数 - 80256 */
+	u_int32_t cg_initediblk;		/* last initialized inode 最后一个被初始化的 inode - 0 */
 	u_int32_t cg_unrefs;		/* number of unreferenced inodes 未被初始化的 inode 数量*/
 	int32_t	 cg_sparecon32[1];	/* reserved for future use */
 	u_int32_t cg_ckhash;		/* check-hash of this cg */
@@ -579,6 +581,12 @@ struct cg {
 
 /*
  * Macros for access to cylinder group array structures
+ * 注意一下着几个宏的实现，用的是一个结构体的起始地址 + 偏移量(这个结构体是在内存中的，
+ * 而不是磁盘上的，所以地址并不是磁盘的块号)。调试小技巧：对于一些 /bin /sbin 中的函数
+ * 或者结构体，可以在内核代码中尝试搜索一下有没有对应的实现或者定义，有的话可以调试一下
+ * 内核，进行类比。
+ * 这里的思想是将块组的组描述符、数据块位图、索引节点位图等 metadata 数据都读出来，然后
+ * 直接利用偏移定位到对应的位图起始位置，然后执行相应的操作
  */
 #define	cg_chkmagic(cgp) ((cgp)->cg_magic == CG_MAGIC)
 #define	cg_inosused(cgp) \

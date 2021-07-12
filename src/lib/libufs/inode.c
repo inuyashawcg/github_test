@@ -48,10 +48,12 @@ __FBSDID("$FreeBSD: releng/12.0/lib/libufs/inode.c 332415 2018-04-11 19:28:54Z m
 
 #include <libufs.h>
 
+/* inode 参数表示的 inode number */
 int
 getino(struct uufsd *disk, void **dino, ino_t inode, int *mode)
 {
 	ino_t min, max;
+	/* 从下文可以看出，该变量不是块号，而是指向 inode 数据的指针 */
 	caddr_t inoblock;
 	struct ufs1_dinode *dp1;
 	struct ufs2_dinode *dp2;
@@ -59,17 +61,22 @@ getino(struct uufsd *disk, void **dino, ino_t inode, int *mode)
 
 	ERROR(disk, NULL);
 
-	fs = &disk->d_fs;
+	fs = &disk->d_fs;	/* superblock */
+	/*  判断 inode number 是否在限制范围之内 */
 	if (inode >= (ino_t)fs->fs_ipg * fs->fs_ncg) {
 		ERROR(disk, "inode number out of range");
 		return (-1);
 	}
 	inoblock = disk->d_inoblock;
+	/* 
+		限定 inode number 取值范围。因为一个 block 会存放多个 inode 结构体。所以
+		推测这两个成员限定的是在这个块中存放的 inode 的 number 的范围
+	*/
 	min = disk->d_inomin;
 	max = disk->d_inomax;
 
 	if (inoblock == NULL) {
-		inoblock = malloc(fs->fs_bsize);
+		inoblock = malloc(fs->fs_bsize);	/* 分配内存空间 */
 		if (inoblock == NULL) {
 			ERROR(disk, "unable to allocate inode block");
 			return (-1);
@@ -78,12 +85,21 @@ getino(struct uufsd *disk, void **dino, ino_t inode, int *mode)
 	}
 	if (inode >= min && inode < max)
 		goto gotit;
+	/*
+		首先是通过 inode number 计算出 filesystem block number，然后再利用 fsbtodb 宏
+		将 block number 转换成 disk sector number，最后调用 bread 读取数据
+	*/
 	bread(disk, fsbtodb(fs, ino_to_fsba(fs, inode)), inoblock,
 	    fs->fs_bsize);
 	disk->d_inomin = min = inode - (inode % INOPB(fs));
 	disk->d_inomax = max = min + INOPB(fs);
 gotit:	switch (disk->d_ufs) {
 	case 1:
+		/*
+			inoblock 存放的是一整个数据块的内容，里边会包含有多个 inode 结构体。这里的处理方式就是对 inoblock 进行
+			强制类型转换，把它从一个 char* 转换成一个 struct ufs1_dinode* (非常不错的编程技巧)。所以，该指针可以
+			看作是指向了一个 struct ufs1_dinode 类型的数组。再根据 inode number 计算偏移量
+		*/
 		dp1 = &((struct ufs1_dinode *)inoblock)[inode - min];
 		if (mode != NULL)
 			*mode = dp1->di_mode & IFMT;
@@ -114,6 +130,7 @@ putino(struct uufsd *disk)
 		ERROR(disk, "No inode block allocated");
 		return (-1);
 	}
+	/* 写操作不用像读操作那么麻烦，直接将一整块数据更新就完了 */
 	if (bwrite(disk, fsbtodb(fs, ino_to_fsba(&disk->d_fs, disk->d_inomin)),
 	    disk->d_inoblock, disk->d_fs.fs_bsize) <= 0)
 		return (-1);

@@ -63,14 +63,21 @@ bread(struct uufsd *disk, ufs2_daddr_t blockno, void *data, size_t size)
 	 * XXX: which is stricter than struct alignment.
 	 * XXX: Bounce the buffer if not 64 byte aligned.
 	 * XXX: this can be removed if/when the kernel is fixed
+	 * 各种磁盘控制器都要求我们的缓冲区对齐，这比结构对齐更为严格。如果不是64字节对齐，
+	 * 则跳出缓冲区。如果/当内核被修复时，这可以被移除
 	 */
 	if (((intptr_t)data) & 0x3f) {
-		p2 = malloc(size);
+		p2 = malloc(size);	/* 如果data是64字节对齐，执行该代码分支 */
 		if (p2 == NULL) {
 			ERROR(disk, "allocate bounce buffer");
 			goto fail;
 		}
 	}
+	/* 
+		pread（）和preadv（）系统调用执行相同的函数，但从文件中的指定位置读取而不修改文件指针，
+		返回值是读取的字节数。disk->d_bsize 表示的是 device block，从代码实现来看，涉及到
+		物理设备块应该就是指的是扇区，所以这里是利用 扇区号 * 扇区大小 算出来数据的偏移量
+	*/
 	cnt = pread(disk->d_fd, p2, size, (off_t)(blockno * disk->d_bsize));
 	if (cnt == -1) {
 		ERROR(disk, "read error from block device");
@@ -85,7 +92,7 @@ bread(struct uufsd *disk, ufs2_daddr_t blockno, void *data, size_t size)
 		goto fail;
 	}
 	if (p2 != data) {
-		memcpy(data, p2, size);
+		memcpy(data, p2, size);	/* 最终是将数据存放到 data 当中 */
 		free(p2);
 	}
 	return (cnt);
@@ -105,7 +112,7 @@ bwrite(struct uufsd *disk, ufs2_daddr_t blockno, const void *data, size_t size)
 
 	ERROR(disk, NULL);
 
-	rv = ufs_disk_write(disk);
+	rv = ufs_disk_write(disk);	/* 这里主要是测试设备能否使用，并不涉及写入操作 */
 	if (rv == -1) {
 		ERROR(disk, "failed to open disk for writing");
 		return (-1);
@@ -116,6 +123,7 @@ bwrite(struct uufsd *disk, ufs2_daddr_t blockno, const void *data, size_t size)
 	 * XXX: which is stricter than struct alignment.
 	 * XXX: Bounce the buffer if not 64 byte aligned.
 	 * XXX: this can be removed if/when the kernel is fixed
+	 * 这里同上，还是要检测数据位对齐
 	 */
 	if (((intptr_t)data) & 0x3f) {
 		p2 = malloc(size);
@@ -126,6 +134,7 @@ bwrite(struct uufsd *disk, ufs2_daddr_t blockno, const void *data, size_t size)
 		memcpy(p2, data, size);
 		data = p2;
 	}
+	/* 对应上述pread，也是直接通过偏移量写设备，但是不会改变文件指针的位置 */
 	cnt = pwrite(disk->d_fd, data, size, (off_t)(blockno * disk->d_bsize));
 	if (p2 != NULL)
 		free(p2);
@@ -187,14 +196,14 @@ berase_helper(struct uufsd *disk, ufs2_daddr_t blockno, ufs2_daddr_t size)
 }
 
 #endif
-
+/* erase：清除，擦除 */
 int
 berase(struct uufsd *disk, ufs2_daddr_t blockno, ufs2_daddr_t size)
 {
 	int rv;
 
 	ERROR(disk, NULL);
-	rv = ufs_disk_write(disk);
+	rv = ufs_disk_write(disk);	/* 测试设备是否可用 */
 	if (rv == -1) {
 		ERROR(disk, "failed to open disk for writing");
 		return(rv);

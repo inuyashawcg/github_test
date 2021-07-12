@@ -42,7 +42,9 @@
 /* Size of bootblock area in sector-size neutral bytes */
 #define BSD_BOOTBLOCK_SIZE	8192
 
-/* partition containing whole disk */
+/* partition containing whole disk 
+	包含整个磁盘的分区。FreeBSD 把第二个分区定义成不可进行读写的分区？
+*/
 #define	BSD_PART_RAW		2
 
 /* partition normally containing swap */
@@ -51,7 +53,9 @@
 /* Drive-type specific data size (in number of 32-bit inegrals) */
 #define	BSD_NDRIVEDATA		5
 
-/* Number of spare 32-bit integrals following drive-type data */
+/* Number of spare 32-bit integrals following drive-type data 
+	驱动器类型数据之后的备用32位积分数
+*/
 #define	BSD_NSPARE		5
 
 /*
@@ -73,7 +77,7 @@ struct disklabel {
 	uint32_t d_ntracks;		/* # of tracks per cylinder 一个柱面所包含的磁道数 */
 	uint32_t d_ncylinders;		/* # of data cylinders per unit 一个单元所包含的柱面数 */
 	uint32_t d_secpercyl;		/* # of data sectors per cylinder 一个柱面所包含的扇区数 */
-	uint32_t d_secperunit;		/* # of data sectors per unit 一个单元多包含的扇区数 */
+	uint32_t d_secperunit;		/* # of data sectors per unit */
 
 	/*
 	 * Spares(备用) (bad sector replacements) below are not counted in

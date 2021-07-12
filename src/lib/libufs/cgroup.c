@@ -48,6 +48,7 @@ __FBSDID("$FreeBSD: releng/12.0/lib/libufs/cgroup.c 328092 2018-01-17 17:58:24Z 
 
 #include <libufs.h>
 
+/* cgroup block alloc */
 ufs2_daddr_t
 cgballoc(struct uufsd *disk)
 {
@@ -59,20 +60,23 @@ cgballoc(struct uufsd *disk)
 	fs = &disk->d_fs;
 	cgp = &disk->d_cg;
 	blksfree = cg_blksfree(cgp);
+	/* 遍历块组的所有块号 */
 	for (bno = 0; bno < fs->fs_fpg / fs->fs_frag; bno++)
-		if (ffs_isblock(fs, blksfree, bno))
+		if (ffs_isblock(fs, blksfree, bno)) /* 找到第一个可用的块 */
 			goto gotit;
 	return (0);
 gotit:
-	fs->fs_cs(fs, cgp->cg_cgx).cs_nbfree--;
-	ffs_clrblock(fs, blksfree, (long)bno);
+	fs->fs_cs(fs, cgp->cg_cgx).cs_nbfree--;	/* 因为该块要被使用了，所以空闲计数-- */
+	ffs_clrblock(fs, blksfree, (long)bno);	/* take a block out of the map */
 	ffs_clusteracct(fs, cgp, bno, -1);
 	cgp->cg_cs.cs_nbfree--;
 	fs->fs_cstotal.cs_nbfree--;
 	fs->fs_fmod = 1;
+	/* 超级块成员更新，最后返回的应该是一个块号 */
 	return (cgbase(fs, cgp->cg_cgx) + blkstofrags(fs, bno));
 }
 
+/* cgroup block free */
 int
 cgbfree(struct uufsd *disk, ufs2_daddr_t bno, long size)
 {
@@ -134,6 +138,7 @@ cgbfree(struct uufsd *disk, ufs2_daddr_t bno, long size)
 	return cgwrite(disk);
 }
 
+/* cgroup inode alloc */
 ino_t
 cgialloc(struct uufsd *disk)
 {
@@ -147,6 +152,7 @@ cgialloc(struct uufsd *disk)
 	fs = &disk->d_fs;
 	cgp = &disk->d_cg;
 	inosused = cg_inosused(cgp);
+	/* 循环查找可用inode */
 	for (ino = 0; ino < fs->fs_ipg; ino++)
 		if (isclr(inosused, ino))
 			goto gotit;
@@ -179,6 +185,7 @@ gotit:
 	return (ino + (cgp->cg_cgx * fs->fs_ipg));
 }
 
+/* cread 函数的底层实现是 cgget */
 int
 cgread(struct uufsd *disk)
 {
@@ -197,6 +204,9 @@ cgread1(struct uufsd *disk, int c)
 	return (-1);
 }
 
+/*
+	推测是应该是获取块组描述符
+*/
 int
 cgget(struct uufsd *disk, int cg, struct cg *cgp)
 {
@@ -226,6 +236,7 @@ cgget(struct uufsd *disk, int cg, struct cg *cgp)
 	return (0);
 }
 
+/* 两个 write 函数底层实现还是 cgput */
 int
 cgwrite(struct uufsd *disk)
 {
@@ -248,17 +259,25 @@ cgwrite1(struct uufsd *disk, int cg)
 	return (-1);
 }
 
+/*
+	将块组描述符写入到磁盘对应的位置
+*/
 int
 cgput(struct uufsd *disk, struct cg *cgp)
 {
 	struct fs *fs;
 
 	fs = &disk->d_fs;
+	/* 首先判断文件系 metadata 的 hash 类型是否是 cyliner group */
 	if ((fs->fs_metackhash & CK_CYLGRP) != 0) {
 		cgp->cg_ckhash = 0;
 		cgp->cg_ckhash =
 		    calculate_crc32c(~0L, (void *)cgp, fs->fs_cgsize);
 	}
+	/*
+		其实就是将超级块的内容写入到磁盘，在 newtpt 中可以使用 tpt_sblock.c 文件中
+		提供的函数
+	*/
 	if (bwrite(disk, fsbtodb(fs, cgtod(fs, cgp->cg_cgx)), cgp,
 	    fs->fs_cgsize) == -1) {
 		ERROR(disk, "unable to write cylinder group");

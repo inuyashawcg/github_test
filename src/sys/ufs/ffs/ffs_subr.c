@@ -138,6 +138,9 @@ ffs_load_inode(struct buf *bp, struct inode *ip, struct fs *fs, ino_t ino)
 /*
  * These are the low-level functions that actually read and write
  * the superblock and its associated data.
+ * 通过 SBLOCKSEARCH 宏定义可知，ufs 是将超级块备份到了几个不同的区域当中，这样就能够保证
+ * 当默认使用的超级块损坏的时候，可以从备份中进行修复。超级块备份位置就存放到了 sblock_try
+ * 数组当中
  */
 static off_t sblock_try[] = SBLOCKSEARCH;
 static int readsuper(void *, struct fs **, off_t, int,
@@ -152,6 +155,9 @@ static int readsuper(void *, struct fs **, off_t, int,
  * is returned. If filltype is non-NULL, additional memory is allocated
  * of type filltype and filled in with the superblock summary information.
  * All memory is freed when any error is returned.
+ * 如果指定了备用超级块，则读取该超级块。否则，将在SBLOCKSEARCH列表中给定的位置集中搜索超级块。
+ * readfunc 为超级块分配内存并返回。如果 filltype 为非NULL，则分配 filltype 类型的额外内存，
+ * 并用超级块摘要信息填充。当返回任何错误时，将释放所有内存
  *
  * If a superblock is found, zero is returned. Otherwise one of the
  * following error values is returned:
@@ -162,19 +168,29 @@ static int readsuper(void *, struct fs **, off_t, int,
  *     EINVAL: The previous newfs operation on this volume did not complete.
  *         The administrator must complete newfs before using this volume.
  */
+/*
+	参数 fsp 为上级函数传下来的指针。后面代码中涉及到了 free 操作，所以要搞清楚到底是哪个
+	指针执行了 malloc 操作
+*/
 int
 ffs_sbget(void *devfd, struct fs **fsp, off_t altsblock,
     struct malloc_type *filltype,
     int (*readfunc)(void *devfd, off_t loc, void **bufp, int size))
 {
-	struct fs *fs;
+	struct fs *fs;	/* 创建局部指针变量 */
 	int i, error, size, blks;
 	uint8_t *space;
 	int32_t *lp;
 	char *buf;
 
+	/* 两个指针都先置空 */
 	fs = NULL;
 	*fsp = NULL;
+	/*
+		altsblock 这个参数表示的应该是判断是否要读取备份的超级块，-1的话应该是不读取。
+		tptfs 当中目前还没有考虑添加多个超级块地址，所以这个参数在 newtpt 函数设计中
+		可以不要
+	*/
 	if (altsblock != -1) {
 		if ((error = readsuper(devfd, &fs, altsblock, 1,
 		     readfunc)) != 0) {
@@ -182,7 +198,7 @@ ffs_sbget(void *devfd, struct fs **fsp, off_t altsblock,
 				UFS_FREE(fs, filltype);
 			return (error);
 		}
-	} else {
+	} else {	/* else 分支代码不需要再执行 */
 		for (i = 0; sblock_try[i] != -1; i++) {
 			if ((error = readsuper(devfd, &fs, sblock_try[i], 0,
 			     readfunc)) == 0)

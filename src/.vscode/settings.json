@@ -67,6 +67,13 @@
         "newfs.h": "c",
         "dir.h": "c",
         "disklabel.h": "c",
-        "climits": "cpp"
+        "climits": "cpp",
+        "cdefs.h": "c",
+        "stdlib.h": "c",
+        "disk.h": "c",
+        "wait.h": "c",
+        "file.h": "c",
+        "libgeom.h": "c",
+        "stdint.h": "c"
     }
 }

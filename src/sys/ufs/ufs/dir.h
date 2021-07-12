@@ -89,6 +89,13 @@
 #define	DIRBLKSIZ	DEV_BSIZE
 #define	UFS_MAXNAMLEN	255
 
+/*
+	ufs 目录项在磁盘上是以片(chunk)为单位进行分配的。目录片的大小是可选择的，遵循的原则是每次分配
+	的目录片只需要一次操作就可以传送到磁盘上。每个目录片可以划分成长度不等的若干个目录项，所以文件名
+	可以是几乎任意长度的。但是目录项不能跨越多个目录片；
+	direct 结构的第二个成员表示的是目录项的大小，这个其实可以用于对目录项的检索当中。第一个目录项
+	加上它本身的长度，就可以找到第二个目录项所在的位置，以此类推
+*/
 struct	direct {
 	u_int32_t d_ino;		/* inode number of entry */
 	u_int16_t d_reclen;		/* length of this record */
