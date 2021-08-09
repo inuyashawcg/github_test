@@ -162,6 +162,13 @@ ext2_init_dirent_tail(struct ext2fs_direct_tail *tp)
 	tp->e2dt_reserved_ft = EXT2_FT_DIR_CSUM;
 }
 
+/* 
+	从实例来看，ep 指向的是数据块中最后一个目录项的位置。但其实它本质上是一个 ext2fs_direct_tail 所管理的
+	数据。可以中这里的处理逻辑中推测一下 ext2 一个数据块中目录项的存放机制。
+	磁盘上的目录项数据肯定是变长的，这样才能够最大限度的利用存储空间。但是当存储一定的数据之后，剩余的空间对于
+	一些目录项来说可能就太小了，放不下。怎么办？再定义一个别的结构体来管理这一部分剩余的空间，感觉这部分空间是
+	没有被利用的，只是用一个结构体来显示这部分空间的基本属性信息
+*/
 int
 ext2_is_dirent_tail(struct inode *ip, struct ext2fs_direct_2 *ep)
 {
@@ -183,6 +190,7 @@ ext2_is_dirent_tail(struct inode *ip, struct ext2fs_direct_2 *ep)
 	return (0);
 }
 
+/*  */
 struct ext2fs_direct_tail *
 ext2_dirent_get_tail(struct inode *ip, struct ext2fs_direct_2 *ep)
 {
@@ -190,10 +198,25 @@ ext2_dirent_get_tail(struct inode *ip, struct ext2fs_direct_2 *ep)
 	void *top;
 	unsigned int rec_len;
 
-	dep = ep;
+	dep = ep;	/* 函数中dep是不断变化的，但是ep其实是没有改变的，只是给dep赋值 */
+	/* 
+		top 表示的是数据块中 ext2fs_direct_tail 结构的起始位置  
+	*/
 	top = EXT2_DIRENT_TAIL(ep, ip->i_e2fs->e2fs_bsize);
-	rec_len = dep->e2d_reclen;
+	/* 表示的是数据块中第一个目录项的目录项长度 */
+	rec_len = dep->e2d_reclen;	
 
+	/* 
+		ext2 目录项貌似规定其长度一定要是4的倍数， (rec_len & 0x3) 条件应该就是对这个属性是否
+		满足进行检查。while 循环就是跳转检查每一个目录项，退出条件就是当 dep > top 或者 rec_len
+		为0。所以这里可能会存在有三种情况：
+			1、数据块还有剩余空间能够存放目录项和tail结构，所以dep指针指向的是数据块中间的某个位置。
+				此时 rec_len 的值应该是0，退出循环，返回 NULL
+			2、剩余空间刚好装下tail结构，这种情况就去调用相关函数检测属性信息是否正确，然后返回相应
+				的值
+			3、最后一个数据项的结束位置已经超过了tail的起始位置，说明剩余空间已经容不下该结构体了，
+				退出循环，返回NULL
+	*/
 	while (rec_len && !(rec_len & 0x3)) {
 		dep = (struct ext2fs_direct_2 *)(((char *)dep) + rec_len);
 		if ((void *)dep >= top)
@@ -204,6 +227,9 @@ ext2_dirent_get_tail(struct inode *ip, struct ext2fs_direct_2 *ep)
 	if (dep != top)
 		return (NULL);
 
+	/* 
+		下面的代码分支是特殊情况，数据块刚好有对应的目录项填充完毕，并且留出了刚刚好的空间给tail
+	*/
 	if (ext2_is_dirent_tail(ip, dep))
 		return ((struct ext2fs_direct_tail *)dep);
 
@@ -236,10 +262,12 @@ ext2_dirent_csum_verify(struct inode *ip, struct ext2fs_direct_2 *ep)
 	uint32_t calculated;
 	struct ext2fs_direct_tail *tp;
 
+	/* 获取 ext2fs_direct_tail 结构数据 */
 	tp = ext2_dirent_get_tail(ip, ep);
 	if (tp == NULL)
 		return (0);
 
+	/* 计算checksum */
 	calculated = ext2_dirent_csum(ip, ep, (char *)tp - (char *)ep);
 	if (calculated != tp->e2dt_checksum)
 		return (EIO);
@@ -247,6 +275,7 @@ ext2_dirent_csum_verify(struct inode *ip, struct ext2fs_direct_2 *ep)
 	return (0);
 }
 
+/* 根据实际应用场景来看，ep 指向的是数据块的起始位置 */
 static struct ext2fs_htree_count *
 ext2_get_dx_count(struct inode *ip, struct ext2fs_direct_2 *ep, int *offset)
 {
@@ -255,9 +284,16 @@ ext2_get_dx_count(struct inode *ip, struct ext2fs_direct_2 *ep, int *offset)
 	int count_offset;
 
 	if (ep->e2d_reclen == EXT2_BLOCK_SIZE(ip->i_e2fs))
-		count_offset = 8;
+		count_offset = 8;	/* 如果目录项大小等于文件系统块大小 */
 	else if (ep->e2d_reclen == 12) {
-		dp = (struct ext2fs_direct_2 *)(((char *)ep) + 12);
+		/*
+			目录项属性信息一共占用了8个字节，然后目录项要求4字节对齐。所以，name 长度肯定是不能超过4的。
+			所以这个分支处理的很可能是 . 和 .. 命令的目录
+		*/
+		dp = (struct ext2fs_direct_2 *)(((char *)ep) + 12); /* 此时dp指向了下一个目录项 */
+		/*
+			如果块剩余的空间不等于目录项的长度，则表明没有找到目标目录项，返回 NULL
+		*/
 		if (dp->e2d_reclen != EXT2_BLOCK_SIZE(ip->i_e2fs) - 12)
 			return (NULL);
 
@@ -331,6 +367,9 @@ ext2_dx_csum_verify(struct inode *ip, struct ext2fs_direct_2 *ep)
 	return (0);
 }
 
+/*
+	ext2 directory block checksum verify
+*/
 int
 ext2_dir_blk_csum_verify(struct inode *ip, struct buf *bp)
 {
@@ -340,11 +379,15 @@ ext2_dir_blk_csum_verify(struct inode *ip, struct buf *bp)
 
 	fs = ip->i_e2fs;
 
+	/* 首先进行文件系统属性判断 */
 	if (!EXT2_HAS_RO_COMPAT_FEATURE(fs, EXT2F_ROCOMPAT_METADATA_CKSUM))
 		return (error);
 
-	ep = (struct ext2fs_direct_2 *)bp->b_data;
-
+	ep = (struct ext2fs_direct_2 *)bp->b_data;	/* 指向从磁盘读取到内存中数据的起始位置 */
+	/*
+		尝试获取数据块中的 tail 结构体。如果能够获取到，就对其进行属性检查；如果获取失败，
+		执行else代码分支
+	*/
 	if (ext2_dirent_get_tail(ip, ep) != NULL)
 		error = ext2_dirent_csum_verify(ip, ep);
 	else if (ext2_get_dx_count(ip, ep, NULL) != NULL)

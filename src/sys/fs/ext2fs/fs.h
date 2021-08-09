@@ -169,7 +169,10 @@
 #define	lblktosize(fs, blk)	/* calculates (blk * fs->fs_bsize) */ \
 	((blk) << (fs->e2fs_bshift))
 
-/* 计算逻辑块号 */
+/* 
+	计算逻辑块号。这里的 loc 从实际的使用情况来看，像是数据在磁盘的中的字符偏移量，然后与数据块大小进行取模运算，
+	得出该数据所在的逻辑块号(基于文件系统的逻辑块号，不是磁盘真正的块号) 
+*/
 #define	lblkno(fs, loc)		/* calculates (loc / fs->fs_bsize) */ \
 	((loc) >> (fs->e2fs_bshift))
 

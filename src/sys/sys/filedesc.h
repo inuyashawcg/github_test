@@ -97,8 +97,8 @@ struct fdescenttbl {
 */
 struct filedesc {
 	struct	fdescenttbl *fd_files;	/* open files table 指向一个文件描述符表(系统级的？) */
-	struct	vnode *fd_cdir;		/* current directory */
-	struct	vnode *fd_rdir;		/* root directory */
+	struct	vnode *fd_cdir;		/* current directory 当前目录 */
+	struct	vnode *fd_rdir;		/* root directory 根目录 */
 	struct	vnode *fd_jdir;		/* jail root directory 监控根目录 */
 	NDSLOTTYPE *fd_map;		/* bitmap of free fds */
 	int	fd_lastfile;		/* high-water mark of fd_ofiles */

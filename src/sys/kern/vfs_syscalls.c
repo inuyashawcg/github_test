@@ -1625,7 +1625,7 @@ kern_symlinkat(struct thread *td, char *path1, int fd, char *path2,
 	int error;
 
 	if (segflg == UIO_SYSSPACE) {
-		syspath = path1;
+		syspath = path1;	/* path1 就是"/"，表示系统根目录 */
 	} else {
 		syspath = uma_zalloc(namei_zone, M_WAITOK);
 		if ((error = copyinstr(path1, syspath, MAXPATHLEN, NULL)) != 0)
@@ -1633,7 +1633,7 @@ kern_symlinkat(struct thread *td, char *path1, int fd, char *path2,
 	}
 	AUDIT_ARG_TEXT(syspath);
 restart:
-	bwillwrite();
+	bwillwrite();	/* buf 相关的操作 */
 	NDINIT_ATRIGHTS(&nd, CREATE, LOCKPARENT | SAVENAME | AUDITVNODE1 |
 	    NOCACHE, segflg, path2, fd, &cap_symlinkat_rights,
 	    td);

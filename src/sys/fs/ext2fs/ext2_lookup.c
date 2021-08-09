@@ -79,10 +79,12 @@ SYSCTL_INT(_vfs_e2fs, OID_AUTO, dircheck, CTLFLAG_RW, &dirchk, 0, "");
    DIRBLKSIZE in ffs is DEV_BSIZE (in most cases 512)
    while it is the native blocksize in ext2fs - thus, a #define
    is no longer appropriate
-	 ext2fs 本地 blocksize 大小为512字节
 */
 #undef  DIRBLKSIZ
 
+/* 
+	文件类型与目录类型的相互转换 
+*/
 /* file type to directory type ? */
 static u_char ext2_ft_to_dt[] = {
 	DT_UNKNOWN,		/* EXT2_FT_UNKNOWN */

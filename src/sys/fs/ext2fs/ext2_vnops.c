@@ -1356,10 +1356,10 @@ out:
 static int
 ext2_mkdir(struct vop_mkdir_args *ap)
 {
-	struct m_ext2fs *fs;
+	struct m_ext2fs *fs;	/* 超级块 in-memory */
 	struct vnode *dvp = ap->a_dvp;	/* 表示的应该是创建文件所在的目录对应的 vnode */
-	struct vattr *vap = ap->a_vap;
-	struct componentname *cnp = ap->a_cnp;
+	struct vattr *vap = ap->a_vap;	/* vnode 属性信息 */
+	struct componentname *cnp = ap->a_cnp;	/* 组件名称 */
 	struct inode *ip, *dp;
 	struct vnode *tvp;	/* target vnode */
 	struct dirtemplate dirtemplate, *dtp;

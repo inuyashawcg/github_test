@@ -235,15 +235,17 @@ set_rootvnode(void)
 		panic("Cannot find root vnode");
 
 	VOP_UNLOCK(rootvnode, 0);
-
+	/* 获取当前线程对应的进程信息 */
 	p = curthread->td_proc;
 	FILEDESC_XLOCK(p->p_fd);
 
-	if (p->p_fd->fd_cdir != NULL)
+	/* 设置进程当前目录 */
+	if (p->p_fd->fd_cdir != NULL)	
 		vrele(p->p_fd->fd_cdir);
 	p->p_fd->fd_cdir = rootvnode;
 	VREF(rootvnode);
 
+	/* 设置进程根目录 */
 	if (p->p_fd->fd_rdir != NULL)
 		vrele(p->p_fd->fd_rdir);
 	p->p_fd->fd_rdir = rootvnode;
@@ -255,12 +257,13 @@ set_rootvnode(void)
 static int
 vfs_mountroot_devfs(struct thread *td, struct mount **mpp)
 {
+	/* mpp 现在还是一个空数据 */
 	struct vfsoptlist *opts;	// operation链表
 	struct vfsconf *vfsp;
 	struct mount *mp;
 	int error;
 
-	*mpp = NULL;
+	*mpp = NULL;	/* 初始化为null */
 
 	if (rootdevmp != NULL) {
 		/*
@@ -272,11 +275,16 @@ vfs_mountroot_devfs(struct thread *td, struct mount **mpp)
 			return (error);
 		*mpp = rootdevmp;
 	} else {
-		vfsp = vfs_byname("devfs");	// 应该就是查找相应的文件系统设备文件
+		/* 处理 rootdevmp 为 null 的代码分支 */
+		vfsp = vfs_byname("devfs");	// 应该就是查找相应的文件系统设备文件，设置名称
 		KASSERT(vfsp != NULL, ("Could not find devfs by name"));
 		if (vfsp == NULL)
 			return (ENOENT);
 
+		/* 
+			传入一个 vfsconf 结构体和一个空 vnode 指针，函数的作用可以认为是实例化出一个
+			mount 结构体对象；mp 的挂载点的名称信息在 alloc 中更新成了 "/dev"
+		*/
 		mp = vfs_mount_alloc(NULLVP, vfsp, "/dev", td->td_ucred);
 
 		error = VFS_MOUNT(mp);	// 挂载 /dev
@@ -292,6 +300,8 @@ vfs_mountroot_devfs(struct thread *td, struct mount **mpp)
 		/*
 			先加锁，然后再多mountlist进行操作，说明它会关联到多线程应用场景；mountlist就是
 			管理系统中所有挂载的文件系统
+			这里是把 devfs mp 插入到了链表的起始位置，tptfs 是否可以将其插入到链表尾部，读取
+			的时候从最后尾部获取数据
 		*/
 		mtx_lock(&mountlist_mtx);
 		TAILQ_INSERT_HEAD(&mountlist, mp, mnt_list);
@@ -924,7 +934,7 @@ vfs_mountroot_conf0(struct sbuf *sb)
 		sbuf_printf(sb, "cd9660:/dev/cd1 ro\n");
 		sbuf_printf(sb, ".timeout %d\n", root_mount_timeout);
 	}
-	s = kern_getenv("vfs.root.mountfrom");	// 获取环境变量
+	s = kern_getenv("vfs.root.mountfrom");	// 获取环境变量，gdb 打印： ufs:/dev/vtbd0
 	if (s != NULL) {
 		opt = kern_getenv("vfs.root.mountfrom.options");
 		tok = s;
@@ -1105,6 +1115,10 @@ vfs_mountroot(void)
 	 */
 	timebase = 0;
 	mtx_lock(&mountlist_mtx);
+	/* 
+		初始化 mount list，推测所有的挂载记录都应该是存储在该链表中。遍历整个链表中的元素，
+		找出其中最晚挂载时间作为 timebase
+	*/
 	mp = TAILQ_FIRST(&mountlist);
 	while (mp != NULL) {
 		if (mp->mnt_time > timebase)
@@ -1112,7 +1126,7 @@ vfs_mountroot(void)
 		mp = TAILQ_NEXT(mp, mnt_list);
 	}
 	mtx_unlock(&mountlist_mtx);
-	inittodr(timebase);
+	inittodr(timebase);	/* 利用timebase初始化系统时间 */
 
 	/* Keep prison0's root in sync with the global rootvnode. */
 	mtx_lock(&prison0.pr_mtx);

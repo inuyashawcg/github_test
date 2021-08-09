@@ -242,6 +242,7 @@ ext2_prep_hashbuf(const char *src, int slen, uint32_t *dst, int dlen,
 	}
 }
 
+/* hash 好像是通过 name 来计算的 */
 int
 ext2_htree_hash(const char *name, int len,
     uint32_t *hash_seed, int hash_version,
@@ -263,9 +264,13 @@ ext2_htree_hash(const char *name, int len,
 	hash[2] = 0x98BADCFE;
 	hash[3] = 0x10325476;
 
+	/* 如果存在 hash_seed， 将初始化完成的 hash 进行拷贝 */
 	if (hash_seed)
 		memcpy(hash, hash_seed, sizeof(hash));
 
+	/* 
+		根据不同的hash版本信息，获取 major 和 minor 
+	*/
 	switch (hash_version) {
 	case EXT2_HTREE_TEA_UNSIGNED:
 		unsigned_char = 1;
@@ -306,6 +311,12 @@ ext2_htree_hash(const char *name, int len,
 	major &= ~1;
 	if (major == (EXT2_HTREE_EOF << 1))
 		major = (EXT2_HTREE_EOF - 1) << 1;
+	
+	/*
+		将计算得到的 hash 分别赋值给 hash_major 和 hash_minor。从这里可以得知，该函数的主要作用
+		就是为了计算出一个 hash range，lookup 函数可以判断所要查找的 entry hash 是不是在这个范围
+		之内，如果是的话就
+	*/
 	*hash_major = major;
 	if (hash_minor)
 		*hash_minor = minor;

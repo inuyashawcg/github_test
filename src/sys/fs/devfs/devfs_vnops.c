@@ -520,7 +520,7 @@ loop:
 		printf("devfs_allocv: failed to allocate new vnode\n");
 		return (error);
 	}
-
+	/* 这里会根据目录的类型填充 vnode type 字段 */
 	if (de->de_dirent->d_type == DT_CHR) {
 		vp->v_type = VCHR;
 		VI_LOCK(vp);

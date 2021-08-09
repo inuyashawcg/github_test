@@ -66,6 +66,7 @@ static const char *devfs_opts[] = {
 
 /*
  * Mount the filesystem
+ * 传入的参数 mp 已经在 mountroot 阶段完成了实例化
  */
 static int
 devfs_mount(struct mount *mp)
@@ -128,6 +129,7 @@ devfs_mount(struct mount *mp)
 	/*
 		FreeBSD中有一个关于vnode分配的一个机制，所有的fs共用同所有的vnode，看这里的逻辑推测一下，
 		unr 很可能就是管理vnode的，每次分配的时候需要看一下还有哪些vnode的是可以被使用的
+		为 devfs_mount 结构体分配内存空间，初始化锁，引用计数设置为1
 	*/
 	fmp = malloc(sizeof *fmp, M_DEVFS, M_WAITOK | M_ZERO);
 	fmp->dm_idx = alloc_unr(devfs_unr);
@@ -141,14 +143,33 @@ devfs_mount(struct mount *mp)
 	mp->mnt_flag |= MNT_MULTILABEL;
 #endif
 	MNT_IUNLOCK(mp);
+	/* 
+		- devfs_mount 函数执行的过程中，malloc 出了一个 devfs_mount 结构体。所以，tptfs 挂载过程中首先要
+			实例化出一个 struct tpt_mount
+		- mp 其实是在上级 vfs 中的函数调用特定接口来创建的。所以还需要 malloc 一个 struct mount
+		- 调用 vfs 函数接口给文件系统分配一个 id
+		- 创建目录。目录项其实是跟 vnode 有着一一对应关系的，所以肯定会在某个过程中将两者进行关联。目前这个阶段
+			还未涉及到 vnode 的申请(FreeBSD 应该是向 VFS 统一申请 vnode)
+		- 然后执行 root 函数，这个函数大概率是将目录项跟 vnode 进行关联的，要详细阅读其实现逻辑
+		- 最后执行 vfs_mountedfrom 函数。其实就是对数据的简单拷贝，没有其他特别的操作
+	*/
 	fmp->dm_mount = mp;
 	mp->mnt_data = (void *) fmp;
 	// 每一个文件系统都会对应一个唯一的id
 	vfs_getnewfsid(mp);
 
+	/* 
+		该函数就是执行 malloc 分配内存空间。所以我们重点修改的就是这里，改变成数据块那种形式。
+		这里要特别注意 rootdir，看代码感觉应该是"/"。因为 vmkdir 一共执行了三次 devfs_newdirent
+		函数，也就是说它其实是创建了三个目录项
+	*/
 	fmp->dm_rootdir = devfs_vmkdir(fmp, NULL, 0, NULL, DEVFS_ROOTINO);
 
-	/* 给devfs 根目录申请一个vnode并赋值给 rvp */
+	/* 
+		给devfs 根目录申请一个vnode并赋值给 rvp
+		rvp 直到现在都还没有进行过任何一次操作，这里直接传入两个参数 mp 和 rvp，大致可以推测就是
+		将 rootdir 跟 vnode 关联在一起的 
+	*/
 	error = devfs_root(mp, LK_EXCLUSIVE, &rvp);
 	if (error) {
 		sx_destroy(&fmp->dm_lock);
@@ -209,7 +230,9 @@ devfs_unmount(struct mount *mp, int mntflags)
 	return 0;
 }
 
-/* Return locked reference to root.  */
+/* Return locked reference to root.  
+	从代码逻辑可以看到，devfs_root 函数其实一共就做了一件事，获取vnode
+*/
 
 static int
 devfs_root(struct mount *mp, int flags, struct vnode **vpp)
@@ -221,11 +244,14 @@ devfs_root(struct mount *mp, int flags, struct vnode **vpp)
 	dmp = VFSTODEVFS(mp);
 	sx_xlock(&dmp->dm_lock);
 
-	/* 从 vnode list 中找到一个free项给devfs用 */
+	/* 
+		从 vnode list 中找到一个free项给devfs用。devfs_mount 函数中，root_dir 已经构造完毕。它包含有
+		三个部分：第一个
+	*/
 	error = devfs_allocv(dmp->dm_rootdir, mp, LK_EXCLUSIVE, &vp);
 	if (error)
 		return (error);
-	vp->v_vflag |= VV_ROOT;
+	vp->v_vflag |= VV_ROOT;	/* 设置 vnode 属性信息，将该vnode标记为文件系统的root */
 	*vpp = vp;
 	return (0);
 }

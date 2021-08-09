@@ -496,27 +496,32 @@ vfs_mount_alloc(struct vnode *vp, struct vfsconf *vfsp, const char *fspath,
     struct ucred *cred)
 {
 	struct mount *mp;
-
+	/* 给mp分配内存空间 */
 	mp = uma_zalloc(mount_zone, M_WAITOK);
 	bzero(&mp->mnt_startzero,
 	    __rangeof(struct mount, mnt_startzero, mnt_endzero));
+	/* 初始化 mount 所管理的 vnode 链表 */
 	TAILQ_INIT(&mp->mnt_nvnodelist); // 初始化vnode list
 	mp->mnt_nvnodelistsize = 0;
+	/* 活跃的 vnode 链表 */
 	TAILQ_INIT(&mp->mnt_activevnodelist);	// active vnode list
 	mp->mnt_activevnodelistsize = 0;
+	/* 初始化空闲 vnode 链表 */
 	TAILQ_INIT(&mp->mnt_tmpfreevnodelist);	// free vnode list
 	mp->mnt_tmpfreevnodelistsize = 0;
-	mp->mnt_ref = 0;
+	mp->mnt_ref = 0;	/* mount引用计数初始化为0 */
 	(void) vfs_busy(mp, MBF_NOWAIT);
-	atomic_add_acq_int(&vfsp->vfc_refcount, 1); // 引用+1
+	atomic_add_acq_int(&vfsp->vfc_refcount, 1); // vfsconf 结构体的引用计数+1
 	mp->mnt_op = vfsp->vfc_vfsops;
 	mp->mnt_vfc = vfsp;
 	mp->mnt_stat.f_type = vfsp->vfc_typenum;
 	mp->mnt_gen++;
+	/* 初始化文件系统名称 */
 	strlcpy(mp->mnt_stat.f_fstypename, vfsp->vfc_name, MFSNAMELEN);
 	mp->mnt_vnodecovered = vp;
 	mp->mnt_cred = crdup(cred);
 	mp->mnt_stat.f_owner = cred->cr_uid;
+	/* 初始化文件系统挂载点名称 */
 	strlcpy(mp->mnt_stat.f_mntonname, fspath, MNAMELEN);
 	mp->mnt_iosize_max = DFLTPHYS;
 #ifdef MAC

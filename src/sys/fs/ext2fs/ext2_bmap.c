@@ -98,7 +98,7 @@ ext2_bmap(struct vop_bmap_args *ap)
 	else
 		error = ext2_bmaparray(ap->a_vp, ap->a_bn, &blkno,
 		    ap->a_runp, ap->a_runb);
-	*ap->a_bnp = blkno;	/* 最后利用局部变量 blkno 对 a_bnp 进行赋值 */
+	*ap->a_bnp = blkno;	/* a_bnp 应该就是指向我们需要计算的磁盘块号 */
 	return (error);
 }
 
@@ -172,7 +172,7 @@ ext4_bmapext(struct vnode *vp, int32_t bn, int64_t *bnp, int *runp, int *runb)
  * ext2_bmaparray 执行 bmap 转换，如果请求，则返回逻辑块数组，必须遍历这些逻辑块才能得到块。
  * 每个条目都包含到该块的偏移量，该偏移量使您到达下一个块，以及该块的磁盘地址（如果已分配）
  * 
- * bn: block number(从上层函数追下来，bn = 2)
+ * bn: block number(从上层函数追下来，bn = 2)，bn表示的应该就是计算出的那个逻辑块号
  * bnp: block number pointer
  */
 
@@ -205,8 +205,8 @@ ext2_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, int *runp, int *runb)
 		*runb = 0;
 
 
-	ap = a;
-	nump = &num;
+	ap = a;	/* 指向寻址数组的指针 */
+	nump = &num;	
 	error = ext2_getlbns(vp, bn, ap, nump);
 	if (error)
 		return (error);
@@ -333,6 +333,7 @@ ext2_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, int *runp, int *runb)
  * 间接寻址块的逻辑块号在数组中出现两次，一次偏移量出现在 i_ib 中，另一次偏移量出现在页本身中
  * 
  * ext2fs get logical block number
+ * 从上层代码逻辑可以看出，ap 指向的是数据块寻址的数组，bn 应该是文件块的逻辑块号
  */
 int
 ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
@@ -348,12 +349,14 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 	if (nump)
 		*nump = 0;
 	numlevels = 0; /* 应该表示的是寻址的等级，1、2、3级直接或者间接寻址 */
-	realbn = bn;
+	realbn = bn;	
 	if ((long)bn < 0)
 		bn = -(long)bn;
 
 	/* The first EXT2_NDADDR blocks are direct blocks. 
-		如果块号是在一级直接寻址范围内(也就是小于12)，就直接返回
+		如果块号是在一级直接寻址范围内(也就是小于12)，就直接返回，此时 *unmp = 0。
+		当块号大于12的时候，执行下面的代码分支；
+		从这里其实可以反推，bn 就是表示的文件逻辑块号
 	*/
 	if (bn < EXT2_NDADDR)
 		return (0);
@@ -363,8 +366,9 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 	 * is done, blockcnt indicates the number of data blocks possible
 	 * at the previous level of indirection, and EXT2_NIADDR - i is the
 	 * number of levels of indirection needed to locate the requested block.
-	 * 确定间接寻址的级别数。完成此循环后，blockcnt表示上一级间接寻址可能的数据块数，
+	 * 确定间接寻址的级别数。完成此循环后，blockcnt 表示上一级间接寻址可能的数据块数，
 	 * EXT2_NIADDR-i 表示定位请求块所需的间接寻址级别数。
+	 * 
 	 */
 	for (blockcnt = 1, i = EXT2_NIADDR, bn -= EXT2_NDADDR; ;
 	    i--, bn -= blockcnt) {
@@ -385,7 +389,12 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 		blockcnt = qblockcnt;
 	}
 
-	/* Calculate the address of the first meta-block. */
+	/* 
+		Calculate the address of the first meta-block.
+		间接寻址的时候，文件系统会分配单独的一个数据块用来存放磁盘块号。所以我们需要先找到存放数据块块号的这个
+		块。所以下面的逻辑应该就是先找到这个数据块，然后利用offset找到我们需要读取的数据块块号在这个块中的存储
+		位置，这样就可以拿到真正的磁盘块号，最后读取真实数据
+	*/
 	if (realbn >= 0)
 		metalbn = -(realbn - bn + EXT2_NIADDR - i);
 	else

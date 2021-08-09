@@ -74,6 +74,7 @@ struct ext2fs_direct_2 {
 						 * length<=EXT2FS_MAXNAMLEN 文件名 */
 };
 
+/* 该结构体的大小一共是12个字节 */
 struct ext2fs_direct_tail {
 	uint32_t e2dt_reserved_zero1;	/* pretend to be unused */
 	uint16_t e2dt_rec_len;		/* 12 */
@@ -84,6 +85,10 @@ struct ext2fs_direct_tail {
 
 #define EXT2_FT_DIR_CSUM	0xDE
 
+/*
+	data 指向的是它所读取的磁盘块数据在内存中的起始位置，加上 blocksize 后指向数据块
+	末尾位置，减去 ext2fs_direct_tail 得到 ext2fs_direct_tail 结构体的起始位置(如果有的话)
+*/
 #define EXT2_DIRENT_TAIL(data, blocksize) \
 	((struct ext2fs_direct_tail *)(((char *)(data)) + \
 	(blocksize) - sizeof(struct ext2fs_direct_tail)))

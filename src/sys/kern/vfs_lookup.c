@@ -683,7 +683,7 @@ lookup(struct nameidata *ndp)
 	 * 我们使用共享锁，直到到达最后一个cn的父级，然后根据请求的标志进行调整
 	 */
 	cnp->cn_lkflags = LK_SHARED;
-	dp = ndp->ni_startdir;
+	dp = ndp->ni_startdir;	// ni_startdir 打印出来的结果是 devfs
 	ndp->ni_startdir = NULLVP;	// start directory置空？
 	vn_lock(dp,
 	    compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags | LK_RETRY,

@@ -91,6 +91,9 @@ static uint32_t	ext2_htree_root_limit(struct inode *ip, int len);
 static int	ext2_htree_writebuf(struct inode *ip,
 		    struct ext2fs_htree_lookup_info *info);
 
+/*
+	判断inode对应的目录项是否已经被索引
+*/
 int
 ext2_htree_has_idx(struct inode *ip)
 {
@@ -260,12 +263,21 @@ ext2_htree_find_leaf(struct inode *ip, const char *name, int namelen,
 	fs = ip->i_e2fs->e2fs;
 	m_fs = ip->i_e2fs;
 
+	/*
+		通过逻辑块号读取对应磁盘上的数据块。需要注意的是，逻辑块号这里直接指定的是0，说明读取的是第一个逻辑块。
+		根据文档中的说明可以看到，root 节点的信息是保存在第一个逻辑块当中的
+
+		奇海 newtpt 工具的执行流程可能需要改一下，目前采用的方式是直接将目录项信息写入，没有这里 htree 的信息，是否
+		需要补充上呢？ 其他数据块是否也需要相应的做一些处理？
+	*/
 	if (ext2_blkatoff(vp, 0, NULL, &bp) != 0)
 		return (-1);
 
 	info->h_levels_num = 1;
 	info->h_levels[0].h_bp = bp;
-	rootp = (struct ext2fs_htree_root *)bp->b_data;
+	rootp = (struct ext2fs_htree_root *)bp->b_data;	/* 获取根节点信息 */
+
+	/* 判断根节点 hash 属性 */
 	if (rootp->h_info.h_hash_version != EXT2_HTREE_LEGACY &&
 	    rootp->h_info.h_hash_version != EXT2_HTREE_HALF_MD4 &&
 	    rootp->h_info.h_hash_version != EXT2_HTREE_TEA)
@@ -276,6 +288,9 @@ ext2_htree_find_leaf(struct inode *ip, const char *name, int namelen,
 		hash_version += m_fs->e2fs_uhash;
 	*hash_ver = hash_version;
 
+	/*
+		在数据块中的目录项的 hash 值是顺序排布的
+	*/
 	ext2_htree_hash(name, namelen, fs->e3fs_hash_seed,
 	    hash_version, &hash_major, &hash_minor);
 	*hash = hash_major;
@@ -342,10 +357,10 @@ ext2_htree_lookup(struct inode *ip, const char *name, int namelen,
 	struct ext2fs_htree_entry *leaf_node;
 	struct m_ext2fs *m_fs;
 	struct buf *bp;
-	uint32_t blk;
-	uint32_t dirhash;
-	uint32_t bsize;
-	uint8_t hash_version;
+	uint32_t blk;	/* block number */
+	uint32_t dirhash;	/* 由 name 计算得到的 hash */
+	uint32_t bsize;	/* block size */
+	uint8_t hash_version;	
 	int search_next;
 	int found = 0;
 

@@ -770,6 +770,9 @@ initcg(int cylno, time_t utime)
 	ufs2_daddr_t cbase, dmax;
 	struct ufs1_dinode *dp1;
 	struct ufs2_dinode *dp2;
+	/* 
+		ext2 中也包含有类似的统计块组数据的结构，可以考虑保留
+	*/
 	struct csum *cs;
 
 	/*
@@ -1292,6 +1295,7 @@ clrblock(struct fs *fs, unsigned char *cp, int h)
 
 /*
  * put a block into the map
+ * 把数据块在位图中对应的位置1，标明这个数据块已经被占用了
  */
 static void
 setblock(struct fs *fs, unsigned char *cp, int h)

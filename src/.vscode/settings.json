@@ -74,6 +74,7 @@
         "wait.h": "c",
         "file.h": "c",
         "libgeom.h": "c",
-        "stdint.h": "c"
+        "stdint.h": "c",
+        "mac_framework.h": "c"
     }
 }
