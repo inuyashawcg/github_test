@@ -1,0 +1,56 @@
+//////////////
+ext2_htree.c - ext2_htree_create_index():
+    line: 738
+    TODO: DOINGASYNC 宏貌似是跟线程同步相关的操作，讨论是否需要进一步处理
+
+//////////////
+很多地方省略了对checksum的操作，后续要考虑是否添加上
+
+//////////////
+    目录项大小的宏定义需要修改 TPT_DIR_REC_LEN，并且目录项的大小其实不是固定不变的，而是可以动态变化的。所以，不同
+引用场合下的处理也要区分开来，而不是全部都设置为256
+
+//////////////
+ext2_lookup.c - ext2_lookup_ino():
+    namei cache 的相关操作
+
+//////////////
+tptfs_lookup.cpp - TptDirBad()
+    SDT_PROBE4: 
+        当添加 extern "C" 的时候:
+        /usr/home/wcg/qihai/sys/fs/tptfs/tptfs_lookup.cpp:58:12: error: expected unqualified-id
+            extern "C" {
+        
+        当不添加 extern "C" 的时候:
+        ld: error: undefined symbol: sdt_provider_tptfs
+        >>> referenced by tptfs_lookup.cpp
+        >>>               tptfs_lookup.o:(sdt_tptfs__lookup_trace)
+        >>> referenced by tptfs_lookup.cpp
+        >>>               tptfs_lookup.o:(sdt_tptfs__trace_tpt_dirbad_error)
+        >>> referenced by tptfs_lookup.cpp
+        >>>               tptfs_lookup.o:(sdt_tptfs__trace_tpt_dirbadentry_error)
+        *** [kernel.full] Error code 1
+
+//////////////
+tptfs 中的 uio 相关操作的替换
+
+//////////////
+newtpt 初始化数据块的操作(htree)
+
+//////////////*****
+利用编译器对文件进行静态关联。需要研究一下编译器查找方面的一下功能以及 fopen 等系统函数的行为，因为修改之后可能就是
+对虚拟地址的操作，而不再通过文件描述符。所以还要再去看一下进程描述符表相关知识
+
+//////////////
+bread() 函数的行为
+
+//////////////
+文件系统中数据大小的扩展。比如 ext4 中数据块总个数是用一个64位的整型数据表示的，目前还是以32位来表示。
+后续要看文件系统的规模会有多大，根据情况再进行数据位扩展。tptfs 留给超级块的空间是足够的，这些扩展没有
+太大问题
+
+//////////////
+移植 ext2_alloc.c 中的函数时，省略掉了一些 SDT_PROBE* 和 SYSCTL 相关的定义
+
+//////////////
+ext2_alloc.c - ext2_alloccg() 函数的参数中有一个 bpref，这个表示的貌似是绝对块号，要注意处理方法
