@@ -179,6 +179,7 @@ struct inode {
  */
 struct indir {
 	e2fs_lbn_t in_lbn;		/* Logical block number. */
+	/* 可以认为是在数据块中的索引的偏移 */
 	int	in_off;			/* Offset in buffer. */
 };
 

@@ -39,6 +39,8 @@ _obj=		obj
 KERNEL_KO?=	kernel
 KERNEL?=	kernel
 KODIR?=		/boot/${KERNEL}
+
+# 指定链接脚本，$M 用于解析 machine type(amd64/arm/riscv ....)
 LDSCRIPT_NAME?=	ldscript.$M
 LDSCRIPT?=	$S/conf/${LDSCRIPT_NAME}
 

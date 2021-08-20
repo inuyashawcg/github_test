@@ -315,7 +315,7 @@ ext2_htree_hash(const char *name, int len,
 	/*
 		将计算得到的 hash 分别赋值给 hash_major 和 hash_minor。从这里可以得知，该函数的主要作用
 		就是为了计算出一个 hash range，lookup 函数可以判断所要查找的 entry hash 是不是在这个范围
-		之内，如果是的话就
+		之内，如果是的话就可以定位我们所要找的那个目录项所在的磁盘块
 	*/
 	*hash_major = major;
 	if (hash_minor)

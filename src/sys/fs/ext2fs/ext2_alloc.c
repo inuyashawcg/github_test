@@ -80,6 +80,20 @@ static daddr_t  ext2_mapsearch(struct m_ext2fs *, char *, daddr_t);
  *        inode for the file.
  *   2) quadradically rehash into other cylinder groups, until an
  *        available block is located.
+ * 文件系统数据块的分配策略.
+ * 
+ * 一个优先选择(块组？策略？)可能会被指定。如果给出了指定，那就按照下面的等级划分去查找一个数据块:
+ * 	1、分配一个建议的块(inode 结构体中指定的块号？)
+ * 	2、同一个块组中的最佳快
+ * 	3、同一个块组中的块
+ * 	4、跳转到其他的块组查找，知道查找到一个块是可用的
+ * 
+ * 如果优先选择没有给出，那按照下面的登记划分去查找一个数据块:
+ * 	1、在包含文件inode的块组中找到一个块
+ * 	2、跳转到其他块组找出一个可用的块
+ * 
+ * ext2_balloc 函数中会调用该函数，其中 bpref 参数表示的就是优先分配的块号，或者是距离
+ * 某个磁盘块距离比较近的磁盘块号
  */
 int
 ext2_alloc(struct inode *ip, daddr_t lbn, e4fs_daddr_t bpref, int size,
@@ -103,13 +117,19 @@ ext2_alloc(struct inode *ip, daddr_t lbn, e4fs_daddr_t bpref, int size,
 	if (cred == NOCRED)
 		panic("ext2_alloc: missing credential");
 #endif		/* INVARIANTS */
+	/* 判断文件系统是否还有空闲块 */
 	if (size == fs->e2fs_bsize && fs->e2fs_fbcount == 0)
 		goto nospace;
+	/* 
+		ext2 文件系统设计中会包含有一些保留块，如果可用块的数量小于保留块，也就说明
+		文件系统已经没有足够的空间再去容纳其他数据
+	*/
 	if (cred->cr_uid != 0 &&
 	    fs->e2fs_fbcount < fs->e2fs_rbcount)
 		goto nospace;
 	if (bpref >= fs->e2fs_bcount)
 		bpref = 0;
+	/* 当优先选择的块号为0时，那就执行第二种策略，即在inode所在的块组中查找可用块 */
 	if (bpref == 0)
 		cg = ino_to_cg(fs, ip->i_number);
 	else
@@ -402,7 +422,11 @@ ext2_valloc(struct vnode *pvp, int mode, struct ucred *cred, struct vnode **vpp)
 	 * 给人的感觉是目录要平均分配到不同的块组当中，而不是说先集中使用同一个块组进行存储
 	 */
 	if ((mode & IFMT) == IFDIR) {
-		cg = ext2_dirpref(pip);	/* 通过一套策略找到最适合存放该目录的一个块组 */
+		/* 
+			通过一套策略找到最适合存放该目录的一个块组，但是在 tptfs 中只有一个块组，所以这个操作其实
+			是不需要的
+		*/
+		cg = ext2_dirpref(pip);	
 		if (fs->e2fs_contigdirs[cg] < 255)
 			fs->e2fs_contigdirs[cg]++;	/* 该块组中包含的目录数量++ */
 	} else {
@@ -414,6 +438,10 @@ ext2_valloc(struct vnode *pvp, int mode, struct ucred *cred, struct vnode **vpp)
 		if (fs->e2fs_contigdirs[cg] > 0)
 			fs->e2fs_contigdirs[cg]--;
 	}
+	/*
+		块组编号 * 每个块组中的inode数量 + 1 = 该块组中 inode 的起始编号，并将它作为优先获取的
+		inode
+	*/
 	ipref = cg * fs->e2fs->e2fs_ipg + 1;
 	ino = (ino_t)ext2_hashalloc(pip, cg, (long)ipref, mode, ext2_nodealloccg);
 
@@ -472,11 +500,17 @@ noinodes:
 static uint64_t
 e2fs_gd_get_b_bitmap(struct ext2_gd *gd)
 {
-
+	/* 
+		块组描述符结构体中直接就包含有字段，表示的应该是该块组的起始数据块号。tptfs 中这些数据
+		其实是包含在超级块当中，因为只有一个块组
+	*/
 	return (((uint64_t)(gd->ext4bgd_b_bitmap_hi) << 32) |
 	    gd->ext2bgd_b_bitmap);
 }
 
+/*
+	同上，计算 inode bitmap 的起始块号
+*/
 static uint64_t
 e2fs_gd_get_i_bitmap(struct ext2_gd *gd)
 {
@@ -544,6 +578,7 @@ e2fs_gd_set_ndirs(struct ext2_gd *gd, uint32_t val)
 	gd->ext4bgd_ndirs_hi = val >> 16;
 }
 
+/* 计算块组中还未被使用的 inode 的个数，tptfs 应该也是需要添加这样的一个字段 */
 static uint32_t
 e2fs_gd_get_i_unused(struct ext2_gd *gd)
 {
@@ -691,7 +726,7 @@ ext2_dirpref(struct inode *pip)
  * Select the desired position for the next block in a file.
  * 为文件中的下一个块选择所需的位置
  *
- * we try to mimic what Remy does in inode_getblk/block_getblk
+ * we try to mimic(模仿) what Remy does in inode_getblk/block_getblk
  *
  * we note: blocknr == 0 means that we're about to allocate either
  * a direct block or a pointer block at the first level of indirection
@@ -709,7 +744,9 @@ ext2_blkpref(struct inode *ip, e2fs_lbn_t lbn, int indx, e2fs_daddr_t *bap,
 	int tmp;
 
 	fs = ip->i_e2fs;
-
+	/* 
+		ext2mount 结构体中包含一个 mutex 成员，tpt_mount 感觉也需要添加类似的字段 
+	*/
 	mtx_assert(EXT2_MTX(ip->i_ump), MA_OWNED);
 
 	/*
@@ -722,15 +759,20 @@ ext2_blkpref(struct inode *ip, e2fs_lbn_t lbn, int indx, e2fs_daddr_t *bap,
 	/*
 	 * Now check whether we were provided with an array that basically
 	 * tells us previous blocks to which we want to stay close.
+	 * 这里想要表达的意思应该是: 前面如果已经得到了可以优先分配的数据块号，
+	 * 那就直接返回。如果前面没找到，那就找一个距离最近的一个非空块，我们次优先
+	 * 分配这个块附近的数据块。如果还是没有，那就执行再下面的代码分支
 	 */
 	if (bap)
 		for (tmp = indx - 1; tmp >= 0; tmp--)
-			if (bap[tmp])
-				return bap[tmp];
+			if (bap[tmp])	/* 逻辑块号对应的数组元素不为空 */
+				return bap[tmp];	/* 返回的其实是磁盘块号 */
 
 	/*
 	 * Else lets fall back to the blocknr or, if there is none, follow
 	 * the rule that a block should be allocated near its inode.
+	 * 否则，让我们回到blocknr，或者，如果没有，则遵循块应该在其inode附近分配的规则。
+	 * 从代码逻辑来看，分配的应该是块组的第一个块
 	 */
 	return (blocknr ? blocknr :
 	    (e2fs_daddr_t)(ip->i_block_group *
@@ -760,13 +802,14 @@ ext2_hashalloc(struct inode *ip, int cg, long pref, int size,
 	mtx_assert(EXT2_MTX(ip->i_ump), MA_OWNED);
 	fs = ip->i_e2fs;
 	/*
-	 * 1: preferred cylinder group 首选的柱面组
+	 * 1: preferred cylinder group 首选的柱面组，也就是inode所在的柱面组
 	 */
 	result = (*allocator)(ip, cg, pref, size);
 	if (result)
 		return (result);
 	/*
-	 * 2: quadratic rehash
+	 * 2: quadratic rehash 如果在inode当前柱面组中没有找到合适的数据块，则在
+	 			其他柱面组进行查找
 	 */
 	for (i = 1; i < fs->e2fs_gcount; i *= 2) {
 		cg += i;
@@ -780,6 +823,8 @@ ext2_hashalloc(struct inode *ip, int cg, long pref, int size,
 	 * 3: brute force search
 	 * Note that we start at i == 2, since 0 was checked initially,
 	 * and 1 is always checked in the quadratic rehash.
+	 * 最后实在不行就暴力查找，与上述一种方式相对应，两者都是基于一定的规则来进行的。
+	 * 在 tptfs 中不再区分柱面，所以不需要确定柱面组
 	 */
 	cg = (icg + 2) % fs->e2fs_gcount;
 	for (i = 2; i < fs->e2fs_gcount; i++) {
@@ -946,6 +991,7 @@ ext2_cg_block_bitmap_init(struct m_ext2fs *fs, int cg, struct buf *bp)
  *
  * Check to see if a block of the appropriate size is available,
  * and if it is, allocate it.
+ * 检查是否有适当大小的块可用，如果可用，则分配它
  */
 static daddr_t
 ext2_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
@@ -959,9 +1005,13 @@ ext2_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
 	/* XXX ondisk32 */
 	fs = ip->i_e2fs;
 	ump = ip->i_ump;
+	/*
+		判断块组中的可用数据块的数量，如果为0的话就直接返回
+	*/
 	if (e2fs_gd_get_nbfree(&fs->e2fs_gd[cg]) == 0)
 		return (0);
 	EXT2_UNLOCK(ump);
+	/* 定位到数据块位图的第一个块，读取出来 */
 	error = bread(ip->i_devvp, fsbtodb(fs,
 	    e2fs_gd_get_b_bitmap(&fs->e2fs_gd[cg])),
 	    (int)fs->e2fs_bsize, NOCRED, &bp);
@@ -970,6 +1020,10 @@ ext2_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
 		EXT2_LOCK(ump);
 		return (0);
 	}
+	/* 
+		处理 checksum。当前 ext2 中的 checksum 相关的实现貌似都是跟 ext4 文件系统有关系。
+		所以在目前的实现当中可以暂时先不考虑这些，整理出一个基础版本
+	*/
 	if (EXT2_HAS_RO_COMPAT_FEATURE(fs, EXT2F_ROCOMPAT_GDT_CSUM) ||
 	    EXT2_HAS_RO_COMPAT_FEATURE(fs, EXT2F_ROCOMPAT_METADATA_CKSUM)) {
 		error = ext2_cg_block_bitmap_init(fs, cg, bp);
@@ -990,6 +1044,7 @@ ext2_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
 		/*
 		 * Another thread allocated the last block in this
 		 * group while we were waiting for the buffer.
+		 * 在我们等待缓冲区时，另一个线程分配了这个组中的最后一个块
 		 */
 		brelse(bp);
 		EXT2_LOCK(ump);
@@ -1000,9 +1055,12 @@ ext2_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
 	if (dtog(fs, bpref) != cg)
 		bpref = 0;
 	if (bpref != 0) {
-		bpref = dtogd(fs, bpref);
+		bpref = dtogd(fs, bpref);	/* 获取优先分配的数据块在块组中的相对位置 */
 		/*
 		 * if the requested block is available, use it
+		 		从这里可以看到，isclr 传入的块号其实是数据块在块组中的相对块号。
+				判断这个块是否已经被占用了。如果没有被占用，直接goto跳转，如果被
+				占用了，指向下面的代码分支
 		 */
 		if (isclr(bbp, bpref)) {
 			bno = bpref;
@@ -1014,6 +1072,8 @@ ext2_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
 	 * available one in this cylinder group.
 	 * first try to get 8 contigous blocks, then fall back to a single
 	 * block.
+	 * 在块组中并没有找到对应的块，所以要在当前块组中接着查找下一个可用的块。
+	 * 首先尝试获取8个连续的块，然后再跳转回单个数据块
 	 */
 	if (bpref)
 		start = dtogd(fs, bpref) / NBBY;
@@ -1024,6 +1084,7 @@ retry:
 	runlen = 0;
 	runstart = 0;
 	for (loc = start; loc < end; loc++) {
+		/* 当找到了一个可以块时，指向下面的代码分支 */
 		if (bbp[loc] == (char)0xff) {
 			runlen = 0;
 			continue;
@@ -1060,7 +1121,8 @@ retry:
 			bno = runstart;
 			goto gotit;
 		}
-	}
+	}	/* end for */
+
 	if (start != 0) {
 		end = start;
 		start = 0;
@@ -1211,16 +1273,20 @@ ext2_zero_inode_table(struct inode *ip, int cg)
 
 	fs = ip->i_e2fs;
 
+	/* 判断块组中的 inode table 是否已经设置为空 */
 	if (fs->e2fs_gd[cg].ext4bgd_flags & EXT2_BG_INODE_ZEROED)
 		return (0);
 
+	/* 计算 inode 所占用的数据块个数 */
 	all_blks = fs->e2fs->e2fs_inode_size * fs->e2fs->e2fs_ipg /
 	    fs->e2fs_bsize;
 
+	/* 计算已经被占用的数据块个数？ */
 	used_blks = howmany(fs->e2fs->e2fs_ipg -
 	    e2fs_gd_get_i_unused(&fs->e2fs_gd[cg]),
 	    fs->e2fs_bsize / EXT2_INODE_SIZE(fs));
 
+	/* 把所有 inode table 中未使用的 inode entry 数据清零 */
 	for (i = 0; i < all_blks - used_blks; i++) {
 		bp = getblk(ip->i_devvp, fsbtodb(fs,
 		    e2fs_gd_get_i_tables(&fs->e2fs_gd[cg]) + used_blks + i),
@@ -1231,7 +1297,7 @@ ext2_zero_inode_table(struct inode *ip, int cg)
 		vfs_bio_bzero_buf(bp, 0, fs->e2fs_bsize);
 		bawrite(bp);
 	}
-
+	
 	fs->e2fs_gd[cg].ext4bgd_flags |= EXT2_BG_INODE_ZEROED;
 
 	return (0);
@@ -1254,6 +1320,7 @@ ext2_nodealloccg(struct inode *ip, int cg, daddr_t ipref, int mode)
 	int error, start, len, ifree;
 	char *ibp, *loc;
 
+	/* 从上层调用来看，ipref 指定的是块组中第一个的 inode */
 	ipref--;	/* to avoid a lot of (ipref -1) */
 	if (ipref == -1)
 		ipref = 0;
@@ -1266,7 +1333,7 @@ ext2_nodealloccg(struct inode *ip, int cg, daddr_t ipref, int mode)
 	EXT2_UNLOCK(ump);
 
 	/* 
-		如果还有空闲的 inode，指向下面的代码分支，将获取到的数据存放到buf当中 
+		如果还有空闲的 inode，指向下面的代码分支，将获取到的数据存放到 buf 当中 
 	*/
 	error = bread(ip->i_devvp, fsbtodb(fs,
 	    e2fs_gd_get_i_bitmap(&fs->e2fs_gd[cg])),

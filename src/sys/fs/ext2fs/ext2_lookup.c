@@ -206,7 +206,7 @@ ext2_readdir(struct vop_readdir_args *ap)
 		dp = (struct ext2fs_direct_2 *)&bp->b_data[skipcnt];
 		edp = (struct ext2fs_direct_2 *)&bp->b_data[readcnt];
 		while (error == 0 && uio->uio_resid > 0 && dp < edp) {
-			if (dp->e2d_reclen <= offsetof(struct ext2fs_direct_2,
+			if (dp->e2d_reclen <= offsetof (struct ext2fs_direct_2,
 			    e2d_namlen) || (caddr_t)dp + dp->e2d_reclen >
 			    (caddr_t)edp) {
 				error = EIO;
@@ -340,7 +340,7 @@ ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp, struct componentname *cnp
 	struct vnode *pdp;		/* saved dp during symlink work 符号链接时候保存的vnode指针 */
 	struct vnode *tdp;		/* returned by VFS_VGET 宏定义返回的vnode指针 */
 	doff_t enduseful;		/* pointer past last used dir slot 指向最后一次使用的目录slot后？ */
-	u_long bmask;			/* block offset mask 块偏移标志，应高是用于计算数据在块中所占大小，偏移等 */
+	u_long bmask;			/* block offset mask 块偏移标志，应该是用于计算数据在块中所占大小，偏移等 */
 	int error;
 	struct ucred *cred = cnp->cn_cred;	/* 用户凭证 */
 	int flags = cnp->cn_flags;
@@ -424,6 +424,9 @@ restart:
 	 * location of the last DELETE or RENAME has not reduced
 	 * profiling time and hence has been removed in the interest
 	 * of simplicity.
+	 * 如果在此目录的上一次搜索中有缓存信息，请选择上次停止的位置。我们只缓存查找，因为这些是最常见的，
+	 * 并且有最大的回报。缓存CREATE没有什么好处，因为它通常必须搜索整个目录以确定条目不存在。缓存最后
+	 * 一次删除或重命名的位置并没有减少分析时间，因此为了简单起见，已将其删除
 	 */
 	if (nameiop != LOOKUP || i_diroff == 0 ||
 	    i_diroff > dp->i_size) {
@@ -725,12 +728,15 @@ found:
 	return (0);
 }
 
+/*
+	从 ext2_htree.c 中的实际调用情况来看，entry offset in block pointer 传入的值是0
+*/
 int
 ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
     const char *name, int namelen, int *entryoffsetinblockp,
     doff_t *offp, doff_t *prevoffp, doff_t *endusefulp,
     struct ext2fs_searchslot *ssp)
-{
+{ 
 	struct vnode *vdp;
 	struct ext2fs_direct_2 *ep, *top;
 	uint32_t bsize = ip->i_e2fs->e2fs_bsize;
@@ -738,7 +744,10 @@ ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
 	int namlen;
 
 	vdp = ITOV(ip);
-
+	/* 
+		entry pointer 指向数据块 offset 位置，top 限制了指针的访问空间大小，指向
+		了数据块的末尾位置 
+	*/
 	ep = (struct ext2fs_direct_2 *)((char *)data + offset);
 	top = (struct ext2fs_direct_2 *)((char *)data + bsize);
 	while (ep < top) {
@@ -747,11 +756,13 @@ ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
 		 * enough to insure forward progress through the
 		 * directory. Complete checks can be run by setting
 		 * "vfs.e2fs.dirchk" to be true.
+		 * 判断 entry 是否满足文件系统对目录项的一些要求，比如说目录项长度是不是4的倍数，
+		 * name_length 是否超标等等
 		 */
 		if (ep->e2d_reclen == 0 ||
 		    (dirchk && ext2_dirbadentry(vdp, ep, offset))) {
 			int i;
-
+			/* mangled entry: 破损的入口 */
 			ext2_dirbad(ip, *offp, "mangled entry");
 			i = bsize - (offset & (bsize - 1));
 			*offp += i;
@@ -764,6 +775,8 @@ ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
 		 * check to see if one is available. Also accumulate space
 		 * in the current block so that we can determine if
 		 * compaction is viable.
+		 * 如果尚未找到合适大小的插槽，请检查是否有可用的插槽。还可以
+		 * 在当前块中累积空间，以便确定压缩是否可行
 		 */
 		if (ssp->slotstatus != FOUND) {
 			int size = ep->e2d_reclen;
@@ -816,7 +829,7 @@ ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
 		 * Get pointer to the next entry.
 		 */
 		ep = (struct ext2fs_direct_2 *)((char *)data + offset);
-	}
+	}	// end while
 
 	return (0);
 }
@@ -845,6 +858,13 @@ ext2_dirbad(struct inode *ip, doff_t offset, char *how)
  *	record must be large enough to contain entry
  *	name is not longer than MAXNAMLEN
  *	name must be as long as advertised, and null terminated
+	
+	对目录进行一致性检查:
+		- 目录项长度必须是4的倍数
+		- 条目必须适合其DIRBLKSIZ块的其余部分
+		- 目录项的长度必须足够包括一个entry
+		- 名字的长度不能超过 MAXNAMLEN
+		- 名字必须要与展示的一样长，并且以null作为结尾
  */
 /*
  *	changed so that it confirms to ext2_check_dir_entry

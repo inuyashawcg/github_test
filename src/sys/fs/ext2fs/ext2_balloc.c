@@ -122,7 +122,7 @@ ext2_ext_balloc(struct inode *ip, uint32_t lbn, int size,
  * Balloc defines the structure of filesystem storage
  * by allocating the physical blocks on a device given
  * the inode and the logical block number in a file.
- * Block alloc？ 通过在给定inode和文件中的逻辑块号的设备上分配物理块来定义文件系统存储的结构
+ * Balloc 通过在给定 inode 和文件中的逻辑块号的设备上分配物理块来定义文件系统存储的结构
  */
 int
 ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
@@ -149,25 +149,29 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 	 * to make a good guess
 	 * 检查这是否是顺序块分配。如果是这样的话，增加 next_alloc 字段以允许
 	 * ext2_blkpref 做出正确的猜测
+	 * ext2 中会将下次可以被分配的块的块号在 inode 中做个记录，我们在执行块分配操作的时候可以对这个字段
+	 * 进行检测，可以提高分配效率，tptfs 中也可以加上这个字段
 	 */
 	if (lbn == ip->i_next_alloc_block + 1) {
 		ip->i_next_alloc_block++;
 		ip->i_next_alloc_goal++;
 	}
 
+	/* 判断是否需要处理ext4扩展属性的数据 */
 	if (ip->i_flag & IN_E4EXTENTS)
 		return (ext2_ext_balloc(ip, lbn, size, cred, bpp, flags));
 
 	/*
 	 * The first EXT2_NDADDR blocks are direct blocks
-	 * 如果这个块落在了直接块索引数组当中
+	 * 如果这个块落在了直接块索引数组当中，那就可以直接获取磁盘块号
 	 */
 	if (lbn < EXT2_NDADDR) {
-		nb = ip->i_db[lbn];	/* 通过逻辑块号索引得到物理块号？ */
+		nb = ip->i_db[lbn];	/* 通过逻辑块号索引得到物理块号 */
 		/*
 		 * no new block is to be allocated, and no need to expand
 		 * the file
-		 * 没有新的块需要申请，并且不需要扩展文件
+		 * 没有新的块需要申请，并且不需要扩展文件。此时nb不为0，说明在 ip->i_db[lbn] 中
+		 * 已经存放了数据，也就是说对应的物理块中已经被填充进去了文件数据
 		 */
 		if (nb != 0 && ip->i_size >= (lbn + 1) * fs->e2fs_bsize) {
 			error = bread(vp, lbn, fs->e2fs_bsize, NOCRED, &bp);
@@ -175,10 +179,17 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 				brelse(bp);
 				return (error);
 			}
+			/* 
+				buf 结构体中有一个字段专门用于表示其所对应的磁盘块号，所以 tptfs 中也可以增加一个
+				对应字段用于存放虚拟页号
+			*/
 			bp->b_blkno = fsbtodb(fs, nb);
 			*bpp = bp;
 			return (0);
 		}
+		/*  
+			下面是对要求的块号大于文件大小所对应的逻辑块号的时候，那也就是说需要重新分配数据块
+		*/
 		if (nb != 0) {
 			/*
 			 * Consider need to reallocate a fragment.
@@ -209,6 +220,9 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 						*/
 			}
 		} else {
+			/* 
+				处理当逻辑块号为0的情况，也就是文件的第一个块。从这里也可以看出，逻辑块号也是从0开始的 
+			*/
 			if (ip->i_size < (lbn + 1) * fs->e2fs_bsize)
 				nsize = fragroundup(fs, size);
 			else
@@ -225,20 +239,31 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 			 */
 			if (newb > UINT_MAX)
 				return (EFBIG);
+			/*
+				通过上述过程的处理之后，我们已经得到了要分配给直接块索引的物理块号 newb，然后还有一个 buf 。
+				猜测一下，该函数执行完成之后，后续应该会有一个数据同步到磁盘的步骤。应该会借助这里的这个 buf
+				将数据暂存到 b_data 字段中，然后根据 b_blkno 执行磁盘写入操作
+			*/
 			bp = getblk(vp, lbn, nsize, 0, 0, 0);
 			bp->b_blkno = fsbtodb(fs, newb);
 			if (flags & BA_CLRBUF)
 				vfs_bio_clrbuf(bp);
 		}
+		/* 填充 inode 字段 */
 		ip->i_db[lbn] = dbtofsb(fs, bp->b_blkno);
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
 		*bpp = bp;
 		return (0);
 	}
+
 	/*
 	 * Determine the number of levels of indirection.
+	 		上面的代码都是处理直接块寻址的情况，下面开始处理间接块寻址的情况
 	 */
 	pref = 0;
+	/*
+		ext2_getlbns 函数将间接寻址的信息放到 indirs 数组当中，num 表示的是查找等级
+	*/
 	if ((error = ext2_getlbns(vp, lbn, indirs, &num)) != 0)
 		return (error);
 #ifdef INVARIANTS
@@ -249,6 +274,11 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 	 * Fetch the first indirect block allocating if necessary.
 	 */
 	--num;
+	/* 
+		从这里可以看出，indir 结构体中的 in_off 字段表示的在间接查找数组的索引.
+		nb = 0，说明当前 ip->i_ib[indirs[0].in_off] 中并没有存放块号，所以要先
+		给它分配一个数据块
+	*/
 	nb = ip->i_ib[indirs[0].in_off];
 	if (nb == 0) {
 		EXT2_LOCK(ump);
@@ -276,6 +306,7 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 	}
 	/*
 	 * Fetch through the indirect blocks, allocating as necessary.
+	 		获取间接块，根据需要进行分配
 	 */
 	for (i = 1;;) {
 		error = bread(vp,
@@ -330,7 +361,7 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 				bp->b_flags |= B_CLUSTEROK;
 			bdwrite(bp);
 		}
-	}
+	}	/* end for */
 	/*
 	 * Get the data block, allocating if necessary.
 	 */

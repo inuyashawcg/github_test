@@ -367,8 +367,7 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 	 * at the previous level of indirection, and EXT2_NIADDR - i is the
 	 * number of levels of indirection needed to locate the requested block.
 	 * 确定间接寻址的级别数。完成此循环后，blockcnt 表示上一级间接寻址可能的数据块数，
-	 * EXT2_NIADDR-i 表示定位请求块所需的间接寻址级别数。
-	 * 
+	 * EXT2_NIADDR-i 表示定位请求块所需的间接寻址级别数
 	 */
 	for (blockcnt = 1, i = EXT2_NIADDR, bn -= EXT2_NDADDR; ;
 	    i--, bn -= blockcnt) {
@@ -387,13 +386,22 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 		if (bn < qblockcnt)
 			break;
 		blockcnt = qblockcnt;
+		/*
+			i = 3 时，1级间接寻址；
+			i = 2 时，2级间接寻址；
+			i = 1 时，3级间接寻址。
+			所以当 i = 0 的时候，相当于三级间接寻址都不够用，返回error。blockcnt 最多也就只能表示到
+			二级间接寻址的所能容纳的数据块的个数。bn 的话其实就表示减去上一级所能容纳的最大数据块个数
+			之后，当前寻址等级中剩余的数据块的个数
+		*/
 	}
 
 	/* 
 		Calculate the address of the first meta-block.
 		间接寻址的时候，文件系统会分配单独的一个数据块用来存放磁盘块号。所以我们需要先找到存放数据块块号的这个
 		块。所以下面的逻辑应该就是先找到这个数据块，然后利用offset找到我们需要读取的数据块块号在这个块中的存储
-		位置，这样就可以拿到真正的磁盘块号，最后读取真实数据
+		位置，这样就可以拿到真正的磁盘块号，最后读取真实数据。bn 存放的是当前间接查找等级剩余的数据块，所以 metalbn
+		表示的就是前面所有检查等级所能容纳的数据块的个数加上 EXT2_NIADDR - i (可以认为是一种offset)
 	*/
 	if (realbn >= 0)
 		metalbn = -(realbn - bn + EXT2_NIADDR - i);
@@ -405,6 +413,8 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 	 * an array of disk addresses at the current level of indirection.
 	 * The logical block number and the offset in that block are stored
 	 * into the argument array.
+	 * 在每次迭代中，off是bap数组的偏移量，bap数组是当前间接寻址级别的磁盘地址数组。
+	 * 逻辑块号和该块中的偏移量存储在参数数组中
 	 */
 	ap->in_lbn = metalbn;
 	ap->in_off = off = EXT2_NIADDR - i;
@@ -414,6 +424,10 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 		if (metalbn == realbn)
 			break;
 
+		/* 
+			剩余量 / 上一个间接检查等级blockcnt = count
+			count / 每个数据块所能包含的磁盘块指针 = 数据块中的 offset
+		*/
 		off = (bn / blockcnt) % MNINDIR(ump);
 
 		++numlevels;
@@ -421,6 +435,7 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 		ap->in_off = off;
 		++ap;
 
+		/* metabln 可以看做是每个检查等级的 base address */
 		metalbn -= -1 + off * blockcnt;
 		blockcnt /= MNINDIR(ump);
 	}

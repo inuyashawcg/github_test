@@ -81,10 +81,13 @@ struct ext2fs {
 	uint32_t  e2fs_first_ino;	/* first non-reserved inode 第一个非保留的索引节点 */
 	uint16_t  e2fs_inode_size;	/* size of inode structure 磁盘上索引节点结构的大小 */
 	uint16_t  e2fs_block_group_nr;	/* block grp number of this sblk 这个超级块的块组号 */
+	/*
+		字段用于判断ext2文件系统是否支持某些属性，比如说是否支持 hash index 方式的目录项搜索
+	*/
 	uint32_t  e2fs_features_compat;	/* compatible feature set 具有兼容特点的位图 */
 	/*
-		ext2fs 有时候会涉及到判断32位和64位的兼容性。比如当文件系统不支持64位的时候，就要设置该成员
-		并且执行一些移位操作。
+		跟上面的字段代表的意义刚好相反，用于判断文件系统不支持哪些属性。比如ext2fs 有时候会涉及到
+		判断32位和64位的兼容性。比如当文件系统不支持64位的时候，就要设置该成员
 	*/
 	uint32_t  e2fs_features_incompat; /* incompatible feature set 具有非兼容特点的位图 */
 	/*
@@ -390,7 +393,7 @@ static const struct ext2_feature incompat[] = {
 
 #define	EXT2_BG_INODE_UNINIT	0x0001	/* Inode table/bitmap not in use */
 #define	EXT2_BG_BLOCK_UNINIT	0x0002	/* Block bitmap not in use */
-#define	EXT2_BG_INODE_ZEROED	0x0004	/* On-disk itable initialized to zero */
+#define	EXT2_BG_INODE_ZEROED	0x0004	/* On-disk itable initialized to zero 磁盘上的 itable 已初始化为零 */
 
 /* ext2 file system block group descriptor 组描述符 
 	分配新的索引节点和数据块时，会用到 ext2bgd_nbfree、ext2bgd_nifree 和 ext2bgd_ndirs，

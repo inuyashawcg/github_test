@@ -2,6 +2,7 @@
 
 #
 # Warning flags for compiling the kernel and components of the kernel:
+# 编译内核或者相关组件的时候的警告信息，通过配置这个选项来设置
 #
 CWARNFLAGS?=	-Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes \
 		-Wmissing-prototypes -Wpointer-arith -Wcast-qual \
@@ -12,6 +13,7 @@ CWARNFLAGS?=	-Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes \
 #
 # The following flags are next up for working on:
 #	-Wextra
+# gcc 中的 -Wextra 能够提供不被 -Wall 所允许的警告信息
 
 # Disable a few warnings for clang, since there are several places in the
 # kernel where fixing them is more trouble than it is worth, or where there is
@@ -124,6 +126,7 @@ INLINE_LIMIT?=	8000
 
 .if ${MACHINE_CPUARCH} == "aarch64"
 # We generally don't want fpu instructions in the kernel.
+# FPU: 浮点运算单元
 CFLAGS += -mgeneral-regs-only
 # Reserve x18 for pcpu data
 CFLAGS += -ffixed-x18
@@ -206,6 +209,8 @@ INLINE_LIMIT?=	8000
 #
 # GCC 3.0 and above like to do certain optimizations based on the
 # assumption that the program is linked against libc.  Stop this.
+# 
+# GCC 3.0及以上版本喜欢基于程序链接到libc的假设进行某些优化。别这样。
 #
 CFLAGS+=	-ffreestanding
 
@@ -214,11 +219,14 @@ CFLAGS+=	-ffreestanding
 # gcc and clang opimizers take advantage of this.  The kernel makes
 # use of signed integer wraparound mechanics so we need the compiler
 # to treat it as a wraparound and not take shortcuts.
+# 
+# C标准未定义有符号整数溢出行为。gcc和clang Opimizer利用了这一点。内核使用有符号
+# 整数环绕机制，因此我们需要编译器将其视为环绕，而不是采用快捷方式。
 #
 CFLAGS+=	-fwrapv
 
 #
-# GCC SSP support
+# GCC SSP support：堆栈溢出保护功能
 #
 .if ${MK_SSP} != "no" && \
     ${MACHINE_CPUARCH} != "arm" && ${MACHINE_CPUARCH} != "mips"
@@ -227,6 +235,7 @@ CFLAGS+=	-fstack-protector
 
 #
 # Retpoline speculative execution vulnerability mitigation (CVE-2017-5715)
+# Retpoline推测性执行漏洞缓解
 #
 .if defined(COMPILER_FEATURES) && ${COMPILER_FEATURES:Mretpoline} != "" && \
     ${MK_KERNEL_RETPOLINE} != "no"
@@ -249,6 +258,7 @@ CFLAGS+= ${CFLAGS.${COMPILER_TYPE}} ${CFLAGS.${.IMPSRC:T}}
 
 # Tell bmake not to mistake standard targets for things to be searched for
 # or expect to ever be up-to-date.
+# 告诉bmake不要将标准目标误认为是要搜索或期望永远是最新的东西
 PHONY_NOTMAIN = afterdepend afterinstall all beforedepend beforeinstall \
 		beforelinking build build-tools buildfiles buildincludes \
 		checkdpadd clean cleandepend cleandir cleanobj configure \
