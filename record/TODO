@@ -54,3 +54,6 @@ bread() 函数的行为
 
 //////////////
 ext2_alloc.c - ext2_alloccg() 函数的参数中有一个 bpref，这个表示的貌似是绝对块号，要注意处理方法
+
+//////////////
+TptInodeOps::TptInactive() 函数中的 extattr free 操作暂时省略，后续需要添加

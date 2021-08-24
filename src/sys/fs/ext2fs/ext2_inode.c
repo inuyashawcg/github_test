@@ -259,7 +259,7 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 #endif
 
 	fs = oip->i_e2fs;	/* 超级块 */
-	osize = oip->i_size;	/* 文件大小 */
+	osize = oip->i_size;	/* 文件大小(in bytes) */
 	/*
 	 * Lengthen the size of the file. We must ensure that the
 	 * last byte of the file is allocated. Since the smallest
@@ -270,16 +270,21 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	if (osize < length) {
 		if (length > oip->i_e2fs->e2fs_maxfilesize)
 			return (EFBIG);
+		/* 
+			tptfs 中的数据已经全部在虚拟内存当中了，这里应该不再需要缓存机制，这一步操作
+			感觉是可以省略掉的
+		*/
 		vnode_pager_setsize(ovp, length);
-		offset = blkoff(fs, length - 1);
-		lbn = lblkno(fs, length - 1);
+		offset = blkoff(fs, length - 1);	/* 在最后一个数据块中的数据偏移量 */
+		lbn = lblkno(fs, length - 1);	/* 逻辑块号 */
 		flags |= BA_CLRBUF;
+		/* 读取逻辑块对应的磁盘块中的数据，并存放 buf 当中 */
 		error = ext2_balloc(oip, lbn, offset + 1, cred, &bp, flags);
 		if (error) {
 			vnode_pager_setsize(vp, osize);
 			return (error);
 		}
-		oip->i_size = length;
+		oip->i_size = length;	/* 把文件长度设置成了length */
 		if (bp->b_bufsize == fs->e2fs_bsize)
 			bp->b_flags |= B_CLUSTEROK;
 		if (flags & IO_SYNC)
@@ -299,20 +304,26 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	 * of subsequent file growth.
 	 * 缩短文件的大小。如果文件未被截断到块边界，则文件结尾后的部分块的内容必须为零，
 	 * 以防由于后续文件增长而再次访问该文件
+	 * 
+	 * 这里其实就是分成了两种情况，第一就是当我们打算分割的位置比文件本身的实际长度还要长的时候，
+	 * 就通过上面的代码分支进行操作。其中需要注意的一点是，它把表示文件长度的字段做了更新，相当
+	 * 于是增加了文件的长度；当分割的位置比文件本身长度要小的时候，则执行下面的代码分支
 	 */
 	/* I don't understand the comment above */
 	offset = blkoff(fs, length);
 	if (offset == 0) {
-		oip->i_size = length;
+		oip->i_size = length;	/* 当截取位置恰好为一个完整的数据块的边界值，i_size 直接赋值 */
 	} else {
-		lbn = lblkno(fs, length);
+		lbn = lblkno(fs, length);	/* 计算 length 对应的逻辑块号 */
 		flags |= BA_CLRBUF;
-		error = ext2_balloc(oip, lbn, offset, cred, &bp, flags);
+		error = ext2_balloc(oip, lbn, offset, cred, &bp, flags);	/* 读取逻辑块对应磁盘块中的数据 */
 		if (error)
 			return (error);
 		oip->i_size = length;
 		size = blksize(fs, oip, lbn);
-		/* 将未达到边界的数据都置0，所以offset可以理解为在数据块中的数据偏移量 */
+		/*
+			把数据块中 offset 之后的数据置零
+		*/
 		bzero((char *)bp->b_data + offset, (u_int)(size - offset));
 		allocbuf(bp, size);
 		if (bp->b_bufsize == fs->e2fs_bsize)
@@ -330,11 +341,18 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	 * which we want to keep.  Lastblock is -1 when
 	 * the file is truncated to 0.
 	 */
+	/* 
+		计算截断之后的文件的最后一个逻辑块的块号，也就表示截取后的文件一共包含有多少个数据块
+	*/
 	lastblock = lblkno(fs, length + fs->e2fs_bsize - 1) - 1;
-	lastiblock[SINGLE] = lastblock - EXT2_NDADDR;
-	lastiblock[DOUBLE] = lastiblock[SINGLE] - NINDIR(fs);
-	lastiblock[TRIPLE] = lastiblock[DOUBLE] - NINDIR(fs) * NINDIR(fs);
-	nblocks = btodb(fs->e2fs_bsize);
+	/* 
+		减去直接块个数之后，剩余的数据块个数。可以用作判断被截取后文件大小的一个标志，当数组的第一个元素小于 0 的时候，
+		就意味着变化后的文件用直接块就可以完全表示，不再需要间接索引，下面同理
+	*/
+	lastiblock[SINGLE] = lastblock - EXT2_NDADDR;	
+	lastiblock[DOUBLE] = lastiblock[SINGLE] - NINDIR(fs);	/* 去除掉直接索引和一级间接索引之后，剩余的数据块 */
+	lastiblock[TRIPLE] = lastiblock[DOUBLE] - NINDIR(fs) * NINDIR(fs);	/* 去除掉直接、一级和二级间接索引后剩余数据块个数 */
+	nblocks = btodb(fs->e2fs_bsize);	/* 文件系统块号与磁盘块号的转换，tptfs 中是 1 */
 	/*
 	 * Update file and block pointers on disk before we start freeing
 	 * blocks.  If we crash before free'ing blocks below, the blocks
@@ -342,18 +360,29 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	 * normalized to -1 for calls to ext2_indirtrunc below.
 	 */
 	for (level = TRIPLE; level >= SINGLE; level--) {
+		/* 把间接索引信息更新到 oldblks 数组当中 */
 		oldblks[EXT2_NDADDR + level] = oip->i_ib[level];
 		if (lastiblock[level] < 0) {
+			/*
+				当判断 lastiblock 数组中的元素小于 0 时，表示文件不会再用到当前等级的数据块索引了，
+				那就直接把 inode 对应的索引数组元素的值置0，对应的 lastiblock 数组置-1
+			*/
 			oip->i_ib[level] = 0;
 			lastiblock[level] = -1;
 		}
 	}
+	/* 把直接块索引的信息也更新到 oldblks 数组当中 */
 	for (i = 0; i < EXT2_NDADDR; i++) {
 		oldblks[i] = oip->i_db[i];
+
 		if (i > lastblock)
 			oip->i_db[i] = 0;
 	}
-	oip->i_flag |= IN_CHANGE | IN_UPDATE;
+	/* 
+		到了这一步，inode 中数据块索引数组中的元素都已经更新完毕了。然后下面就执行 update 函数，把更新后的数据
+		同步到磁盘当中。猜测后面应该就是对之前文件占用、但现在已经不再使用的数据块进行 free
+	*/
+	oip->i_flag |= IN_CHANGE | IN_UPDATE;	/* 更新 inode 状态 */
 	allerror = ext2_update(ovp, !DOINGASYNC(ovp));
 
 	/*
@@ -362,6 +391,12 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	 * Note that we save the new block configuration so we can check it
 	 * when we are done.
 	 */
+	/*
+		inode 最原始的数据是在 oldblks 数组当中的，inode 中的数据已经完成了更新。
+		然后再把更新后的 inode 数据放到 newblks 中，再用 oldblks 中的数据更新 inode
+		中的数据。为什么不直接把更新后的数据放到 oldblks 中，而是有中转了一下？应该是
+		为了能够方便的执行 ext2_update 函数。tptfs 也是可以用这种实现方式的
+	*/
 	for (i = 0; i < EXT2_NDADDR; i++) {
 		newblks[i] = oip->i_db[i];
 		oip->i_db[i] = oldblks[i];
@@ -369,8 +404,17 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	for (i = 0; i < EXT2_NIADDR; i++) {
 		newblks[EXT2_NDADDR + i] = oip->i_ib[i];
 		oip->i_ib[i] = oldblks[EXT2_NDADDR + i];
-	}
-	oip->i_size = osize;
+	}	/* inode 在内存中的数据其实是已经还原成了初始数据 */
+
+	/* 
+		前面把 i_size 赋值 length，这里接着还原。inode 到这一步感觉都没怎么变化。个人理解是因为
+		我们已经把更新后的数据写回磁盘了，现在就需要对原有的数据块进行清理，还是要用到 inode 结构体，
+		所以这里才把它进行了还原，处理完之后应该就可以直接释放掉了。
+		在 tptfs 中操作的时候应该也是要按照这个步骤，但是感觉需要构建新的 inode 对象，保存原有的数据。
+		(tptfs 直接操作的就是虚拟页，在原对象上的操作会直接反映到虚拟页当中，更新后的数据会被更改掉)
+		或者是将更新后的数据备份，等其他操作完毕之后再来更新 inode 的数据 
+	*/
+	oip->i_size = osize;	
 	error = vtruncbuf(ovp, cred, length, (int)fs->e2fs_bsize);
 	if (error && (allerror == 0))
 		allerror = error;
@@ -378,12 +422,19 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 
 	/*
 	 * Indirect blocks first.
+	 * 这里为什么给了负数？ 虽然目前还不太清除具体的原因，但之前在 bmap 函数的实现中的确是出现过类似的情况，
+	 * 那里会将负数转换成正值，然后再进行其他的计算。下面处理逻辑中会调用 ext2_indirtrunc 函数，这个函数
+	 * 中会调用 getblk 函数，传入逻辑块号的是一个负数，所以再往下大概率是会调用 bmap 函数的，要不然这个负数
+	 * 确实不知道要如何处理
 	 */
 	indir_lbn[SINGLE] = -EXT2_NDADDR;
 	indir_lbn[DOUBLE] = indir_lbn[SINGLE] - NINDIR(fs) - 1;
 	indir_lbn[TRIPLE] = indir_lbn[DOUBLE] - NINDIR(fs) * NINDIR(fs) - 1;
+
+	/* 处理间接索引的时候就要跟申请操作的流程相反，首先处理三级间接索引 */
 	for (level = TRIPLE; level >= SINGLE; level--) {
-		bn = oip->i_ib[level];
+		bn = oip->i_ib[level];	/* 每个等级间接索引对应的块号，真实的物理块号(不是扇区号)，对应 tptfs 中的虚拟页号 */
+		/* 当间接索引对应块号不为0的时候 */
 		if (bn != 0) {
 			error = ext2_indirtrunc(oip, indir_lbn[level],
 			    fsbtodb(fs, bn), lastiblock[level], level, &count);
@@ -396,12 +447,17 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 				blocksreleased += nblocks;
 			}
 		}
+		/* 
+			间接索引块号为0，并且对应的 lastiblock 元素 >= 0，说明该文件已经用到了该等级，那直接块的处理其实就
+			不用考虑了，直接跳转
+		*/
 		if (lastiblock[level] >= 0)
 			goto done;
-	}
+	}	// end for
 
 	/*
 	 * All whole direct blocks or frags.
+	 * 当文件截取到用直接索引就可以表示的情况时，执行下面的代码分支。lastblock 之后的数组元素置0
 	 */
 	for (i = EXT2_NDADDR - 1; i > lastblock; i--) {
 		long bsize;
@@ -561,6 +617,8 @@ ext2_ext_truncate(struct vnode *vp, off_t length, int flags,
 /*
  * Truncate(截断) the inode ip to at most length size, freeing the
  * disk blocks.
+ * 应该是把文件在长度 length 之后的数据全部舍弃掉
+ * 
  * 文件截断可以理解为删除那些我们不需要的数据块；
  * 所谓的截断文件指的是：一个特定长度的文件，我们从某个位置开始丢弃后面的数据，之前的数据依然保留。
  * 对具体文件系统来说，截断数据主要意味着两件事情：1. 文件大小发生变化；2. 文件被截断部分之前占用
@@ -598,6 +656,7 @@ ext2_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 		return (ext2_update(vp, 0));
 	}
 
+	/* 通过 inode flag 判断我们所要截取的是文件真实的数据，还是它的属性信息 */
 	if (ip->i_flag & IN_E4EXTENTS)
 		error = ext2_ext_truncate(vp, length, flags, cred, td);
 	else
