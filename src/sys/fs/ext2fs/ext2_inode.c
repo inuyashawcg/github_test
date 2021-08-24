@@ -147,6 +147,12 @@ ext2_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 	factor = 1;
 	for (i = SINGLE; i < level; i++)
 		factor *= NINDIR(fs);
+	/*
+		从上级函数调用的情况来看，lastbn 表示的是减去上级索引之后，剩余的 block 的个数。
+		这也就解释了 factor 计算每一级索引所能索引的最大块数；
+		factor 表示的是上一个索引等级所能映射的最大数据块的数量，last / factor 表示的就是
+		当前索引块中的偏移量
+	*/
 	last = lastbn;
 	if (lastbn > 0)
 		last /= factor;
@@ -161,6 +167,10 @@ ext2_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 	 */
 	vp = ITOV(ip);
 	bp = getblk(vp, lbn, (int)fs->e2fs_bsize, 0, 0, 0);
+	/*
+		这里应该是需要等待 I/O 操纵完成，获取到对应磁盘块的数据并保存到 buf 中。
+		tptfs 中应该可以直接省略这一步，直接利用 dbn 定位到数据所在的虚拟页
+	*/
 	if ((bp->b_flags & (B_DONE | B_DELWRI)) == 0) {
 		bp->b_iocmd = BIO_READ;
 		if (bp->b_bcount > bp->b_bufsize)
@@ -178,11 +188,16 @@ ext2_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 	}
 	bap = (e2fs_daddr_t *)bp->b_data;
 	copy = malloc(fs->e2fs_bsize, M_TEMP, M_WAITOK);
+	/* 将 buf 中的数据拷贝一份到 copy 当中 */
 	bcopy((caddr_t)bap, (caddr_t)copy, (u_int)fs->e2fs_bsize);
+
+	/* 将没有映射数据块的 entry 全部置零 */
 	bzero((caddr_t)&bap[last + 1],
 	    (NINDIR(fs) - (last + 1)) * sizeof(e2fs_daddr_t));
+	
 	if (last == -1)
 		bp->b_flags |= B_INVAL;
+	/* 将数据同步到磁盘当中 */	
 	if (DOINGASYNC(vp)) {
 		bdwrite(bp);
 	} else {
@@ -193,7 +208,7 @@ ext2_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 	bap = copy;
 
 	/*
-	 * Recursively free totally unused blocks.
+	 * Recursively free totally unused blocks. 递归释放完全未使用的块
 	 */
 	for (i = NINDIR(fs) - 1, nlbn = lbn + 1 - i * factor; i > last;
 	    i--, nlbn += factor) {
@@ -212,6 +227,7 @@ ext2_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 
 	/*
 	 * Recursively free last partial block.
+	 * 递归释放最后一个部分块
 	 */
 	if (level > SINGLE && lastbn >= 0) {
 		last = lastbn % factor;
@@ -427,9 +443,9 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	 * 中会调用 getblk 函数，传入逻辑块号的是一个负数，所以再往下大概率是会调用 bmap 函数的，要不然这个负数
 	 * 确实不知道要如何处理
 	 */
-	indir_lbn[SINGLE] = -EXT2_NDADDR;
-	indir_lbn[DOUBLE] = indir_lbn[SINGLE] - NINDIR(fs) - 1;
-	indir_lbn[TRIPLE] = indir_lbn[DOUBLE] - NINDIR(fs) * NINDIR(fs) - 1;
+	indir_lbn[SINGLE] = -EXT2_NDADDR;	/* 一级间接索引起始逻辑块号，取负 */
+	indir_lbn[DOUBLE] = indir_lbn[SINGLE] - NINDIR(fs) - 1;	/* 二级间接索引起始逻辑块号，取负 */
+	indir_lbn[TRIPLE] = indir_lbn[DOUBLE] - NINDIR(fs) * NINDIR(fs) - 1;	/* 同上 */
 
 	/* 处理间接索引的时候就要跟申请操作的流程相反，首先处理三级间接索引 */
 	for (level = TRIPLE; level >= SINGLE; level--) {
@@ -467,6 +483,7 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 			continue;
 		oip->i_db[i] = 0;
 		bsize = blksize(fs, oip, i);
+		/* 释放掉对应 bn 的磁盘数据块 */
 		ext2_blkfree(oip, bn, bsize);
 		blocksreleased += btodb(bsize);
 	}
@@ -484,9 +501,10 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 		/*
 		 * Calculate amount of space we're giving
 		 * back as old block size minus new block size.
+		 * 最后，查找最后一个直接块大小的变化；释放所有碎片
 		 */
 		oldspace = blksize(fs, oip, lastblock);
-		oip->i_size = length;
+		oip->i_size = length;	/* i_size 重置为 length */
 		newspace = blksize(fs, oip, lastblock);
 		if (newspace == 0)
 			panic("ext2_truncate: newspace");
