@@ -3945,6 +3945,11 @@ kern_getdirentries(struct thread *td, int fd, char *buf, size_t count,
 	struct vnode *vp;
 	struct file *fp;
 	struct uio auio;
+	/* 
+		IO vector，对应于一块数据的地址和长度，uio 则会管理这样的一个数据，应该就是将一些
+		分散的数据聚合在一起进行传输。文件的数据其实就是分散在各个磁盘块当中，推测就是对应
+		到每一个数组元素
+	*/
 	struct iovec aiov;
 	off_t loff;
 	int error, eofflag;
@@ -3953,10 +3958,12 @@ kern_getdirentries(struct thread *td, int fd, char *buf, size_t count,
 	AUDIT_ARG_FD(fd);
 	if (count > IOSIZE_MAX)
 		return (EINVAL);
-	auio.uio_resid = count;
+	auio.uio_resid = count;	/* 指定需要被处理的数据量为count */
 	error = getvnode(td, fd, &cap_read_rights, &fp);
 	if (error != 0)
 		return (error);
+
+	/* 权限判断，如果不具备读权限的话就返回error */
 	if ((fp->f_flag & FREAD) == 0) {
 		fdrop(fp, td);
 		return (EBADF);
@@ -3965,6 +3972,7 @@ kern_getdirentries(struct thread *td, int fd, char *buf, size_t count,
 	foffset = foffset_lock(fp, 0);
 unionread:
 	if (vp->v_type != VDIR) {
+		/* 判断 file 对应的 vnode 类型是否为目录项 */
 		error = EINVAL;
 		goto fail;
 	}
@@ -3977,7 +3985,7 @@ unionread:
 	auio.uio_td = td;
 	vn_lock(vp, LK_SHARED | LK_RETRY);
 	AUDIT_ARG_VNODE1(vp);
-	loff = auio.uio_offset = foffset;
+	loff = auio.uio_offset = foffset;	/* 数据在文件中的偏移 */
 #ifdef MAC
 	error = mac_vnode_check_readdir(td->td_ucred, vp);
 	if (error == 0)

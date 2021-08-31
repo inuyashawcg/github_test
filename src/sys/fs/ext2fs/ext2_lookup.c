@@ -160,12 +160,16 @@ ext2_readdir(struct vop_readdir_args *ap)
 	/* uio 数据是不可能小于0的，为0的时候说明数据传输已经完毕 */
 	if (uio->uio_offset < 0)	
 		return (EINVAL);
-	ip = VTOI(vp);	/* 关联vnode和inode */
+	ip = VTOI(vp);
+	/*
+		cookies 其中一种翻译是网络饼干，表示的是用户发送给中央信息处理器的数据。用在这里的话表示的可能就是
+		从内核空间发送到用户空间的数据长度计数
+	*/
 	if (ap->a_ncookies != NULL) {
 		if (uio->uio_resid < 0)
 			ncookies = 0;
 		else
-			ncookies = uio->uio_resid;	/* ncookies 赋值为 uio 剩余字节数 */
+			ncookies = uio->uio_resid;	/* ncookies 赋值为 uio 剩余字节数，ncookies 表示的就是剩余多少字节要处理 */
 		if (uio->uio_offset >= ip->i_size)	/* 如果uio_offset偏移量已经大于文件大小，令剩余处理字节数为0 */
 			ncookies = 0;
 		else if (ip->i_size - uio->uio_offset < ncookies)	
@@ -182,30 +186,46 @@ ext2_readdir(struct vop_readdir_args *ap)
 		cookies = NULL;
 	}	// end if ap->a_ncookies != NULL
 
-	offset = startoffset = uio->uio_offset;
+	offset = startoffset = uio->uio_offset;	/* 确定数据在文件中的起始偏移量 */
 	startresid = uio->uio_resid;	/* 仍然需要被处理的数据 */
 	error = 0;
+
+	/*
+		while 循环执行的条件:
+			- uio 剩余要处理的数据长度不为0
+			- uio offset 要小于 inode size
+	*/
 	while (error == 0 && uio->uio_resid > 0 &&
-	    uio->uio_offset < ip->i_size) {	/* uio_offset 要小于 i_size(文件大小) */
-		/* bp 中保存着从物理块中读取到的数据 */
+	    uio->uio_offset < ip->i_size) {	
 		error = ext2_blkatoff(vp, uio->uio_offset, NULL, &bp);
 		if (error)
 			break;
-		/* 如果请求的数据大小 b_count + offset > 文件大小 i_size，则取小值 */
+		/* 
+			bp->b_offset 表示的是 lbn * bsize，也就是说当前偏移量 + bcount(当前情形下貌似是 block size)已经比 inode
+			对应的文件长度要大了，也就是说明剩余需要被处理的数据已经装不满一整个块了。所以 readcnt 表示这一次操作需要读取的
+			数据的长度，最大好像也就是一个数据块大小
+		*/
 		if (bp->b_offset + bp->b_bcount > ip->i_size)
 			readcnt = ip->i_size - bp->b_offset;
 		else
 			readcnt = bp->b_bcount;	/* 否则就取 b_count */
+
 		/*
-			uio offset 应该是程序打算读取的数据的起始位置在文件中的偏移量，b_offset 应该是
-			buf 目前对应在文件中的偏移，相减之后就可以确定真正要读取的数据在文件中的起始位置
+			uio_offset 表示的应该是数据在文件中的真正偏移量，但是这个偏移量可能刚好处在一个块的中间位置。读取的时候不是刚好
+			从 offset 处开始的，而是将 offset 所处的这个块的数据全部读取出来。bp->b_offset 表示的应该就是这个块的起始位置，
+			uio->uio_offset 包含在这个块中。然后再将两者相减得到所需要的数据在这个块中的偏移，即 skipcnt。最后用 bp->b_offset
+			就得到了数据的真实起始位置
 		*/
 		skipcnt = (size_t)(uio->uio_offset - bp->b_offset) &
 		    ~(size_t)(DIRBLKSIZ - 1);
-		offset = bp->b_offset + skipcnt;	/* 相当于是做了一步跳转 */
+		offset = bp->b_offset + skipcnt;
 		dp = (struct ext2fs_direct_2 *)&bp->b_data[skipcnt];
 		edp = (struct ext2fs_direct_2 *)&bp->b_data[readcnt];
+
 		while (error == 0 && uio->uio_resid > 0 && dp < edp) {
+			/*
+				当计算出的目录项长度大于结构体长度字段值，或者超过访问位置上界时，报错
+			*/
 			if (dp->e2d_reclen <= offsetof (struct ext2fs_direct_2,
 			    e2d_namlen) || (caddr_t)dp + dp->e2d_reclen >
 			    (caddr_t)edp) {
@@ -263,10 +283,12 @@ nextentry:
 			offset += dp->e2d_reclen;
 			dp = (struct ext2fs_direct_2 *)((caddr_t)dp +
 			    dp->e2d_reclen);
-		}
+		}	// enf while in
+
 		bqrelse(bp);
 		uio->uio_offset = offset;
-	}
+	}	// end while out
+
 	/* We need to correct uio_offset. */
 	uio->uio_offset = offset;
 	if (error == EJUSTRETURN)
@@ -330,13 +352,13 @@ ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp, struct componentname *cnp
 	struct inode *dp;		/* inode for directory being searched 正在搜索的目录的inode */
 	struct buf *bp;			/* a buffer of directory entries 目录项的缓冲区 */
 	struct ext2fs_direct_2 *ep;	/* the current directory entry 当前目录项 */
-	int entryoffsetinblock;		/* offset of ep in bp's buffer ep在bp中的偏移 */
+	int entryoffsetinblock;		/* offset of ep in bp's buffer 表示的应该是 htree entry 在 block 中的 offset */
 	struct ext2fs_searchslot ss;
 	doff_t i_diroff;		/* cached i_diroff value */
 	doff_t i_offset;		/* cached i_offset value */
 	int numdirpasses;		/* strategy for directory search 目录查找策略 */
 	doff_t endsearch;		/* offset to end directory search 目录查找终止位置的偏移量 */
-	doff_t prevoff;			/* prev entry dp->i_offset 上一个entry的offset */
+	doff_t prevoff;			/* prev entry dp->i_offset 上一个 entry 的 offset */
 	struct vnode *pdp;		/* saved dp during symlink work 符号链接时候保存的vnode指针 */
 	struct vnode *tdp;		/* returned by VFS_VGET 宏定义返回的vnode指针 */
 	doff_t enduseful;		/* pointer past last used dir slot 指向最后一次使用的目录slot后？ */
@@ -354,6 +376,7 @@ ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp, struct componentname *cnp
 	if (vpp != NULL)
 		*vpp = NULL;
 
+	/* 表示的应该是目录项inode节点 */
 	dp = VTOI(vdp);
 	bmask = VFSTOEXT2(vdp->v_mount)->um_mountp->mnt_stat.f_iosize - 1;
 restart:
@@ -369,14 +392,18 @@ restart:
 	 * case it doesn't already exist.
 	 * 禁止对插槽的搜索，除非创建文件并在路径名的末尾，在这种情况下，我们将监视放置
 	 * 新文件的位置，以防它不存在
+	 * 
+	 * 从注释中我们可以看到， i_diroff 表示的是用于查找最后一个 dirent。它可能表示两种情况，第一种就是
+	 * 表示在块最后的那个 entry 所在的位置；第二种情况表示的是当前已有的 entry 的最后一个。 ufs 中也有
+	 * 对应的字段，可以通过 gdb 调试看一下其表示的具体含义
 	 */
-	i_diroff = dp->i_diroff;	/* 用于查找目录中的最后一个entry */
+	i_diroff = dp->i_diroff;	/* 用于查找目录中的最后一个 entry */
 	ss.slotstatus = FOUND;	/* 把search slot的状态设置为 found */
 	ss.slotfreespace = ss.slotsize = ss.slotneeded = 0;	/* slot相关属性全置空 */
 	if ((nameiop == CREATE || nameiop == RENAME) &&
-	    (flags & ISLASTCN)) {	
+	    (flags & ISLASTCN)) {
 		ss.slotstatus = NONE;
-		ss.slotneeded = EXT2_DIR_REC_LEN(cnp->cn_namelen);
+		ss.slotneeded = EXT2_DIR_REC_LEN(cnp->cn_namelen);	/* tptfs 中应该要设置为 256 */
 		/*
 		 * was ss.slotneeded = (sizeof(struct direct) - MAXNAMLEN +
 		 * cnp->cn_namelen + 3) &~ 3;
@@ -389,12 +416,12 @@ restart:
 	 * If we got an error or we want to find '.' or '..' entry,
 	 * we will fall back to linear search.
 	 * 如果出现错误或要查找“.”或“..”条目，我们将退回到线性搜索；
-	 * 也就是说，目录项的查找目前有两种方式：树搜索和线性搜索；
-	 * 当目录项不是 . 并且在 htree 中包含有对应的结点
+	 * 也就是说，目录项的查找目前有两种方式：树搜索和线性搜索
 	 */
 	if (!ext2_is_dot_entry(cnp) && ext2_htree_has_idx(dp)) {
 		numdirpasses = 1;	/* 采用策略1 */
 		entryoffsetinblock = 0;	/* entry在块中的偏移量赋值为0 */
+		
 		switch (ext2_htree_lookup(dp, cnp->cn_nameptr, cnp->cn_namelen,
 		    &bp, &entryoffsetinblock, &i_offset, &prevoff,
 		    &enduseful, &ss)) {
@@ -411,8 +438,8 @@ restart:
 			 * search.
 			 */
 			break;
-		}
-	}
+		}	/* end switch */
+	}	/* end if */
 
 	/*
 	 * If there is cached information on a previous search of

@@ -92,7 +92,8 @@ static int	ext2_htree_writebuf(struct inode *ip,
 		    struct ext2fs_htree_lookup_info *info);
 
 /*
-	判断文件系统是否支持 hash index
+	该函数用来判断文件系统是否支持 hash 索引。从函数功能我们可以看到，这里是需要判断超级块的 feature 是否
+	包含有 hash index 属性的。所以才文件系统初始化的时候，需要设置该属性到超级块当中
 */
 int
 ext2_htree_has_idx(struct inode *ip)
@@ -395,6 +396,9 @@ ext2_htree_lookup(struct inode *ip, const char *name, int namelen,
     struct ext2fs_searchslot *ss)
 {
 	struct vnode *vp;
+	/*
+		这是一个结构体，而不是指针，要注意
+	*/
 	struct ext2fs_htree_lookup_info info;
 	struct ext2fs_htree_entry *leaf_node;
 	struct m_ext2fs *m_fs;

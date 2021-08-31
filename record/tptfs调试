@@ -1,0 +1,174 @@
+//
+// FreeBSD tptfs 调试过程中的问题汇总
+//
+
+/////////////////////// C++ 变量符号
+_ZN10TptfsMount4pDirE
+
+
+ls 命令调试：
+
+  //////////// 
+  error: .: Bad file descriptor
+    - 在 error.h 文件中会有对应的错误码，gdb 调试过程中发现在
+
+        vfs_default.c - vop_stdstat()
+
+      函数中对 vnode 类型的解析出现了问题。正常情况应该是解析为一个目录类型(4)，但是实际出入的参数却是未存在类型(0)
+
+      解决方法: 在 tptfs 中添加了一个 TptStat 函数，里边会构造一个 struct stat 把 vnode 的属性信息进行处理，然后进行发送，
+                  这样系统就可以正确解析 vnode 属性，不会出现上述报错信息
+
+      错误类型：缺少函数
+
+  ////////////
+  error: .: Not a directory
+    - error.h 中同样也会出现对应的错误码，gdb 调试发现错误可能发生在
+
+      vfs_vnops.c - vn_open()
+
+    该函数会向下调用 vn_open_cred() 函数，这个函数中包含了 lookup operation，所以猜测可能是 tptfs lookup 函数出现了问题。
+
+    解决方法： 对比了 ext2 / tmpfs 的注册方式(因为一个是磁盘文件系统，一个是内存文件系统，两者 lookup 的机制是完全不同的，所以
+             不存在对比的必要性)
+      
+      tmpfs_vnodeop_entries：
+        .vop_lookup =			vfs_cache_lookup,
+	      .vop_cachedlookup =		tmpfs_cached_lookup,
+      
+      ext2_vnodeops：
+        .vop_cachedlookup =	ext2_lookup,
+        .vop_lookup =		vfs_cache_lookup,
+
+      tptfs 的注册可以参考上述方式，将 vfs_cache_lookup 函数包含进来，不会报上述错误信息
+    
+    错误类型：文件系统功能函数注册
+
+  ////////////
+  root@qemu:/tpt # ls -al
+  t[0] == 0x0000000000000000
+  t[1] == 0x00000000000041ed
+  t[2] == 0x0000000000000002
+  t[3] == 0x000000004001ec40
+  t[4] == 0x0000000000000001
+  t[5] == 0x0000000000000000
+  t[6] == 0x0000000000001000
+  s[0] == 0xffffffc0a51fd570
+  s[1] == 0xffffffffffffff9c
+  s[2] == 0x0000000000000200
+  s[3] == 0x00000000408182f8
+  s[4] == 0x0000000000019b20
+  s[5] == 0x0000000040809000
+  s[6] == 0x0000000000000000
+  s[7] == 0x0000000000000000
+  s[8] == 0x0000000000000000
+  s[9] == 0x0000000000000000
+  s[10] == 0x0000000000000000
+  s[11] == 0x0000000000000030
+  a[0] == 0x0000000000000000
+  a[1] == 0xffffffd007196840
+  a[2] == 0x0000000000000082
+  a[3] == 0x0000000000000000
+  a[4] == 0x0000000000000000
+  a[5] == 0x0000000000000000
+  a[6] == 0x0000000000000040
+  a[7] == 0x0000000000000000
+  ra == 0xffffffc0004b6fe8
+  sp == 0xffffffc0a51fd540
+  gp == 0xffffffd0064eac00
+  tp == 0x0000000000200000
+  sepc == 0xffffffc0004b9c1c
+  sstatus == 0x8000000000006100
+  timeout stopping cpus
+  panic: Fatal page fault at 0xffffffc0004b9c1c: 0x0000000000000c
+  cpuid = 1
+  time = 1630289010
+  KDB: stack backtrace:
+  #0 0xffffffc0004913b8 at kdb_backtrace+0x86
+  #1 0xffffffc00041cd98 at vpanic+0x20c
+  #2 0xffffffc00041cb88 at panic+0x32
+  #3 0xffffffc000878e80 at do_trap_supervisor+0x670
+  #4 0xffffffc000878936 at do_trap_supervisor+0x126
+  #5 0xffffffc000860e88 at cpu_exception_handler_supervisor+0x68
+  #6 0xffffffc0004b6fe4 at turnstile_adjust+0x5c0
+  #7 0xffffffc0004b8942 at turnstile_wait+0x6a4
+  #8 0xffffffc0003e552c at __mtx_lock_sleep+0x2ea
+  #9 0xffffffc00088b3a0 at _ZN10TptfsVnode7TptStatEP13vop_stat_args+0x144
+  #10 0xffffffc000581068 at sys_funlinkat+0xc2
+  #11 0xffffffc0005818d2 at kern_statat+0x156
+  #12 0xffffffc00058173a at sys_fstatat+0x3c
+  #13 0xffffffc0008798b4 at do_trap_user+0xa28
+  #14 0xffffffc000879186 at do_trap_user+0x2fa
+  #15 0xffffffc000878fc8 at do_trap_user+0x13c
+  #16 0xffffffc000860f52 at cpu_exception_handler_user+0x72
+  Uptime: 4m10s
+
+  从 backtrace 信息中可以看出，貌似 TptStat 出现了问题。对比 ufs 与 tmpfs vop_stat 函数的实现，ufs 在更新时间信息的时候要
+  对 vnode 加锁，但是在 tmpfs 中是不需要的，所以就将对应的函数调用删除，然后又会报下面的错误：
+
+  t[0] == 0x0000000000000000
+t[1] == 0x000000004002fefa
+t[2] == 0x0000000040286c20
+t[3] == 0x000000004001ec40
+t[4] == 0x0000000000000001
+t[5] == 0x0000000000000000
+t[6] == 0x0000000000001000
+s[0] == 0xffffffc0a51d04a0
+s[1] == 0x0000000000000002
+s[2] == 0x000000000000002e
+s[3] == 0x0000000040818180
+s[4] == 0x000000004081b000
+s[5] == 0x0000000000000002
+s[6] == 0x0000000040818480
+s[7] == 0x0000000040809000
+s[8] == 0x0000000040818300
+s[9] == 0x0000000040818480
+s[10] == 0x0000000040813000
+s[11] == 0xffffffffffffffff
+a[0] == 0x0000000000000000
+a[1] == 0xffffffd0030f4000
+a[2] == 0x000000000000008c
+a[3] == 0x0000000000000000
+a[4] == 0x0000000000000000
+a[5] == 0x0000000000000000
+a[6] == 0x0000000000200400
+a[7] == 0x00000000000001e1
+ra == 0xffffffc0004b6fe8
+sp == 0xffffffc0a51d0470
+gp == 0x0000000000000000
+tp == 0x000006ef00000000
+sepc == 0xffffffc0004b9c1c
+sstatus == 0x8000000000006100
+timeout stopping cpus
+panic: Fatal page fault at 0xffffffc0004b9c1c: 0x0000000000000c
+cpuid = 1
+time = 1630291915
+KDB: stack backtrace:
+#0 0xffffffc0004913b8 at kdb_backtrace+0x86
+#1 0xffffffc00041cd98 at vpanic+0x20c
+#2 0xffffffc00041cb88 at panic+0x32
+#3 0xffffffc000878e80 at do_trap_supervisor+0x670
+#4 0xffffffc000878936 at do_trap_supervisor+0x126
+#5 0xffffffc000860e88 at cpu_exception_handler_supervisor+0x68
+#6 0xffffffc0004b6fe4 at turnstile_adjust+0x5c0
+#7 0xffffffc0004b8942 at turnstile_wait+0x6a4
+#8 0xffffffc0003e552c at __mtx_lock_sleep+0x2ea
+#9 0xffffffc00088ac40 at _ZN10TptfsVnode8TptCloseEP14vop_close_args+0x8c
+#10 0xffffffc00087df3e at VOP_CLOSE_APV+0x48
+#11 0xffffffc000591722 at vn_lock_pair+0x482
+#12 0xffffffc00058b0ce at vn_close+0x15e
+#13 0xffffffc000588fa4 at sys_copy_file_range+0xea8
+#14 0xffffffc00038dfce at fgetvp_exec+0x72
+#15 0xffffffc0003879d6 at _fdrop+0x1c
+#16 0xffffffc00038c790 at closef+0x2c2
+#17 0xffffffc0003915fa at invfo_sendfile+0x52e
+Uptime: 1m54s
+
+看着貌似又是 TptClose 函数出了问题。注意 __mtx_lock_sleep 函数调用，有可能是锁操作本身是不需要的(跟上面的出错类型类似)，
+也有可能是函数对于锁操作的使用出现了问题，需要调查。函数实现可能还是要以 tmpfs 的逻辑为主，参考 ufs 和 ext2，毕竟 tmpfs
+是基于内存的
+
+
+
+
+      

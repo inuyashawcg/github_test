@@ -54,7 +54,7 @@ struct ext2fs_searchslot {
 	doff_t	slotoffset;		/* offset of area with free space 拥有空闲空间的区域的偏移 */
 	int	slotsize;		/* size of area at slotoffset slotoffset处的区域的大小 */
 	int	slotfreespace;		/* amount of space free in slot slot中可用的空闲区域的数量 */
-	int	slotneeded;		/* sizeof the entry we are seeking 我们需要找的entry的大小*/
+	int	slotneeded;		/* sizeof the entry we are seeking 我们需要找的 entry 的大小*/
 };
 
 /*
