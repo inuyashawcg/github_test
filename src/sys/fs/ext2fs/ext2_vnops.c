@@ -261,7 +261,10 @@ static int
 ext2_create(struct vop_create_args *ap)
 {
 	int error;
-	/* 创建一个 inode */
+	/* 
+		创建一个 inode。这里的 MAKEIMODE 其实是处理来自用户空间的、应该是所要创建的文件的属性信息，
+		后续的处理中如果出现了错误，可能就会导致 ls 命令提示无法识别文件类型的错误，要留意一下
+	*/
 	error =
 	    ext2_makeinode(MAKEIMODE(ap->a_vap->va_type, ap->a_vap->va_mode),
 	    ap->a_dvp, ap->a_vpp, ap->a_cnp);
@@ -808,6 +811,7 @@ ext2_dec_nlink(struct inode *ip)
  * but ``atomically''.  Can't do full commit without saving state in the
  * inode on disk which isn't feasible at this time.  Best we can do is
  * always guarantee the target exists.
+ * 如果不将状态保存在磁盘上的inode中，则无法执行完全提交，这在此时是不可行的。我们所能做的就是保证目标的存在
  *
  * Basic algorithm is:
  *
@@ -852,6 +856,9 @@ ext2_rename(struct vop_rename_args *ap)
 	 * Check for cross-device rename. 检查跨设备重命名
 	 * 从注释来看，tdvp 表示的应该是重命名目标文件的 vnode，这里判断的是
 	 * 源文件和目标文件的挂载点是否一致
+	 * 
+	 * 链接不能跨分区或者跨文件系统进行，用户态貌似不支持目录项硬链接。下面的判断逻辑应该就是
+	 * 对这个进行的判断
 	 */
 	if ((fvp->v_mount != tdvp->v_mount) ||
 	    (tvp && (fvp->v_mount != tvp->v_mount))) {
@@ -867,6 +874,7 @@ abortit:
 		vrele(fvp);
 		return (error);
 	}
+
 	/* 在很多情况下都需要对 inode 属性进行判断 */
 	if (tvp && ((VTOI(tvp)->i_flags & (NOUNLINK | IMMUTABLE | APPEND)) ||
 	    (VTOI(tdvp)->i_flags & APPEND))) {
@@ -1370,9 +1378,9 @@ ext2_mkdir(struct vop_mkdir_args *ap)
 	if ((cnp->cn_flags & HASBUF) == 0)
 		panic("ext2_mkdir: no name");
 #endif
-	dp = VTOI(dvp);	/* 文件所在目录对应的 inode */
+	dp = VTOI(dvp);	/* 文件所在目录对应的 inode，即 directory inode pointer */
 	/*
-		判断 dp 的链接数是否符合要求
+		判断 dp 的链接数是否符合要求，判断超级块是否具有 dir link 属性
 	*/
 	if ((nlink_t)dp->i_nlink >= EXT4_LINK_MAX &&
 	    !EXT2_HAS_RO_COMPAT_FEATURE(dp->i_e2fs, EXT2F_ROCOMPAT_DIR_NLINK)) {
@@ -1388,13 +1396,14 @@ ext2_mkdir(struct vop_mkdir_args *ap)
 	 * made later after writing "." and ".." entries.
 	 * 必须在此处模拟 ext2_makeinode 的一部分以获取 inode，但不能将其输入父目录。
 	 * 条目在写入“.”和“..”项之后进行
+	 * tvp 表示的是获取到的新的 vnode
 	 */
 	error = ext2_valloc(dvp, dmode, cnp->cn_cred, &tvp);
 	if (error)
 		goto out;
 	ip = VTOI(tvp);	/* 目标文件对应的 inode */
 	fs = ip->i_e2fs;
-	ip->i_gid = dp->i_gid;
+	ip->i_gid = dp->i_gid;	/* 将父目录 inode 的 gid 赋值给成员 */
 #ifdef SUIDDIR
 	{
 		/*
@@ -1422,13 +1431,14 @@ ext2_mkdir(struct vop_mkdir_args *ap)
 	ip->i_nlink = 2;	/* 一个是它本身，一个是.目录？ */
 	if (cnp->cn_flags & ISWHITEOUT)
 		ip->i_flags |= UF_OPAQUE;
-	error = ext2_update(tvp, 1);
+	error = ext2_update(tvp, 1);	/* 上面的代码就是对 inode 和 vnode 属性的设置 */
 
 	/*
 	 * Bump link count in parent directory
 	 * to reflect work done below.  Should
 	 * be done before reference is created
 	 * so reparation is possible if we crash.
+	 * 在父目录中增加链接计数，以反映下面完成的工作。应该在创建引用之前完成，以便在崩溃时可以进行修复
 	 */
 	ext2_inc_nlink(dp);
 	dp->i_flag |= IN_CHANGE;
@@ -1446,7 +1456,7 @@ ext2_mkdir(struct vop_mkdir_args *ap)
 		dtp = &omastertemplate;
 	dirtemplate = *dtp;
 	dirtemplate.dot_ino = ip->i_number;
-	dirtemplate.dotdot_ino = dp->i_number;
+	dirtemplate.dotdot_ino = dp->i_number;	/* 将当前目录的 .. 子目录 inode number 设置为父目录 */
 	/*
 	 * note that in ext2 DIRBLKSIZ == blocksize, not DEV_BSIZE so let's
 	 * just redefine it - for this function only
@@ -2014,6 +2024,8 @@ ext2_vinit(struct mount *mntp, struct vop_vector *fifoops, struct vnode **vpp)
 
 /*
  * Allocate a new inode.
+ * 通过 ext2_valloc 函数申请一个新的 vnode，然后根据父目录项对应的 inode 的信息初始化其对应的
+ * inode 的信息(gid 和 uid 之类的)
  */
 static int
 ext2_makeinode(int mode, struct vnode *dvp, struct vnode **vpp,
@@ -2035,6 +2047,7 @@ ext2_makeinode(int mode, struct vnode *dvp, struct vnode **vpp,
 		组件名称中包含有认证信息，mode 是根据 vnode 属性计算出来的模式值。
 		dvp 表示的应该是所要当前目录所对应的 vnode(directory vnode)，新获取的 inode 对应到
 		tvp(target vnode pointer)
+		这里也会将刚才处理过的 mode 传入 valloc 函数中
 	*/
 	error = ext2_valloc(dvp, mode, cnp->cn_cred, &tvp);
 	if (error) {
@@ -2093,7 +2106,10 @@ ext2_makeinode(int mode, struct vnode *dvp, struct vnode **vpp,
 			goto bad;
 	}
 #endif /* UFS_ACL */
-	/* 对当前的目录项对应的 vnode 进行操作 */
+	/*
+		要注意这里的实现，ip 表示的是通过 valloc 申请到的 vnode 所对应的 inode (通过 malloc 实例化)。
+		dvp 则表示的是当前目录对应的 vnode，其实主要是为了把 mount，超级块和一些属性信息传递给目标 inode
+	*/
 	error = ext2_direnter(ip, dvp, cnp);
 	if (error)
 		goto bad;
@@ -2171,6 +2187,10 @@ ext2_read(struct vop_read_args *ap)
 		if (bytesinfile < xfersize)
 			xfersize = bytesinfile;
 
+		/*
+			当文件系统支持 cluster_read 属性的时候，可以采用对应的功能函数。也就是说不采用也是可以
+			实现的。tptfs 直接将其省略掉
+		*/
 		if (lblktosize(fs, nextlbn) >= ip->i_size)
 			error = bread(vp, lbn, size, NOCRED, &bp);
 		else if ((vp->v_mount->mnt_flag & MNT_NOCLUSTERR) == 0) {

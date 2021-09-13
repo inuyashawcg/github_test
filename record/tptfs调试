@@ -169,6 +169,47 @@ Uptime: 1m54s
 是基于内存的
 
 
+////////////
+(gdb) p *ip
+$26 = {
+  tpti_vnode = 0xffffffd0071d73d0,
+  tpti_tmp = 0xffffffd0071a5080,
+  tpti_sb = 0xffffffc640000000,
+  tpti_number = 1,
+  tpti_modrev = 1912080236146,
+  tpti_count = 0,
+  tpti_endoff = 0,
+  tpti_diroff = 0,
+  tpti_offset = 0,
+  tpti_next_alloc_block = 0,
+  tpti_next_alloc_goal = 0,
+  tpti_sum = 0,
+  tpti_uid = 0,
+  tpti_gid = 0,
+  tpti_mode = 0,
+  tpti_links_count = 0,
+  tpti_blocks = 0,
+  tpti_size = 0,
+  tpti_atime = 0,
+  tpti_ctime = 1630400736,
+  tpti_mtime = 0,
+  tpti_dtime = 0,
+  tpti_xattr = 0,
+  tpti_generation = 4093738900,
+  tpti_facl = 0,
+  tpti_flags = 0,
+  {
+    {
+      tpti_db = {0 <repeats 12 times>},
+      tpti_ib = {0, 0, 0}
+    },
+    tpti_data = {0 <repeats 15 times>}
+  }
+}
+
+  TptValloc 函数申请的 inode 的 i_number 字段是 1，这个肯定是不对的，1 是文件系统保留的 inode number，root是 2。
+这里其实是文件系统初始化的时候出现了问题，要把 root node 前面的 inode 都设置为被占用
+
 
 
       

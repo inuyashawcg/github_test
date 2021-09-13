@@ -1,0 +1,165 @@
+////////////// 20210906 //////////////
+  对文件进行写操作的时候，数据并没有进入文件，执行 cat 命令获取到的文件数据为空。所以其真实的内容可能仅存在缓存当中，没有更新到持久化内存
+
+  从打印信息中我们可以看出，levels 会被解析成 5
+
+    root@qemu:/tpt # ls -al
+      TptBlkAtOff----------------------------------
+      TptBmap---------------------
+      TptBmapArray---------------------
+      TptBlkAtOff: TptBmap error: 0
+      TptBlkAtOff: dbn is: 262651
+      TptHtreeLookup----------------------------------
+      TptHtreeFindLeaf----------------------------------
+      TptBlkAtOff----------------------------------
+      TptBmap---------------------
+      TptBmapArray---------------------
+      TptBlkAtOff: TptBmap error: 0
+      TptBlkAtOff: dbn is: 262651
+      TptGetHashSeed----------------------------------
+      rootp virtual address is -248032284672
+      rootp->h_info.h_ind_levels is 5
+      level is 5
+      TptHtreeFindLeaf: root info levels error!
+      TptHtreeRelease----------------------------------
+      TptHtreeFindLeaf: return -1, end!
+      TptHtreeLookup: find leaf function occurs some error!
+      TptLookupIno: default, linear search!
+      TptLookupIno: now enter liner search mode!
+      TptLookupIno: liner search loop!
+      TptBlkAtOff----------------------------------
+      TptBmap---------------------
+      TptBmapArray---------------------
+      TptBlkAtOff: TptBmap error: 0
+      TptBlkAtOff: dbn is: 262651
+      TptLookupIno: found entry!
+      total 5
+      ls: ./.: No error: 0
+      drwxr-xr-x   2 root  wheel  4096 Sep  6 07:12 .
+      drwxr-xr-x  21 root  wheel   512 Sep  6 07:09 ..
+      ls: ./a.txt: No such file or directory
+      -rw-r--r--   1 root  wheel     0 Sep  6 07:12 a.txt
+
+  5 刚好是这个目录项成员的 namelen，很有可能就是这个目录项数据把之前原有的数据给替换掉了。对那块数据处理的操作其实就是在
+往目录项中添加 entry 的时候，应该是要重新建立一个字段，所以很有能是这个阶段把数据搞乱了
+  ext2_htree.c - ext2_htree_add_entry() 函数中包含有一步 ext2_add_entry 操作，是把新的目录项成员。它的判断条件是
+当 ip->i_count 不为 0 的时候执行。文件的第一个数据块是被 root node 完全占用的，所以 i_count 可能是要设置为0
+
+
+////////////// 20210907 //////////////
+  ext2 lookup 查找流程可能是如果支持 hash 索引的话，就先利用 hash 查找方式看当前路径下是不是包含所要查找的对象。如果没有的话，
+那就要会跳转到线性查找的方式再查找一下；如果还没有，那就返回未找到对应的目录项，执行 add_entry 操作，这里要注意 tpti_count 是
+如何变化的
+
+  freebsd ext2 没有使用 hash 查找，使用的是线性查找方式，所以 tptfs 只能一点点调试了 
+
+  ext2_direnter() 函数中会有一个判断逻辑：
+  
+    if (EXT2_HAS_COMPAT_FEATURE(ip->i_e2fs, EXT2F_COMPAT_DIRHASHINDEX) &&
+	    !ext2_htree_has_idx(dp)) {
+      ...
+    }
+  
+  这个首先是判断文件系统是不是支持 hash 索引，如果判断它支持的话，然后看 inode flag 中是否也包含有相关属性。这个就过程会牵涉到
+函数 ext2_htree_create_index()，它会将原有的线性目录项转化成 hash 索引的类型，然后向 inode 添加 hash 索引属性，最后还会做
+一些其他的操作。
+  当前 tptfs 的操作是直接修改 inode flag 支持 hash 索引。这样就会导致上述函数中其他的逻辑操作并没有被执行，替换的过程其实是
+不完整的，后续向目录项添加 entry 的时候就会直接把数据更新到 root node 所在的数据块，覆盖掉原有的 info 信息，所以才会出现调试
+过程中的 levels = 5 的情况。
+  解决方法是修改 tptfs mount 过程中的行为。第一个数据块还是按照原有的方式进行排布，不手动添加 hash 索引属性。超级块中增加 hash
+属性，严格按照原有的逻辑进行操作  
+
+
+////////////// 20210908 //////////////
+  目前 tptfs 存在的问题是无法从线性查找变换成 hash 查找，因为在创建 index 的过程中有比较严格的条件限制，现在要着重分析
+条件不能满足的原因：
+  - 目前分析还是线性查找到 hash 查找转换过程中间出现了问题
+  - inode 初始化不正确
+  - 查找过程理解错误
+  - 代码移植错误
+
+  ls 执行的时候会出现一个无法识别文件类型的错误，其中一个原因是文件类型在最初设置的时候可能就不对。ext2_create 函数中会
+调用到 ext2_makeinode()，这个函数中又会用到宏 MAKEIMODE，这个宏貌似是用来处理从用户空间发送过来的文件的属性信息，这里
+有可能是出现问题的地方，需要留意一下
+
+  向 ext2 根目录添加 a.txt 时的 inode 状态：
+    ext2_add_entry():
+
+      (gdb) p dp
+      $5 = (struct inode *) 0xffffffd006ea7600
+      (gdb) p* dp
+      $6 = {
+        i_vnode = 0xffffffd006ef47a0,
+        i_ump = 0xffffffd006edab80,
+        i_flag = 0,
+        i_number = 2,
+        i_e2fs = 0xffffffd002e0d400,
+        i_modrev = 556931612029,
+        i_count = 1000,
+        i_endoff = 1024,
+        i_diroff = 0,
+        i_offset = 24,
+
+  可以大致推断出关于目录项查找的字段的含义。ext2 根目录下包含有三个目录项成员: . / .. / lost+found，数据块大小是 1024，
+. / .. 两个目录项由于字节对齐的原因大小是 12，可以看出：
+
+  - i_offset 表示的就是 lost+found 的起始位置，即 i_offset 表示的应该是包含可用空间的目录项成员的偏移量。
+      也要考虑当可用空间在中间和末尾时候的情况处理
+  - i_diroff 表示的可能是数据块的偏移
+  - i_count 表示的是目录项可用空间的大小。只不过这里做了特殊处理，它把 lost+found 所占用的空间也给计算进去了(20 bytes)。
+      所以真正可以使用的空间只有 980 bytes。需要注意的是，新添加的 entry 变成了最后一个成员，它的 namlen 以及根目录 inode
+      对应的这些成员都要进行更新
+  - i_endoff 表示的应该就是数据块的大小
+
+
+  ext2_lookup_ino(): 应该是 inode 的初始状态
+
+    $30 = (struct inode *) 0xffffffd006ea7600
+    (gdb) p* dp
+    $31 = {
+      i_vnode = 0xffffffd006ef47a0,
+      i_ump = 0xffffffd006edab80,
+      i_flag = 0,
+      i_number = 2,
+      i_e2fs = 0xffffffd002e0d400,
+      i_modrev = 556931612031,
+      i_count = 20,
+      i_endoff = 1024,
+      i_diroff = 0,
+      i_offset = 44,
+      i_block_group = 0,
+      i_next_alloc_block = 0,
+      i_next_alloc_goal = 0,
+      i_mode = 16877,
+      i_nlink = 3,
+      i_uid = 0,
+      i_gid = 0,
+      i_size = 1024,
+      i_blocks = 2,
+
+  关于线性查找和 hash 查找之前的转换可能不是之前所想的，直接就开始构建 root node 那种数据块类型，而是首先按照线性查找的
+方式排布目录项成员，查找的时候还是按照线性查找进行。当一个块装满的时候，才开始对这个数据块进行拆分，创建hash 索引。所以 
+ext2_htree_create_index() 函数的执行才会添加两层判断条件。这个函数中包含一个 split 函数，应该就是拆分操作对应的函数
+  
+
+////////////// 20210910 //////////////
+  不论是普通文件还是目录文件都是可以用 ln 命令建立链接的。软链接可以理解为是快捷方式，当实际链接到的目录项被删除了之后，它就
+相当于找不到所要链接的那个对象了，于是就会报错。
+  硬链接机制跟软链接有差别，软链接的作用对象可以认为是文件上层的壳子；硬链接的作用对象则是底层数据，就算是原有文件被删除了，
+其底层数据还是会保留的(创建一个inode，inode number 跟原有对象是相同的)，所以我们访问硬链接文件还是会有数据存在，而软链接
+的话因为底层数据已经被删除了，对应的壳子自然而然也就找不到了，所以会报错
+
+  当 tptfs umount 之后再重新 mount，会发现原有的 regular file 变成了 directory file，说明是 vnode(或者inode)中文件
+属性信息被冲洗掉了。观察之后可以发现，在 umount 过程中会调用一个函数 vflush，这个应该就是对 tptfs 中的 vnode 进行还原操作，
+尝试将这个函数注释掉，观察是否还会发生此现象。
+  tptfs 所有的数据都是在内存当中的，所以即使我们执行了 umount 操作，也不会像是磁盘文件系统那样把所有的数据同步到磁盘，然后所有
+的 vnode、inode 这些数据全部清除，应该还是要继续保留的，否则下次挂载的时候将无法恢复
+
+  调试如果要看一些特殊寄存器的值，可能需要用到 hardware watch pointer。软件调试的话貌似只能看到一些通用寄存器的值
+
+  通常我们用 C++ 设计类的时候，都是一个文件对应一个类。但是如果我们定义了 friend class，那么就可以在一个文件中定义多个类。
+  友元类之间就可以互相访问对方的成员(但是友元的使用会破坏类的封装性，所以一般不是特别需要，不要定义友元)：
+    如果将 C++ 中类的封装比喻成一堵城墙，那么友元机制就相当于在城墙上开了一扇门，它会使得类的封装性减弱
+
+  利用 swap pager 的原理来设计文件系统？
+  利用 FreeBSD 目前已有的 ATF 中提供的一些工具来进行文件系统功能测试 

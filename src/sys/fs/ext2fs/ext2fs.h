@@ -206,6 +206,11 @@ struct m_ext2fs {
 	int32_t  e2fs_contigsumsize;    /* size of cluster summary array 块组操作的时候会用到这个字段 */
 	int32_t *e2fs_maxcluster;       /* max cluster in each cyl group */
 	struct   csum *e2fs_clustersum; /* cluster summary in each cyl group */
+	/*
+		在 ext2 中，目录项的 hash index 包含有多种计算方式，每种计算方式又分成了两种子类型。第一种类型是 signed，
+		第二种类型是 unsigned，signed + 3 = unsigned。所以 e2fs_uhash 字段表示的就是如果我们打算使用 unsigned
+		类型的计算方式，那就把它设置为 3；如果不打算使用的话就直接设置为 0
+	*/
 	int32_t  e2fs_uhash;	  /* 3 if hash should be signed, 0 if not */
 	uint32_t e2fs_csum_seed;  /* sb checksum seed */
 };

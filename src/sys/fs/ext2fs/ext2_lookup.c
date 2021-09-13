@@ -312,7 +312,8 @@ nextentry:
  * This is a very central and rather complicated routine.
  * If the file system is not maintained in a strict tree hierarchy,
  * this can result in a deadlock situation (see comments in code below).
- * 将路径名的组件转换为指向锁定inode的指针。这是一个非常核心和相当复杂的程序。
+ * 
+ * 将路径名的组件转换为指向锁定 inode 的指针。这是一个非常核心和相当复杂的程序。
  * 如果文件系统没有在严格的树层次结构中维护，这可能会导致死锁情况
  *
  * The cnp->cn_nameiop argument is LOOKUP, CREATE, RENAME, or DELETE depending
@@ -381,7 +382,10 @@ ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp, struct componentname *cnp
 	bmask = VFSTOEXT2(vdp->v_mount)->um_mountp->mnt_stat.f_iosize - 1;
 restart:
 	bp = NULL;	/* buf置空 */
-	ss.slotoffset = -1;	/* 空闲区域偏移初始化为-1 */
+	/*
+		空闲区域的 offset，表示的应该就是空闲区域的起始位置
+	*/
+	ss.slotoffset = -1;
 
 	/*
 	 * We now have a segment name to search for, and a directory to search.
@@ -400,9 +404,13 @@ restart:
 	i_diroff = dp->i_diroff;	/* 用于查找目录中的最后一个 entry */
 	ss.slotstatus = FOUND;	/* 把search slot的状态设置为 found */
 	ss.slotfreespace = ss.slotsize = ss.slotneeded = 0;	/* slot相关属性全置空 */
+
+	/*
+		如果我们要执行的操作是创建、重命名并且得是路径的最后一个组件名称，那么就执行 if 代码分支
+	*/
 	if ((nameiop == CREATE || nameiop == RENAME) &&
 	    (flags & ISLASTCN)) {
-		ss.slotstatus = NONE;
+		ss.slotstatus = NONE;	/* 将状态设置为NONE */
 		ss.slotneeded = EXT2_DIR_REC_LEN(cnp->cn_namelen);	/* tptfs 中应该要设置为 256 */
 		/*
 		 * was ss.slotneeded = (sizeof(struct direct) - MAXNAMLEN +
@@ -416,12 +424,17 @@ restart:
 	 * If we got an error or we want to find '.' or '..' entry,
 	 * we will fall back to linear search.
 	 * 如果出现错误或要查找“.”或“..”条目，我们将退回到线性搜索；
-	 * 也就是说，目录项的查找目前有两种方式：树搜索和线性搜索
+	 * 也就是说，目录项的查找目前有两种方式：树搜索和线性搜索。在调试 tptfs 创建新的文件的时候，我们所要查找的
+	 * 就不是 . 和 .. 两个目录，所以下面的代码分支是会执行的。判断条件中一个带！一个不带，这两个函数的实现逻辑
+	 * 是一致的
 	 */
 	if (!ext2_is_dot_entry(cnp) && ext2_htree_has_idx(dp)) {
 		numdirpasses = 1;	/* 采用策略1 */
 		entryoffsetinblock = 0;	/* entry在块中的偏移量赋值为0 */
-		
+		/* 
+			从tptfs调试中可以得知，cn_nameptr 传入的是我们所要创建的文件名，后面跟的是它的名字长度。i_offset 表示
+			的应该就是我们所要找的目录项成员在数据块中的偏移，或者是计算文件末尾数据在数据块中的偏移
+		*/
 		switch (ext2_htree_lookup(dp, cnp->cn_nameptr, cnp->cn_namelen,
 		    &bp, &entryoffsetinblock, &i_offset, &prevoff,
 		    &enduseful, &ss)) {
@@ -454,14 +467,23 @@ restart:
 	 * 如果在此目录的上一次搜索中有缓存信息，请选择上次停止的位置。我们只缓存查找，因为这些是最常见的，
 	 * 并且有最大的回报。缓存CREATE没有什么好处，因为它通常必须搜索整个目录以确定条目不存在。缓存最后
 	 * 一次删除或重命名的位置并没有减少分析时间，因此为了简单起见，已将其删除
+	 * 
+	 * 上面的代码分支执行的是 hash index 的查找方式，如果查找出错，那么将执行下面的代码分支。可以看一下
+	 * 上面的代码逻辑，如果通过 hash 找到了对应的目录项 entry(这个肯定是保存在目录项数据块，跟 . 和.. 
+	 * 不在同一个位置)，所以一些局部变量可以通过不同的应用场景来分析其具体的作用是什么
 	 */
 	if (nameiop != LOOKUP || i_diroff == 0 ||
 	    i_diroff > dp->i_size) {
+		/*
+			线性查找过程除了 . 和 .. 两个目录项，其他的应该就不会再涉及到 root node，都是直接操作存储目录项的
+			数据块。所以 entryoffsetinblock 表示的应该是目录项在块数据中的偏移，应该不是 hash 查找中的 entry
+		*/
 		entryoffsetinblock = 0;
 		i_offset = 0;
 		numdirpasses = 1;
 	} else {
 		i_offset = i_diroff;
+		/* 判断读取 i_offset 所在数据块是否出错 */
 		if ((entryoffsetinblock = i_offset & bmask) &&
 		    (error = ext2_blkatoff(vdp, (off_t)i_offset, NULL,
 		    &bp)))
@@ -480,6 +502,8 @@ searchloop:
 		 */
 		if (bp != NULL)
 			brelse(bp);
+
+		/* 读取偏移量 i_offset 所在的数据块 */
 		error = ext2_blkatoff(vdp, (off_t)i_offset, NULL, &bp);
 		if (error != 0)
 			return (error);
@@ -763,17 +787,19 @@ ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
     const char *name, int namelen, int *entryoffsetinblockp,
     doff_t *offp, doff_t *prevoffp, doff_t *endusefulp,
     struct ext2fs_searchslot *ssp)
-{ 
+{
 	struct vnode *vdp;
 	struct ext2fs_direct_2 *ep, *top;
 	uint32_t bsize = ip->i_e2fs->e2fs_bsize;
+	/* offset 表示在数据块中的偏移 */
 	int offset = *entryoffsetinblockp;
 	int namlen;
 
 	vdp = ITOV(ip);
 	/* 
 		entry pointer 指向数据块 offset 位置，top 限制了指针的访问空间大小，指向
-		了数据块的末尾位置 
+		了数据块的末尾位置。
+		这里有一点要注意，ep 和 top 都是目录项指针，也就是说 data 中存放的数据是目录项数据
 	*/
 	ep = (struct ext2fs_direct_2 *)((char *)data + offset);
 	top = (struct ext2fs_direct_2 *)((char *)data + bsize);
@@ -807,11 +833,20 @@ ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
 		 */
 		if (ssp->slotstatus != FOUND) {
 			int size = ep->e2d_reclen;
-
+			/*
+				size 首先设置为目录项成员的数据长度，计算根据 namlen 得到的长度，两者相减得到
+				剩余空间的大小(可能是因为数据对齐的原因，导致两者大小不一致，也有可能是两个目录项
+				成员合并了)。如果还包含 tail，则再减去 tail 结构的长度
+			*/
 			if (ep->e2d_ino != 0)
 				size -= EXT2_DIR_REC_LEN(ep->e2d_namlen);
 			else if (ext2_is_dirent_tail(ip, ep))
 				size -= sizeof(struct ext2fs_direct_tail);
+
+			/* 
+				经过上述处理之后的长度值仍然大于0，这个应该就是处理把两个目录项合并成一个，或者数据块的
+				最后一个目录项成员的情况
+			*/
 			if (size > 0) {
 				if (size >= ssp->slotneeded) {
 					ssp->slotstatus = FOUND;
@@ -828,7 +863,7 @@ ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
 						    ssp->slotoffset;
 					}
 				}
-			}
+			}	// end if (size > 0)
 		}
 		/*
 		 * Check for a name match.
@@ -912,6 +947,9 @@ ext2_dirbadentry(struct vnode *dp, struct ext2fs_direct_2 *de,
 		error_msg = "reclen is too small for name_len";
 	else if (entryoffsetinblock + de->e2d_reclen > DIRBLKSIZ)
 		error_msg = "directory entry across blocks";
+	/*
+		entryoffsetinblock 从上述判断可以看出，表示的就是目录项成员在数据块中的偏移量
+	*/
 	/* else LATER
 	     if (de->inode > dir->i_sb->u.ext2_sb.s_es->s_inodes_count)
 		error_msg = "inode out of bounds";
@@ -1015,8 +1053,12 @@ ext2_direnter(struct inode *ip, struct vnode *dvp, struct componentname *cnp)
 		panic("ext2_direnter: missing name");
 #endif
 	dp = VTOI(dvp);	/* directory inode */
-	newdir.e2d_ino = ip->i_number;
+	newdir.e2d_ino = ip->i_number;	/* 目录中新成员的 inode number */
 	newdir.e2d_namlen = cnp->cn_namelen;
+	/*
+		tptfs 中还没有设置该属性，所以暂时处理的方式就是直接对 mode 进行转换。在目录下执行 ls 命令的时候，会提示新创建的
+		文件既不是普通文件类型，又不是目录类型，可能跟这里是有关系的
+	*/
 	if (EXT2_HAS_INCOMPAT_FEATURE(ip->i_e2fs,
 	    EXT2F_INCOMPAT_FTYPE))
 		newdir.e2d_type = DTTOFT(IFTODT(ip->i_mode));	/* directory type to file type */
@@ -1025,7 +1067,10 @@ ext2_direnter(struct inode *ip, struct vnode *dvp, struct componentname *cnp)
 	/* 将名字从 componentname 结构中拷贝到目录项结构 */
 	bcopy(cnp->cn_nameptr, newdir.e2d_name, (unsigned)cnp->cn_namelen + 1);
 
-	/* 目录项应该是通过 htree 来进行管理的 */
+	/*
+		从这里我们可以看出，即使是通过 hash htree 来管理目录项，其实还是需要申请 inode，说明
+		hash tree 最终并没有改变文件系统的作用机制
+	*/
 	if (ext2_htree_has_idx(dp)) {
 		error = ext2_htree_add_entry(dvp, &newdir, cnp);
 		if (error) {
@@ -1035,6 +1080,13 @@ ext2_direnter(struct inode *ip, struct vnode *dvp, struct componentname *cnp)
 		return (error);
 	}
 
+	/*
+		当文件系统拥有这个属性，但是 inode 不包含这个属性的时候，执行下面的代码分支。所以这里要区分文件系统
+		和 inode 它们之间的属性；
+		当 inode size 和 i_offset 满足一定条件的时候，才会去调用 create index 函数。所以，tptfs 没有
+		执行到这一步的原因可能是这些值的初始化设置出现了问题，可以尝试着修改一下；
+		调试 ext2 文件系统并开启 hash 索引，对比其中的这些成员的初始值设置
+	*/
 	if (EXT2_HAS_COMPAT_FEATURE(ip->i_e2fs, EXT2F_COMPAT_DIRHASHINDEX) &&
 	    !ext2_htree_has_idx(dp)) {
 		if ((dp->i_size / DIRBLKSIZ) == 1 &&
@@ -1067,6 +1119,13 @@ ext2_direnter(struct inode *ip, struct vnode *dvp, struct componentname *cnp)
 /*
  * Insert an entry into the directory block.
  * Compact the contents.
+ * 
+ * 先从函数的参数来看，它添加的是一个目录项成员，所以它作用的数据块应该是存放目录项成员的数据块，
+ * 而不是 node 所在的数据块。
+ * 从调试的数据来看，root node info 结构中的 levels 被改成了 5，这是在 touch a.txt 的时候发生的。
+ * 可以注意到 a.txt 的 namlen 刚好也是5，可以联想到很有可能是 entry 的数据更新到了 node 所在的数据
+ * 块导致的，位置刚好卡在了 info 所在的地方。对比一下 info 和 dirent 的结构体中的字段构成，好像确实是
+ * 上述原因导致的结果
  */
 int
 ext2_add_entry(struct vnode *dvp, struct ext2fs_direct_2 *entry)
@@ -1095,6 +1154,10 @@ ext2_add_entry(struct vnode *dvp, struct ext2fs_direct_2 *entry)
 	 * DIRBLKSIZE.
 	 *
 	 * N.B. - THIS IS AN ARTIFACT OF 4.2 AND SHOULD NEVER HAPPEN.
+	 * 当数据偏移 + 剩余可用数据 > i_size 的时候，更新 i_size 数据为较大值。从这里可以推断一下几个字段的含义：
+	 * i_offset 注释中说的是目录项可用空间的偏移，这就包含有两种情况。第一种就是假设目录项分配了两个数据块，但是
+	 * 只使用了其中的一个半，还有半个块的空间没有使用，i_offset 可能会指向这个位置；第二种情况就是中间的一个目录项
+	 * 成员数据被释放了，所以空闲出了一块空间，i_offset 也有可能是指向这个地方。i_count 可能就表示这块空间的大小
 	 */
 	if (dp->i_offset + dp->i_count > dp->i_size)
 		dp->i_size = dp->i_offset + dp->i_count;
@@ -1110,12 +1173,25 @@ ext2_add_entry(struct vnode *dvp, struct ext2fs_direct_2 *entry)
 	 * arranged that compacting the region dp->i_offset to
 	 * dp->i_offset + dp->i_count would yield the
 	 * space.
+	 * 
+	 * dirbuf 指向数据 offset 的位置。从这段逻辑可以看出，即使保存目录项的数据块后面并没有真实的目录项，
+	 * 也要将这块区域进行"格式化"，即把它认为是一个空的目录项，namelen 应该就是指定为0
 	 */
 	newentrysize = EXT2_DIR_REC_LEN(entry->e2d_namlen);
+	
+	/*
+		dirbuf 指向的 i_offset 所在的位置，也就是可用空间的其实位置。
+	*/
 	ep = (struct ext2fs_direct_2 *)dirbuf;
 	dsize = EXT2_DIR_REC_LEN(ep->e2d_namlen);
 	spacefree = ep->e2d_reclen - dsize;
+	/*
+		上面可以认为是计算空目录项的实际大小，也就是数据块中未被使用的区域的大小。从下面的代码逻辑可以推测，i_count 表示的可能是
+		包含可用数据的目录项成员总的大小，也就是说如果一个被释放的成员合并到上一个目录项当中，i_count 表示的就是这两个合并后总的
+		大小，i_offset 就是指向这个区域的起始地址，也就是原来的上一个成员的起始地址
+	*/
 	for (loc = ep->e2d_reclen; loc < dp->i_count; ) {
+		/* next entry pointer */
 		nep = (struct ext2fs_direct_2 *)(dirbuf + loc);
 		if (ep->e2d_ino) {
 			/* trim the existing slot */
