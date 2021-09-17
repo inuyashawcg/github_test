@@ -1,0 +1,54 @@
+root@qemu:/tpt # cp /tmpfs/file.img ./
+TptAccess----------------------------------
+TptGetattr----------------------------------
+TptAccess----------------------------------
+TptAccess----------------------------------
+TptLookupx----------------------------------
+TptLookupIno: start!
+TptIsDotEntry----------------------------------
+TptLookupIno: now enter liner search mode!
+TptLookupIno: liner search loop!
+TptSearchDirBlock----------------------------------
+TptLookupIno: not found entry!
+TptAccess----------------------------------
+TptAccess----------------------------------
+TptLookupx----------------------------------
+TptLookupIno: start!
+TptIsDotEntry----------------------------------
+TptLookupIno: now enter liner search mode!
+TptLookupIno: liner search loop!
+TptSearchDirBlock----------------------------------
+TptLookupIno: not found entry!
+TptAccess----------------------------------
+TptCreate----------------------------------
+TptMakeInode----------------------------------
+TptValloc----------------------------------
+TptHashAlloc----------------------------------
+TptNodeAlloc----------------------------------
+TptGetNiFree----------------------------------
+TptGetNiFree----------------------------------
+TptGetNiFree----------------------------------
+TptSetNiFree----------------------------------
+TptVinit----------------------------------
+TptUpdate----------------------------------
+TptItimes----------------------------------
+TptDirEnter----------------------------------
+TptAddEntry----------------------------------
+TptOpen----------------------------------
+TptGetattr----------------------------------
+TptWrite----------------------------------
+TptBallocx----------------------------------
+TptAllocx----------------------------------
+TptHashAlloc----------------------------------
+TptAllocg----------------------------------
+TptGetNbFree----------------------------------
+TptGetNbFree----------------------------------
+TptGetNbFree----------------------------------
+TptSetNbFree----------------------------------
+
+...
+
+TptUpdate----------------------------------
+TptItimes----------------------------------
+TptClose----------------------------------
+TptInactive----------------------------------
