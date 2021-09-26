@@ -221,7 +221,8 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 			}
 		} else {
 			/* 
-				处理当逻辑块号为0的情况，也就是文件的第一个块。从这里也可以看出，逻辑块号也是从0开始的 
+				当直接索引数组中的元素为0的时候，说明我们需要申请的这个数据块当前还是没有被分配的，
+				所以要调用 ext2_alloc 函数去分配一个我们所需要的数据块
 			*/
 			if (ip->i_size < (lbn + 1) * fs->e2fs_bsize)
 				nsize = fragroundup(fs, size);

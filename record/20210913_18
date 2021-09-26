@@ -72,3 +72,95 @@ inode 与 vnode 关联到一起的，其中会调用 ext2_vinit 获取文件的�
 那个 inode 就会被系统回收。回收调用的是 vfs_hash_remove 函数。
   tptfs 中该函数的实现跟 ext2 稍微有些差异，ext2 中 vnode 对应的 inode 是通过 malloc 函数实例化的，而 tptfs 直接指向 inode 所在的
 虚拟地址，所以不需要执行 free 操作，但是要把原有的数据清除掉，利用的是 bzero 函数
+
+
+////////////// 20210918 //////////////
+  九一八事变，勿忘历史
+
+  当目录项数量超过一个数据块所能承受的最大数量时，开始建立 htree 来管理目录项：
+
+    TptDirEnter----------------------------------
+    TptHtreeHasIdx----------------------------------
+    TptHtreeHasIdx----------------------------------
+    TptHtreeCreateIndex----------------------------------
+    TptBmap---------------------
+    TptBmapArray---------------------
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeCreateIndex: while-----1111111
+    TptHtreeSetBlock----------------------------------
+    TptHtreeSetCount----------------------------------
+    TptHtreeRootLimit----------------------------------
+    TptHtreeSetLimit----------------------------------
+    TptGetHashSeed----------------------------------
+    TptHtreeSplitDirblock----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptHtreeCmpSortEntry----------------------------------
+    TptAppendEntry----------------------------------
+    TptHtreeInsertEntry----------------------------------
+    TptHtreeInsertEntryToLevel----------------------------------
+    TptHtreeGetCount----------------------------------
+    TptHtreeSetBlock----------------------------------
+    TptHtreeSetHash----------------------------------
+    TptHtreeSetCount----------------------------------
+    TptHtreeAppendBlock----------------------------------
+    TptWrite----------------------------------
+    TptBallocx----------------------------------
+    TptAllocx----------------------------------
+    TptHashAlloc----------------------------------
+    TptAllocg----------------------------------
+    TptGetNbFree----------------------------------
+    TptGetNbFree----------------------------------
+    TptGetNbFree----------------------------------
+    TptSetNbFree----------------------------------
+    TptUpdate----------------------------------
+    TptItimes----------------------------------
+    TptHtreeAppendBlock----------------------------------
+
+    TptHtreeCreateIndex: while-----1111111 语句一共打印了14次，因为整个数据块最多可以容纳16个目录项，除去 . 和 .. 两个
+  对象，还剩下14个，while 循环全部覆盖到了。这个操作就是为了定位数据块最后一个成员所在的位置
+
+
+    KDB: stack backtrace:
+    #0 0xffffffc0004b2d70 at kdb_backtrace+0x86
+    #1 0xffffffc00043e750 at vpanic+0x20c
+    #2 0xffffffc00043e540 at panic+0x32
+    #3 0xffffffc00089a740 at do_trap_supervisor+0x670
+    #4 0xffffffc00089a1f6 at do_trap_supervisor+0x126
+    #5 0xffffffc000882748 at cpu_exception_handler_supervisor+0x68
+    #6 0xffffffc000571552 at vop_eagain+0x1be
+    #7 0xffffffc00056f2c4 at vop_stdaccessx+0x190
+    #8 0xffffffc0005a2978 at sys_funlinkat+0xc2
+    #9 0xffffffc0005a31e2 at kern_statat+0x156
+    #10 0xffffffc0005a304a at sys_fstatat+0x3c
+    #11 0xffffffc00089b174 at do_trap_user+0xa28
+    #12 0xffffffc00089aa46 at do_trap_user+0x2fa
+    #13 0xffffffc00089a888 at do_trap_user+0x13c
+    #14 0xffffffc000882812 at cpu_exception_handler_user+0x72
+    Uptime: 22m56s
+

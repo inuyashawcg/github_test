@@ -1,0 +1,89 @@
+////////////// 20210926 //////////////
+
+  $23 = (tpt_inode *) 0xffffffc640003fc0
+  (gdb) p *ip
+  $24 = {
+    tpti_vnode = 0xffffffd006f5e3d0,
+    tpti_tmp = 0xffffffd006dd4580,
+    tpti_sb = 0xffffffc640000000,
+    tpti_flag = 0,
+    tpti_number = 15,
+    tpti_modrev = 452298327007,
+    tpti_count = 0,
+    tpti_endoff = 0,
+    tpti_diroff = 0,
+    tpti_offset = 0,
+    tpti_next_alloc_block = 116776960,
+    tpti_next_alloc_goal = 4294967248,
+    tpti_sum = 17792,
+    tpti_uid = 4294967248,
+    tpti_gid = 1073741824,
+    tpti_mode = 65478,
+    tpti_links_count = 65535,
+    tpti_blocks = 0,
+    tpti_size = 17,
+    tpti_atime = 496781844457,
+    tpti_ctime = 1632446686,
+    tpti_mtime = 1632446686,
+    tpti_dtime = 1128141879771136,
+    tpti_xattr = 0,
+    tpti_generation = 0,
+    tpti_facl = 1,
+    tpti_flags = 4096,
+    {
+      {
+        tpti_db = {1632446697, 1632446697, 1632446697, 0, 0, 1535063926, 0, 0, 262666, 0, 0, 0},
+        tpti_ib = {0, 0, 0}
+      },
+      tpti_data = {1632446697, 1632446697, 1632446697, 0, 0, 1535063926, 0, 0, 262666, 0, 0, 0, 0, 0, 0}
+    }
+  }
+
+  上次关于 panic 打印信息可以看到，262666 数据应该是正确的，符合数据块分配的预期数值。但是前面会多了许多不应该出现的、值也是
+错误的虚拟页号，并且前面的一些数据的值也比较离谱。推测一下，有可能是数据错位(数据整体前移或者后移)导致的。导致数据整体偏移的原因
+之一就是 struct inode 的大小并不是 256 bytes，这就导致我们存入的数据位置与后来读取数据的位置是不一样的
+  实际测试发现，直接索引数组元素个数为 12 的时候，struct inode 大小为 288 字节，刚好多出来 32 个字节。其他属性信息无法删除的
+情况下，就只能调整直接索引数组的大小为 8。测试通过，不会再出现 panic
+
+  root@qemu:/ # mount -t tptfs tptfs /tpt
+    TptRoot----------------------------------
+    TptVget----------------------------------
+    TptVinit----------------------------------
+    TptInactive----------------------------------
+    TptReclaim----------------------------------
+    TptRoot----------------------------------
+    TptVget----------------------------------
+    TptVinit----------------------------------
+    TptGetattr----------------------------------
+    TptItimes----------------------------------
+    TptItimesLocked----------------------------------
+    TptInactive----------------------------------
+    TptReclaim----------------------------------
+    mount: /tpt: Bad file descriptor
+
+  通过 gdb 调试发现，当第二次 mount 的时候，TptRoot 传入的参数 ip = NULL，正常情况下 ip 应该是我们初始化的值才对。这里牵涉
+到了 TptReclaim 函数在 tptfs 和 ext2 中应用场景的差异。ext2 中的 vnode 和对应的 inode 分成两种类型，磁盘上的和内存中的。
+原函数执行了对 vnode->v_data(inode) 执行了 free 操作，其实是把内存中的 inode 数据清空，但是磁盘中的数据依然存在。
+  tptfs 如果执行了 bzero，那么它就将对应内存页中的数据直接删除掉了，那我们下一次重新 mount 的时候 inode 就是一个空值，这就会
+导致 /tpt 目录的属性信息完全丧失，对应的 vnode 中的数据也是错误的，如下：
+
+  root@qemu:/ # ls -al
+    TptRoot----------------------------------
+    TptVget----------------------------------
+    TptVinit----------------------------------
+    TptGetattr----------------------------------
+    TptItimes----------------------------------
+    TptItimesLocked----------------------------------
+    TptInactive----------------------------------
+    TptReclaim----------------------------------
+    ls: tpt: Bad file descriptor
+
+  TptReclaim 函数的作用是当我们把一个文件删除掉之后，它用来将已使用的 inode 进行回收，并且释放其所对应的 vnode。上一次出现这种
+情况是当我们从另外一个文件夹拷贝一个文件到当前路径，然后将其删除，再新建一个文件夹，发现它的文件属性是上一个被删除的文件的属性信息。
+说明 struct inode 数据没有刷新。bzero 可以放到 valloc 的过程去做。当我们重新申请已经存放过其他文件数据的 inode 的时候，先执行
+置零操作，然后再往里边填充数据
+
+  如果在调试过程中出现以下错误：
+    error: .: Bad file descriptor
+    error: .: Not a directory
+  基本上就是由于 inode 数据不正确或者缺少功能函数将 inode 数据解析并保存到对应的 vnode 当中

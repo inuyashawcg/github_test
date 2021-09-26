@@ -1,0 +1,211 @@
+////////////// 20210922 //////////////
+  ls 命令执行的话，是可以显示出来所有的目录项，这就表明对于数据块的定位和处理是正常的，ls -al 造成的 panic 貌似
+是跟 access 函数有关，也就是说 access 和 htree 之间的配合上出现了问题
+
+  每次 panic 的时候，貌似都是在检测完第九个目录项之后才发生，也就是说可能检查第十个目录项属性的时候出现的错误。如果
+我们在一个目录下创建17个成员的时候，根据代码逻辑，肯定是一个数据块中包含8个，另外一个包含9个。
+
+  当前情况可能是第一个块包含有9个成员，检查比较正常。当读取第十个目录项的时候，那就需要跳转到另外一个块中查找，跳转的
+时候可能出现了某种错误，访问到了非法地址，使得程序出现了 panic。或者是在检查第9个，也就是新添加的目录项的时候发生了
+错误
+
+
+////////////// 20210923 //////////////
+
+  240		TptInodeOps::TptItimes(vp);
+  (gdb) p ip
+  $3 = (tpt_inode *) 0xffffffc640003120
+  (gdb) p *ip
+  $4 = {
+    tpti_vnode = 0xffffffd006f01b70,
+    tpti_tmp = 0xffffffd006dae500,
+    tpti_sb = 0xffffffc640000000,
+    tpti_flag = 65536,
+    tpti_number = 2,
+    tpti_modrev = 740964330969,
+    tpti_count = 0,
+    tpti_endoff = 4096,
+    tpti_diroff = 0,
+    tpti_offset = 4096,
+    tpti_next_alloc_block = 2,
+    tpti_next_alloc_goal = 2,
+    tpti_sum = 0,
+    tpti_uid = 0,
+    tpti_gid = 0,
+    tpti_mode = 16877,
+    tpti_links_count = 17,
+    tpti_blocks = 3,
+    tpti_size = 12288,
+    tpti_atime = 1632305452,
+    tpti_ctime = 1632305452,
+    tpti_mtime = 1632305452,
+    tpti_dtime = 0,
+    tpti_xattr = 0,
+    tpti_generation = 545580870,
+    tpti_facl = 0,
+    tpti_flags = 0,
+    {
+      {
+        tpti_db = {262651, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        tpti_ib = {0, 0, 0}
+      },
+      tpti_data = {262651, 1, 2, 0 <repeats 12 times>}
+    }
+  }
+
+  tptfs 索引数组中的元素保存的是虚拟页号，是绝对页号，不是相对页号。从打印的情况来看，inode 中存放的却是相对块号，
+这就可能会导致操作系统并没有对相应的虚拟地址建立页表，访问的时候也就会发生 panic。所以，对于 tptfs 来说，如果出现
+了页错误，首先要排查的就是 inode 中存放的页号
+
+  panic: Fatal page fault at 0xffffffc0008ad1da: 0000000000000000
+  panic: Fatal page fault at 0xffffffc0008ad1da: 0000000000000000
+  panic: Fatal page fault at 0xffffffc0008ad1c4: 0000000000000000
+  panic: Fatal page fault at 0xffffffc0008ad1da: 0000000000000000
+  panic: Fatal page fault at 0xffffffc0008ad1da: 0000000000000000
+
+  PERSISTENTMEMORY_START_VA  0xffffffc600000000
+
+  对比发生页错误的地址可以看出，它们每次都发生在某个区域范围，并且是小于持久化内存区块的，所以应该是在堆栈中出现的错误
+
+  ls -al 过程中会调用 readdir 函数和 bmap 函数，猜测应该是将数据块中的内容读出来进行处理，获取到目录项成员的属性信息。
+调试过程中给人的感觉就是当所有的数据都在同一个数据块中的时候，没有出现页错误。当成员需要多个数据块进行存储的时候，就发现
+执行上面的命令会报错，很可能是跳转到第二个数据块进行数据处理的时候出现了错误
+
+    TptAccess----------------------------------
+    TptReadDir----------------------------------
+    TptBmap---------------------
+    TptBmapArray---------------------
+    TptBmap---------------------
+    TptBmapArray---------------------
+
+
+////////////// 20210924 //////////////
+ ls -al 命令导致 panic 的打印信息：
+
+  $23 = (tpt_inode *) 0xffffffc640003fc0
+  (gdb) p *ip
+  $24 = {
+    tpti_vnode = 0xffffffd006f5e3d0,
+    tpti_tmp = 0xffffffd006dd4580,
+    tpti_sb = 0xffffffc640000000,
+    tpti_flag = 0,
+    tpti_number = 15,
+    tpti_modrev = 452298327007,
+    tpti_count = 0,
+    tpti_endoff = 0,
+    tpti_diroff = 0,
+    tpti_offset = 0,
+    tpti_next_alloc_block = 116776960,
+    tpti_next_alloc_goal = 4294967248,
+    tpti_sum = 17792,
+    tpti_uid = 4294967248,
+    tpti_gid = 1073741824,
+    tpti_mode = 65478,
+    tpti_links_count = 65535,
+    tpti_blocks = 0,
+    tpti_size = 17,
+    tpti_atime = 496781844457,
+    tpti_ctime = 1632446686,
+    tpti_mtime = 1632446686,
+    tpti_dtime = 1128141879771136,
+    tpti_xattr = 0,
+    tpti_generation = 0,
+    tpti_facl = 1,
+    tpti_flags = 4096,
+    {
+      {
+        tpti_db = {1632446697, 1632446697, 1632446697, 0, 0, 1535063926, 0, 0, 262666, 0, 0, 0},
+        tpti_ib = {0, 0, 0}
+      },
+      tpti_data = {1632446697, 1632446697, 1632446697, 0, 0, 1535063926, 0, 0, 262666, 0, 0, 0, 0, 0, 0}
+    }
+  }
+
+
+  $45 = (tpt_inode *) 0xffffffc6400040e0
+  (gdb) p *ip
+  $26 = {
+    tpti_vnode = 0x0,
+    tpti_tmp = 0x0,
+    tpti_sb = 0x0,
+    tpti_flag = 0,
+    tpti_number = 0,
+    tpti_modrev = 0,
+    tpti_count = 0,
+    tpti_endoff = 0,
+    tpti_diroff = 0,
+    tpti_offset = 0,
+    tpti_next_alloc_block = 0,
+    tpti_next_alloc_goal = 262665,
+    tpti_sum = 0,
+    tpti_uid = 0,
+    tpti_gid = 0,
+    tpti_mode = 16877,
+    tpti_links_count = 2,
+    tpti_blocks = 1,
+    tpti_size = 4096,
+    tpti_atime = 1632446686,
+    tpti_ctime = 1632446686,
+    tpti_mtime = 1632446686,
+    tpti_dtime = 0,
+    tpti_xattr = 0,
+    tpti_generation = 820681080,
+    tpti_facl = 0,
+    tpti_flags = 0,
+    {
+      {
+        tpti_db = {262665, 0 <repeats 11 times>},
+        tpti_ib = {0, 0, 0}
+      },
+      tpti_data = {262665, 0 <repeats 14 times>}
+    }
+  }
+
+  
+
+  ls -al 命令会检测文件的属性信息，比如这个文件是什么类型的，类型信息就是保存在 vnode 中的。第一个 inode 中的信息已经错乱了，
+索引数组中的虚拟页号明显是不对的。第二个 inode 中没有填充 vnode 指针，导致 ls -al 需要解析 vnode 成员数据的时候发生访问了
+空指针，可能导致了页错误，然后就发生了 panic
+
+  (gdb) p tpti_vnode
+  No symbol "tpti_vnode" in current context.
+  (gdb) p ip->tpti_vnode
+  $47 = (vnode *) 0x0
+  ......
+  (gdb) 
+  259	  vap->va_flags = ip->tpti_flags;
+  (gdb) 
+  260	  vap->va_gen = ip->tpti_generation;
+  (gdb) 
+  261	  vap->va_blocksize = ip->tpti_sb->tptfs_blocksize;
+  (gdb) 
+
+  Thread 2 hit Breakpoint 5, panic (fmt=0xffffffc00091f939 "Fatal page fault at %#lx: %#016lx")
+      at /usr/home/wcg/qihai/sys/kern/kern_shutdown.c:842
+  
+  在访问 ip->tpti_sb 的时候发生了 panic
+
+
+  offset = tpt_inotobo(fs, ino);
+  ip = &(reinterpret_cast<struct tpt_inode*>
+          (tpt_vpntovaddr(fs, tpt_inotovpn(fs ,ino))))[offset];
+  
+  偏移计算可能出现了问题
+
+////////////// 周会记录 //////////////
+
+  文件系统测试还是要利用专门的工具进行，发现其中的文件再改进
+
+  TLS：thread local storage
+    每个线程都会有自己的 TLS，当发生上下文切换的时候，每个线程会把自己的状态信息保存，应该就是在这里了。现有的机制是把所有的寄存器
+  的值都保存下来。每次调用 syscall 的时候，操作系统会把线程的状态信息恢复，相当于就是进行了一次上下文切换。syscall 执行的时候并
+  不仅仅是代码中显示的那样，就只是调用了一个函数，而是操作系统会将相关的寄存器的值进行修改，满足当前运行的条件
+
+    刘强现在遇到的问题是当前用户线程会利用 tp 寄存器把指向 TLS 数据结构的指针保存下来，但是内核也会使用到该指针指向别的内容。所以
+  就导致了如果把现在的用户线程编译进内核当中，就会使得用户跟内核发生冲突，两者都会利用该 tp 寄存器保存的指针修改内容，这样整个系统
+  就乱套了。
+    可以采取的方法是编译器将这个寄存器空余出来专门给线程使用，或者是线程上下文切换的时候把 tp 寄存器的值保存下来，下次执行时再恢复。
+  tp 寄存器值的设置是在操作系统中完成的，而不是通过编译器，所以需要在内核代码中添加相应的逻辑代码。
+
+    当前编译生成的 kernel 中其实是不包含 TLS 相关的段，所以后续需要进行添加。操作逻辑感觉是可以模仿驱动注册的机制，根据线程id或者
+  某个独有的标志从段的起始位置到终止位置进行遍历，确定数据位置后解析并恢复 

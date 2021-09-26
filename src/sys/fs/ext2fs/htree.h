@@ -78,7 +78,7 @@ struct ext2fs_htree_entry {
 	uint32_t h_hash;	// entry 的 hash 值
 	/*
 		The block number (within the directory file) that goes with hash=0
-		哈希值为0的块编号（在目录文件中）
+		哈希值为0的块编号（在目录文件中），从代码中的应用情况来看，有点像是逻辑块号
 	*/
 	uint32_t h_blk;
 };
@@ -146,6 +146,10 @@ struct ext2fs_htree_node {
 /* htree 查找等级 */
 struct ext2fs_htree_lookup_level {
 	struct buf *h_bp;	/* 存放的应该是查找必须的一些基本数据 */
+	/*
+		h_entries 指向的应该是 entry 数组的起始位置，h_entry 指向的应该是我们所要操作的
+		那个 entry
+	*/
 	struct ext2fs_htree_entry *h_entries;
 	struct ext2fs_htree_entry *h_entry;
 };

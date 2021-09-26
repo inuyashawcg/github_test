@@ -630,6 +630,9 @@ ext2_append_entry(char *block, uint32_t blksize,
 
 /*
  * Move half of entries from the old directory block to the new one.
+ * 从上层函数调用的情况来看，block1 存放的是原有目录项数据块中的数据备份，block2 为空，
+ * entry 表示的是需要被创建的目录项。这个函数所要计算的就是 split_hash 参数，它的作用
+ * 应该就是作为两个数据块中目录项分布策略的比较对象
  */
 static int
 ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
@@ -650,6 +653,12 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 	fs = ip->i_e2fs;
 	ep = (struct ext2fs_direct_2 *)block1;
 	dest = block2;
+	/*
+		这里的 sort_info 指向了数据块的末尾，下面的 while 循环中它的操作都是自减，
+		感觉这里的处理方式是倒序；
+		sort_entry 中一共包含有三个参数： offset、size 和 hash，offset 表示的应该是该目录项在原数据块中的偏移量，
+		size 表示的是目录项的大小，hash 表示的是该目录项的 hash 值。sort_info 的数据是保存在 buf2 当中
+ 	*/
 	sort_info = (struct ext2fs_htree_sort_entry *)
 	    ((char *)block2 + blksize);
 
@@ -658,12 +667,14 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 
 	/*
 	 * Calculate name hash value for the entry which is to be added.
+	 * 利用新创建的目录项的名字计算该项的 hash 值，并保存到 entry_hash 当中，在数据块拆分中会使用到
 	 */
 	ext2_htree_hash(entry->e2d_name, entry->e2d_namlen, hash_seed,
 	    hash_version, &entry_hash, NULL);
 
 	/*
 	 * Fill in directory entry sort descriptors.
+	 * ep 指向 block1，这里把所有的目录项成员的 hash 都计算了出来，放到 sort_info 项当中
 	 */
 	while ((char *)ep < block1 + blksize - csum_size) {
 		if (ep->e2d_ino && ep->e2d_namlen) {
@@ -681,12 +692,15 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 
 	/*
 	 * Sort directory entry descriptors by name hash value.
+	 * 上面把所有的目录项成员hash值都计算出来了，下面开始对这些 hash 值进行排序
 	 */
 	qsort(sort_info, entry_cnt, sizeof(struct ext2fs_htree_sort_entry),
 	    ext2_htree_cmp_sort_entry);
 
 	/*
 	 * Count the number of entries to move to directory block 2.
+	 * 计算需要转移到 block2 的目录项的个数，注意 sort_info 目前已经是顺序排列了。
+	 * 从代码逻辑可以看出，需要把一半的目录项转移到另外一个数据块中
 	 */
 	for (i = entry_cnt - 1; i >= 0; i--) {
 		if (sort_info[i].h_size + size > blksize / 2)
@@ -698,6 +712,7 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 
 	/*
 	 * Set collision bit.
+	 * 如果处于中间的两个目录项的 hash 值刚好相等，那就将 split_hash 自加1
 	 */
 	if (*split_hash == sort_info[i].h_hash)
 		*split_hash += 1;
@@ -717,7 +732,9 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 	}
 	dest -= entry_len;
 
-	/* Shrink directory entries in block 1. */
+	/* Shrink directory entries in block 1. 
+		收缩块1中的目录项
+	*/
 	last = (struct ext2fs_direct_2 *)block1;
 	entry_len = 0;
 	for (offset = 0; offset < blksize - csum_size; ) {
@@ -752,7 +769,7 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 		ext2_init_dirent_tail(EXT2_DIRENT_TAIL(block1, blksize));
 		ext2_init_dirent_tail(EXT2_DIRENT_TAIL(block2, blksize));
 	}
-
+	/* 处理完后的数据都是暂存在两个 buffer 当中 */
 	return (0);
 }
 
@@ -769,6 +786,10 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	struct m_ext2fs *m_fs;
 	struct ext2fs_direct_2 *ep, *dotdot;
 	struct ext2fs_htree_root *root;
+	/*
+		info 只是一个局部变量，它可能不会保存到磁盘当中，有可能只是每次在 htree 开启的时候动态创建，
+		动作执行完成之后就被销毁 
+	*/
 	struct ext2fs_htree_lookup_info info;
 	uint32_t blksize, dirlen, split_hash;
 	uint8_t hash_version;
@@ -849,7 +870,9 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	    ext2_htree_root_limit(dp, sizeof(root->h_info)));
 
 	/*
-		设置 htree lookup info 信息
+		设置 htree lookup info 信息。info 可看到是一个局部变量，并且在磁盘结构体中并没有该字段。
+		所以，注意下面的代码逻辑是否包含对该信息的保存操作，如果没有的话，那它的生命周期就是函数执行
+		的这段时间
 	*/
 	memset(&info, 0, sizeof(info));
 	info.h_levels_num = 1;	/* 表示当前的搜索等级数组中只有一个元素 */
@@ -861,7 +884,8 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	*/
 	if (hash_version <= EXT2_HTREE_TEA)
 		hash_version += m_fs->e2fs_uhash;
-		
+	
+	/* new_entry 表示的是最新的需要创建的目录项成员 */
 	ext2_htree_split_dirblock(dp, buf1, buf2, blksize, fs->e3fs_hash_seed,
 	    hash_version, &split_hash, new_entry);
 	ext2_htree_insert_entry(&info, split_hash, 2);

@@ -1,27 +1,17 @@
-root@qemu:/tpt # cp /tmpfs/file.img ./
-TptAccess----------------------------------
-TptGetattr----------------------------------
-TptAccess----------------------------------
+root@qemu:/tpt # mkdir d15
 TptAccess----------------------------------
 TptLookupx----------------------------------
 TptLookupIno: start!
 TptIsDotEntry----------------------------------
+TptHtreeHasIdx----------------------------------
 TptLookupIno: now enter liner search mode!
 TptLookupIno: liner search loop!
+TptBmap---------------------
+TptBmapArray---------------------
 TptSearchDirBlock----------------------------------
 TptLookupIno: not found entry!
 TptAccess----------------------------------
-TptAccess----------------------------------
-TptLookupx----------------------------------
-TptLookupIno: start!
-TptIsDotEntry----------------------------------
-TptLookupIno: now enter liner search mode!
-TptLookupIno: liner search loop!
-TptSearchDirBlock----------------------------------
-TptLookupIno: not found entry!
-TptAccess----------------------------------
-TptCreate----------------------------------
-TptMakeInode----------------------------------
+TptMkdir----------------------------------
 TptValloc----------------------------------
 TptHashAlloc----------------------------------
 TptNodeAlloc----------------------------------
@@ -29,13 +19,17 @@ TptGetNiFree----------------------------------
 TptGetNiFree----------------------------------
 TptGetNiFree----------------------------------
 TptSetNiFree----------------------------------
+TptGetNDirs----------------------------------
+TptSetNDirs----------------------------------
 TptVinit----------------------------------
+TptMkdir: valloc error code is 0
 TptUpdate----------------------------------
 TptItimes----------------------------------
-TptDirEnter----------------------------------
-TptAddEntry----------------------------------
-TptOpen----------------------------------
-TptGetattr----------------------------------
+TptMkdir: tvp update end!
+TptUpdate----------------------------------
+TptItimes----------------------------------
+TptMkdir: dvp update end!
+TptMkdir: fs has TPTF_INCOMPAT_FTYPE!
 TptWrite----------------------------------
 TptBallocx----------------------------------
 TptAllocx----------------------------------
@@ -45,10 +39,152 @@ TptGetNbFree----------------------------------
 TptGetNbFree----------------------------------
 TptGetNbFree----------------------------------
 TptSetNbFree----------------------------------
-
-...
-
 TptUpdate----------------------------------
 TptItimes----------------------------------
-TptClose----------------------------------
+TptMkdir: vn_rdwr end, error code is 0
+TptMkdir: direnter start!
+TptDirEnter----------------------------------
+TptHtreeHasIdx----------------------------------
+TptHtreeHasIdx----------------------------------
+TptDirEnter: Making indexed directory----------------
+TptHtreeCreateIndex----------------------------------
+TptBmap---------------------
+TptBmapArray---------------------
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeCreateIndex: while-----1111111
+TptHtreeSetBlock----------------------------------
+TptHtreeSetCount----------------------------------
+TptHtreeRootLimit----------------------------------
+TptHtreeSetLimit----------------------------------
+TptGetHashSeed----------------------------------
+TptHtreeSplitDirblock----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptHtreeCmpSortEntry----------------------------------
+TptAppendEntry----------------------------------
+TptHtreeInsertEntry----------------------------------
+TptHtreeInsertEntryToLevel----------------------------------
+TptHtreeGetCount----------------------------------
+TptHtreeSetBlock----------------------------------
+TptHtreeSetHash----------------------------------
+TptHtreeSetCount----------------------------------
+TptHtreeAppendBlock----------------------------------
+TptWrite----------------------------------
+TptBallocx----------------------------------
+TptAllocx----------------------------------
+TptHashAlloc----------------------------------
+TptAllocg----------------------------------
+TptGetNbFree----------------------------------
+TptGetNbFree----------------------------------
+TptGetNbFree----------------------------------
+TptSetNbFree----------------------------------
+TptUpdate----------------------------------
+TptItimes----------------------------------
+TptHtreeAppendBlock----------------------------------
+TptWrite----------------------------------
+TptBallocx----------------------------------
+TptAllocx----------------------------------
+TptHashAlloc----------------------------------
+TptAllocg----------------------------------
+TptGetNbFree----------------------------------
+TptGetNbFree----------------------------------
+TptGetNbFree----------------------------------
+TptSetNbFree----------------------------------
+TptUpdate----------------------------------
+TptItimes----------------------------------
+TptMkdir: direnter error code is 0
+TptMkdir: ------------------bad status!
+TptMkdir: ------------------out status!
 TptInactive----------------------------------
+TptUpdate----------------------------------
+TptItimes----------------------------------
+
+
+(gdb) p ip
+$8 = (tpt_inode *) 0xffffffc640004000
+(gdb) p *ip
+$9 = {
+  tpti_vnode = 0xffffffd006ed6988,
+  tpti_tmp = 0xffffffd006edd900,
+  tpti_sb = 0xffffffc640000000,
+  tpti_flag = 6,
+  tpti_number = 17,
+  tpti_modrev = 571148264735,
+  tpti_count = 1632380780,
+  tpti_endoff = 0,
+  tpti_diroff = 1632380780,
+  tpti_offset = 0,
+  tpti_next_alloc_block = 0,
+  tpti_next_alloc_goal = 262666,
+  tpti_sum = 0,
+  tpti_uid = 0,
+  tpti_gid = 0,
+  tpti_mode = 16877,
+  tpti_links_count = 2,
+  tpti_blocks = 1,
+  tpti_size = 0,
+  tpti_atime = 1632380787,
+  tpti_ctime = 1632380787,
+  tpti_mtime = 1632380787,
+  tpti_dtime = 0,
+  tpti_xattr = 0,
+  tpti_generation = 822720860,
+  tpti_facl = 0,
+  tpti_flags = 0,
+  {
+    {
+      tpti_db = {262666, 0 <repeats 11 times>},
+      tpti_ib = {0, 0, 0}
+    },
+    tpti_data = {262666, 0 <repeats 14 times>}
+  }
+}
+
+
+
+
+panic: Fatal page fault at 0xffffffc0008ad1da: 0000000000000000
+cpuid = 1
+time = 1632392422
+KDB: stack backtrace:
+#0 0xffffffc0004b2f64 at kdb_backtrace+0x86
+#1 0xffffffc00043e944 at vpanic+0x20c
+#2 0xffffffc00043e734 at panic+0x32
+#3 0xffffffc00089a950 at do_trap_supervisor+0x670
+#4 0xffffffc00089a406 at do_trap_supervisor+0x126
+#5 0xffffffc000882958 at cpu_exception_handler_supervisor+0x68
+#6 0xffffffc000571746 at vop_eagain+0x1be
+#7 0xffffffc00056f4b8 at vop_stdaccessx+0x190
+#8 0xffffffc0005a2b7c at sys_funlinkat+0xc2
+#9 0xffffffc0005a33e6 at kern_statat+0x156
+#10 0xffffffc0005a324e at sys_fstatat+0x3c
+#11 0xffffffc00089b384 at do_trap_user+0xa28
+#12 0xffffffc00089ac56 at do_trap_user+0x2fa
+#13 0xffffffc00089aa98 at do_trap_user+0x13c
+#14 0xffffffc000882a22 at cpu_exception_handler_user+0x72
+Uptime: 2m13s
