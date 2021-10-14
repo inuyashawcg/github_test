@@ -87,3 +87,191 @@
     error: .: Bad file descriptor
     error: .: Not a directory
   基本上就是由于 inode 数据不正确或者缺少功能函数将 inode 数据解析并保存到对应的 vnode 当中
+
+
+////////////// 20210927 //////////////
+  buildworld 是将除了内核之外的所有的东西进行编译，编译出的文件是存放到 /usr/obj/{MACHINE_ARCH}/ 路径下。
+它们都是分散的文件，如果我们需要制作根文件系统的话要手动利用 makefs 等命令来实现，具体过程可以参考 riscv 文档
+中的操作步骤
+
+  root@root:/usr/tests # find / -name "kyua.conf" -type f
+    /usr/src/contrib/kyua/examples/kyua.conf
+    /usr/share/examples/kyua/kyua.conf
+    /var/db/etcupdate/current/etc/kyua/kyua.conf
+    /etc/kyua/kyua.conf
+
+  kyua.conf 文件其实是一个 Lua 脚本文件，里面配置的主要是一些属性信息，有的属性应该是针对全局的，比如 /etc 路径下的文件。
+有的属性是独立于不同的测试对象
+
+  ATF (Automated Testing Framework) 中提到了关于测试用例设计的基本思路，总体上来看就是包含3个部分：header、body 和 cleanup。
+header 主要是提供了一些元数据，用于描述整个测试用例的执行步骤和条件。body 就是测试用例执行的主体，它需要在满足 header 相关条件的情况
+下执行；cleanup 就是在测试完成只有做一些清理工作。在 FreeBSD 中 ATF 是一个非常独立的模块，它几乎不会对系统的运行产生影响。这也是测试
+工具设计时的一个重要考虑。
+
+  保持测试用例的头和主体之间的分离非常重要，因为头总是被解析的，而主体只有在满足头中定义的条件以及用户指定该测试用例时才会执行。测试用例
+可以用来查找代码实现中的错误，方法就是设置一个预期结果。当代码跑完之后的结果跟我们预期的不符，测试结果就会提示错误，我们就可以根据放回的
+结果来修复代码逻辑。
+
+  测试用例可以自由地将他们想要的任何内容打印到他们的标准输出（4）和标准输出（4）文件描述符中。事实上，鼓励他们在执行时打印状态信息，以让
+用户了解他们的操作。这对于长测试用例特别重要。
+
+  测试用例将把它们的结果记录到一个辅助文件中，然后由包含它们的测试程序收集。只要开发人员使用正确的API来实现测试用例，他就不需要关心这个问题
+
+  测试程序总是在运行测试用例主体之前创建一个临时目录并切换到它。通过这种方式，测试用例可以随意修改其当前目录，运行时引擎将能够稍后以安全的
+方式清理它，从系统中删除其执行的任何痕迹；如果找到装入点，将卸载文件系统（如果可能）
+
+  参考文档：
+    https://www.freebsd.org/cgi/man.cgi?query=atf-test-case&sektion=4&apropos=0&manpath=FreeBSD+13.0-RELEASE+and+Ports
+
+  从上面的表述来看，测试用例执行后不应该让操作系统产生任何变化，而仅仅是生成了一些文档。文档中要包括执行时的一些状态，这样就能让用户知道代码
+执行的步骤。因为有些测试用例返回的结果是对的，但是执行流程可能跟正常情况下完全不一样，这样做可以消除这类错误
+
+
+////////////// 20210928 //////////////
+
+  从文件系统 test suite 来看，FreeBSD 中的测试文件主要包含三个部分：
+    - /usr/src/contrib/netbsd-tests/*
+        测试用例的源文件，里边都是测试用例的逻辑实现
+
+    - /usr/src/tests/*
+        测试模块对应的 Makefile 文件，里边主要包括对源文件的修改(sed/awk 命令)和编译规则
+
+    - /usr/tests/*
+        生成的可执行文件或者 shell 脚本。.c 文件编译生成可执行二进制文件，脚本源文件编程过程则是利用 sed/awk 命令生成可执行 shell 脚本
+
+    Makefile 语句的基本格式是：
+
+      target ... : prerequisites ...
+
+        command
+        ...
+        ...
+
+      command 可以是任意 shell 命令，而不仅仅是 gcc 这些编译命令
+
+
+////////////// 20210929 //////////////
+
+Makefile 中的 .PHONY:
+  单词 phony (即 phoney)的意思是：伪造的，假的。在 Makefile 中，.PHONY 后面的 target 表示的也是一个伪造的 target, 而不是真实存在的
+文件 target，注意 Makefile 的 target 默认是文件。最常见的例子就是 .PHONY : clean，它其实就表示 clean 并不是一个真正的文件，所以在执行
+make 的时候也不会去生成 clean 文件，而是在 make clean 的时候执行 clean 后面跟的命令行
+
+  makefile 在命名时一般使用 Makefile，这样会比较显眼；也可以指定具体的 makefile 的名称，例如 Make.linux。然后在 make 命令执行的时候
+需要利用 -f / --file 参数，make -f Make.linux
+
+  make 命令执行时，首先会在当前目录下去查找文件。如果包含 -I 或者 --include-dir 参数时，则会去对应的目录下查找。或者当 <prefix>/include，
+一般是 /usr/local/bin 或 /usr/include，存在的话，也会去该路径下查找。如果还没有找到，make 也不会立即报错，而是继续载入其他的文件。当文件
+载入完成后，仍然存在无法找到或者无法读取的文件，这时就会报一个致命错误，命令停止。
+  如果你想让 make 不理那些无法读取的文件，而继续执行，你可以在 include 前加一个减号“-”。如： -include <filename>
+
+  环境变量可能会影响到 make 执行的过程。可能就是当前环境中存在一个环境变量的名称跟 Makefile 中的名称一致。
+
+  当我们想只用一个 make 命令就生成多个目标文件的时候，可以利用伪目标。具体做法就是把伪目标作为第一个目标，Makefile 会把第一个目标作为默认目标，
+默认目标总是会被执行。但是它又是一个伪目标，所以不会生成具体的文件，那它就只会将对应的命令执行完毕，例如：
+
+  all : prog1 prog2 prog3
+  .PHONY : all
+
+  prog1 : prog1.o utils.o
+  cc -o prog1 prog1.o utils.o
+
+  prog2 : prog2.o
+  cc -o prog2 prog2.o
+
+  prog3 : prog3.o sort.o utils.o
+  cc -o prog3 prog3.o sort.o utils.o
+
+all 是伪目标，所以不会生成 all 文件，执行 make 之后只会生成 prog1 prog2 prog3 三个目标文件，就实现了一口气生成多个目标文件的目标
+
+
+  $@ 表示的是一个目标的集合(多目标场景)，可以近似认为它就是一个数组，执行的时候 $@ 依次从数组中取出元素并在命令中执行。例如：
+    bigoutput littleoutput : text.g
+      generate text.g -$(subst output,,$@) > $@
+
+  $@ 表示的就是目标的集合，也就是 bigoutput 和 littleoutput。$(subst output,,$@) 其实是执行了 Makefile 中的 subst 函数，它的
+作用是将 $@ 中的 output 字符串替换成后面的参数，这里是空字符。所以，上述命令转换之后变成了两条命令：
+    bigoutput littleoutput : text.g
+      generate text.g -big > bigoutput
+      generate text.g -little > littleoutput
+
+
+  Makefile 中提供了一种静态模式用来定义多目标的规则，并且让我们的规则变得更加灵活。具体语法如下：
+    <targets ...> : <target-pattern> : <prereq-patterns ...>
+      <commands>
+      ...
+  targets：表示是一系列目标文件，可以有通配符。是目标的一个集合；
+  target-pattern：表示的是目标文件的模式，也就是目标集的模式。这也就说明该模式一次只能处理一种类型的目标文件集
+  prereq-patterns：是目标的依赖模式，它对 target-pattern 形成的模式再进行一次依赖目标的定义
+
+    objects = foo.o bar.o
+
+    all: $(objects)
+
+    $(objects): %.o: %.c
+      $(CC) -c $(CFLAGS) $< -o $@
+
+  文件中首先定义了一个变量 objects，表示我的目标文件会依赖哪些文件。% 表示匹配零或者多个字符，所以 %.o 和 %.c 表示的是匹配所有的以 .o/.c 
+为后缀的文件。CC 和 CFLAGS 是Makefile 中的特殊变量，表示的是编译器的类型和参数。$< 表示的是第一个依赖的文件，假如我们要生成的目标文件是 a.o,
+如果我们没有指定生成该文件的依赖，那它应该就默认只依赖 a.c 这一个文件，所以 $< 就表示 a.c。$@ 上面已经讲过了，就是把目标文件依次提取出来执行。
+所以上述命令就等价为：
+
+  foo.o : foo.c
+    $(CC) -c $(CFLAGS) foo.c -o foo.o
+  
+  bar.o : bar.c
+    $(CC) -c $(CFLAGS) bar.c -o bar.o
+
+  假如我们需要多种类型的目标文件集，要如何利用静态模式呢？ Makefile 提供了一种过滤模式来解决这个问题，如下：
+
+    files = foo.elc bar.o lose.o
+
+    $(filter %.o,$(files)): %.o: %.c
+      $(CC) -c $(CFLAGS) $< -o $@
+
+    $(filter %.elc,$(files)): %.elc: %.el
+      emacs -f batch-byte-compile $<
+
+  生成 files 需要依赖两种类型的中间文件(.elc / .o)。filter 函数起到的是过滤的作用，只保留 .o/.elc 类型的目标文件，这样就可以把不同类型的
+目标文件集分开来处理。
+
+  Makefile 中的变量一般都是用大写字母来表示，并且区分大小写。写的时候可以采用首字母大写的方式，这样就可以避免跟环境变量发生冲突
+  
+  Makefile 中的变量跟 shell 脚本中的变量的特性有些类似。我们可以在文件前面使用一个变量，但是在后面给它赋值。所以，FreeBSD 中 Makefile 里面
+很多 include 操作可能就会把其他文件中的变量引入到本文件的后面，所以我们在本文件中看到的一些可能还没有被赋值的变量是在后边赋值
+
+////////////// 20210930 //////////////
+  tmpfs testsuite 中的测试用例测试的项目比较少，主要集中在功能测试。tptfs 感觉是要添加一些测试用例，多大测试范围。其次还要进行性能测试，比如
+创建一下比较大的文件
+
+  gtest 在设计上是支持多线程的，所以 atf 框架要确认是否支持多线程测试。但即使不支持多线程测试，我们同样可以将测试用例划分成互不冲突的几个部分，
+每一个部分用一个线程去执行
+
+  每个源文件所在的目录下都会存在一个 CMakeList。执行 cmake . 之后，cmake 会在当前目录下安装运行 cmake 所需要的环境。cmake --build . 执行
+完成之后就会生成目标文件
+
+
+////////////// 周会记录 ////////////// 
+  链接脚本的默认行为和重写 MEMORY / PHDRS?
+
+  链接脚本对于新添加的 section 的命名也是有要求的，那就是编译器需要能够识别这些段的名称，应该是不能随意乱取的。所以一种比较稳妥的方式就是在现有
+sections 名字的基础上起新的名字，形式为 sections + group_number，例如 .data1
+
+  明确 RTTI 是运行时生成的，还是本身的信息就存储在 class 中(应该是直接存放在 class 当中的)。奇海操作系统中编译器在编译的过程中把 RTTI 信息放到
+global registry 中
+
+  RISCV CSR(Control Status Register): 控制状态寄存器，当系统由用户空间进入到内核空间的时候会用到该寄存器。但是奇海系统已经不再区分用户空间和
+内核空间，所以该寄存器可能就不会被用到。刘强将原来需要使用 tp 寄存器的传递的数据改成了使用 CSR
+
+  操作系统函数对应的堆栈空间很小，但是用户程序可能会用的比较多。所以当用户线程变成内核线程之后可能造成堆栈溢出的错误
+
+  每个线程数据对应的初始值不能因为线程的运行而被改变，否则下一次再启动的时候，线程的初始状态就会被改变，可能会出现一些意想不到的错误。所以，这些数据
+都是要放在 TLS 当中不能改变。线程搭建起来的时候，就把这些需要用到的数据抄写到 4GB 地址空间中
+
+  操作系统中其实并不存在进程切换，而仅仅存在线程切换。进程的作用是来管理资源，而 CPU 运行的操作对象是线程。所谓的进程切换是指A进程的子线程切换到B进程
+的子线程，同时进程指向资源数据的指针也随之发生变化
+
+  许多用户程序依赖的库文件中也会包含有自己的变量，这些变量是全局的，所以编译器在编译的时候会把这些数据放到 .data 段或者 .bss 段。多线程运行时每个线程
+可能都要访问该库中的某个变量进行读写操作。如果我们不对这些变量做特殊处理，它们的值在第一个访问进程执行后会被改变。但下一个线程在访问时，库已经不是初始
+状态了，这样该进程的执行肯定会出现错误。目前库会包含一个 thread safe 版本，专门用来处理多线程同时访问的情况
+  奇海中的处理方法是将库链接到线程的 TLS 当中，其实就是将变量编译到了 .tbss/.dtata 段当中，这样每个线程都会保存有一份自己的数据，这样就不会相互干扰

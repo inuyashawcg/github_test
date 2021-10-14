@@ -131,7 +131,7 @@ struct vnode {
 	struct	vop_vector *v_op;		/* u vnode operations vector 操作集合 */
 
 	/*
-		vnode 有一个对应的私有数据的指针，v_data成员可能就是指向的这个设备
+		vnode 有一个对应的私有数据的指针，v_data 成员可能就是指向的这个设备
 	*/
 	void	*v_data;			/* u private data for fs */
 
@@ -285,15 +285,15 @@ struct xvnode {
 #define	VV_ISTTY	0x0002	/* vnode represents a tty */
 #define	VV_NOSYNC	0x0004	/* unlinked, stop syncing */
 #define	VV_ETERNALDEV	0x0008	/* device that is never destroyed */
-#define	VV_CACHEDLABEL	0x0010	/* Vnode has valid cached MAC label */
+#define	VV_CACHEDLABEL	0x0010	/* Vnode has valid cached MAC label Vnode具有有效的缓存MAC标签 */
 #define	VV_TEXT		0x0020	/* vnode is a pure text prototype vnode是一个纯文本类型 */
 #define	VV_COPYONWRITE	0x0040	/* vnode is doing copy-on-write */
 #define	VV_SYSTEM	0x0080	/* vnode being used by kernel */
-#define	VV_PROCDEP	0x0100	/* vnode is process dependent */
-#define	VV_NOKNOTE	0x0200	/* don't activate knotes on this vnode */
+#define	VV_PROCDEP	0x0100	/* vnode is process dependent vnode依赖于进程 */
+#define	VV_NOKNOTE	0x0200	/* don't activate knotes on this vnode 不要激活该 vnode 上的 knotes*/
 #define	VV_DELETED	0x0400	/* should be removed */
-#define	VV_MD		0x0800	/* vnode backs the md device */
-#define	VV_FORCEINSMQ	0x1000	/* force the insmntque to succeed */
+#define	VV_MD		0x0800	/* vnode backs the md device vnode支持md设备 */
+#define	VV_FORCEINSMQ	0x1000	/* force the insmntque to succeed 迫使督察成功 */
 #define	VV_READLINK	0x2000	/* fdescfs linux vnode */
 
 #define	VMP_TMPMNTFREELIST	0x0001	/* Vnode is on mnt's tmp free list */

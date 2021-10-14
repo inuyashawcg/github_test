@@ -92,7 +92,10 @@ TptNodeAlloc() 函数中对于 TPT_INODE_UNINIT 情况暂时未处理
 TptMakeDir 函数中 tail 和 checksum 的处理
 
 //////////////
-之前调试中遇到的一些锁操作有可能是一致过程中代码错误导致的
+之前调试中遇到的一些锁操作有可能是一些过程中代码错误导致的
 
 //////////////
 htree 中的 malloc 处理，尤其是 TptHtreeAddEntry 函数，比较复杂
+
+//////////////
+TptGetPages 手动修改数据页属性

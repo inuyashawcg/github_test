@@ -1,0 +1,166 @@
+////////////// 20211008 //////////////
+Linux 进程：
+  进程切换只发生在内核态。在执行进程切换之前，用户态进程所使用的所有寄存器的内容都已经保存到了内核堆栈上，这也包括
+ss 和 esp 这对寄存器的内容(存储用户态堆栈指针的地址)
+
+  进程和线程的理解可以参考：
+    https://my.oschina.net/cnyinlinux/blog/422207
+    https://blog.csdn.net/haopeng123321/article/details/54880125
+
+  linux 中貌似只有内核线程的概念，不存在所谓的内核进程。一般讨论的时候是分成3个概念：内核线程、用户线程和用户进程。
+注意没有内核进程。linux 的实现中其实是不区分进程和线程的，都是以 struct task 结构体来表示，通过它们地址空间的属性
+来区分到底是哪种类型。
+  内核线程只存在于内核地址空间，不包括用户地址空间。用户进程既包含内核地址空间，也包含用户地址空间(因为用户进程需要调度
+或者进行文件IO时，都是需要进入到内核态的)。用户线程应该就是只存在与用户地址空间当中。
+
+  对于独立地址空间的理解：
+    以用户进程为例。比如说当前有两个应用程序，一个邮件，一个视频播放器，我们就需要创建两个进程将它们运行起来，正常情况下
+  视频播放器肯定不会用到邮件中的数据，它们其实就是两个独立的实体。播放器运行时堆栈、寄存器等等一些信息在操作系统切换到邮件
+  进程时，肯定是要保存起来的，否则系统无法恢复播放器在进程切换之前所处的状态。这些信息存储到哪里呢，一部分是存放到内核堆栈
+  当中，有的系统架构可能还会专门添加一个段来保存这些信息，比如 TSS 段；
+
+    同一个进程下线程则是共享地址空间。比如一个文本编辑器，我们要调整文字的大小并且修改文字的颜色，假设这两个操作是通过两个
+  线程来实现，文字数据保存在进程地址空间的某个区域当中。调整文字大小的线程操作的数据跟修改颜色操作的数据其实是同一块区域，
+  它们所做的操作仅仅是修改了文字的不同的属性信息。这样的话就完全没有必要像进程管理那样把这块数据独立到两个线程当中不同地址
+  空间，它们只需要访问进程中的同一个地址的数据即可。也就是说不管哪个线程，只要是修改这些文字的属性信息，它们都是访问同一个
+  地址空间中的数据，这就是线程地址共享。
+
+    每个线程可能有自己独有的一些数据，当我们进行线程切换的时候，也需要像进程那样把这些数据进行恢复。基于上述需求，操作系统
+  提供了线程本地存储机制(Thread Local Storage, TLS)。它会增加一个数据段来保存每个线程自己独有的信息，当线程进行调度时
+  解析整个数据段，将线程的状态恢复
+
+
+////////////// 20211009 //////////////
+
+  root@qemu:/usr/tests/sys/fs/tptfs # kyua test mkdir_test 
+      mkdir_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.093s]
+
+      Results file id is usr_tests_sys_fs_tptfs.20211009-081806-359012
+      Results saved to /root/.kyua/store/results.usr_tests_sys_fs_tptfs.20211009-081806-359012.db
+
+      0/1 passed (1 failed)
+  shell 脚本代码中出现了一个逻辑错误，stat -s ${Mount_Point} 命令执行之前，不能将原有的文件删除。可能是由这个原因引起
+  的错误
+
+
+  root@qemu:/usr/tests/sys/fs/tptfs # kyua test exec_test 
+    exec_test:basic  ->  failed: New binary file does not match original  [2.760s]
+
+    Results file id is usr_tests_sys_fs_tptfs.20211009-081925-381947
+    Results saved to /root/.kyua/store/results.usr_tests_sys_fs_tptfs.20211009-081925-381947.db
+
+    0/1 passed (1 failed)
+
+
+  root@qemu:/tpt # cp /bin/cp .
+    root@qemu:/tpt # ls
+    cp
+    root@qemu:/tpt # md5 cp
+    MD5 (cp) = d15e43a249ee0be9a05fff1ff3739c75
+    root@qemu:/tpt # md5 /bin/cp
+    MD5 (/bin/cp) = 9c838a2caac978c10be39d115b5cc7d3
+    root@qemu:/tpt # md5 cp | cut -d ' ' -f 4)
+    Too many )'s.
+    root@qemu:/tpt # md5 cp | cut -d ' ' -f 4 
+    d15e43a249ee0be9a05fff1ff3739c75
+    root@qemu:/tpt # md5 /bin/cp | cut -d ' ' -f 4
+    9c838a2caac978c10be39d115b5cc7d3
+    root@qemu:/tpt # file cp
+    cp: data
+    root@qemu:/tpt # file /bin/cp
+    /bin/cp: ELF 64-bit LSB executable, UCB RISC-V, version 1 (SYSV), dynamically linked, interpreter /libexec/ld-elf.so.1, 
+             for FreeBSD 13.0 (1300123), FreeBSD-style, stripped
+
+  从命令执行的结果可以看到，MD5 命令的输出值已经发生了改变，而且文件的属性也发生了变化，说明对于可执行文件的拷贝有错误
+
+  file 命令主要调用的是 read 函数，可执行文件目前还是 elf 类型，也就是说 elf header 数据读取都有问题
+
+
+////////////// 20211013 //////////////
+  tmpfs 对于只执行文件的拷贝也是遇到了同样的问题。挂载 tmpfs 到 /tmpfs 目录，执行 cp /bin/cp /tmpfs，然后执行 file 命令的时候
+也是提示 cp 的文件信息是可以正确读取的；如果我们自己编译生成一个可执行文件拷贝到 /tmpfs 中的话，并不能识别文件类型，只有将源文件在当前
+路径下编译，重新生成一个可执行文件的时候，才能正确解析
+
+  root@qemu:~ # mount -t tmpfs tmpfs /tmpfs
+    root@qemu:~ # ls
+    .cshrc          .k5login        .login          .shrc
+    .history        .kyua           .profile        workspace
+    root@qemu:~ # cd /tmpfs
+    root@qemu:/tmpfs # ls
+    root@qemu:/tmpfs # df -a
+    Filesystem 1K-blocks    Used   Avail Capacity  Mounted on
+    /dev/vtbd0  10143484 2912552 6419456    31%    /
+    devfs              1       1       0   100%    /dev
+    tmpfs        1904356       4 1904352     0%    /tmpfs
+    root@qemu:/tmpfs # cp /bin/cp ./
+    root@qemu:/tmpfs # file cp
+    cp: ELF 64-bit LSB executable, UCB RISC-V, version 1 (SYSV), dynamically linked, interpreter /libexec/ld-elf.so.1, 
+        for FreeBSD 13.0 (1300123), FreeBSD-style, stripped
+    root@qemu:/tmpfs # cp /a.out ./
+    root@qemu:/tmpfs # file a.out 
+    a.out: data
+    root@qemu:/tmpfs # cp /hello.c ./
+    root@qemu:/tmpfs # clang hello.c -o a.out
+    root@qemu:/tmpfs # file a.out 
+    a.out: ELF 64-bit LSB executable, UCB RISC-V, version 1 (SYSV), dynamically linked, interpreter /libexec/ld-elf.so.1, 
+          for FreeBSD 13.0 (1300123), FreeBSD-style, with debug_info, not stripped
+  
+  UNIX 系统为了减少对磁盘的读写次数，采用了文件缓存机制。当我们对文件进行读写的时候，首先会将数据放到内存当中，然后利用系统的数据同步机制将数据
+写入磁盘。但是这样会导致一个问题，当我们还未将数据同步的时候系统突然崩溃，或者时间太久导致缓存积累过多。linux 中为用户提供了常用的三个函数来实现
+文件数据直接同步到磁盘：sync、fsync 和 fdatasync。
+  sync 是将所有的文件缓存同步到磁盘当中
+  fsync 仅仅是将对应于某个文件描述符的文件的缓存数据同步到磁盘当中
+  fdatasync 只是同步文件数据，不同步 metadata
+
+
+////////////// 20211013 //////////////
+
+  #0  panic (fmt=0xffffffc00091ee6e "Fatal page fault at %#lx: %#016lx")
+      at /usr/home/wcg/qihai/sys/kern/kern_shutdown.c:842
+  #1  0xffffffc000895224 in page_fault_handler (frame=0xffffffc000fee4f0, usermode=0)
+      at /usr/home/wcg/qihai/sys/riscv/riscv/trap.c:265
+  #2  0xffffffc000894cda in do_trap_supervisor (frame=0xffffffc000fee4f0)
+      at /usr/home/wcg/qihai/sys/riscv/riscv/trap.c:302
+  #3  <signal handler called>
+  #4  0xffffffc0004db128 in propagate_unlock_ts (top=0xffffffd00135c300, ts=0x0)
+      at /usr/home/wcg/qihai/sys/kern/subr_turnstile.c:184
+  #5  0xffffffc0004d84f4 in propagate_priority (td=0xffffffc09c465080)
+      at /usr/home/wcg/qihai/sys/kern/subr_turnstile.c:302
+  #6  0xffffffc0004d9e52 in turnstile_wait (ts=0xffffffd00135c300, owner=0xffffffc09c465080, queue=0)
+      at /usr/home/wcg/qihai/sys/kern/subr_turnstile.c:808
+  #7  0xffffffc000406a4c in __mtx_lock_sleep (c=0xffffffd006eacc28, v=18446743801453498497)
+      at /usr/home/wcg/qihai/sys/kern/kern_mutex.c:664
+  #8  0xffffffc000590d90 in __mnt_vnode_next_all (mvp=0xffffffc000fee918, mp=0xffffffc0671de080)
+      at /usr/home/wcg/qihai/sys/kern/vfs_subr.c:6569
+  #9  0xffffffc0008a6cce in TptfsMount::TptSync (mp=0xffffffc0671de080, waitfor=3)
+      at /usr/home/wcg/qihai/sys/fs/tptfs/tptfs_mount.cpp:557
+  #10 0xffffffc00059cc6c in sync_fsync (ap=0xffffffc000fee9d0) at /usr/home/wcg/qihai/sys/kern/vfs_subr.c:5078
+  #11 0xffffffc000590522 in VOP_FSYNC (vp=0xffffffd006e5e988, waitfor=3, td=0xffffffc04eff2600)
+      at ./vnode_if.h:771
+  #12 0xffffffc00059ae12 in sync_vnode (slp=0xffffffd002912cb0, bo=0xffffffc000feebb8, td=0xffffffc04eff2600)
+      at /usr/home/wcg/qihai/sys/kern/vfs_subr.c:2583
+  #13 0xffffffc00059a792 in sched_sync () at /usr/home/wcg/qihai/sys/kern/vfs_subr.c:2685
+  #14 0xffffffc0003d23c8 in fork_exit (callout=0xffffffc00059a32a <sched_sync>, arg=0x0, 
+      frame=0xffffffc000feec50) at /usr/home/wcg/qihai/sys/kern/kern_fork.c:1069
+  #15 0xffffffc00089490e in fork_trampoline () at /usr/home/wcg/qihai/sys/riscv/riscv/swtch.S:385
+
+  添加 TptPutPages 函数的时候出现的问题。看一下好像是锁操作出现的问题，看了代码也完全没有头绪，不知道错误出现在了什么地方。这个时候
+要做一个检查，就是每个 lock 函数或者宏是不是有对应的 unlock 函数或者宏定义(一定要对照 base 代码好好检查)。上面的错误就是 TptPutPages
+函数中的 lock 操作忘记解锁产生的
+
+  TptPutPages 是参考 smbfs_putpages 函数编写的，TptGetPages 函数是根据 vfs_bio_getpages 函数编写的。本来以为内存文件系统的数据
+只存在于持久化内存文件系统区域，其实并不是的。这两个函数初步分析是在用户进程的内核和用户地址空间的数据拷贝(个人理解，仅供参考)，也是用到了
+文件系统中的数据 (感觉数据应该是被拷贝到了进程堆栈当中)
+
+  TptPutPages 函数是将 vm_page 中存放的数据借助文件系统的 write 函数同步到文件；TptGetPages 的过程正好相反，它是将文件中的数据通过
+read 函数拷贝到 vm_page 当中，只不过 tptfs 中可以直接访问内存页，不需要像磁盘文件系统那样调用 bread 等函数，所以这里省略了 TptRead 
+操作。否则还要创建一个新的 uio，相当于是多进行了一个数据拷贝，没有必要。TptPutPages 则是借助了 bio 中定义的全局量 unmapped_buf 来实现
+数据传输。个人理解是 unmapped_buf 对于所有的文件系统都是可用的，只要是 putpages 操作，vm_page 中的数据都是存放在其中的，我们只需进行
+一次简单的数据拷贝即可，所以 TptPutPages 也就直接参考了 smbfs_putpages 的实现过程。
+
+  TptGetPages 在执行 vm_page_all_valid 函数(检查内存页是否可用)的时候出现错误，导致其一致处于 redo 状态，即重新读取页数据。但是函数
+的实现逻辑是已经把数据进行了拷贝，所以可能是原有的实现逻辑中的某一步将 flag 进行了设置，tptfs 由于修改了数据读取逻辑可能使得该步骤没有执行，
+所以手动修改了每个数据页的属性。目前还不知道会不会有什么影响，调试正常。后续会持续关注 
+
+
+
