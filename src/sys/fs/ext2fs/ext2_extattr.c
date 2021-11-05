@@ -48,6 +48,7 @@
 #include <fs/ext2fs/ext2_extattr.h>
 #include <fs/ext2fs/ext2_extern.h>
 
+/* ext2 扩展属性命名空间转换成 bsd 格式 */
 static int
 ext2_extattr_attrnamespace_to_bsd(int attrnamespace)
 {
@@ -69,6 +70,7 @@ ext2_extattr_attrnamespace_to_bsd(int attrnamespace)
 	return (EXTATTR_NAMESPACE_EMPTY);
 }
 
+/* ext2 扩展属性命名转换成 bsd 格式 */
 static const char *
 ext2_extattr_name_to_bsd(int attrnamespace, const char *name, int* name_len)
 {
@@ -96,6 +98,7 @@ ext2_extattr_name_to_bsd(int attrnamespace, const char *name, int* name_len)
 	return (NULL);
 }
 
+/* ext2 扩展属性命名空间转换成 linux 格式 */
 static int
 ext2_extattr_attrnamespace_to_linux(int attrnamespace, const char *name)
 {
@@ -123,6 +126,7 @@ ext2_extattr_attrnamespace_to_linux(int attrnamespace, const char *name)
 	return (-1);
 }
 
+/* ext2 扩展属性命名转换成 linux 格式 */
 static const char *
 ext2_extattr_name_to_linux(int attrnamespace, const char *name)
 {
@@ -134,6 +138,7 @@ ext2_extattr_name_to_linux(int attrnamespace, const char *name)
 		return (name);
 }
 
+/* 判断扩展属性名称是否有效 */
 int
 ext2_extattr_valid_attrname(int attrnamespace, const char *attrname)
 {
@@ -149,6 +154,11 @@ ext2_extattr_valid_attrname(int attrnamespace, const char *attrname)
 	return (0);
 }
 
+/* 
+	遍历文件的所有扩展属性。从实际调用情况来看，end 指向的是 buf 的末尾位置。
+	这个函数应该就是判断扩展属性是不是超过了一个块的空间。ext 应该是规定最多
+	占用一个数据块
+*/
 static int
 ext2_extattr_check(struct ext2fs_extattr_entry *entry, char *end)
 {
@@ -165,6 +175,10 @@ ext2_extattr_check(struct ext2fs_extattr_entry *entry, char *end)
 	return (0);
 }
 
+/* 
+	获取文件扩展属性对应的磁盘块。这里需要注意 bp 是从上级函数传递过来的，对应到 tptfs 中要注意
+	buf 的释放过程是否被遗漏
+*/
 static int
 ext2_extattr_block_check(struct inode *ip, struct buf *bp)
 {
@@ -178,6 +192,7 @@ ext2_extattr_block_check(struct inode *ip, struct buf *bp)
 	if (error)
 		return (error);
 
+	/* tptfs 中不再包含 checksum 计算，该步骤可以省略 */
 	return (ext2_extattr_blk_csum_verify(ip, bp));
 }
 
@@ -195,6 +210,7 @@ ext2_extattr_inode_list(struct inode *ip, int attrnamespace,
 
 	fs = ip->i_e2fs;
 
+	/* 读取 inode 所在的磁盘块数据 */
 	if ((error = bread(ip->i_devvp,
 	    fsbtodb(fs, ino_to_fsba(fs, ip->i_number)),
 	    (int)fs->e2fs_bsize, NOCRED, &bp)) != 0) {
@@ -202,6 +218,7 @@ ext2_extattr_inode_list(struct inode *ip, int attrnamespace,
 		return (error);
 	}
 
+	/* 获取指定 inode 结构体数据 */
 	struct ext2fs_dinode *dinode = (struct ext2fs_dinode *)
 	    ((char *)bp->b_data +
 	    EXT2_INODE_SIZE(fs) * ino_to_fsbo(fs, ip->i_number));
@@ -255,6 +272,10 @@ ext2_extattr_inode_list(struct inode *ip, int attrnamespace,
 	return (error);
 }
 
+/*
+	函数参数中只有一个 attrnamespace 参数，并没有给具体的属性名称。然后函数中包含了一个 for 循环。
+	所以，该函数的作用应该就是将某一 namespace 下的所有属性都找出来
+*/
 int
 ext2_extattr_block_list(struct inode *ip, int attrnamespace,
     struct uio *uio, size_t *size)
@@ -276,13 +297,19 @@ ext2_extattr_block_list(struct inode *ip, int attrnamespace,
 		return (error);
 	}
 
-	/* Check attributes magic value */
+	/* 
+		Check attributes magic value 
+		magic 貌似是可以自定义的，不用非要按照 ext2 的指定的值。h_blocks 表示的应该是扩展属性
+		所占用的磁盘块的数量，对应到 tptfs 中表示的就是占用的内存页的数量，从目前的设计来看，该成员
+		的值始终是1
+	*/
 	header = EXT2_HDR(bp);
 	if (header->h_magic != EXTATTR_MAGIC || header->h_blocks != 1) {
 		brelse(bp);
 		return (EINVAL);
 	}
 
+	/* 判断文件的扩展属性占用的空间是否超过了一个数据页的大小 */
 	error = ext2_extattr_block_check(ip, bp);
 	if (error) {
 		brelse(bp);
@@ -291,11 +318,16 @@ ext2_extattr_block_list(struct inode *ip, int attrnamespace,
 
 	for (entry = EXT2_FIRST_ENTRY(bp); !EXT2_IS_LAST_ENTRY(entry);
 	    entry = EXT2_EXTATTR_NEXT(entry)) {
+		/* 首先判断 namespace 是否匹配 */
 		if (ext2_extattr_attrnamespace_to_bsd(entry->e_name_index) !=
 		    attrnamespace)
 			continue;
 
 		name_len = entry->e_name_len;
+		/*
+			通过 name_index 判断属性的类型，因为有的属性是默认的属性，它的名称是固定的，返回的 name 字符串也是一个
+			全局字符串，而不是 entry->e_name 字段中存放的字符串
+		*/
 		attr_name = ext2_extattr_name_to_bsd(entry->e_name_index,
 		    entry->e_name, &name_len);
 		if (!attr_name) {
@@ -303,6 +335,11 @@ ext2_extattr_block_list(struct inode *ip, int attrnamespace,
 			return (ENOTSUP);
 		}
 
+		/*
+			下面的代码逻辑涉及到了 uiomove，所以这个函数很可能是用户通过 lsattr 等命令获取文件扩展属性时会调用
+			到的底层内核函数，通过 uio 将数据发送到用户空间。size 其实是上层函数传递下来的一个指针，应该是用来
+			表示获取到的文件扩展属性的大小是多少
+		*/
 		if (size != NULL)
 			*size += name_len + 1;
 
@@ -315,7 +352,7 @@ ext2_extattr_block_list(struct inode *ip, int attrnamespace,
 			if (error)
 				break;
 		}
-	}
+	}	// end for
 
 	brelse(bp);
 
@@ -396,6 +433,10 @@ ext2_extattr_inode_get(struct inode *ip, int attrnamespace,
 	return (ENOATTR);
 }
 
+/*
+	这个函数跟上面 block_list 函数的区别就在于多了一个 name，猜测是通过 namespace 和 name
+	定位某一个扩展属性 entry
+*/
 int
 ext2_extattr_block_get(struct inode *ip, int attrnamespace,
     const char *name, struct uio *uio, size_t *size)
@@ -444,6 +485,7 @@ ext2_extattr_block_get(struct inode *ip, int attrnamespace,
 			return (ENOTSUP);
 		}
 
+		/* 跟 block_list 函数最重要的区别就在这个地方，多了一个 name 比较 */
 		if (strlen(name) == name_len &&
 		    0 == strncmp(attr_name, name, name_len)) {
 			if (size != NULL)
@@ -460,9 +502,14 @@ ext2_extattr_block_get(struct inode *ip, int attrnamespace,
 
 	brelse(bp);
 
+	/* 如果没有找到对应属性的话，就返回 ENOATTR */
 	return (ENOATTR);
 }
 
+/*
+	扩展属性其实就类似于map，一个属性名对应一个属性值。从上级函数调用的情况来看，off 表示的是 buffer 的起始位置，
+	end 表示的是 buffer 的末尾位置。entry 表示的是需要被处理的属性 entry
+*/
 static uint16_t
 ext2_extattr_delete_value(char *off,
     struct ext2fs_extattr_entry *first_entry,
@@ -471,8 +518,13 @@ ext2_extattr_delete_value(char *off,
 	uint16_t min_offs;
 	struct ext2fs_extattr_entry *next;
 
+	/* min_offs 表示的是整个数据页的大小 */
 	min_offs = end - off;
 	next = first_entry;
+
+	/*
+		while 循环结束后，min_offs 表示的就是 offset 最小的 attr value 所在的位置
+	*/
 	while (!EXT2_IS_LAST_ENTRY(next)) {
 		if (min_offs > next->e_value_offs && next->e_value_offs > 0)
 			min_offs = next->e_value_offs;
@@ -480,9 +532,20 @@ ext2_extattr_delete_value(char *off,
 		next = EXT2_EXTATTR_NEXT(next);
 	}
 
+	/*
+		如果该属性对应的 value 是 0，则直接返回最小 value offset
+	*/
 	if (entry->e_value_size == 0)
 		return (min_offs);
 
+	/*
+		从这里可以看出，EXT2_EXTATTR_SIZE 宏是对 attr value 进行字节对齐处理。应该就是之前分析的那样，
+		四字节对齐。下面的操作其实就是数据的整体偏移。假设最小 value 偏移是 5，我们所要找的 entry 对应的
+		value 偏移是 7，长度是 1，那将该属性删除之后的结果就是最小偏移变成了 6，原来 7-8 之间的数据被覆盖
+		掉了。
+		下面的操作就是把原来 5-7 的数据搬移到了 6-8 的位置。然后原来比 entry value offset 小的偏移量需要
+		进行更新，因为数据搬移了。而比它大的哪些value的偏移则是不需要进行变动的。然后更新一下 min_offs
+	*/
 	memmove(off + min_offs + EXT2_EXTATTR_SIZE(entry->e_value_size),
 	    off + min_offs, entry->e_value_offs - min_offs);
 
@@ -503,6 +566,12 @@ ext2_extattr_delete_value(char *off,
 	return (min_offs);
 }
 
+/*
+	off：buffer 的起始位置
+	first_entry：表示的就是读取到的属性块中的第一个 entry
+	entry：表示的是我们找到的那个需要被删除掉的 entry
+	end：表示 buffer 末尾的位置
+*/
 static void
 ext2_extattr_delete_entry(char *off,
     struct ext2fs_extattr_entry *first_entry,
@@ -514,11 +583,18 @@ ext2_extattr_delete_entry(char *off,
 	/* Clean entry value */
 	ext2_extattr_delete_value(off, first_entry, entry, end);
 
-	/* Clean the entry */
+	/* Clean the entry 
+		上面把 entry 对应的 value 删除了，然后开始删除 entry 本身。经过 while 循环的处理之后，entry 应该是
+		已经到了最后的位置。
+	*/
 	next = first_entry;
 	while (!EXT2_IS_LAST_ENTRY(next))
 		next = EXT2_EXTATTR_NEXT(next);
 
+	/* 
+		pad 的作用感觉还是对数据进行对齐，所用的宏跟 value 操作是一样的，所以应该还是4字节对齐。但是在 tptfs 中
+		所有的 entry 都已经被设计成了256个字节，所以这个步骤可以直接省去
+	*/
 	pad = (char*)next + sizeof(uint32_t);
 
 	memmove(entry, (char *)entry + EXT2_EXTATTR_LEN(entry->e_name_len),
@@ -616,6 +692,10 @@ ext2_extattr_inode_delete(struct inode *ip, int attrnamespace, const char *name)
 	return (ENOATTR);
 }
 
+/*
+	当多个文件共享一个数据块属性、此时其中一个文件需要修改属性的时候，我们就需要 clone 出
+	一个副本，否则所有关联文件的属性都会被改变
+*/
 static int
 ext2_extattr_block_clone(struct inode *ip, struct buf **bpp)
 {
@@ -632,6 +712,7 @@ ext2_extattr_block_clone(struct inode *ip, struct buf **bpp)
 	if (header->h_magic != EXTATTR_MAGIC || header->h_refcount == 1)
 		return (EINVAL);
 
+	/* 给当前文件重新分配一个扩展属性数据块 */
 	facl = ext2_alloc_meta(ip);
 	if (!facl)
 		return (ENOSPC);
@@ -657,6 +738,9 @@ ext2_extattr_block_clone(struct inode *ip, struct buf **bpp)
 	return (0);
 }
 
+/*
+	从 extattr 数据块中删除掉一个 entry，通过 name 和 namespace 定位
+*/
 int
 ext2_extattr_block_delete(struct inode *ip, int attrnamespace, const char *name)
 {
@@ -689,9 +773,16 @@ ext2_extattr_block_delete(struct inode *ip, int attrnamespace, const char *name)
 		brelse(bp);
 		return (error);
 	}
-
+	/*
+		貌似是只要操作扩展属性所在的数据块，就要执行上述这些代码逻辑。因为这个函数的功能是要删除掉数据块中的属性 entry，
+		但是可能会出现的情况就是有多个文件共享这一个数据块属性。那么我们就要像创建影子对象那样克隆出一个对象给没有修改
+		扩展属性的文件来使用。应该是要重新分配一个数据块
+	*/
 	if (header->h_refcount > 1) {
 		error = ext2_extattr_block_clone(ip, &bp);
+		/*
+			此时 bp 已经是指向克隆出的新的扩展属性数据块，所以后续的修改都是基于新的数据块来实现的
+		*/
 		if (error) {
 			brelse(bp);
 			return (error);
@@ -712,6 +803,7 @@ ext2_extattr_block_delete(struct inode *ip, int attrnamespace, const char *name)
 			return (ENOTSUP);
 		}
 
+		/* strncmp 返回 0 表示两个字符串一致 */
 		if (strlen(name) == name_len &&
 		    0 == strncmp(attr_name, name, name_len)) {
 			ip->i_blocks -= btodb(fs->e2fs_bsize);
@@ -722,7 +814,7 @@ ext2_extattr_block_delete(struct inode *ip, int attrnamespace, const char *name)
 			brelse(bp);
 			return (error);
 		}
-	}
+	}	// end if
 
 	for (entry = EXT2_FIRST_ENTRY(bp); !EXT2_IS_LAST_ENTRY(entry);
 	    entry = EXT2_EXTATTR_NEXT(entry)) {
@@ -785,6 +877,10 @@ free_entry(struct ext2fs_extattr_entry *entry)
 	free(entry, M_TEMP);
 }
 
+/*
+	从函数调用情况来看，new_size 传入的参数是 uio_resid，也就是说这个函数应该是将用户程序发送过来的设置
+	属性的数据添加到数据块中对应的位置，然后计算这些数据总量是否已经超过整个数据块的大小
+*/
 static int
 ext2_extattr_get_size(struct ext2fs_extattr_entry *first_entry,
     struct ext2fs_extattr_entry *exist_entry, int header_size,
@@ -801,6 +897,9 @@ ext2_extattr_get_size(struct ext2fs_extattr_entry *first_entry,
 		size += EXT2_EXTATTR_SIZE(new_size);
 	}
 
+	/*
+		for 循环把所有的扩展属性 entry 和 value 的长度全部加到 size 当中
+	*/
 	if (first_entry)
 		for (entry = first_entry; !EXT2_IS_LAST_ENTRY(entry);
 		    entry = EXT2_EXTATTR_NEXT(entry)) {
@@ -815,6 +914,9 @@ ext2_extattr_get_size(struct ext2fs_extattr_entry *first_entry,
 	return (size);
 }
 
+/*
+	该函数应该就是对于已经存在的文件扩展属性值进行进一步设置
+*/
 static void
 ext2_extattr_set_exist_entry(char *off,
     struct ext2fs_extattr_entry *first_entry,
@@ -835,6 +937,9 @@ ext2_extattr_set_exist_entry(char *off,
 	uiomove(off + entry->e_value_offs, entry->e_value_size, uio);
 }
 
+/*
+	设置一个新添加的属性 entry
+*/
 static struct ext2fs_extattr_entry *
 ext2_extattr_set_new_entry(char *off, struct ext2fs_extattr_entry *first_entry,
     const char *name, int attrnamespace, char *end, struct uio *uio)
@@ -848,6 +953,7 @@ ext2_extattr_set_new_entry(char *off, struct ext2fs_extattr_entry *first_entry,
 	/* Find pad's */
 	min_offs = end - off;
 	entry = first_entry;
+	/* while 循环用于获取最小的 value offset */
 	while (!EXT2_IS_LAST_ENTRY(entry)) {
 		if (min_offs > entry->e_value_offs && entry->e_value_offs > 0)
 			min_offs = entry->e_value_offs;
@@ -857,7 +963,10 @@ ext2_extattr_set_new_entry(char *off, struct ext2fs_extattr_entry *first_entry,
 
 	pad = (char*)entry + sizeof(uint32_t);
 
-	/* Find entry insert position */
+	/* Find entry insert position 
+		通过比较 name 来确定 entry 插入的位置。ext 文件系统的名称信息是通过 name 字符串比较来确定的，
+		而 value 则是根据插入的时间前后进行排序的
+	*/
 	name_len = strlen(name);
 	entry = first_entry;
 	while (!EXT2_IS_LAST_ENTRY(entry)) {
@@ -1198,6 +1307,9 @@ ext2_extattr_block_set(struct inode *ip, int attrnamespace,
 	return (bwrite(bp));
 }
 
+/*
+	释放掉扩展属性所占用的数据块
+*/
 int ext2_extattr_free(struct inode *ip)
 {
 	struct m_ext2fs *fs;

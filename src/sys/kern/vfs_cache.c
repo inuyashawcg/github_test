@@ -106,9 +106,9 @@ struct	namecache {
 	LIST_ENTRY(namecache) nc_hash;	/* hash chain */
 	LIST_ENTRY(namecache) nc_src;	/* source vnode list */
 	TAILQ_ENTRY(namecache) nc_dst;	/* destination vnode list 指向目标位置 */
-	struct	vnode *nc_dvp;		/* vnode of parent of name */
+	struct	vnode *nc_dvp;		/* vnode of parent of name 表示的是目标文件所在目录对应的 vnode */
 	union {
-		struct	vnode *nu_vp;	/* vnode the name refers to */
+		struct	vnode *nu_vp;	/* vnode the name refers to 目标文件对应的vnode */
 		u_int	nu_neghits;	/* negative entry hits */
 	} n_un;
 	u_char	nc_flag;		/* flag bits */
@@ -118,7 +118,7 @@ struct	namecache {
 
 /*
  * struct namecache_ts repeats struct namecache layout up to the
- * nc_nlen member. 就是namecache + times
+ * nc_nlen member. 就是 namecache + times
  * struct namecache_ts is used in place of struct namecache when time(s) need
  * to be stored.  The nc_dotdottime field is used when a cache entry is mapping
  * both a non-dotdot directory name plus dotdot for the directory's
@@ -136,6 +136,7 @@ struct	namecache_ts {
 
 /*
  * Flags in namecache.nc_flag
+ * NCF: name cache flags
  */
 #define NCF_WHITE	0x01
 #define NCF_ISDOTDOT	0x02
@@ -154,11 +155,12 @@ struct	namecache_ts {
  * obtained from (vp, name) where vp refers to the directory
  * containing name.
  * 通过目录扫描找到的名称将保留在缓存中以供将来参考。它是受管理的LRU，因此
- * 经常使用的名称将挂起。缓存由从（vp，name）获得的哈希值索引，其中vp表示
- * 包含name的目录
+ * 经常使用的名称将挂起。缓存由从（vp，name）获得的哈希值索引，其中 vp 表示
+ * 包含 name 的目录
  *
  * If it is a "negative" entry, (i.e. for a name that is known NOT to
  * exist) the vnode pointer will be NULL.
+ * 如果是“负”条目（即已知不存在的名称），vnode指针将为空
  *
  * Upon reaching the last segment of a path, if the reference
  * is for DELETE, or NOCACHE is set (rewrite), and the
@@ -263,7 +265,7 @@ struct neglist {
 	TAILQ_HEAD(, namecache) nl_list;
 } __aligned(CACHE_LINE_SIZE);
 
-/* 统一管理negative cache list */
+/* 统一管理 negative cache list */
 static struct neglist __read_mostly	*neglists;
 static struct neglist ncneg_hot;
 
@@ -311,6 +313,11 @@ static uma_zone_t __read_mostly cache_zone_large_ts;
 
 #define	CACHE_PATH_CUTOFF	35
 
+/*
+	uma 申请内存的时候也分成两种类型：normal 和 cache，normal 就是按照正常的逻辑申请和释放；cache 貌似是
+	自定义的内存申请方法，需要自己提供释放功能。
+	zalloc: zone alloc，申请的内存已经被清空
+*/
 static struct namecache *
 cache_alloc(int len, int ts)
 {
@@ -355,7 +362,7 @@ cache_free(struct namecache *ncp)
 	}
 }
 
-/* 把namecache的时间信息提取出来 */
+/* 把 namecache 的时间信息提取出来 */
 static void
 cache_out_ts(struct namecache *ncp, struct timespec *tsp, int *ticksp)
 {
@@ -459,7 +466,9 @@ cache_assert_vnode_locked(struct vnode *vp)
 	cache_assert_vlp_locked(vlp);
 }
 
-/* cache hash table 没有像vnode hash table那样，每个元素又是一个链表 */
+/* cache hash table 
+	利用 name、namelength、vnode length 计算 vnode 对应的 hash
+*/
 static uint32_t
 cache_get_hash(char *name, u_char len, struct vnode *dvp)
 {

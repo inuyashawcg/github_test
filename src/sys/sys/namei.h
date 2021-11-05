@@ -85,6 +85,12 @@ struct nameidata {
 	cap_rights_t ni_rightsneeded;	/* rights required to look up vnode 请求查找 vnode 的权限 */
 	/*
 	 * Arguments to lookup.
+	 * ni_startdir： 在正常情况下，这是当前目录或根目录。如果传入的名称不是以“/”开头，并且我们没有通过任何具有
+	 * 绝对路径的符号链接，则它是当前目录，否则为根目录。参考：
+	 * https://www.freebsd.org/cgi/man.cgi?query=namei&apropos=0&sektion=9&manpath=FreeBSD+13.0-RELEASE+and+Ports&arch=default&format=html
+	 * 
+	 * ni_startdir 表示我们查找文件时路径起始的目录项。如果是绝对路径查找，表示的应该就是根目录或者根目录下的一级目录。
+	 * 如果是相对路径查找，它表示的应该就是相对路径的起始目录，可能就不是根目录了
 	 */
 	struct  vnode *ni_startdir;	/* starting directory 起始目录 */
 	struct	vnode *ni_rootdir;	/* logical root directory 逻辑根目录 */
@@ -97,8 +103,14 @@ struct nameidata {
 	struct filecaps ni_filecaps;	/* rights the *at base has */
 	/*
 	 * Results: returned from/manipulated by lookup
+	 * 指向结果对象的Vnode指针，否则为NULL。此vnode的v_usecount字段递增。如果设置了LOCKLEAF，它也会被锁定
 	 */
 	struct	vnode *ni_vp;		/* vnode of result */
+	/*
+		指向执行查找的对象目录的Vnode指针。如果设置了LOCKPARENT或WANTPARENT，则在成功返回时可用。
+		如果设置了 LOCKPARENT，则锁定。NDF_NO_DVP_RELE、NDF_NO_DVP_PUT或NDF_NO_DVP_UNLOCK
+		（具有明显的效果）可以禁止在 NDFREE 中释放此项
+	*/
 	struct	vnode *ni_dvp;		/* vnode of intermediate directory 中间目录的vnode */
 	/*
 	 * Shared between namei and lookup/commit routines.
@@ -136,6 +148,10 @@ struct nameidata {
 #define	LOCKPARENT	0x0008	/* want parent vnode returned locked */
 #define	WANTPARENT	0x0010	/* want parent vnode returned unlocked */
 #define	NOCACHE		0x0020	/* name must not be left in cache 名称不能留在缓存中 */
+/*
+	使用此标志，如果提供的路径的最后一部分是符号链接，则namei（）将跟随符号链接（即，它将为链接
+	指向的任何位置返回vnode，而不是为链接本身返回vnode）
+*/
 #define	FOLLOW		0x0040	/* follow symbolic links */
 #define	LOCKSHARED	0x0100	/* Shared lock leaf */
 #define	NOFOLLOW	0x0000	/* do not follow symbolic links (pseudo) */
@@ -161,7 +177,7 @@ struct nameidata {
 #define	ISDOTDOT	0x00002000 /* current component name is .. */
 #define	MAKEENTRY	0x00004000 /* entry is to be added to name cache 条目将被添加到名称缓存 */
 #define	ISLASTCN	0x00008000 /* this is last component of pathname 这是路径名的最后一个组件 */
-#define	ISSYMLINK	0x00010000 /* symlink needs interpretation */
+#define	ISSYMLINK	0x00010000 /* symlink needs interpretation 符号链接需要解释 */
 #define	ISWHITEOUT	0x00020000 /* found whiteout */
 #define	DOWHITEOUT	0x00040000 /* do whiteouts */
 #define	WILLBEDIR	0x00080000 /* new files will be dirs; allow trailing / */
@@ -169,16 +185,16 @@ struct nameidata {
 #define	ISOPEN		0x00200000 /* caller is opening; return a real vnode. */
 #define	NOCROSSMOUNT	0x00400000 /* do not cross mount points */
 #define	NOMACCHECK	0x00800000 /* do not perform MAC checks */
-#define	AUDITVNODE1	0x04000000 /* audit the looked up vnode information */
+#define	AUDITVNODE1	0x04000000 /* audit the looked up vnode information 审核已查找的vnode信息 */
 #define	AUDITVNODE2	0x08000000 /* audit the looked up vnode information */
 #define	TRAILINGSLASH	0x10000000 /* path ended in a slash 路径以斜线结束 */
-#define	NOCAPCHECK	0x20000000 /* do not perform capability checks */
+#define	NOCAPCHECK	0x20000000 /* do not perform capability checks 不要执行功能检查 */
 #define	PARAMASK	0x3ffffe00 /* mask of parameter descriptors */
 
 /*
  * Flags in ni_lcf, valid for the duration of the namei call.
  */
-#define	NI_LCF_STRICTRELATIVE	0x0001	/* relative lookup only */
+#define	NI_LCF_STRICTRELATIVE	0x0001	/* relative lookup only 仅限相对查找 */
 #define	NI_LCF_CAP_DOTDOT	0x0002	/* ".." in strictrelative case */
 
 /*
@@ -188,8 +204,12 @@ struct nameidata {
 	NDINIT_ALL(ndp, op, flags, segflg, namep, AT_FDCWD, NULL, 0, td)
 #define	NDINIT_AT(ndp, op, flags, segflg, namep, dirfd, td)		\
 	NDINIT_ALL(ndp, op, flags, segflg, namep, dirfd, NULL, 0, td)
+/*
+	这个宏定义里面只传进来了 dirfd，而 struct vnode *startdir = NULL
+*/
 #define	NDINIT_ATRIGHTS(ndp, op, flags, segflg, namep, dirfd, rightsp, td) \
 	NDINIT_ALL(ndp, op, flags, segflg, namep, dirfd, NULL, rightsp, td)
+
 #define	NDINIT_ATVP(ndp, op, flags, segflg, namep, vp, td)		\
 	NDINIT_ALL(ndp, op, flags, segflg, namep, AT_FDCWD, vp, 0, td)
 

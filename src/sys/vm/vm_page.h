@@ -202,7 +202,7 @@ struct vm_page {
 	} plinks;
 
 	TAILQ_ENTRY(vm_page) listq;	/* pages in same object (O) 同一个 object 上关联的 pages */
-	vm_object_t object;		/* which object am I in (O,P) */
+	vm_object_t object;		/* which object am I in (O,P) 表示这个页属于哪一个内存对象 */
 	vm_pindex_t pindex;		/* offset into object (O,P) */
 	vm_paddr_t phys_addr;		/* physical address of page (C) 对应的物理地址 */
 	struct md_page md;		/* machine dependent stuff 依赖机器的字段 */

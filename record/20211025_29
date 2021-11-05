@@ -1,0 +1,74 @@
+////////////// 20211025 //////////////
+  用户进程在用户空间应该是每个进程对应一个独立的页表，在内核空间就只有一个页表，所有的进程都是共享的
+
+  vm_object 表示的是某些数据页对应的数据源(从文件系统角度来看，也就是某个文件的数据)。如前所说，文件对应的是一个
+vnode object，不管该文件是映射到单个进程还是多个进程，系统只用一个 object 来表示它。object 不会把一个文件中的
+同一个页面保存到多个物理页中，因此，所有的映射看到的文件都是一致的
+
+  mmap 函数用户创建进程的共享内存段
+
+
+////////////// 20211026 //////////////
+  调试 TptRead 函数时 inode 信息如下：
+
+  (gdb) p* (struct tpt_inode*)ap->a_vp->v_data 
+  $14 = {
+    tpti_vnode = 0xffffffd006ef83d0,
+    tpti_tmp = 0xffffffd006f04180,
+    tpti_sb = 0xffffffc640000000,
+    tpti_flag = 0,
+    tpti_number = 4,
+    tpti_modrev = 594160627791,
+    tpti_count = 0,
+    tpti_endoff = 0,
+    tpti_diroff = 0,
+    tpti_offset = 0,
+    tpti_next_alloc_block = 3,
+    tpti_next_alloc_goal = 262656,
+    tpti_sum = 0,
+    tpti_uid = 0,
+    tpti_gid = 0,
+    tpti_mode = 33261,
+    tpti_links_count = 1,
+    tpti_blocks = 18446744073709551613,
+    tpti_size = 16352,
+    tpti_atime = 1635226507,
+    tpti_ctime = 1635226507,
+    tpti_mtime = 1635226507,
+    tpti_dtime = 0,
+    tpti_xattr = 0,
+    tpti_generation = 3766191600,
+    tpti_facl = 0,
+    tpti_flags = 0,
+    {
+      {
+        tpti_db = {262653, 262654, 262655, 262656, 0, 0, 0, 0},
+        tpti_ib = {0, 0, 0}
+      },
+      tpti_data = {262653, 262654, 262655, 262656, 0, 0, 0, 0, 0, 0, 0}
+
+  生成的可执行文件 a 一共占有四个数据页，对应的 uio 为：
+
+    $16 = (tpt_buf *) 0xffffffd006de9340
+    (gdb) p *bp
+    $17 = {
+      tptb_data = 0xffffffc6401fe000 "",
+      tptb_blkno = 262654,
+      tptb_lblkno = -274873989536,
+      tptb_count = 4096,
+      tptb_resid = 0,
+      tptb_offset = 4096
+    }
+
+  可以看出它所读取的页为逻辑页2，但是文件的属性信息一般都是存放在第一个逻辑页中，所以这里的计算是存在问题的。
+TptRead 函数参考了 ext2 文件系统的 read 函数实现，里面包含了一个参数 ioflag 用于传递给 breadn 和计算
+seqcount，调试过程中发现是这个参数导致了读取的文件页号向后移动了一位，也就是本来我们要读取 a 文件的第一个
+数据页，结果最后读取的却是文件的第二个数据页。这就导致了 file 命令无法正确解析文件的类型
+
+
+////////////// 20211026 //////////////
+
+times_test:empty  ->  skipped: Incorrect atime  [3.816s]
+times_test:link  ->  skipped: Incorrect atime  [3.418s]
+times_test:non_empty  ->  skipped: Incorrect atime  [3.473s]
+times_test:rename  ->  skipped: Incorrect atime  [4.290s]

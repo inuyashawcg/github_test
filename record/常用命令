@@ -1,0 +1,22 @@
+//////////////////////////
+调试常用命令：
+
+  make TARGET_ARCH=riscv64 NO_CLEAN=yes buildkernel -j32
+
+  make TARGET_ARCH=riscv64 NO_CLEAN=yes buildworld -j16
+
+  make TARGET_ARCH=riscv64 -DNO_ROOT DESTDIR=/home/wcg/riscv-world NO_CLEAN=yes installworld -j16
+
+  scp -r root@192.168.2.101:/home/wcg/riscv-world/usr/tests/sys/fs/tptfs /home/mercury/Documents/workspace/testsuite/exe/
+
+  scp -r /home/mercury/Documents/workspace/testsuite/exe/tptfs root@192.168.2.213:/home/wcg/testsuite/exe/
+
+  cp /usr/obj/usr/home/wcg/qihai/riscv.riscv64/sys/GENERIC/kernel* ./
+
+  device_name=`mdconfig ext2_test.img`
+  mount -t ext2fs /dev/${device_name} ./mnt
+  cp -r /home/wcg/testsuite/exe/tptfs ./mnt
+  umount ./mnt
+  mdconfig -d -u ${device_name}
+
+#! /usr/local/bin/bash

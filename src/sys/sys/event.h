@@ -81,12 +81,12 @@
 #endif
 
 struct kevent {
-	__uintptr_t	ident;		/* identifier for this event */
-	short		filter;		/* filter for event */
+	__uintptr_t	ident;		/* identifier for this event 此事件的标识符 */
+	short		filter;		/* filter for event 事件过滤器 */
 	unsigned short	flags;		/* action flags for kqueue */
 	unsigned int	fflags;		/* filter flag value */
 	__int64_t	data;		/* filter data value */
-	void		*udata;		/* opaque user data identifier */
+	void		*udata;		/* opaque user data identifier 不透明用户数据标识符 */
 	__uint64_t	ext[4];		/* extensions */
 };
 

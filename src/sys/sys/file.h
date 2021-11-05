@@ -184,7 +184,10 @@ struct file {
 	 *  DTYPE_VNODE specific fields.
 	 */
 	int		f_seqcount;	/* (a) Count of sequential accesses. 顺序访问计数 */
-	off_t		f_nextoff;	/* next expected read/write offset. 文件指针的offset */
+	/*
+		这个设计类似与文件系统中的下一个读写块的预期值
+	*/
+	off_t		f_nextoff;	/* next expected read/write offset. 下一个预期读/写偏移量 */
 	union {
 		struct cdev_privdata *fvn_cdevpriv;	// 表示设备文件的时候，共用体用的是 cdev_privdata 指针
 					/* (d) Private data for the cdev. */
@@ -234,6 +237,11 @@ struct xfile {
 
 #ifdef _KERNEL
 
+/*
+	fileops 表示的是文件所支持的操作类型，目前可以看到一共是定义了三种类型，vnode、bad 和 socket。bad 应该就是
+	用于初始化操作，socket 套接字所对应的文件操作(socket通信)，vnode 应该就是设备或者存储文件对应的操作。我们重点
+	关注的应该是这些对象的定义
+*/
 extern struct fileops vnops;
 extern struct fileops badfileops;
 extern struct fileops socketops;

@@ -1910,6 +1910,8 @@ falloc_caps(struct thread *td, struct file **resultfp, int *resultfd, int flags,
 /*
  * Create a new open file structure without allocating a file descriptor.
  * 在不分配文件描述符的情况下创建新的打开文件结构，两者是独立的过程
+ * 
+ * 这里只是创建并返回一个 struct file，但是还没有涉及到文件描述符的操作，对应上述注释中的内容
  */
 int
 falloc_noinstall(struct thread *td, struct file **resultfp)
@@ -2753,6 +2755,7 @@ fget_unlocked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
 		if (!seq_consistent(fd_seq(fdt, fd), seq))
 			continue;
 #else
+	/* 从进程文件描述符表中获取 struct file 指针 */
 		fp = fdt->fdt_ofiles[fd].fde_file;
 #endif
 		if (fp == NULL)
@@ -2821,6 +2824,7 @@ _fget(struct thread *td, int fd, struct file **fpp, int flags,
 
 	*fpp = NULL;
 	fdp = td->td_proc->p_fd;
+	/* 从进程文件描述符表中获取文件指针fp */
 	error = fget_unlocked(fdp, fd, needrightsp, &fp, seqp);
 	if (error != 0)
 		return (error);
@@ -2831,6 +2835,7 @@ _fget(struct thread *td, int fd, struct file **fpp, int flags,
 
 	/*
 	 * FREAD and FWRITE failure return EBADF as per POSIX.
+	 * 判断文件描述符属性(读、写、执行)并完成对应的操作
 	 */
 	error = 0;
 	switch (flags) {

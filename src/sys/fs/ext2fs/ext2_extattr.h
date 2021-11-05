@@ -53,7 +53,15 @@
 #define EXT2_EXTATTR_VALUE_HASH_SHIFT		16
 #define EXT2_EXTATTR_BLOCK_HASH_SHIFT		16
 
+/*  
+	该结构体一共是 32*8=256 个字节，通过一些功能函数的逻辑可以推断，它的数据成员要与 ext2fs_extattr_entry 
+	结构体中的成员或者是大小进行对应。所以，如果我们要修改块号为一个64位的数字，就需要两个结构体同时进行修改
 
+	https://zhuanlan.zhihu.com/p/53027662
+	https://man7.org/linux/man-pages/man7/xattr.7.html
+	https://www.freebsd.org/cgi/man.cgi?query=extattr&sektion=9&apropos=0&manpath=FreeBSD+13.0-RELEASE+and+Ports
+
+*/
 struct ext2fs_extattr_header {
 	int32_t	h_magic;	/* magic number for identification */
 	int32_t	h_refcount;	/* reference count */
@@ -85,13 +93,19 @@ struct ext2fs_extattr_entry {
 #define EXT2_FIRST_ENTRY(bh) EXT2_ENTRY(EXT2_HDR(bh)+1)
 #define EXT2_IS_LAST_ENTRY(entry) (*(uint32_t *)(entry) == 0)
 
+/*
+	下面的宏定义中有关于 entry 大小的计算，需要利用 name_len 来实现。但是在 tptfs 中所有的
+	entry 都是固定长度的，目前暂定是 256 bytes，名称长度最大为 240 bytes。所以下面的宏的
+	实现在 tptfs 中可以适当简化
+*/
 #define EXT2_EXTATTR_PAD_BITS		2
-#define EXT2_EXTATTR_PAD		(1<<EXT2_EXTATTR_PAD_BITS)
+#define EXT2_EXTATTR_PAD		(1<<EXT2_EXTATTR_PAD_BITS)	
 #define EXT2_EXTATTR_ROUND		(EXT2_EXTATTR_PAD-1)
 #define EXT2_EXTATTR_LEN(name_len) \
 	(((name_len) + EXT2_EXTATTR_ROUND + \
 	    sizeof(struct ext2fs_extattr_entry)) & ~EXT2_EXTATTR_ROUND)
 
+/* 这个宏应该是要将 size 转换成 4 的倍数 */
 #define EXT2_EXTATTR_SIZE(size) \
     (((size) + EXT2_EXTATTR_ROUND) & ~EXT2_EXTATTR_ROUND)
 

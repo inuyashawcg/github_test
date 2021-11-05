@@ -80,7 +80,7 @@ typedef	__pid_t		pid_t;
 /*
  * Kernel encoding of open mode; separate read and write bits that are
  * independently testable: 1 greater than the above.
- * 文件打开模式
+ * 开放模式的内核编码；独立可测试的独立读写位：1大于上述值
  *
  * XXX
  * FREAD and FWRITE are excluded from the #ifdef _KERNEL so that TIOCFLUSH,
@@ -102,9 +102,9 @@ typedef	__pid_t		pid_t;
 #if __POSIX_VISIBLE >= 200809
 #define	O_NOFOLLOW	0x0100		/* don't follow symlinks */
 #endif
-#define	O_CREAT		0x0200		/* create if nonexistent */
-#define	O_TRUNC		0x0400		/* truncate to zero length */
-#define	O_EXCL		0x0800		/* error if already exists */
+#define	O_CREAT		0x0200		/* create if nonexistent 当文件不存在的时候执行创建操作 */
+#define	O_TRUNC		0x0400		/* truncate to zero length 截断为零长度 */
+#define	O_EXCL		0x0800		/* error if already exists 如果文件已经存在则报错 */
 #ifdef _KERNEL
 #define	FHASLOCK	0x4000		/* descriptor holds advisory lock */
 #endif
@@ -118,8 +118,8 @@ typedef	__pid_t		pid_t;
 #endif
 
 #if __POSIX_VISIBLE >= 200809
-#define	O_DIRECTORY	0x00020000	/* Fail if not directory */
-#define	O_EXEC		0x00040000	/* Open for execute only */
+#define	O_DIRECTORY	0x00020000	/* Fail if not directory 如果不是目录的话就报错 */
+#define	O_EXEC		0x00040000	/* Open for execute only 仅为执行而打开 */
 #endif
 #ifdef	_KERNEL
 #define	FEXEC		O_EXEC
@@ -127,13 +127,13 @@ typedef	__pid_t		pid_t;
 
 #if __POSIX_VISIBLE >= 200809
 /* Defined by POSIX 1003.1-2008; BSD default, but reserve for future use. */
-#define	O_TTY_INIT	0x00080000	/* Restore default termios attributes */
+#define	O_TTY_INIT	0x00080000	/* Restore default termios attributes 恢复默认termios属性 */
 
 #define	O_CLOEXEC	0x00100000
 #endif
 
 #if __BSD_VISIBLE
-#define	O_VERIFY	0x00200000	/* open only after verification */
+#define	O_VERIFY	0x00200000	/* open only after verification 仅在验证后打开 */
 #endif
 
 /*
@@ -201,6 +201,7 @@ typedef	__pid_t		pid_t;
  * Magic value that specify the use of the current working directory
  * to determine the target of relative file paths in the openat() and
  * similar syscalls.
+ * 魔术值，指定当前工作目录的使用，以确定 openat 和类似系统调用中相对文件路径的目标
  */
 #define	AT_FDCWD		-100
 

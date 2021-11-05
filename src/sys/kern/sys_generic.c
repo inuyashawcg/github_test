@@ -234,6 +234,9 @@ kern_pread(struct thread *td, int fd, void *buf, size_t nbyte, off_t offset)
 
 	if (nbyte > IOSIZE_MAX)
 		return (EINVAL);
+	/*
+		将 nbyte 的数据从文件中读取出来，并且存放到 buf 当中
+	*/
 	aiov.iov_base = buf;
 	aiov.iov_len = nbyte;
 	auio.uio_iov = &aiov;
@@ -283,6 +286,9 @@ kern_readv(struct thread *td, int fd, struct uio *auio)
 	struct file *fp;
 	int error;
 
+	/*
+		通过文件描述符 fd 读取进程文件描述符表，获取对应的文件指针 fp
+	*/
 	error = fget_read(td, fd, &cap_read_rights, &fp);
 	if (error)
 		return (error);

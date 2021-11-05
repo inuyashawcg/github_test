@@ -178,18 +178,20 @@ vn_open(struct nameidata *ndp, int *flagp, int cmode, struct file *fp)
 {
 	struct thread *td = ndp->ni_cnd.cn_thread;
 
+	// cmode: create mode
+	// 从调用情况来看，fp 指向的是一个已经创建好的 struct file，只是其中的一些属性还是空的,
+	// 后面肯定还要对它做进一步的填充
 	return (vn_open_cred(ndp, flagp, cmode, 0, td->td_ucred, fp));
 }
 
 /*
  * Common code for vnode open operations via a name lookup. 通过查找到的名字打开vnode结点
- * Lookup the vnode and invoke VOP_CREATE if needed.
+ * Lookup the vnode and invoke(调用) VOP_CREATE if needed.
  * Check permissions, and call the VOP_OPEN or VOP_CREATE routine.
  * 
  * Note that this does NOT free nameidata for the successful case,
  * due to the NDINIT being done elsewhere.
- * 注意，这里不会因为成功执行后释放 nameidata，因为NDINIT是在其他地方完成的，搜索vn_open关键字可以看到，
- * 在linker代码查找文件的时候会用到这个函数
+ * 注意，这里不会因为成功执行后释放 nameidata，因为 NDINIT 是在其他地方完成的，估计在别的地方也可能会用到
  */
 int
 vn_open_cred(struct nameidata *ndp, int *flagp, int cmode, u_int vn_open_flags,
@@ -212,19 +214,29 @@ restart:
 		/*
 		 * Set NOCACHE to avoid flushing the cache when
 		 * rolling in many files at once.
-		 * 设置NOCACHE以避免在一次滚动多个文件时刷新缓存
+		 * 设置 NOCACHE 以避免在一次滚动多个文件时刷新缓存
+		 * 
+		 * cn_flags 是专门为 namei 函数制定的 flag,所以设置完成之后就可以调用 namei 函数
 		*/
 		ndp->ni_cnd.cn_flags = ISOPEN | LOCKPARENT | LOCKLEAF | NOCACHE;
+
 		if ((fmode & O_EXCL) == 0 && (fmode & O_NOFOLLOW) == 0)
-			ndp->ni_cnd.cn_flags |= FOLLOW;
+			ndp->ni_cnd.cn_flags |= FOLLOW;	// 跟随符号链接
+
 		if (!(vn_open_flags & VN_OPEN_NOAUDIT))
-			ndp->ni_cnd.cn_flags |= AUDITVNODE1;
+			ndp->ni_cnd.cn_flags |= AUDITVNODE1;	// 审核已查找的 vnode 信息
+
 		if (vn_open_flags & VN_OPEN_NOCAPCHECK)
-			ndp->ni_cnd.cn_flags |= NOCAPCHECK;
-		bwillwrite();	// 锁操作，write操作之前执行，下面紧接着开始write
+			ndp->ni_cnd.cn_flags |= NOCAPCHECK; // 不要执行功能检查
+		bwillwrite();	// 锁操作，write 操作之前执行，下面紧接着开始 write
+
 		if ((error = namei(ndp)) != 0)
 			return (error);
-		if (ndp->ni_vp == NULL) {	// 当vnode为空，还未指定？
+		/*
+			当 namei 执行完之后，发现我们所要找的文件没有对应的 vnode，说明没有该文件，然后执行
+			创建一个。因为 fmode 中包含有 O_CREAT 属性，所以要执行该步骤，否则应该会返回没有该文件？
+		*/
+		if (ndp->ni_vp == NULL) {
 			VATTR_NULL(vap);	// vnode 属性置空
 			vap->va_type = VREG;
 			vap->va_mode = cmode;
@@ -248,7 +260,7 @@ restart:
 			if (error == 0)
 #endif
 				error = VOP_CREATE(ndp->ni_dvp, &ndp->ni_vp,
-						   &ndp->ni_cnd, vap);	// 创建相应的一个file或者socket等等
+						   &ndp->ni_cnd, vap);	// 创建相应的一个 file 或者 socket 等等
 			vput(ndp->ni_dvp);
 			vn_finished_write(mp);
 			if (error) {
@@ -271,6 +283,11 @@ restart:
 			fmode &= ~O_CREAT;
 		}
 	} else {
+		/*
+			从代码结构来看，vn_open 主要面对的是两种类型的操作，一个是 create，另外一个是 lookup，
+			感觉 exec 应该也算是一个吧。两个代码分支都包含了 namei 函数，说明它才是获取指定文件 vnode
+			的主要功能函数
+		*/
 		ndp->ni_cnd.cn_nameiop = LOOKUP;
 		ndp->ni_cnd.cn_flags = ISOPEN |
 		    ((fmode & O_NOFOLLOW) ? NOFOLLOW : FOLLOW) | LOCKLEAF;
@@ -284,12 +301,19 @@ restart:
 			return (error);
 		vp = ndp->ni_vp;
 	}
+	/*
+		总体看下来，上面的代码主要就是为了获取 ndp->ni_vp，然后接着调用 vn_open_vnode；当跳转到
+		bad 的时候 ndp->ni_vp 会被置空
+	*/
 	error = vn_open_vnode(vp, fmode, cred, td, fp);
 	if (error)
 		goto bad;
 	*flagp = fmode;
 	return (0);
 bad:
+	/*
+		这里会释放掉 nameidata
+	*/
 	NDFREE(ndp, NDF_ONLY_PNBUF);
 	vput(vp);
 	*flagp = fmode;
@@ -300,7 +324,7 @@ bad:
 /*
  * Common code for vnode open operations once a vnode is located.
  * Check permissions, and call the VOP_OPEN routine.
- * 找到vnode后用于vnode打开操作的通用代码。检查权限，并调用VOP_OPEN例程
+ * 找到 vnode 后用于 vnode 打开操作的通用代码。检查权限，并调用 VOP_OPEN 例程
  */
 int
 vn_open_vnode(struct vnode *vp, int fmode, struct ucred *cred,
@@ -310,6 +334,9 @@ vn_open_vnode(struct vnode *vp, int fmode, struct ucred *cred,
 	struct flock lf;	// 感觉像是对文件数据操作的指针的位置，偏移等等的描述
 	int error, lock_flags, type;
 
+	/*
+		链接文件、socket 文件不支持 vnode open 操作？
+	*/
 	if (vp->v_type == VLNK)
 		return (EMLINK);
 	if (vp->v_type == VSOCK)
@@ -317,6 +344,10 @@ vn_open_vnode(struct vnode *vp, int fmode, struct ucred *cred,
 	if (vp->v_type != VDIR && fmode & O_DIRECTORY)
 		return (ENOTDIR);
 	accmode = 0;
+	/*
+		accmode 都执行的或操作，也就是要加入某个属性的时候，执行或操作；要判断是否具有某个属性
+		的时候，执行与操作
+	*/
 	if (fmode & (FWRITE | O_TRUNC)) {
 		if (vp->v_type == VDIR)
 			return (EISDIR);
@@ -785,7 +816,7 @@ get_advice(struct file *fp, struct uio *uio)
 }
 
 /*
- * File table vnode read routine. 文件表vnode读取例程
+ * File table vnode read routine.
  */
 static int
 vn_read(struct file *fp, struct uio *uio, struct ucred *active_cred, int flags,
@@ -1156,16 +1187,21 @@ out:
 	return (error);
 }
 
+/* 
+	类似 page fault，机制应该就是应用程序需要对某个文件进行读取的时候，虚拟文件系统就会产生一个
+	io fault，根据上层传下来的参数确定 io 执行什么操作，读或者写
+*/
 static int
 vn_io_fault(struct file *fp, struct uio *uio, struct ucred *active_cred,
     int flags, struct thread *td)
 {
-	fo_rdwr_t *doio;
+	fo_rdwr_t *doio;	/* 函数类型 */
 	struct vnode *vp;
 	void *rl_cookie;
 	struct vn_io_fault_args args;
 	int error;
 
+	/* 判断读写操作 */
 	doio = uio->uio_rw == UIO_READ ? vn_read : vn_write;
 	vp = fp->f_vnode;
 	foffset_lock_uio(fp, uio, flags);

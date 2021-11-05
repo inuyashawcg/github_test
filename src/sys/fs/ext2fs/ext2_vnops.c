@@ -272,7 +272,7 @@ ext2_create(struct vop_create_args *ap)
 		return (error);
 	/* 判断是否利用将名字添加到 name cache */
 	if ((ap->a_cnp->cn_flags & MAKEENTRY) != 0)
-		cache_enter(ap->a_dvp, *ap->a_vpp, ap->a_cnp);
+		cache_enter(ap->a_dvp, *ap->a_vpp, ap->a_cnp);	// 将新添加的目录项放入 namecache 中
 	return (0);
 }
 
@@ -875,7 +875,13 @@ abortit:
 		return (error);
 	}
 
-	/* 在很多情况下都需要对 inode 属性进行判断 */
+	/*
+		NOUNLINK: 文件可能不被允许移动或者重命名
+		IMMUTABLE： 文件不能被更改
+		APPEND： 对文件的写入只能附加
+
+		目标文件vp如果包含上述属性，那么重命名操作在该文件上是不被允许的，返回操作参数错误
+	*/
 	if (tvp && ((VTOI(tvp)->i_flags & (NOUNLINK | IMMUTABLE | APPEND)) ||
 	    (VTOI(tdvp)->i_flags & APPEND))) {
 		error = EPERM;
@@ -892,12 +898,16 @@ abortit:
 		error = 0;
 		goto abortit;
 	}
-	/* 现在要开始对fvp进行操作了，所以要加锁进行保护 */
+	/* 
+		现在要开始对fvp进行操作了，所以要加锁进行保护。这里处理的是 fvp 对应的专用锁
+	*/
 	if ((error = vn_lock(fvp, LK_EXCLUSIVE)) != 0)
 		goto abortit;
-	dp = VTOI(fdvp);	/* 同样的操作，更进一步说明对文件的操作还是以 inode 作为载体，vnode 只是个中间媒介 */
+	dp = VTOI(fdvp);
 	ip = VTOI(fvp);
-	/* 判断最大链接数是否超过了限制，并且判断文件系统是否具有只读属性 */
+	/* 
+		判断最大链接数是否超过了限制，并且判断文件系统是否具有只读属性 
+	*/
 	if (ip->i_nlink >= EXT4_LINK_MAX &&
 	    !EXT2_HAS_RO_COMPAT_FEATURE(ip->i_e2fs, EXT2F_ROCOMPAT_DIR_NLINK)) {
 		VOP_UNLOCK(fvp, 0);
@@ -924,9 +934,14 @@ abortit:
 			goto abortit;
 		}
 		ip->i_flag |= IN_RENAME;
-		oldparent = dp->i_number;	/* 旧父目录对应的inode进行赋值操作 */
+		/*
+			指定文件移动之前的所在目录项的 inode number
+		*/
+		oldparent = dp->i_number;
 		doingdirectory++;
 	}
+
+	/* 返回一个未被锁定的对象，并且减少对象的引用计数 */
 	vrele(fdvp);
 
 	/*
@@ -944,6 +959,8 @@ abortit:
 	 *    around.  If we crash somewhere before
 	 *    completing our work, the link count
 	 *    may be wrong, but correctable.
+	 * 当我们移动东西时，碰撞链接计数。如果我们在完成工作之前在某个地方崩溃，
+	 * 链接计数可能是错误的，但可以纠正
 	 */
 	ext2_inc_nlink(ip);
 	ip->i_flag |= IN_CHANGE;
@@ -961,6 +978,10 @@ abortit:
 	 * as to be able to change "..". We must repeat the call
 	 * to namei, as the parent directory is unlocked by the
 	 * call to checkpath().
+	 * 
+	 * 如果必须更改“..”（即目录获得新的父目录），则源目录不得位于目标目录之上的目录层次结构中，
+	 * 因为这将孤立源目录之下的所有内容。此外，用户必须在源中具有写入权限，才能更改“..”。我们
+	 * 必须重复调用 namei，因为调用 checkpath 会解锁父目录
 	 */
 	error = VOP_ACCESS(fvp, VWRITE, tcnp->cn_cred, tcnp->cn_thread);
 	VOP_UNLOCK(fvp, 0);

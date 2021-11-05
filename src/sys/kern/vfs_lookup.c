@@ -78,7 +78,9 @@ SDT_PROBE_DEFINE2(vfs, namei, lookup, return, "int", "struct vnode *");
 /* Allocation zone for namei. */
 uma_zone_t namei_zone;
 
-/* Placeholder vnode for mp traversal. */
+/* Placeholder vnode for mp traversal. 
+	mp 遍历用的占位符 vnode？
+*/
 static struct vnode *vp_crossmp;
 
 static int
@@ -141,7 +143,7 @@ static struct vop_vector crossmp_vnodeops = {
 };
 
 /*
-	namei capture tracker：名字捕获追踪器？其实就是vnode的队列
+	namei capture tracker：名字捕获追踪器？其实就是 vnode 队列
 */
 struct nameicap_tracker {
 	struct vnode *dp;
@@ -149,7 +151,7 @@ struct nameicap_tracker {
 };
 
 /* Zone for cap mode tracker elements used for dotdot capability checks. 
-	用于dotdot功能检查的cap模式跟踪器元素的区域
+	用于 dotdot 功能检查的 cap 模式跟踪器元素的区域
 */
 static uma_zone_t nt_zone;
 
@@ -254,6 +256,10 @@ namei_handle_root(struct nameidata *ndp, struct vnode **dpp)
 #endif
 		return (ENOTCAPABLE);
 	}
+	/*
+		while 循环已经改变了 nameidata 中对应字段中指针指向的位置。循环结束之后应该就是
+		指向了我们所要查找的文件路径除去 "/" 的起始位置
+	*/
 	while (*(cnp->cn_nameptr) == '/') {
 		cnp->cn_nameptr++;
 		ndp->ni_pathlen--;
@@ -265,18 +271,18 @@ namei_handle_root(struct nameidata *ndp, struct vnode **dpp)
 
 /*
  * Convert a pathname into a pointer to a locked vnode.
- * 将路径名转换为指向锁定vnode的指针
+ * 将路径名转换为指向锁定 vnode 的指针
  *
  * The FOLLOW flag is set when symbolic links are to be followed
  * when they occur at the end of the name translation process.
  * Symbolic links are always followed for all other pathname
  * components other than the last.
- * 当符号链接出现在名称转换过程的末尾时，将在符号链接后面设置FOLLOW标志。
+ * 当符号链接出现在名称转换过程的末尾时，将在符号链接后面设置 FOLLOW 标志。
  * 对于除最后一个以外的所有其他路径名组件，始终遵循符号链接
  *
  * The segflg defines whether the name is to be copied from user
  * space or kernel space.
- * segflg定义是从用户空间还是从内核空间复制名称
+ * segflg 定义是从用户空间还是从内核空间复制名称
  *
  * Overall outline of namei:
  *
@@ -286,6 +292,9 @@ namei_handle_root(struct nameidata *ndp, struct vnode **dpp)
  *		call lookup to search path.
  *		if symbolic link, massage name in buffer and continue
  *	}
+
+	 该函数会增加 vnode 的引用计数，所以在函数执行完毕之后，还需要调用 vput 或者 vrele 函数来
+	 减少引用计数 (LOCKLEAF 分区采用哪一个)
  */
 int
 namei(struct nameidata *ndp)
@@ -329,8 +338,13 @@ namei(struct nameidata *ndp)
 	 * name into the buffer. 为要翻译的名称获取一个缓冲区，并将名称复制到缓冲区中
 	 * 将 nameidata 中的数据拷贝到 componentname 当中(下面的代码为 componentname 分配了存储空间)
 	 */
-	if ((cnp->cn_flags & HASBUF) == 0)
+	if ((cnp->cn_flags & HASBUF) == 0)	// 当没有缓冲区时，利用 uma 申请一个内存作为缓冲区
 		cnp->cn_pnbuf = uma_zalloc(namei_zone, M_WAITOK);
+	/*
+		内核空间和用户空间的数据拷贝方式不一样。ni_dirp 是 nameidata 指向路径名的指针，下面的操作就是将
+		路径名数据拷贝到 cnp->cn_pnbuf 缓冲区。从这里看，感觉 componentname 表示可能不是一个组件名称，
+		而是整个路径的名称，需要进一步验证猜想
+	*/
 	if (ndp->ni_segflg == UIO_SYSSPACE)
 		error = copystr(ndp->ni_dirp, cnp->cn_pnbuf, MAXPATHLEN,
 		    &ndp->ni_pathlen);
@@ -373,7 +387,7 @@ namei(struct nameidata *ndp)
 	}
 #endif
 	if (error != 0) {
-		namei_cleanup_cnp(cnp);	// 释放掉 componentname 的存储空间
+		namei_cleanup_cnp(cnp);	// 如果数据拷贝出错，则释放掉 componentname 的存储空间
 		ndp->ni_vp = NULL;
 		return (error);
 	}
@@ -387,10 +401,10 @@ namei(struct nameidata *ndp)
 #endif
 	/*
 	 * Get starting point for the translation. 
-	 * 获取翻译的起点，应该就是路径的起始地址
+	 * 获取翻译的起点，应该就是路径的起始目录。操作进程文件描述符的时候，首先要进行锁操作
 	 */
 	FILEDESC_SLOCK(fdp);	// slock: shared lock
-	ndp->ni_rootdir = fdp->fd_rdir;
+	ndp->ni_rootdir = fdp->fd_rdir;	// 文件描述符中保存的根目录
 	vrefact(ndp->ni_rootdir);
 	ndp->ni_topdir = fdp->fd_jdir;
 
@@ -404,11 +418,14 @@ namei(struct nameidata *ndp)
 		AUDIT_ARG_UPATH2(td, ndp->ni_dirfd, cnp->cn_pnbuf);
 
 	startdir_used = 0;
-	dp = NULL;	// dp 表示我们目前需要查找的目录
+	dp = NULL;
 
 	// 之前把 nameidata 中的路径数据保存到了 cn_pnbuf，现在将 cn_nameptr 指向它
 	cnp->cn_nameptr = cnp->cn_pnbuf;
-	if (cnp->cn_pnbuf[0] == '/') {	// 路径从根目录开始
+	if (cnp->cn_pnbuf[0] == '/') {	// 绝对路径？
+		/*
+			namei_handle_root 函数执行完成之后，dp 返回的是 rootdir
+		*/
 		error = namei_handle_root(ndp, &dp);
 	} else {
 		if (ndp->ni_startdir != NULL) {
@@ -445,6 +462,7 @@ namei(struct nameidata *ndp)
 			}
 #endif
 		}
+		/* dp 表示的是根目录或者是文件所在的当前目录 */
 		if (error == 0 && dp->v_type != VDIR)
 			error = ENOTDIR;
 	}
@@ -462,7 +480,7 @@ namei(struct nameidata *ndp)
 	SDT_PROBE3(vfs, namei, lookup, entry, dp, cnp->cn_pnbuf,
 	    cnp->cn_flags);
 
-	/* 到这里代码的主要功能是获取 rootdir或者 startdir对应的 vnode */
+	/* 到这里代码的主要功能是获取 rootdir 或者 startdir 对应的 vnode */
 	for (;;) {
 		ndp->ni_startdir = dp;
 		error = lookup(ndp);
@@ -544,7 +562,8 @@ namei(struct nameidata *ndp)
 			if (error != 0)
 				goto out;
 		}
-	}
+	}	// end for
+
 	vput(ndp->ni_vp);
 	ndp->ni_vp = NULL;
 	vrele(ndp->ni_dvp);
@@ -611,8 +630,7 @@ needs_exclusive_leaf(struct mount *mp, int flags)
  * descended until done, or a symbolic link is encountered. The variable
  * ni_more is clear if the path is completed; it is set to one if a
  * symbolic link needing interpretation is encountered.
- * 路径名一直向下，直到完成，或者遇到符号链接。如果路径已完成，则变量ni_more是明确的；
- * 如果遇到需要解释的符号链接，则将其设置为1
+ * ni_ptr 指向路径名字符数据，ni_pathlen 表示的路径名长度。ni_startdir 表示的是路径起始目录。
  *
  * The flag argument is LOOKUP, CREATE, RENAME, or DELETE depending on
  * whether the name is to be looked up, created, renamed, or deleted.
@@ -645,19 +663,19 @@ needs_exclusive_leaf(struct mount *mp, int flags)
 int
 lookup(struct nameidata *ndp)
 {
-	char *cp;			/* pointer into pathname argument */
+	char *cp;			/* pointer into pathname argument 指向路径名参数的指针 */
 	char *prev_ni_next;		/* saved ndp->ni_next */
 	struct vnode *dp = NULL;	/* the directory we are searching */
-	struct vnode *tdp;		/* saved dp */
+	struct vnode *tdp;		/* saved dp - target directory pointer，应该是用于保存目标 vnode */
 	struct mount *mp;		/* mount table entry */
 	struct prison *pr;
-	size_t prev_ni_pathlen;		/* saved ndp->ni_pathlen */
-	int docache;			/* == 0 do not cache last component */
-	int wantparent;			/* 1 => wantparent or lockparent flag */
-	int rdonly;			/* lookup read-only flag bit */
+	size_t prev_ni_pathlen;		/* saved ndp->ni_pathlen 用于保存路径长度 */
+	int docache;			/* == 0 do not cache last component 不要缓存最后一个组件(所要查找的文件名？) */
+	int wantparent;			/* 1 => wantparent or lockparent flag 判断父目录要不要加锁 */
+	int rdonly;			/* lookup read-only flag bit 是否是只读的 */
 	int error = 0;
-	int dpunlocked = 0;		/* dp has already been unlocked */
-	int relookup = 0;		/* do not consume the path component */
+	int dpunlocked = 0;		/* dp has already been unlocked - 目录 vnode 已经被加锁了 */
+	int relookup = 0;		/* do not consume the path component 不要使用路径组件 */
 	struct componentname *cnp = &ndp->ni_cnd;
 	int lkflags_save;
 	int ni_dvp_unlocked;
@@ -669,13 +687,16 @@ lookup(struct nameidata *ndp)
 	wantparent = cnp->cn_flags & (LOCKPARENT | WANTPARENT);
 	KASSERT(cnp->cn_nameiop == LOOKUP || wantparent,
 	    ("CREATE, DELETE, RENAME require LOCKPARENT or WANTPARENT."));
+	/*
+		判断是否需要缓存
+	*/
 	docache = (cnp->cn_flags & NOCACHE) ^ NOCACHE;
 	if (cnp->cn_nameiop == DELETE ||
 	    (wantparent && cnp->cn_nameiop != CREATE &&
 	     cnp->cn_nameiop != LOOKUP))
 		docache = 0;
 	rdonly = cnp->cn_flags & RDONLY;
-	cnp->cn_flags &= ~ISSYMLINK;
+	cnp->cn_flags &= ~ISSYMLINK;	// 遇到链接文件需要找到真实的文件？
 	ndp->ni_dvp = NULL;
 	/*
 	 * We use shared locks until we hit the parent of the last cn then
@@ -683,7 +704,7 @@ lookup(struct nameidata *ndp)
 	 * 我们使用共享锁，直到到达最后一个cn的父级，然后根据请求的标志进行调整
 	 */
 	cnp->cn_lkflags = LK_SHARED;
-	dp = ndp->ni_startdir;	// ni_startdir 打印出来的结果是 devfs
+	dp = ndp->ni_startdir;
 	ndp->ni_startdir = NULLVP;	// start directory置空？
 	vn_lock(dp,
 	    compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags | LK_RETRY,
@@ -697,10 +718,15 @@ dirloop:
 	 * cnp->cn_nameptr for callers that need the name. Callers needing
 	 * the name set the SAVENAME flag. When done, they assume
 	 * responsibility for freeing the pathname buffer.
+	 * 对于需要名称的呼叫者，可以通过cnp->cn\U nameptr访问文件名的最后一个组件。
+	 * 需要名称的呼叫者设置SAVENAME标志。完成后，它们将负责释放路径名缓冲区
 	 */
 	for (cp = cnp->cn_nameptr; *cp != 0 && *cp != '/'; cp++)
 		continue;
-	cnp->cn_namelen = cp - cnp->cn_nameptr;
+	/*
+		componentname 中的路径名长度已经发生了改变，现在应该是表示一个路径组件名称
+	*/
+	cnp->cn_namelen = cp - cnp->cn_nameptr;	
 	if (cnp->cn_namelen > NAME_MAX) {
 		error = ENAMETOOLONG;
 		goto bad;
@@ -711,12 +737,12 @@ dirloop:
 	printf("{%s}: ", cnp->cn_nameptr);
 	*cp = c; }
 #endif
-	prev_ni_pathlen = ndp->ni_pathlen;
-	ndp->ni_pathlen -= cnp->cn_namelen;
+	prev_ni_pathlen = ndp->ni_pathlen;	// 此次处理之前的路径名长度
+	ndp->ni_pathlen -= cnp->cn_namelen;	// 更新 nameidata 的路径长度，减去的是一个路径组件名称
 	KASSERT(ndp->ni_pathlen <= PATH_MAX,
 	    ("%s: ni_pathlen underflow to %zd\n", __func__, ndp->ni_pathlen));
 	prev_ni_next = ndp->ni_next;
-	ndp->ni_next = cp;
+	ndp->ni_next = cp;	// cp 指向的位置在上面for循环中已经发生了改变，移动了一个路径组件名字的长度
 
 	/*
 	 * Replace multiple slashes by a single slash and trailing slashes
@@ -743,11 +769,15 @@ dirloop:
 	cnp->cn_flags |= MAKEENTRY;	// 将entry添加到名称缓存
 	if (*cp == '\0' && docache == 0)
 		cnp->cn_flags &= ~MAKEENTRY;
+	/* 判断是不是 .. */	
 	if (cnp->cn_namelen == 2 &&
 	    cnp->cn_nameptr[1] == '.' && cnp->cn_nameptr[0] == '.')
 		cnp->cn_flags |= ISDOTDOT;
 	else
 		cnp->cn_flags &= ~ISDOTDOT;
+	/*
+		判断是不是路径名的最后一个组件
+	*/
 	if (*ndp->ni_next == 0)
 		cnp->cn_flags |= ISLASTCN;
 	else
@@ -1291,7 +1321,8 @@ bad:
 	vfs -> fs。所以这里的 nameidata 中填充的数据应该就是调用 syscall 时我们所输入的数据，比如路径信息、
 	文件名信息等等，相当于是对数据做了一个打包处理。
 	做软件设计的时候可以借鉴这种处理方式，将一些需要同时传输的数据进行打包，组合成一个结构体类型，这样我们
-	再设计函数的时候传参就会变得更加简洁，阅读起来也比较方便。
+	再设计函数的时候传参就会变得更加简洁，阅读起来也比较方便
+	op 参数传入的是操作类型，比如 LOOKUP，应该就是查找目标文件的 vnode
 */
 void
 NDINIT_ALL(struct nameidata *ndp, u_long op, u_long flags, enum uio_seg segflg,
@@ -1301,10 +1332,10 @@ NDINIT_ALL(struct nameidata *ndp, u_long op, u_long flags, enum uio_seg segflg,
 
 	ndp->ni_cnd.cn_nameiop = op;
 	ndp->ni_cnd.cn_flags = flags;
-	ndp->ni_segflg = segflg;
-	ndp->ni_dirp = namep;
+	ndp->ni_segflg = segflg;	// 指定是用户空间还是内核空间
+	ndp->ni_dirp = namep;	// 路径信息
 	ndp->ni_dirfd = dirfd;
-	ndp->ni_startdir = startdir;
+	ndp->ni_startdir = startdir;	// 实际调用情况来看，有些情况 startdir 传入的参数为空
 	if (rightsp != NULL)
 		ndp->ni_rightsneeded = *rightsp;
 	else

@@ -1031,12 +1031,18 @@ sys_openat(struct thread *td, struct openat_args *uap)
 	    uap->mode));
 }
 
+/*
+	path：表示的应该是开发文件的路径信息
+	pathseg：表示用户空间还是内核空间
+	sys_open 中传入的参数 fd 为 AT_FDCWD = -100，貌似是用于路径检测。但是函数逻辑中完全没有
+	用到，很奇怪
+*/
 int
 kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
     int flags, int mode)
 {
-	struct proc *p = td->td_proc;
-	struct filedesc *fdp = p->p_fd;
+	struct proc *p = td->td_proc;	/* 对应进程 */
+	struct filedesc *fdp = p->p_fd;	/* 文件描述符 */
 	struct file *fp;
 	struct vnode *vp;
 	struct nameidata nd;
@@ -1048,7 +1054,10 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 	AUDIT_ARG_FFLAGS(flags);
 	AUDIT_ARG_MODE(mode);
 	cap_rights_init(&rights, CAP_LOOKUP);
-	flags_to_rights(flags, &rights);
+	/*
+		将 flags 转换成对应的权限值。这里的情形就是 lookup，此处就会把 rights 设置为查找相关
+	*/
+	flags_to_rights(flags, &rights);	
 	/*
 	 * Only one of the O_EXEC, O_RDONLY, O_WRONLY and O_RDWR flags
 	 * may be specified.
@@ -1065,7 +1074,9 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 	/*
 	 * Allocate a file structure. The descriptor to reference it
 	 * is allocated and set by finstall() below.
-	 * 分配文件结构。引用它的描述符由下面的 finstall() 分配和设置(此时还未分配问价描述符)
+	 * 分配文件结构。引用它的描述符由下面的 finstall() 分配和设置(此时还未分配文件描述符)。
+	 * 该函数只是创建了一个 struct file，但是没有文件描述符的相关操作，应该是在后面真正访问文件的时候关联。
+	 * 其中会对 file operations 进行初始化为 badfileops，vnode 字段没有进行任何操作，为空
 	 */
 	error = falloc_noinstall(td, &fp);
 	if (error != 0)
@@ -1075,13 +1086,13 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 	 * falloc_noinstall().
 	 */
 	/* Set the flags early so the finit in devfs can pick them up. 
-		尽早设置标志，以便devfs中的finit可以拾取它们
+		尽早设置标志，以便devfs中的finit可以拾取它们。将参数中传进来的 flags 信息赋给 fp->f_flag 字段
 	*/
 	fp->f_flag = flags & FMASK;
-	cmode = ((mode & ~fdp->fd_cmask) & ALLPERMS) & ~S_ISTXT;
+	cmode = ((mode & ~fdp->fd_cmask) & ALLPERMS) & ~S_ISTXT;	// create mode
 
 	/* 
-		填充nameidata结构体，把这些零散的数据进行打包处理。所以此时 nameidata 结构体中包含
+		填充 nameidata 结构体，把这些零散的数据进行打包处理。所以此时 nameidata 结构体中包含
 		了一些基本信息，比如路径信息、权限信息、线程信息
 	*/
 	NDINIT_ATRIGHTS(&nd, LOOKUP, FOLLOW | AUDITVNODE1, pathseg, path, fd,
@@ -1093,6 +1104,8 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 		 * If the vn_open replaced the method vector, something
 		 * wonderous happened deep below and we just pass it up
 		 * pretending we know what we do.
+		 * 如果vn_open取代了方法向量，那么下面就会发生一些奇妙的事情，我们只是
+		 * 假装知道自己在做什么就放弃它
 		 */
 		if (error == ENXIO && fp->f_ops != &badfileops)
 			goto success;
@@ -1117,17 +1130,24 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 	}
 	td->td_dupfd = 0;
 	NDFREE(&nd, NDF_ONLY_PNBUF);
+	/*
+		到了这一步其实就是获取到了目标文件对应的 vnode，说明上面的处理已经把目标 vnode
+		存放到了 nameidata 当中
+	*/
 	vp = nd.ni_vp;
 
 	/*
 	 * Store the vnode, for any f_type. Typically, the vnode use
 	 * count is decremented by direct call to vn_closefile() for
 	 * files that switched type in the cdevsw fdopen() method.
+	 * 到这里才开始对 file vnode字段进行赋值
 	 */
 	fp->f_vnode = vp;
 	/*
 	 * If the file wasn't claimed by devfs bind it to the normal
 	 * vnode operations here.
+	 * 如果 devfs 没有声明该文件，则将其绑定到此处的正常 vnode 操作。通过 gdb 调试来看，fp->f_ops
+	 * 当前还是 badfileops，然后调用finit(13.0版本中是 finit_vnode 函数)将 vnops 赋给 ops 字段
 	 */
 	if (fp->f_ops == &badfileops) {
 		KASSERT(vp->v_type != VFIFO, ("Unexpected fifo."));
@@ -1138,6 +1158,7 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 
 	VOP_UNLOCK(vp, 0);
 	if (flags & O_TRUNC) {
+		/* 调用 fp->f_ops->fo_truncate 函数 */
 		error = fo_truncate(fp, 0, td->td_ucred, td);
 		if (error != 0)
 			goto bad;
@@ -1168,6 +1189,7 @@ success:
 	/*
 	 * Release our private reference, leaving the one associated with
 	 * the descriptor table intact.
+	 * 释放我们的私有引用，保留与描述符表关联的引用
 	 */
 	fdrop(fp, td);
 	td->td_retval[0] = indx;

@@ -1,0 +1,238 @@
+////////////// 20211018 //////////////
+周会记录：
+  每个人的代码可以利用 ZChecker 跑一下，看看是不是需要进行大改 (编码规范)
+
+  刘强之前将内核堆栈和用户堆栈合并成了一个，调试过程中会出现循环执行 page_fault 的错误。修改的方法就是还原之前的设计，
+将内核堆栈和用户堆栈进行分离，只不过将内核堆栈拷贝到了 0-4G 的内存区域
+
+  Linux / FreeBSD 的进程设计就是内核的守护进程(本质上就是线程)只会有一个内核堆栈，而不会有用户空间的堆栈。所以守护进程只会存在于内核地址空间。
+用户进程则会包含两个堆栈，一个是内核堆栈，一个是用户堆栈(用户线程进行系统调用的时候，其实会切换到它在内核中对应的线程)。从用户态切换到内核态的时候
+用户堆栈的信息或保存到内核堆栈，当内核进程执行完成之后，再将之前保存过来的用户堆栈的数据还原，返回。此时进程就退出了内核态，返回用户态
+  将内核堆栈拷贝到 0-4G 区域其实是有隐患的。当奇海系统中应用程序进程数量越来越多时，由于每个应用程序线程都会有自己的内核堆栈，0-4G 空间就有可能
+存在溢出的风险。目前比较好的方式是采用 copy-on-write 机制，可以参考：
+  https://www.pianshen.com/article/6236980010/
+
+
+////////////// 20211019 //////////////
+  TptPutPages 修改了原有的通过 uio / qmap_enter 实现的方式，采用直接内存拷贝。其中有一个需要注意的问题就是 offset 的处理，即我们需要通过
+offset 来计算所需要写入的页在文件中的逻辑页号，然后传递给 TptBallocx。因为在 uio 的实现中会用到 uio->uio_offset 成员，表明我们操作的数据
+页并不是从逻辑页号 0 开始的，而是从 offset(in-bytes) / PAGESIZE 逻辑页号开始的，这个要注意
+
+  TptPutPages 函数不管采用那种方式，最后都需要设置页属性 (可以使用宏)：
+    #define	vm_page_valid(m) (m)->valid = VM_PAGE_BITS_ALL
+
+////////////// 20211020 //////////////
+  jot 10000 >b
+  在 /tpt 中利用 cat 命令查看的时候，发现前面 1042 个数字是却缺失的。但是数据的大小是正确的，而且将数据拷贝至 /ext2 下执行 cat，数据又是完好的
+
+    root@qemu:/tpt # cat b
+    1
+    1042
+    1043
+    1044
+    1045
+    1046
+    1047
+    1048
+
+    root@qemu:/tpt # ls -al b
+    -rw-r--r--+ 1 root  wheel  48894 Oct 20 02:29 b
+    root@qemu:/tpt # ls -al /tmpfs/b
+    -rw-r--r--  1 root  wheel  48894 Oct 20 02:21 /tmpfs/b
+    root@qemu:/tpt # 
+
+
+    root@qemu:/tpt # ls -al /ext2
+    total 128
+    drwxr-xr-x   4 root  wheel   4096 Oct 20 02:25 .
+    drwxr-xr-x  22 root  wheel    512 Oct 20 01:59 ..
+    -rw-r--r--   1 root  wheel  48894 Oct 20 02:25 b_tmpfs
+    -rw-r--r--   1 root  wheel  48894 Oct 20 02:25 b_tpt
+
+    root@qemu:/tpt # cp c /ext2
+    root@qemu:/tpt # cat /ext2/c
+    1
+    2
+    3
+    4
+    5
+    6
+    7
+    8
+    9
+    10
+    11
+    ...
+    10000
+
+  感觉还是某些函数的实现存在问题，关键又找不出来 。。。
+
+
+  root@qemu:/usr/tests/sys/fs/tptfs # kyua test readdir_test 
+  readdir_test:caching  ->  passed  [3.683s]
+  readdir_test:dots  ->  passed  [2.973s]
+  readdir_test:many  ->  t[0] == 0x0000000000800010
+  t[1] == 0x0000000000001000
+  t[2] == 0x0000000000000000
+  t[3] == 0x0000000000080000
+  t[4] == 0x0000000000000001
+  t[5] == 0x0000000000000000
+  t[6] == 0x0000000000001000
+  s[0] == 0xffffffc0a5195f20
+  s[1] == 0x0000003fffffe938
+  s[2] == 0x0000000000000000
+  s[3] == 0x0000000000000001
+  s[4] == 0x0000000000010c10
+  s[5] == 0x0000000000000000
+  s[6] == 0x0000000000000001
+  s[7] == 0x0000000000000001
+  s[8] == 0x0000003fffffe928
+  s[9] == 0x0000000000000001
+  s[10] == 0x0000000000000000
+  s[11] == 0x0000000000000000
+  a[0] == 0x010201000000005b
+  a[1] == 0x00000346a3431000
+  a[2] == 0x0000000000001000
+  a[3] == 0x0000000000000000
+  a[4] == 0x0000000000000000
+  a[5] == 0x0000000000001000
+  a[6] == 0x0000000000001000
+  a[7] == 0x0000000000000040
+  ra == 0xffffffc0004dbae0
+  sp == 0xffffffc0a5195ee0
+  gp == 0x000000079bfb8693
+  tp == 0x000000079bfb8693
+  sepc == 0xffffffc00087768a
+  sstatus == 0x8000000000006120
+  panic: Fatal page fault at 0xffffffc00087768a: 0x000346a3431000
+  cpuid = 1
+  time = 1634698407
+  KDB: stack backtrace:
+  #0 0xffffffc0004b28c4 at kdb_backtrace+0x86
+  #1 0xffffffc00043e2a4 at vpanic+0x20c
+  #2 0xffffffc00043e094 at panic+0x32
+  #3 0xffffffc000895220 at do_trap_supervisor+0x670
+  #4 0xffffffc000894cd6 at do_trap_supervisor+0x126
+  #5 0xffffffc00087d228 at cpu_exception_handler_supervisor+0x68
+  #6 0xffffffc0004dbadc at uiomove+0x244
+  #7 0xffffffc0004db8c6 at uiomove+0x2e
+  #8 0xffffffc0008aaa74 at _ZN10TptfsVnode8TptWriteEP14vop_write_args+0x38c
+  #9 0xffffffc00089b594 at VOP_WRITE_APV+0xd2
+  #10 0xffffffc0008ae3b2 at _ZN9TptLookup16TptAddFirstEntryEP5vnodeP7tpt_dirP13componentname+0x1d8
+  #11 0xffffffc0008ae9f8 at _ZN10TptfsHtree19TptHtreeAppendBlockEP5vnodePcP13componentnamej+0xa2
+  #12 0xffffffc0008b01e4 at _ZN10TptfsHtree16TptHtreeAddEntryEP5vnodeP7tpt_dirP13componentname+0x614
+  #13 0xffffffc0008ae50e at _ZN9TptLookup11TptDirEnterEP9tpt_inodeP5vnodeP13componentname+0xec
+  #14 0xffffffc0008a79be at _ZN10TptfsVnode12TptMakeInodeEiP5vnodePS1_P13componentname+0x1bc
+  #15 0xffffffc0008a7786 at _ZN10TptfsVnode9TptCreateEP15vop_create_args+0x42
+  #16 0xffffffc000899c06 at VOP_CREATE_APV+0x54
+  #17 0xffffffc0005ab632 at vn_start_write+0x144
+
+  利用 atf 测试的过程中会出现上述错误，但是自己写脚本进行测试的话没有报错，不太确定是哪里出了问题
+
+  root@qemu:/tpt/a # ls -l | grep "^-" | wc -l
+     500
+
+  ls -l: 列出所有文件，包括目录项
+  grep "^-": 过滤出所有以 - 字符开头的项，目录项是以 d 开头，所以会被过滤掉
+  wc -l: --line 的缩写，显示行数。其实就是计算 ls 命令罗列出的文件条目一共有多少个 
+  从打印信息可看出，/tpt/a 下的文件数一共是 500 个，并且没有发生 panic
+
+
+  root@qemu:/usr/tests/sys/fs/tptfs # kyua test rename_test
+  rename_test:basic  ->  failed: atf-check failed; see the output of the test for details  [1.814s]
+  rename_test:crossdev  ->  passed  [2.969s]
+  rename_test:dir_to_emptydir  ->  passed  [3.828s]
+  rename_test:dir_to_file  ->  passed  [3.420s]
+  rename_test:dir_to_fulldir  ->  passed  [4.401s]
+  rename_test:dotdot  ->  panic: lockmgr_xlock_hard: recursing on non recursive lockmgr 0xffffffd006f0d9f8 @ /usr/home/wcg/qihai/sys/kern/vfs_lookup.c:1336
+
+  cpuid = 1
+  time = 1634706228
+  KDB: stack backtrace:
+  #0 0xffffffc0004b28c4 at kdb_backtrace+0x86
+  #1 0xffffffc00043e2a4 at vpanic+0x20c
+  #2 0xffffffc00043e094 at panic+0x32
+  #3 0xffffffc0003f47e0 at lockmgr_lock_flags+0xc8c
+  #4 0xffffffc0003f5ba2 at lockmgr_xlock+0xca
+  #5 0xffffffc0005712f0 at vop_lock+0xc6
+  #6 0xffffffc0005ae146 at vn_truncate_locked+0x17a
+  #7 0xffffffc0005abff0 at _vn_lock+0x40
+  #8 0xffffffc00057aa14 at relookup+0x76
+  #9 0xffffffc0008a92a2 at _ZN10TptfsVnode9TptRenameEP15vop_rename_args+0x462
+  #10 0xffffffc00089c46a at VOP_RENAME_APV+0x54
+  #11 0xffffffc0005a6544 at sys_renameat+0x276
+  #12 0xffffffc0005a6166 at kern_renameat+0x544
+  #13 0xffffffc0005a5c16 at sys_rename+0x38
+  #14 0xffffffc000895c54 at do_trap_user+0xa28
+  #15 0xffffffc000895526 at do_trap_user+0x2fa
+  #16 0xffffffc000895368 at do_trap_user+0x13c
+  #17 0xffffffc00087d2f2 at cpu_exception_handler_user+0x72
+
+
+////////////// 20211021 //////////////
+  
+  (gdb) p/x tdvp->v_lock.lk_lock
+  $27 = 0xffffffc09c457000
+  (gdb) p/x &tdvp->v_lock.lk_lock
+  $28 = 0xffffffd006f13828
+  (gdb) watch * 0xffffffd006f13828
+  Hardware watchpoint 14: * 0xffffffd006f13828
+  (gdb) c
+  Continuing.
+  [Switching to Thread 1.1]
+
+  Thread 1 hit Hardware watchpoint 14: * 0xffffffd006f13828
+
+  Old value = -1673170944
+  New value = 1
+  0xffffffc0003f6232 in atomic_cmpset_64 (p=0xffffffd006f13828, cmpval=18446743801453441024, 
+      newval=1) at /usr/home/wcg/qihai/sys/riscv/include/atomic.h:346
+  346		__asm __volatile(
+  (gdb) bt
+  #0  0xffffffc0003f6232 in atomic_cmpset_64 (p=0xffffffd006f13828, cmpval=18446743801453441024, 
+      newval=1) at /usr/home/wcg/qihai/sys/riscv/include/atomic.h:346
+  #1  0xffffffc0003f5f5a in atomic_cmpset_rel_64 (p=0xffffffd006f13828, 
+      cmpval=18446743801453441024, newval=1)
+      at /usr/home/wcg/qihai/sys/riscv/include/atomic.h:468
+  #2  0xffffffc0003f5d74 in lockmgr_unlock (lk=0xffffffd006f13810)
+      at /usr/home/wcg/qihai/sys/kern/kern_lock.c:1287
+  #3  0xffffffc00056f3ba in vop_stdunlock (ap=0xffffffc0a51b9540)
+      at /usr/home/wcg/qihai/sys/kern/vfs_default.c:545
+  #4  0xffffffc00058ed86 in VOP_UNLOCK (vp=0xffffffd006f137a0) at ./vnode_if.h:1155
+  #5  0xffffffc00058ed18 in vput (vp=0xffffffd006f137a0)
+      at /usr/home/wcg/qihai/sys/kern/vfs_subr.c:3280
+  #6  0xffffffc00037053e in ext2_checkpath (source=0xffffffd002dcbb00, 
+      target=0xffffffd002d10100, cred=0xffffffd006f4de00)
+      at /usr/home/wcg/qihai/sys/fs/ext2fs/ext2_lookup.c:1292
+  #7  0xffffffc000377fa6 in ext2_rename (ap=0xffffffc0a51b9798)
+      at /usr/home/wcg/qihai/sys/fs/ext2fs/ext2_vnops.c:908
+  #8  0xffffffc00089c46e in VOP_RENAME_APV (vop=0xffffffc0009e14f8 <ext2_vnodeops>, 
+      a=0xffffffc0a51b9798) at vnode_if.c:1678
+  #9  0xffffffc0005a6548 in VOP_RENAME (fdvp=0xffffffd006eea1e8, fvp=0xffffffd006f135b8, 
+      fcnp=0xffffffc0a51b99d8, tdvp=0xffffffd006f137a0, tvp=0x0, tcnp=0xffffffc0a51b9908)
+      at ./vnode_if.h:863
+  #10 0xffffffc0005a616a in kern_renameat (td=0xffffffc09c457000, oldfd=-100, 
+      old=0x3fffffee53 <error: Cannot access memory at address 0x3fffffee53>, newfd=-100, 
+      new=0x3fffffe5f8 <error: Cannot access memory at address 0x3fffffe5f8>, 
+      pathseg=UIO_USERSPACE) at /usr/home/wcg/qihai/sys/kern/vfs_syscalls.c:3690
+  #11 0xffffffc0005a5c1a in sys_rename (td=0xffffffc09c457000, uap=0xffffffc09c4573e8)
+      at /usr/home/wcg/qihai/sys/kern/vfs_syscalls.c:3541
+  #12 0xffffffc000895c58 in syscallenter (td=0xffffffc09c457000)
+      at /usr/home/wcg/qihai/sys/riscv/riscv/../../kern/subr_syscall.c:189
+  #13 0xffffffc00089552a in ecall_handler () at /usr/home/wcg/qihai/sys/riscv/riscv/trap.c:167
+  #14 0xffffffc00089536c in do_trap_user (frame=0xffffffc0a51b9c50)
+      at /usr/home/wcg/qihai/sys/riscv/riscv/trap.c:371
+  #15 <signal handler called>
+  #16 0x000000004015e708 in ?? ()
+
+  追踪函数可以发现，该错误产生的原因是锁的状态值产生了错误。当一个锁被重复锁两次，但是只进行一次解锁的时候，它的状态
+值可能就会不会回退到最初状态。当定位到是因为某个值的异常导致的错误，就可以利用 watchpoint 进行调试，定位数据发生的
+位置，然后 bt 查看函数调用栈，查看关联函数。这里可以看到 ext2 中调用到了 ext2_checkpath 函数，里边调用了 vput 
+函数，它有调用了 VOP_UNLOCK，所以查看 tptfs 中对应的函数是否存在 vput 函数调用失败的问题
+
+
+////////////// 20211022 //////////////
+
+  mkdir_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.112s]
+
+  readdir_test 会产生随机性的 panic

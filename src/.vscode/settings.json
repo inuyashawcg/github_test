@@ -76,6 +76,9 @@
         "libgeom.h": "c",
         "stdint.h": "c",
         "mac_framework.h": "c",
-        "future": "c"
+        "future": "c",
+        "forward_list": "c",
+        "ios": "c",
+        "rope": "c"
     }
 }

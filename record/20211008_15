@@ -113,7 +113,7 @@ ss 和 esp 这对寄存器的内容(存储用户态堆栈指针的地址)
   fdatasync 只是同步文件数据，不同步 metadata
 
 
-////////////// 20211013 //////////////
+////////////// 20211014 //////////////
 
   #0  panic (fmt=0xffffffc00091ee6e "Fatal page fault at %#lx: %#016lx")
       at /usr/home/wcg/qihai/sys/kern/kern_shutdown.c:842
@@ -163,4 +163,99 @@ read 函数拷贝到 vm_page 当中，只不过 tptfs 中可以直接访问内�
 所以手动修改了每个数据页的属性。目前还不知道会不会有什么影响，调试正常。后续会持续关注 
 
 
+////////////// 20211015 //////////////
+  单独调试 file 可执行文件的时候，发现它执行的流程是首先判断文件的类型，然后再去决定做什么样的操作。在 ufs/ext2/tmpfs 中执行该命令的时候，
+它每次都是读取一些小的数据块 (可以查看系统调用传进来的 uio 结构体)，但是 tptfs 中则是每次都是读取一整个页的数据。目前判断很可能是文件类型或
+属性的判断出现了问题。
+  可执行文件和 data 文件都是 regular file 类型，但是对于可执行文件的操作可能就是每次读取相应的一小部分数据解析，循环多次；data 文件的处理
+方式可能就是每次直接读取一整页数据，可能就导致了上述问题。
 
+  root@qemu:/tpt # clang hello.c -o a
+    root@qemu:/tpt # file a
+    a: data
+    root@qemu:/tpt # ./a
+    hello world!
+    root@qemu:/tpt # cp a /
+    root@qemu:/tpt # file /a
+    /a: ELF 64-bit LSB executable, UCB RISC-V, version 1 (SYSV), dynamically linked, interpreter /libexec/ld-elf.so.1, 
+        for FreeBSD 13.0 (1300123), FreeBSD-style, with debug_info, not stripped
+
+  tptfs 中编译生成一个可执行文件a，执行 file 命令无法解析其类型。将 a 拷贝至根目录执行该命令，发现属性信息都是正确的，说明生成的文件数据没问题
+
+  ext2 文件系统重新挂载之后执行可执行文件：
+    (gdb) p *imgp
+      $6 = {
+        proc = 0xffffffc0a51cd8d0,
+        execlabel = 0xffffffd0013e7b00,
+        vp = 0xaeb1b8,  // 该文件还是对应有一个 vnode
+        object = 0x8,
+        attr = 0x4007fefa,
+        image_header = 0x402e0c20 <error: Cannot access memory at address 0x402e0c20>,
+        entry_addr = 1074195520,
+        reloc_base = 0,
+        vmspace_destroyed = 96 '`',
+        interpreted = 0 '\000',
+        opened = 0 '\000',
+        interpreter_name = 0x7b <error: Cannot access memory at address 0x7b>,
+        auxargs = 0xffffffc0a51cd970,
+        firstpage = 0x93000,
+        ps_strings = 0x17af8,
+        args = 0x4081fe40,
+        sysent = 0x4081a000,
+        argv = 0x4081fe70,
+        envv = 0x692e8,
+        execpath = 0x0,
+        execpathp = 0x10e,
+        freepath = 0x0,
+        canary = 0x6d000,
+        canarylen = 97016,
+        pagesizes = 0x40820000,
+        pagesizeslen = 1339617456,
+        stack_prot = 192 '\300',
+        stack_sz = 524116,
+        eff_stack_sz = 18446743801601775912,
+        newcred = 0x0,
+        credential_setid = false,
+        textset = false,
+        map_flags = 0
+      }
+  
+  tptfs 重新挂载之后参数如下：
+    (gdb) p *imgp
+      $2 = {
+        proc = 0x2,
+        execlabel = 0xffffffc09c458600,
+        vp = 0x0,
+        object = 0x0,
+        attr = 0xffffffc0a51cd8a0,
+        image_header = 0xffffffd0013e7b00 "",
+        entry_addr = 11448760,
+        reloc_base = 18446743801601775664,
+        vmspace_destroyed = 0 '\000',
+        interpreted = 134 '\206',
+        opened = 69 'E',
+        interpreter_name = 0xffffffc0a51cd830 "\005",
+        auxargs = 0xffffffc00087d7a0 <critical_exit+16>,
+        firstpage = 0xffffffc000aeb1b8 <isrcs+480>,
+        ps_strings = 0xffffffc09c458600,
+        args = 0xffffffc0a51cd860,
+        sysent = 0xffffffc00087d74a <riscv_cpu_intr+182>,
+        argv = 0x5,
+        envv = 0x5000692e8,
+        execpath = 0xffffffc000aeb1b8 <isrcs+480> "",
+        execpathp = 0xffffffc0a51cd8a0,
+        freepath = 0xffffffc0a51cd8a0 "",
+        canary = 0xffffffc000894c2a <do_trap_supervisor+74>,
+        canarylen = 97016,
+        pagesizes = 0x40820000,
+        pagesizeslen = 1339617456,
+        stack_prot = 192 '\300',
+        stack_sz = 524116,
+        eff_stack_sz = 5,
+        newcred = 0xffffffc0a51cd8a0,
+        credential_setid = 32,
+        textset = 218,
+        map_flags = 4294967232
+      }
+
+watch * (struct tpt_inode*)0xffffffc640003300
