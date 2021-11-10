@@ -2736,6 +2736,7 @@ fget_unlocked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
 #endif
 
 	fdt = fdp->fd_files;
+	// 判断文件描述符的值是否越界
 	if ((u_int)fd >= fdt->fdt_nfiles)
 		return (EBADF);
 	/*
@@ -2745,6 +2746,9 @@ fget_unlocked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
 	 * must be re-verified once we acquire a reference to be certain
 	 * that the identity is still correct and we did not lose a race
 	 * due to preemption.
+	 * 无锁地获取描述符。我们通过从不将refcount提高到0以上来避免fdrop（）争用。
+	 * 要实现这一点，我们必须使用cmpset循环，而不是原子加法。一旦我们获得了一个引用，
+	 * 就必须重新验证描述符，以确保标识仍然正确，并且我们没有因为抢占而失去竞争
 	 */
 	for (;;) {
 #ifdef CAPABILITIES
@@ -2755,9 +2759,13 @@ fget_unlocked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
 		if (!seq_consistent(fd_seq(fdt, fd), seq))
 			continue;
 #else
-	/* 从进程文件描述符表中获取 struct file 指针 */
+	/* 
+		从进程文件描述符表中获取 struct file 指针，上级函数已经对 fd 值的有效性进行判断，这里就包括了相关
+		实现逻辑。
+	*/
 		fp = fdt->fdt_ofiles[fd].fde_file;
 #endif
+		// 当获取到的 file 指针为空时，返回错误。所以经过这个函数处理之后的 fd 一定是正确的
 		if (fp == NULL)
 			return (EBADF);
 #ifdef CAPABILITIES
@@ -2790,7 +2798,7 @@ fget_unlocked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
 #endif
 			break;
 		fdrop(fp, curthread);
-	}
+	}	// end for
 	*fpp = fp;
 	if (seqp != NULL) {
 #ifdef CAPABILITIES
@@ -2807,8 +2815,10 @@ fget_unlocked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
  *
  * If the descriptor doesn't exist or doesn't match 'flags', EBADF is
  * returned.
+ * 如果文件描述符不存在或者不能匹配上 flags，则返回 EBADF
  *
  * File's rights will be checked against the capability rights mask.
+ * 将根据功能权限掩码检查文件的权限
  *
  * If an error occurred the non-zero error is returned and *fpp is set to
  * NULL.  Otherwise *fpp is held and set and zero is returned.  Caller is
@@ -2823,7 +2833,7 @@ _fget(struct thread *td, int fd, struct file **fpp, int flags,
 	int error;
 
 	*fpp = NULL;
-	fdp = td->td_proc->p_fd;
+	fdp = td->td_proc->p_fd;	// 赋值为进程文件描述符结构
 	/* 从进程文件描述符表中获取文件指针fp */
 	error = fget_unlocked(fdp, fd, needrightsp, &fp, seqp);
 	if (error != 0)

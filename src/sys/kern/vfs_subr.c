@@ -173,7 +173,7 @@ int vttoif_tab[10] = {
 
 /*
  * List of vnodes that are ready for recycling.
- * 已经准备好回收的 vnode链表，也就是说目前还未回收？
+ * 已经准备好回收的 vnode 链表，也就是说目前还未回收？
  */
 static TAILQ_HEAD(freelst, vnode) vnode_free_list;
 
@@ -187,7 +187,7 @@ static TAILQ_HEAD(freelst, vnode) vnode_free_list;
  * thrashing while the other is relatively inactive.  The targets express
  * a preference for the best balance.
  * 空闲的vnode很少是完全空闲的，只是相比较而言回收成本比较低而已；它们通常用于已统计但
- * 未读取的文件；这些文件通常附带inode和namecache数据。此目标是主要由此类文件组成的子
+ * 未读取的文件；这些文件通常附带 inode 和 namecache 数据。此目标是主要由此类文件组成的子
  * 缓存的首选最小大小。系统平衡这个子缓存的大小和它的补码，以防止其中一个在另一个相对不
  * 活动的情况下抖动。目标表示对最佳平衡的偏好
  * 
@@ -204,7 +204,7 @@ static TAILQ_HEAD(freelst, vnode) vnode_free_list;
  * E.g., 9% of 75% of MAXVNODES is more than 566000 vnodes to reclaim
  * whenever vnlru_proc() becomes active.
  * 
- * 上述表达的意思就是维持vnode回收机制的一个最佳状态，通过sysctl控制一些参数来进行
+ * 上述表达的意思就是维持 vnode 回收机制的一个最佳状态，通过sysctl控制一些参数来进行
  * 相应的配置，
  */
 static u_long wantfreevnodes;
@@ -230,7 +230,7 @@ SYSCTL_INT(_vfs, OID_AUTO, reassignbufcalls, CTLFLAG_RW, &reassignbufcalls, 0,
 static counter_u64_t free_owe_inact;
 SYSCTL_COUNTER_U64(_vfs, OID_AUTO, free_owe_inact, CTLFLAG_RD, &free_owe_inact,
     "Number of times free vnodes kept on active list due to VFS "
-    "owing inactivation"); // 由于VFS失活而保留在活动列表上的可用Vnode的次数
+    "owing inactivation"); // 由于 VFS 失活而保留在活动列表上的可用 Vnode 的次数
 
 /* To keep more than one thread at a time from running vfs_getnewfsid 
 	保证每个时刻都至少一个线程运行 vfs_getnewfsid 函数
@@ -254,7 +254,7 @@ struct nfs_public nfs_pub;
 static uma_zone_t buf_trie_zone;
 
 /* Zone for allocation of new vnodes - used exclusively by getnewvnode() 
-	分配新vnode的区域-由getnewvnode独占使用
+	分配新 vnode 的区域-由 getnewvnode 独占使用
 */
 static uma_zone_t vnode_zone;
 static uma_zone_t vnodepoll_zone;
@@ -414,6 +414,7 @@ PCTRIE_DEFINE(BUF, buf, b_lblkno, buf_trie_alloc, buf_trie_free);
 
 /*
  * Initialize a vnode as it first enters the zone.
+ 在vnode首次进入区域时初始化它
  */
 static int
 vnode_init(void *mem, int size, int flags)
@@ -423,7 +424,7 @@ vnode_init(void *mem, int size, int flags)
 	vp = mem;
 	bzero(vp, size);
 	/*
-	 * Setup locks.
+	 * Setup locks. 初始化锁指针
 	 */
 	vp->v_vnlock = &vp->v_lock;
 	mtx_init(&vp->v_interlock, "vnode interlock", NULL, MTX_DEF);
@@ -433,7 +434,7 @@ vnode_init(void *mem, int size, int flags)
 	lockinit(vp->v_vnlock, PVFS, "vnode", VLKTIMEOUT,
 	    LK_NOSHARE | LK_IS_VNODE);
 	/*
-	 * Initialize bufobj.
+	 * Initialize bufobj. 
 	 */
 	bufobj_init(&vp->v_bufobj, vp);
 	/*
@@ -504,16 +505,16 @@ vntblinit(void *dummy __unused)
 	 * size.  The memory required by desiredvnodes vnodes and vm objects
 	 * must not exceed 1/10th of the kernel's heap size.
 	 * 
-	 * Desiredvnodes是物理内存大小和内核堆大小的函数。一般来说，它随物理内存大小而扩展。
-	 * 在desiredvnodes超过98304之前，desiredvnodes与物理内存大小的比率为1:16
-	 * 此后，期望vnode与物理内存大小的边际比率为1:64。但是，DesiredVnode受到内核堆大小的限制。
-	 * desiredvnodes vnodes和vm对象所需的内存不得超过内核堆大小的十分之一
+	 * Desiredvnodes 是物理内存大小和内核堆大小的函数。一般来说，它随物理内存大小而扩展。
+	 * 在 desiredvnodes 超过98304之前，desiredvnodes 与物理内存大小的比率为1:16
+	 * 此后，期望 vnode 与物理内存大小的边际比率为1:64。但是，DesiredVnode 受到内核堆大小的限制。
+	 * desiredvnodes vnodes 和 v m对象所需的内存不得超过内核堆大小的十分之一
 	 */
 	physvnodes = maxproc + pgtok(vm_cnt.v_page_count) / 64 +
 	    3 * min(98304 * 16, pgtok(vm_cnt.v_page_count)) / 64;
 	virtvnodes = vm_kmem_size / (10 * (sizeof(struct vm_object) +
 	    sizeof(struct vnode) + NC_SZ * ncsizefactor + NFS_NCLNODE_SZ));
-	desiredvnodes = min(physvnodes, virtvnodes);
+	desiredvnodes = min(physvnodes, virtvnodes);	// 计算 desiredvnodes
 	if (desiredvnodes > MAXVNODES_MAX) {
 		if (bootverbose)
 			printf("Reducing kern.maxvnodes %d -> %d\n",
@@ -521,11 +522,12 @@ vntblinit(void *dummy __unused)
 		desiredvnodes = MAXVNODES_MAX;
 	}
 	wantfreevnodes = desiredvnodes / 4;	//wantfreevnodes 为 desiredvnodes 大小的 1/4
+	// 初始化全局锁，貌似是跟线程相关的
 	mtx_init(&mntid_mtx, "mntid", NULL, MTX_DEF);
 	TAILQ_INIT(&vnode_free_list);	// 初始化vnode free list，下一步就直接初始化free_list锁
 	mtx_init(&vnode_free_list_mtx, "vnode_free_list", NULL, MTX_DEF);
 
-	/* 创建了一块内存区域和缓存区域 */
+	/* 创建 vnode 和 vnode poll 的 UMA 对象 */
 	vnode_zone = uma_zcreate("VNODE", sizeof (struct vnode), NULL, NULL,
 	    vnode_init, vnode_fini, UMA_ALIGN_PTR, 0);
 	vnodepoll_zone = uma_zcreate("VNODEPOLL", sizeof (struct vpollinfo),
@@ -534,8 +536,8 @@ vntblinit(void *dummy __unused)
 	 * Preallocate enough nodes to support one-per buf so that
 	 * we can not fail an insert.  reassignbuf() callers can not
 	 * tolerate the insertion failure.
-	 * 预先分配足够的节点来支持每个buf一个节点，这样我们就不会导致插入失败。
-	 * reassignbuf（）调用者不能容忍插入失败
+	 * 预先分配足够的节点来支持每个 buf 一个节点，这样我们就不会导致插入失败。
+	 * reassignbuf 调用者不能容忍插入失败
 	 */
 	buf_trie_zone = uma_zcreate("BUF TRIE", pctrie_node_size(),
 	    NULL, NULL, pctrie_zone_init, NULL, UMA_ALIGN_PTR, 
@@ -565,7 +567,7 @@ vntblinit(void *dummy __unused)
 	syncer_workitem_pending = hashinit(syncer_maxdelay, M_VNODE,
 	    &syncer_mask);
 	syncer_maxdelay = syncer_mask + 1;
-	mtx_init(&sync_mtx, "Syncer mtx", NULL, MTX_DEF);
+	mtx_init(&sync_mtx, "Syncer mtx", NULL, MTX_DEF);	// 初始化同步锁
 	cv_init(&sync_wakeup, "syncer");  //Condition variable，条件变量，同步的时候使用 
 	for (i = 1; i <= sizeof(struct vnode); i <<= 1)
 		vnsz2log++;
@@ -577,8 +579,8 @@ SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_FIRST, vntblinit, NULL);
 /*
  * Mark a mount point as busy. Used to synchronize access and to delay
  * unmounting. Eventually, mountlist_mtx is not released on failure.
- * 将一个挂载点标记为busy状态，用于同步访问和延迟卸载。最终，mountlist_mtx 在失败的时候
- * 是不会被释放的。查阅用户手册注释，实现该功能的方式是通过增加point的引用计数
+ * 将一个挂载点标记为 busy 状态，用于同步访问和延迟卸载。最终，mountlist_mtx 在失败的时候
+ * 是不会被释放的。查阅用户手册注释，实现该功能的方式是通过增加 point的引用计数
  *
  * vfs_busy() is a custom lock, it can block the caller.
  * vfs_busy() only sleeps if the unmount is active on the mount point.
@@ -929,6 +931,10 @@ vattr_null(struct vattr *vap)
  * desirable to reuse such vnodes.  These conditions may cause the
  * number of vnodes to reach some minimum value regardless of what
  * you set kern.maxvnodes to.  Do not set kern.maxvnodes too low.
+ * 许多情况可能会阻止回收 vnode. 缓冲区缓存可能在 vnode 上有引用，目录 vnode 可能
+ * 由于表示底层文件的 namei 缓存而仍有引用，或者 vnode 可能处于活动使用状态。不希望重用
+ * 此类 vnode。这些情况可能会导致 vnode 的数量达到某个最小值，而不管您将 kern.maxvnodes
+ * 设置为什么。不要将 kern.maxvnodes 设置得太低
  */
 static int
 vlrureclaim(struct mount *mp, int reclaim_nc_src, int trigger)

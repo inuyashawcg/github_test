@@ -46,7 +46,7 @@ struct rl_q_entry;
  * all existing lock owners are compatible with the request. Two lock
  * owners are compatible if their ranges do not overlap, or both
  * owners are for read.
- * 范围锁结构体。调用者可能对一个范围内的bytes进行读写操作，如果所有现有锁所有者都与
+ * 范围锁结构体。调用者可能对一个范围内的 bytes 进行读写操作，如果所有现有锁所有者都与
  * 请求兼容，则授予访问权限；如果两个锁所有者的范围不重叠，或者两个所有者都用于读取，
  * 则它们是兼容的
  * 

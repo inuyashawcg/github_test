@@ -176,7 +176,7 @@ __END_DECLS
 #define	EPROTO		92		/* Protocol error */
 
 #ifndef _POSIX_SOURCE
-#define	ENOTCAPABLE	93		/* Capabilities insufficient */
+#define	ENOTCAPABLE	93		/* Capabilities insufficient 能力不足 */
 #define	ECAPMODE	94		/* Not permitted in capability mode */
 #define	ENOTRECOVERABLE	95		/* State not recoverable */
 #define	EOWNERDEAD	96		/* Previous owner died */

@@ -489,7 +489,7 @@ vfs_rel(struct mount *mp)
 
 /*
  * Allocate and initialize the mount point struct.
- * 每个挂载的文件系统都会有一个mount结构体来进行管理，注意其中有几个vnode队列，功能类似与内存页管理机制
+ * 每个挂载的文件系统都会有一个 mount 结构体来进行管理，注意其中有几个 vnode 队列，功能类似与内存页管理机制
  */
 struct mount *
 vfs_mount_alloc(struct vnode *vp, struct vfsconf *vfsp, const char *fspath,

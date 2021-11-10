@@ -163,6 +163,10 @@ nameiinit(void *dummy __unused)
 	    UMA_ALIGN_PTR, 0);
 	nt_zone = uma_zcreate("rentr", sizeof(struct nameicap_tracker),
 	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
+	/*
+		从定义可以看出，vp_crossmp 是一个静态的 vnode 对象，注册的 vnodeops 都是一些锁操作
+		相关的函数
+	*/
 	getnewvnode("crossmp", NULL, &crossmp_vnodeops, &vp_crossmp);
 }
 SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_SECOND, nameiinit, NULL);
@@ -181,12 +185,17 @@ static void
 nameicap_tracker_add(struct nameidata *ndp, struct vnode *dp)
 {
 	struct nameicap_tracker *nt;
-
+	/*
+		当 dp 不是代表对应一个目录项的 vnode 的时候，返回。说明 tracker 处理的是目录项？
+	*/
 	if ((ndp->ni_lcf & NI_LCF_CAP_DOTDOT) == 0 || dp->v_type != VDIR)
 		return;
-	nt = uma_zalloc(nt_zone, M_WAITOK);
-	vhold(dp);
-	nt->dp = dp;
+	nt = uma_zalloc(nt_zone, M_WAITOK);	// 为 tracker 申请一块内存
+	vhold(dp);	// 增加 tracker 的引用计数
+	nt->dp = dp;	// 指定对应的 vnode
+	/*
+		nameidata 中包含了一个 tracker 的链表，这里执行的是插入操作
+	*/
 	TAILQ_INSERT_TAIL(&ndp->ni_cap_tracker, nt, nm_link);
 }
 
@@ -197,6 +206,10 @@ nameicap_cleanup(struct nameidata *ndp)
 
 	KASSERT(TAILQ_EMPTY(&ndp->ni_cap_tracker) ||
 	    (ndp->ni_lcf & NI_LCF_CAP_DOTDOT) != 0, ("not strictrelative"));
+	/*
+		遍历 nameidata 中的 tracker list，每个元素对应的 vnode 引用计数减一，并释放掉
+		所有元素对应的内存
+	*/
 	TAILQ_FOREACH_SAFE(nt, &ndp->ni_cap_tracker, nm_link, nt1) {
 		TAILQ_REMOVE(&ndp->ni_cap_tracker, nt, nm_link);
 		vdrop(nt->dp);
@@ -221,6 +234,13 @@ nameicap_check_dotdot(struct nameidata *ndp, struct vnode *dp)
 	    dp->v_type != VDIR)
 		return (0);
 	mp = dp->v_mount;
+	/*
+		cap: capacity，能力、容量。MNT_LOCAL 表示文件系统存储在本地，表明文件系统是磁盘文件系统？
+		从代码逻辑可以看出，vfs 对于 .. 目录项的查找有比较严格的条件要求，dp 应该就是对应到 .. 目录项
+		关联的 vnode 结构。
+		lookup_cap_dotdot_nonlocal 表示的应该是查找非本地存储(非持久化内存)文件系统的 .. 目录，遍历
+		所有的 tracker 链表元素，对比与dp是否一致
+	*/
 	if (lookup_cap_dotdot_nonlocal == 0 && mp != NULL &&
 	    (mp->mnt_flag & MNT_LOCAL) == 0)
 		return (ENOTCAPABLE);
@@ -229,13 +249,16 @@ nameicap_check_dotdot(struct nameidata *ndp, struct vnode *dp)
 		if (dp == nt->dp)
 			return (0);
 	}
+	// ENOTCAPABLE 表达的意思好像是不具备这种能力
 	return (ENOTCAPABLE);
 }
 
 static void
 namei_cleanup_cnp(struct componentname *cnp)
 {
-
+	/*
+		namei_zone 其实对应的是 nameidata 中的名称缓存
+	*/
 	uma_zfree(namei_zone, cnp->cn_pnbuf);
 #ifdef DIAGNOSTIC
 	cnp->cn_pnbuf = NULL;
@@ -243,12 +266,22 @@ namei_cleanup_cnp(struct componentname *cnp)
 #endif
 }
 
+/*
+	当文件查找路径是从根目录开始(绝对路径)的时候，处理根节点的情况
+*/
 static int
 namei_handle_root(struct nameidata *ndp, struct vnode **dpp)
 {
 	struct componentname *cnp;
-
+	/*
+		nameidata 结构中的路径名缓存其实是放在 componentname 当中的，所以这里处理路径名数据的时候，
+		传入的其实是 ni_cnd 成员
+	*/
 	cnp = &ndp->ni_cnd;
+	/*
+		如果 nameidata 仅支持相对路径方式，那么该函数就会返回不支持这种能力。下面的代码分支其实就是处理
+		绝对路径查找
+	*/
 	if ((ndp->ni_lcf & NI_LCF_STRICTRELATIVE) != 0) {
 #ifdef KTRACE
 		if (KTRPOINT(curthread, KTR_CAPFAIL))
@@ -264,6 +297,10 @@ namei_handle_root(struct nameidata *ndp, struct vnode **dpp)
 		cnp->cn_nameptr++;
 		ndp->ni_pathlen--;
 	}
+	/*
+		将 rootdir 对应的 vnode 结构赋值给 dpp，说明 nameidata 当前已经知道 rootdir 对应的 vnode
+		的指针？
+	*/
 	*dpp = ndp->ni_rootdir;
 	vrefact(*dpp);
 	return (0);
@@ -299,6 +336,7 @@ namei_handle_root(struct nameidata *ndp, struct vnode **dpp)
 int
 namei(struct nameidata *ndp)
 {
+	// 对应进程结构的文件描述符成员
 	struct filedesc *fdp;	/* pointer to file descriptor state */
 	char *cp;		/* pointer into pathname argument */
 
@@ -316,7 +354,7 @@ namei(struct nameidata *ndp)
 	cnp = &ndp->ni_cnd;
 	td = cnp->cn_thread;
 	p = td->td_proc;
-	ndp->ni_cnd.cn_cred = ndp->ni_cnd.cn_thread->td_ucred;
+	ndp->ni_cnd.cn_cred = ndp->ni_cnd.cn_thread->td_ucred;	// 线程对应的通行证
 	KASSERT(cnp->cn_cred && p, ("namei: bad cred/proc"));
 	KASSERT((cnp->cn_nameiop & (~OPMASK)) == 0,
 	    ("namei: nameiop contaminated with flags"));
@@ -325,9 +363,9 @@ namei(struct nameidata *ndp)
 	MPASS(ndp->ni_startdir == NULL || ndp->ni_startdir->v_type == VDIR ||
 	    ndp->ni_startdir->v_type == VBAD);
 
-	// 进程对应的文件描述符，这里初始化fdp，后面会用到
+	// 进程对应的文件描述符，这里初始化 fdp，后面会用到
 	fdp = p->p_fd;
-	TAILQ_INIT(&ndp->ni_cap_tracker); // 初始化用于名称查找的 vnode 队列	
+	TAILQ_INIT(&ndp->ni_cap_tracker); // 初始化 tracker 队列
 	ndp->ni_lcf = 0;
 
 	/* We will set this ourselves if we need it. */
@@ -338,12 +376,14 @@ namei(struct nameidata *ndp)
 	 * name into the buffer. 为要翻译的名称获取一个缓冲区，并将名称复制到缓冲区中
 	 * 将 nameidata 中的数据拷贝到 componentname 当中(下面的代码为 componentname 分配了存储空间)
 	 */
-	if ((cnp->cn_flags & HASBUF) == 0)	// 当没有缓冲区时，利用 uma 申请一个内存作为缓冲区
+	if ((cnp->cn_flags & HASBUF) == 0)	// 当 componentname 没有缓冲区时，要为其申请一块内存
 		cnp->cn_pnbuf = uma_zalloc(namei_zone, M_WAITOK);
 	/*
 		内核空间和用户空间的数据拷贝方式不一样。ni_dirp 是 nameidata 指向路径名的指针，下面的操作就是将
 		路径名数据拷贝到 cnp->cn_pnbuf 缓冲区。从这里看，感觉 componentname 表示可能不是一个组件名称，
-		而是整个路径的名称，需要进一步验证猜想
+		而是整个路径的名称，需要进一步验证猜想；
+		从这里可以看出，nameidata 中的指针指向的是路径信息实际存储位置，而 componentname 中的相应字段
+		只是用做缓存，可以加快查找速度
 	*/
 	if (ndp->ni_segflg == UIO_SYSSPACE)
 		error = copystr(ndp->ni_dirp, cnp->cn_pnbuf, MAXPATHLEN,
@@ -391,7 +431,7 @@ namei(struct nameidata *ndp)
 		ndp->ni_vp = NULL;
 		return (error);
 	}
-	ndp->ni_loopcnt = 0; // 符号链接设置为0
+	ndp->ni_loopcnt = 0; // 查找过程中遇到的符号链接文件个数设置为0
 #ifdef KTRACE
 	if (KTRPOINT(td, KTR_NAMEI)) {
 		KASSERT(cnp->cn_thread == curthread,
@@ -406,7 +446,7 @@ namei(struct nameidata *ndp)
 	FILEDESC_SLOCK(fdp);	// slock: shared lock
 	ndp->ni_rootdir = fdp->fd_rdir;	// 文件描述符中保存的根目录
 	vrefact(ndp->ni_rootdir);
-	ndp->ni_topdir = fdp->fd_jdir;
+	ndp->ni_topdir = fdp->fd_jdir;	// rootdir 和 topdir 可能是同一个
 
 	/*
 	 * If we are auditing the kernel pathname, save the user pathname.
@@ -417,26 +457,30 @@ namei(struct nameidata *ndp)
 	if (cnp->cn_flags & AUDITVNODE2)
 		AUDIT_ARG_UPATH2(td, ndp->ni_dirfd, cnp->cn_pnbuf);
 
-	startdir_used = 0;
+	startdir_used = 0;	// 起始目录使用次数？
 	dp = NULL;
 
-	// 之前把 nameidata 中的路径数据保存到了 cn_pnbuf，现在将 cn_nameptr 指向它
+	// 路径名指针指向缓存 (componentname)
 	cnp->cn_nameptr = cnp->cn_pnbuf;
-	if (cnp->cn_pnbuf[0] == '/') {	// 绝对路径？
+	if (cnp->cn_pnbuf[0] == '/') {
 		/*
-			namei_handle_root 函数执行完成之后，dp 返回的是 rootdir
+			绝对路径处理，namei_handle_root 函数返回指向一个二级目录名字的指针
 		*/
 		error = namei_handle_root(ndp, &dp);
 	} else {
+		/*
+			下面的代码分支用来处理相对路径。首先就是判断 nameidata 起始目录项对应的 vnode 是否为空。
+			如果不为空，则填充 dp，更新 startdir_used。说明 dp 是用于存储路径搜索起始目录的 vnode
+		*/
 		if (ndp->ni_startdir != NULL) {
-			dp = ndp->ni_startdir;
+			dp = ndp->ni_startdir;	// 用 nameidata 中的成员填充
 			startdir_used = 1;
 		} else if (ndp->ni_dirfd == AT_FDCWD) {
-			dp = fdp->fd_cdir;
+			dp = fdp->fd_cdir;	// 用 filedesc 中的成员填充
 			vrefact(dp);
 		} else {
 			rights = ndp->ni_rightsneeded;
-			cap_rights_set(&rights, CAP_LOOKUP);
+			cap_rights_set(&rights, CAP_LOOKUP);	// 设置 nameidata rights
 
 			if (cnp->cn_flags & AUDITVNODE1)
 				AUDIT_ARG_ATFD1(ndp->ni_dirfd);
@@ -444,6 +488,9 @@ namei(struct nameidata *ndp)
 				AUDIT_ARG_ATFD2(ndp->ni_dirfd);
 			error = fgetvp_rights(td, ndp->ni_dirfd,
 			    &rights, &ndp->ni_filecaps, &dp);
+			/*
+				如果上面的检查出现错误，则报告 Not a directory 错误
+			*/
 			if (error == EINVAL)
 				error = ENOTDIR;
 #ifdef CAPABILITIES
@@ -462,11 +509,14 @@ namei(struct nameidata *ndp)
 			}
 #endif
 		}
-		/* dp 表示的是根目录或者是文件所在的当前目录 */
+		/* dp 表示的是根目录或者路径搜索起始目录 */
 		if (error == 0 && dp->v_type != VDIR)
 			error = ENOTDIR;
-	}
+	}	// 绝对路径和相对路径处理初步完成
 	FILEDESC_SUNLOCK(fdp);
+	/*
+		当起始目录不为空并且 startdir_used 为0的时候，要将起始目录的的引用计数减一
+	*/
 	if (ndp->ni_startdir != NULL && !startdir_used)
 		vrele(ndp->ni_startdir);
 	if (error != 0) {
@@ -474,6 +524,10 @@ namei(struct nameidata *ndp)
 			vrele(dp);
 		goto out;
 	}
+	/*
+		当 nameidata 支持相对路径查找，并且 lookup_cap_dotdot 不为0的时候，对 nameidata
+		ni_lcf 属性进行设置
+	*/
 	if ((ndp->ni_lcf & NI_LCF_STRICTRELATIVE) != 0 &&
 	    lookup_cap_dotdot != 0)
 		ndp->ni_lcf |= NI_LCF_CAP_DOTDOT;
@@ -663,7 +717,7 @@ needs_exclusive_leaf(struct mount *mp, int flags)
 int
 lookup(struct nameidata *ndp)
 {
-	char *cp;			/* pointer into pathname argument 指向路径名参数的指针 */
+	char *cp;			/* pointer into pathname argument */
 	char *prev_ni_next;		/* saved ndp->ni_next */
 	struct vnode *dp = NULL;	/* the directory we are searching */
 	struct vnode *tdp;		/* saved dp - target directory pointer，应该是用于保存目标 vnode */
@@ -704,27 +758,32 @@ lookup(struct nameidata *ndp)
 	 * 我们使用共享锁，直到到达最后一个cn的父级，然后根据请求的标志进行调整
 	 */
 	cnp->cn_lkflags = LK_SHARED;
-	dp = ndp->ni_startdir;
-	ndp->ni_startdir = NULLVP;	// start directory置空？
+	dp = ndp->ni_startdir;	// 获取初始目录项
+	ndp->ni_startdir = NULLVP;	// 然后将 start directory 置空
 	vn_lock(dp,
 	    compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags | LK_RETRY,
 	    cnp->cn_flags));
 
 dirloop:
 	/*
-	 * Search a new directory.
+	 * Search a new directory.	lookup 函数可能只对目录项进行查找
 	 *
 	 * The last component of the filename is left accessible via
 	 * cnp->cn_nameptr for callers that need the name. Callers needing
 	 * the name set the SAVENAME flag. When done, they assume
 	 * responsibility for freeing the pathname buffer.
-	 * 对于需要名称的呼叫者，可以通过cnp->cn\U nameptr访问文件名的最后一个组件。
-	 * 需要名称的呼叫者设置SAVENAME标志。完成后，它们将负责释放路径名缓冲区
+	 * 对于需要名称的呼叫者，可以通过 cnp->cn_nameptr 访问文件名的最后一个组件。
+	 * 需要名称的呼叫者设置 SAVENAME 标志。完成后，它们将负责释放路径名缓冲区
+	 * 
+	 * 在 namei 函数中，如果是绝对路径，cn_nameptr 已经不指向 '/'，而是指向它的下一个
+	 * 组件的起始位置。这个需要考虑的情况就比较多了。首先我们查找的既可能是目录文件，也可能
+	 * 是普通文件；dot 和 dotdot 的情况；路径仅仅是根目录，等等
 	 */
 	for (cp = cnp->cn_nameptr; *cp != 0 && *cp != '/'; cp++)
 		continue;
 	/*
-		componentname 中的路径名长度已经发生了改变，现在应该是表示一个路径组件名称
+		componentname 中的路径名长度已经发生了改变，此时 cp 应该是指向 '/' 或者 '\0'；
+		cnp->cn_nameptr 在 for 循环中是没有发生变化的
 	*/
 	cnp->cn_namelen = cp - cnp->cn_nameptr;	
 	if (cnp->cn_namelen > NAME_MAX) {
@@ -743,6 +802,7 @@ dirloop:
 	    ("%s: ni_pathlen underflow to %zd\n", __func__, ndp->ni_pathlen));
 	prev_ni_next = ndp->ni_next;
 	ndp->ni_next = cp;	// cp 指向的位置在上面for循环中已经发生了改变，移动了一个路径组件名字的长度
+	// 从代码逻辑来看，此时 cp 指向的是字符 '/'
 
 	/*
 	 * Replace multiple slashes by a single slash and trailing slashes
@@ -752,7 +812,7 @@ dirloop:
 	 * and non-existing files that won't be directories specially later.
 	 * 
 	 * 用一个斜杠替换多个斜杠，用空斜杠替换后面的斜杠。这必须在 VOP_LOOKUP 之前完成，
-	 * 因为有些fs不知道后面的斜杠。请记住，如果后面有斜杠来处理符号链接、现有的非目录和
+	 * 因为有些 fs 不知道后面的斜杠。请记住，如果后面有斜杠来处理符号链接、现有的非目录和
 	 * 不存在的文件,这些文件稍后将不会成为目录
 	 * 应该就是对尾部'/'的处理，不同的文件系统处理的方式不一样，要注意区分
 	 */
@@ -760,29 +820,50 @@ dirloop:
 		cp++;
 		ndp->ni_pathlen--;
 		if (*cp == '\0') {
+			/*
+				cp 在此之前指向的是 '/' 字符，然后进入 while 循环并自加1，此时cp指向的是'/'后面的一个字符。
+				如果该字符为 '\0'，说明 componentname 路径名其实是以字符 '/'为结尾，所以就设置 cn_flags
+				字段，添加 TRAILINGSLASH 属性
+			*/
 			*ndp->ni_next = '\0';
 			cnp->cn_flags |= TRAILINGSLASH;
 		}
-	}
-	ndp->ni_next = cp;
+	}	// end while
 
-	cnp->cn_flags |= MAKEENTRY;	// 将entry添加到名称缓存
+	/*
+		上面的 while 循环就是处理当遇到路径名中为 ...///////... 或者 '/\0' 的情况。当处理到路径末尾或者
+		是不为 '/' 的字符时，退出循环；
+		nameidata 处理路径名的时候应该是包含有两个对象，一个是当前处理的组件名称，然后是下一次要处理的组件。
+		将组件名起始位置赋值给 ni_next 成员
+	*/
+	ndp->ni_next = cp;	// 此时 cp 有可能就是 '/0'
+
+	cnp->cn_flags |= MAKEENTRY;	// 添加名称缓存属性
+	// 这里应该就是把所有情况统一处理，处理 cp 为 '/0' 的情况
 	if (*cp == '\0' && docache == 0)
 		cnp->cn_flags &= ~MAKEENTRY;
-	/* 判断是不是 .. */	
+
+	/* 判断是不是 dotdot 目录 */	
 	if (cnp->cn_namelen == 2 &&
 	    cnp->cn_nameptr[1] == '.' && cnp->cn_nameptr[0] == '.')
 		cnp->cn_flags |= ISDOTDOT;
 	else
 		cnp->cn_flags &= ~ISDOTDOT;
+
 	/*
-		判断是不是路径名的最后一个组件
+		判断是不是路径名的最后一个组件。因为后面对于 dot 和 dotdot 的处理过程中需要判断它们是不是路径中的
+		最后组件，所以这一步一定要放到它们的处理逻辑之前
 	*/
 	if (*ndp->ni_next == 0)
 		cnp->cn_flags |= ISLASTCN;
 	else
 		cnp->cn_flags &= ~ISLASTCN;
 
+	/*
+		如果是最后一个组件，并且 namelen 为1，name 为 '.'，执行的操作是删除或者重命名，则返回无效参数。
+		上面处理完 dotdot，这里多加一步处理 dot。dot 目录不能执行删除和重命名操作。这里注意 cnp->cn_nameptr，
+		该成员在上述处理过程中一直保持不变，也就是处理单独一个 dot 目录的情况
+	*/
 	if ((cnp->cn_flags & ISLASTCN) != 0 &&
 	    cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.' &&
 	    (cnp->cn_nameiop == DELETE || cnp->cn_nameiop == RENAME)) {
@@ -790,7 +871,7 @@ dirloop:
 		goto bad;
 	}
 
-	/* 将我们需要查找的 vnode 添加到队列当中 */
+	/* 将目录项对应的 tracker 添加到队列当中 */
 	nameicap_tracker_add(ndp, dp);
 
 	/*
@@ -809,7 +890,7 @@ dirloop:
 		}
 		if (wantparent) {
 			ndp->ni_dvp = dp;
-			VREF(dp);
+			VREF(dp);	// 返回的指针处于加锁状态
 		}
 		ndp->ni_vp = dp;
 
@@ -824,7 +905,7 @@ dirloop:
 		if (cnp->cn_flags & SAVESTART)
 			panic("lookup: SAVESTART");
 		goto success;
-	}
+	}	// 当 componentname 中路径名指针指向字符 '\0' 时的处理逻辑，说明路径名已经解析完毕
 
 	/*
 	 * Handle "..": five special cases.
@@ -834,7 +915,8 @@ dirloop:
 	 * 
 	 * 1. Return an error if this is the last component of
 	 *    the name and the operation is DELETE or RENAME.
-	 *    如果这是名称的最后一个组件，并且操作是DELETE或RENAME，则返回错误
+	 *    如果这是名称的最后一个组件，并且操作是 DELETE 或 RENAME，则返回错误。这个机制
+	 * 		与 dot 目录一致
 	 * 
 	 * 2. If at root directory (e.g. after chroot)
 	 *    or at absolute root directory
@@ -845,20 +927,25 @@ dirloop:
 	 *    filesystem, then replace it with the
 	 *    vnode which was mounted on so we take the
 	 *    .. in the other filesystem.
-	 *    如果这个vnode是一个挂载的文件系统的根，那么用挂载的vnode替换它，这样我们就采用..在另一个文件系统中
+	 *    如果这个vnode是一个挂载的文件系统的根，那么用挂载的 vnode 替换它，
+	 * 		这样我们就采用 .. 在另一个文件系统中
 	 * 
 	 * 4. If the vnode is the top directory of
-	 *    the jail or chroot, don't let them out. 如果vnode是jail或chroot的顶级目录，请不要将它们释放
+	 *    the jail or chroot, don't let them out. 
+	 * 		如果 vnode 是 jail 或 chroot 的顶级目录，请不要将它们释放
 	 * 
 	 * 5. If doing a capability lookup and lookup_cap_dotdot is
 	 *    enabled, return ENOTCAPABLE if the lookup would escape
 	 *    from the initial file descriptor directory.  Checks are
 	 *    done by ensuring that namei() already traversed the
 	 *    result of dotdot lookup.
-	 *    如果执行功能查找并且启用了 lookup_cap_dotdot，则如果查找将从初始文件描述符目录转义，则返回 ENOTCAPABLE。
-	 *    检查是通过确保 namei() 已经遍历 dotdot loookup 的结果来完成的
+	 *    如果执行功能查找并且启用了 lookup_cap_dotdot，则如果查找将从初始文件描述符目录转义，
+	 * 		则返回 ENOTCAPABLE。检查是通过确保 namei() 已经遍历 dotdot lookup 的结果来完成的
 	 */
 	if (cnp->cn_flags & ISDOTDOT) {
+		/* 
+			如果 nameidata 支持相对路径查找，但是不具备 .. 目录项的查找能力，则出错
+		*/
 		if ((ndp->ni_lcf & (NI_LCF_STRICTRELATIVE | NI_LCF_CAP_DOTDOT))
 		    == NI_LCF_STRICTRELATIVE) {
 #ifdef KTRACE
@@ -868,25 +955,31 @@ dirloop:
 			error = ENOTCAPABLE;
 			goto bad;
 		}
+		/*
+			这个操作类似与 dot 目录，当 dotdot 是最后一个组件，但是要执行删除或者重命名的操作时，报错
+		*/ 
 		if ((cnp->cn_flags & ISLASTCN) != 0 &&
 		    (cnp->cn_nameiop == DELETE || cnp->cn_nameiop == RENAME)) {
 			error = EINVAL;
 			goto bad;
 		}
+		
 		for (;;) {
 			for (pr = cnp->cn_cred->cr_prison; pr != NULL;
 			     pr = pr->pr_parent)
 				if (dp == pr->pr_root)
 					break;
+
 			if (dp == ndp->ni_rootdir || 
 			    dp == ndp->ni_topdir || 
 			    dp == rootvnode ||
 			    pr != NULL ||
 			    ((dp->v_vflag & VV_ROOT) != 0 &&
 			     (cnp->cn_flags & NOCROSSMOUNT) != 0)) {
+				/* 我们查找的文件不一定就是普通文件，有很大概率是目录文件 */
 				ndp->ni_dvp = dp;
 				ndp->ni_vp = dp;
-				VREF(dp);
+				VREF(dp);	// 增加 dp 的引用计数
 				goto nextname;
 			}
 			if ((dp->v_vflag & VV_ROOT) == 0)
@@ -896,6 +989,7 @@ dirloop:
 				goto bad;
 			}
 			tdp = dp;
+			// 处理目录项是挂载点
 			dp = dp->v_mount->mnt_vnodecovered;
 			VREF(dp);
 			vput(tdp);
@@ -910,8 +1004,8 @@ dirloop:
 #endif
 				goto bad;
 			}
-		}
-	}
+		}	// end for
+	}	// end if，处理 .. 目录
 
 	/*
 	 * We now have a segment name to search for, and a directory to search.
@@ -1329,13 +1423,13 @@ NDINIT_ALL(struct nameidata *ndp, u_long op, u_long flags, enum uio_seg segflg,
     const char *namep, int dirfd, struct vnode *startdir, cap_rights_t *rightsp,
     struct thread *td)
 {
-
+	// 首先设置 componentname 成员属性
 	ndp->ni_cnd.cn_nameiop = op;
 	ndp->ni_cnd.cn_flags = flags;
 	ndp->ni_segflg = segflg;	// 指定是用户空间还是内核空间
 	ndp->ni_dirp = namep;	// 路径信息
 	ndp->ni_dirfd = dirfd;
-	ndp->ni_startdir = startdir;	// 实际调用情况来看，有些情况 startdir 传入的参数为空
+	ndp->ni_startdir = startdir;	// 实际调用情况来看，startdir = NULL
 	if (rightsp != NULL)
 		ndp->ni_rightsneeded = *rightsp;
 	else

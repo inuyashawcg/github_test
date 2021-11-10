@@ -1,0 +1,37 @@
+////////////// 20211108 //////////////
+  从 FreeBSD 服务器转移到本机 ubuntu20.04 系统之后，需要对之前的一些操作进行调整。首先要对本机进行更新，否则clang、llvm等工具
+使用上可能会出错。安装依赖，参考： https://apt.llvm.org/
+  sudo apt-get install clang-format clang-tidy clang-tools clang clangd libc++-dev libc++1 libc++abi-dev libc++abi1 libclang-dev libclang1 liblldb-dev libllvm-ocaml-dev libomp-dev libomp5 lld lldb llvm-dev llvm-runtime llvm python-clang
+  
+  gdb 也不能使用本机默认的gdb，而是要使用 riscv 版本，在安装riscv工具链的时候会进行附带安装，执行命令变为：
+    riscv64-unknown-linux-gnu-gdb -x gdb
+
+  opensbi 也需要进行配置，参考： https://wiki.ubuntu.com/RISC-V
+    sudo apt install qemu-system-misc opensbi u-boot-qemu qemu-utils
+
+  qemu 启动配置项也要进行修改，如下：
+    qemu-system-riscv64 \
+      -bios /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_jump.elf \
+      ...
+
+  FreeBSD 中路经查找的逻辑十分复杂，目前来看有几个重要的点需要特别关注一下：
+    - 绝对路径和相对路径
+    - '.' 和 '..' 两个目录项的处理
+    - 是否以 '/' 为结尾
+
+
+////////////// 20211109 //////////////
+  vfs namecache 的作用就是为了让文件查找更加快速，然后把文件名的信息驻留在内存当中，然后通过一定的方式组织起来，实现快速查找。
+但是 tptfs 本身就是内存文件系统，所有的数据已经存在在内存当中了，所以再把 FreeBSD 中的 namecache 注册到 GR 当中其实并没有
+特别的用处，所以该方案不太可行；
+
+  另外一种方式就是注册 struct(class) file，首先这个结构偏上层，可以适配不同类型的文件系统；
+
+  奇海系统所有的线程贡献文件描述符。FreeBSD 中是当我们需要打开一个文件的时候动态创建一个 struct file，然后分配一个 vnode 对应到
+inode。奇海系统可能就要把 class file 做成静态的，为每一个文件分配唯一 class file(FreeBSD 中不同进程打开相同的文件，对应的是不同
+的 struct file)。vnode 则可以继续做成动态的，只有打开文件的时候才会分配一个；
+
+  目前文件描述符0、1、2对应的是标准输入输出和error，不同的进程包含有独立的三个描述符互不影响。奇海系统由于所有的进程共享描述符，所以
+该机制还需要做修改；
+
+  需要评估注册 class file 可能会对当前系统造成的影响

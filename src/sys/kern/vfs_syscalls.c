@@ -1656,6 +1656,11 @@ kern_symlinkat(struct thread *td, char *path1, int fd, char *path2,
 	AUDIT_ARG_TEXT(syspath);
 restart:
 	bwillwrite();	/* buf 相关的操作 */
+	/*
+		注意这里传入的参数 CREATE。namei 函数会根据路径查找是否有 vnode 与之对应。它支持查找、创建、删除和重命名，
+		这里传入的是创建，也就是说当我们顺着路径找下来的时候，并没有发现有与之对应的 vnode，此时就要重新申请一个空闲
+		的 vnode。
+	*/
 	NDINIT_ATRIGHTS(&nd, CREATE, LOCKPARENT | SAVENAME | AUDITVNODE1 |
 	    NOCACHE, segflg, path2, fd, &cap_symlinkat_rights,
 	    td);

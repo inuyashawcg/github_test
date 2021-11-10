@@ -175,7 +175,7 @@ struct file {
 	void		*f_data;	/* file descriptor specific data 文件描述符对对应的具体数据 */
 	struct fileops	*f_ops;		/* File operations 文件所支持的一些操作 */
 	struct ucred	*f_cred;	/* associated credentials. 关联的凭据 */
-	struct vnode 	*f_vnode;	/* NULL or applicable vnode 文件所对应的vnode */
+	struct vnode 	*f_vnode;	/* NULL or applicable vnode 文件所对应的 vnode */
 	short		f_type;		/* descriptor type 描述符类型，应该表示的就是文件类型 */
 	short		f_vnread_flags; /* (f) Sleep lock for f_offset */
 	volatile u_int	f_flag;		/* see fcntl.h */

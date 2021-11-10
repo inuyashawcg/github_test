@@ -79,6 +79,8 @@ TAILQ_HEAD(nameicap_tracker_head, nameicap_tracker);
 struct nameidata {
 	/*
 	 * Arguments to namei/lookup.
+	 		这对应的是路径名实际存储的位置，componentname 中表示的可能就只是缓存，当我们查找的时候更多情况下就是对
+			这部分缓存进行操作
 	 */
 	const	char *ni_dirp;		/* pathname pointer 指向路径名指针，查找文件？？ */
 	enum	uio_seg ni_segflg;	/* location of pathname 标定指向的是用户空间还是内核空间 */
@@ -95,7 +97,7 @@ struct nameidata {
 	struct  vnode *ni_startdir;	/* starting directory 起始目录 */
 	struct	vnode *ni_rootdir;	/* logical root directory 逻辑根目录 */
 	struct	vnode *ni_topdir;	/* logical top directory 逻辑顶层目录 */
-	int	ni_dirfd;		/* starting directory for *at functions *at函数的起始目录 */
+	int	ni_dirfd;		/* starting directory for *at functions 处理路径查找遇到通配符的情况？ */
 	int	ni_lcf;			/* local call flags 本地呼叫标志 */
 	/*
 	 * Results: returned from namei
@@ -183,7 +185,7 @@ struct nameidata {
 #define	WILLBEDIR	0x00080000 /* new files will be dirs; allow trailing / */
 #define	ISUNICODE	0x00100000 /* current component name is unicode*/
 #define	ISOPEN		0x00200000 /* caller is opening; return a real vnode. */
-#define	NOCROSSMOUNT	0x00400000 /* do not cross mount points */
+#define	NOCROSSMOUNT	0x00400000 /* do not cross mount points 不要跨越安装点 */
 #define	NOMACCHECK	0x00800000 /* do not perform MAC checks */
 #define	AUDITVNODE1	0x04000000 /* audit the looked up vnode information 审核已查找的vnode信息 */
 #define	AUDITVNODE2	0x08000000 /* audit the looked up vnode information */

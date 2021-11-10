@@ -315,7 +315,7 @@ void          __mnt_vnode_markerfree_active(struct vnode **mvp, struct mount *);
  * but visible to the user.
  * XXX some of these are not quite right.. (I've never seen the root flag set)
  */
-#define	MNT_LOCAL	0x0000000000001000ULL /* filesystem is stored locally */
+#define	MNT_LOCAL	0x0000000000001000ULL /* filesystem is stored locally 文件系统存储在本地 */
 #define	MNT_QUOTA	0x0000000000002000ULL /* quotas are enabled on fs */
 #define	MNT_ROOTFS	0x0000000000004000ULL /* identifies the root fs */
 #define	MNT_USER	0x0000000000008000ULL /* mounted by a user */

@@ -108,7 +108,7 @@ struct	namecache {
 	TAILQ_ENTRY(namecache) nc_dst;	/* destination vnode list 指向目标位置 */
 	struct	vnode *nc_dvp;		/* vnode of parent of name 表示的是目标文件所在目录对应的 vnode */
 	union {
-		struct	vnode *nu_vp;	/* vnode the name refers to 目标文件对应的vnode */
+		struct	vnode *nu_vp;	/* vnode the name refers to 目标文件对应的 vnode */
 		u_int	nu_neghits;	/* negative entry hits */
 	} n_un;
 	u_char	nc_flag;		/* flag bits */
@@ -188,31 +188,36 @@ struct	namecache_ts {
  *
  * Insertions and removals of entries require involved vnodes and bucketlocks
  * to be write-locked to prevent other threads from seeing the entry.
- * 条目的插入和删除要求相关的vnode和bucketlock被写锁定，以防止其他线程看到该条目
+ * 条目的插入和删除要求相关的 vnode 和 bucketlock 被写锁定，以防止其他线程看到该条目
  *
  * Some lookups result in removal of the found entry (e.g. getting rid of a
  * negative entry with the intent to create a positive one), which poses a
  * problem when multiple threads reach the state. Similarly, two different
  * threads can purge two different vnodes and try to remove the same name.
  * 某些查找会导致删除找到的条目（例如，为了创建一个正条目而删除一个负条目），这会在多个线程
- * 达到该状态时造成问题。类似地，两个不同的线程可以清除两个不同的vnode并尝试删除相同的名称
+ * 达到该状态时造成问题。类似地，两个不同的线程可以清除两个不同的 vnode 并尝试删除相同的名称
  *
  * If the already held vnode lock is lower than the second required lock, we
  * can just take the other lock. However, in the opposite case, this could
  * deadlock. As such, this is resolved by trylocking and if that fails unlocking
  * the first node, locking everything in order and revalidating the state.
- * 如果已经持有的vnode锁低于第二个所需的锁，我们可以只使用另一个锁。然而，在相反的情况下，
- * 这可能会陷入僵局。因此，这可以通过trylock来解决，如果无法解锁第一个节点，则按顺序锁定
+ * 如果已经持有的 vnode 锁低于第二个所需的锁，我们可以只使用另一个锁。然而，在相反的情况下，
+ * 这可能会陷入僵局。因此，这可以通过 trylock 来解决，如果无法解锁第一个节点，则按顺序锁定
  * 所有节点并重新验证状态
  */
 
 /*
  * Structures associated with name caching.
  * nc: name cache
- * 从下文的代码逻辑来看，namecache也是通过hash table来管理的，类似于vnode。里面又分成不同类型的entry
+ * 从下文的代码逻辑来看，namecache 也是通过 hash table 来管理的，类似于 vnode。
+ * 里面又分成不同类型的 entry
  */
 #define NCHHASH(hash) \
 	(&nchashtbl[(hash) & nchash])
+/*
+	这里定义了一个全局的 hash table。hash table 结合了数组与链表的优势，既能实现快速查找，又可以方便数据插入。
+	bucket 是 hash table 中的一个术语
+*/
 static __read_mostly LIST_HEAD(nchashhead, namecache) *nchashtbl;/* Hash Table */
 
 static u_long __read_mostly	nchash;			/* size of hash table */
@@ -569,12 +574,12 @@ cache_trylock_vnodes(struct mtx *vlp1, struct mtx *vlp2)
 
 	if (vlp1 != NULL) {
 		if (!mtx_trylock(vlp1))
-			return (EAGAIN);
+			return (EAGAIN);	// try again
 	}
 	if (!mtx_trylock(vlp2)) {
 		if (vlp1 != NULL)
 			mtx_unlock(vlp1);
-		return (EAGAIN);
+		return (EAGAIN);	// try again
 	}
 
 	return (0);
@@ -725,7 +730,7 @@ SYSCTL_PROC(_debug_hashstat, OID_AUTO, nchash, CTLTYPE_INT|CTLFLAG_RD|
 	negative cache 在FreeBSD中的一个应用场景是名字缓存。当我们在一个目录中查找名字的时候，如果没有找到，
 	就会把该名字放到缓存当中，vnode指针置空。后来如果又搜索到这个名称时，就可以在缓存中找到它，而不是重新遍历
 	整个目录，这样可以快速知道我们所要找的名字并不在这个目录中。如果我们在目录中增加了一个名字，那么就必须要在
-	缓存中将这个名字给删除掉
+	缓存中将这个名字给删除掉;
 */
 static void
 cache_negative_hit(struct namecache *ncp)
@@ -1187,7 +1192,7 @@ cache_lookup_unlock(struct rwlock *blp, struct mtx *vlp)
 	}
 }
 
-/* dot: 就表示“.”这个符号，这个函数就是查找 . 这个符号 */
+/* dot: 就表示“.”这个符号，这个函数就是查找 . 目录项 */
 static int __noinline
 cache_lookup_dot(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
     struct timespec *tsp, int *ticksp)
@@ -1221,6 +1226,9 @@ cache_lookup_dot(struct vnode *dvp, struct vnode **vpp, struct componentname *cn
 		} else
 			vn_lock(*vpp, LK_DOWNGRADE | LK_RETRY);
 	}
+	/*
+		从 vfs_lookup_cache 代码逻辑来看，如果该函数返回值为 -1，其实表示结果正确
+	*/
 	return (-1);
 }
 
@@ -1235,9 +1243,9 @@ cache_lookup_dot(struct vnode *dvp, struct vnode **vpp, struct componentname *cn
  * fails, a status of zero is returned.  If the directory vnode is
  * recycled out from under us due to a forced unmount, a status of
  * ENOENT is returned.
- * 调用Lookup时，dvp指向要搜索的目录，cnp指向要搜索的条目的名称。如果查找成功，则在
- * *vpp中返回vnode，并返回-1状态。如果查找确定名称不存在（负缓存），则返回enoint状态。
- * 如果查找失败，则返回零状态。如果目录vnode由于强制卸载而从我们下面回收，则返回enoint状态。
+ * 调用 Lookup 时，dvp 指向要搜索的目录，cnp 指向要搜索的条目的名称。如果查找成功，则在
+ * *vpp 中返回 vnode，并返回-1状态。如果查找确定名称不存在（负缓存），则返回 ENOENT 状态。
+ * 如果查找失败，则返回零状态。如果目录 vnode 由于强制卸载而从我们下面回收，则返回 ENOENT 状态。
  *
  * vpp is locked and ref'd on return.  If we're looking up DOTDOT, dvp is
  * unlocked.  If we're looking up . an extra ref is taken, but the lock is
@@ -1254,6 +1262,7 @@ cache_lookup_nomakeentry(struct vnode *dvp, struct vnode **vpp,
 	uint32_t hash;
 	int error;
 
+	// 专门用来处理 dotdot 目录项的代码分支
 	if (cnp->cn_namelen == 2 &&
 	    cnp->cn_nameptr[0] == '.' && cnp->cn_nameptr[1] == '.') {
 		counter_u64_add(dotdothits, 1);
@@ -1288,7 +1297,7 @@ retry_dotdot:
 				mtx_unlock(dvlp2);
 		}
 		return (0);
-	}
+	}	// end if
 
 	hash = cache_get_hash(cnp->cn_nameptr, cnp->cn_namelen, dvp);
 	blp = HASH2BUCKETLOCK(hash);
@@ -1332,7 +1341,7 @@ cache_lookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
     struct timespec *tsp, int *ticksp)
 {
 	struct namecache_ts *ncp_ts;
-	struct namecache *ncp;
+	struct namecache *ncp;	// name cache pointer
 	struct rwlock *blp;
 	struct mtx *dvlp;
 	uint32_t hash;
@@ -1345,21 +1354,23 @@ cache_lookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
 
 	counter_u64_add(numcalls, 1);
 
+	// 如果查找的对象是 dot
 	if (__predict_false(cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.'))
 		return (cache_lookup_dot(dvp, vpp, cnp, tsp, ticksp));
 
+	// 如果名字将要被添加到缓存当中
 	if ((cnp->cn_flags & MAKEENTRY) == 0)
 		return (cache_lookup_nomakeentry(dvp, vpp, cnp, tsp, ticksp));
 
 retry:
-	blp = NULL;
-	dvlp = NULL;
+	blp = NULL;	// bucket lock pointer
+	dvlp = NULL;	// directory vnode lock pointer
 	error = 0;
 	if (cnp->cn_namelen == 2 &&
 	    cnp->cn_nameptr[0] == '.' && cnp->cn_nameptr[1] == '.') {
 		counter_u64_add(dotdothits, 1);
 		dvlp = VP2VNODELOCK(dvp);
-		mtx_lock(dvlp);
+		mtx_lock(dvlp);	// vnode 加锁
 		ncp = dvp->v_cache_dd;
 		if (ncp == NULL) {
 			SDT_PROBE3(vfs, namecache, lookup, miss, dvp,
@@ -1367,6 +1378,9 @@ retry:
 			mtx_unlock(dvlp);
 			return (0);
 		}
+		/*
+			如果 namecache 表示的是 dotdot 的名称缓存，并且它不是 negative 类型的，那就返回 nc_dvp
+		*/
 		if ((ncp->nc_flag & NCF_ISDOTDOT) != 0) {
 			if (ncp->nc_flag & NCF_NEGATIVE)
 				*vpp = NULL;
@@ -1388,12 +1402,15 @@ retry:
 			*tsp = ncp_ts->nc_dotdottime;
 		}
 		goto success;
-	}
+	}	// 专门处理 dotdot
 
 	hash = cache_get_hash(cnp->cn_nameptr, cnp->cn_namelen, dvp);
 	blp = HASH2BUCKETLOCK(hash);
 	rw_rlock(blp);
-
+	/*
+		NCHHASH 宏会用到一个全局的静态 namecache hash table，所以这里搜索的话应该是一个全局搜索，
+		而不是为某个路径单独建立一个缓存区
+	*/
 	LIST_FOREACH(ncp, (NCHHASH(hash)), nc_hash) {
 		counter_u64_add(numchecks, 1);
 		if (ncp->nc_dvp == dvp && ncp->nc_nlen == cnp->cn_namelen &&
@@ -1423,7 +1440,9 @@ retry:
 	}
 
 negative_success:
-	/* We found a negative match, and want to create it, so purge */
+	/* We found a negative match, and want to create it, so purge 
+		我们发现了一个负匹配项，并希望创建它，所以清除
+	*/
 	if (cnp->cn_nameiop == CREATE) {
 		counter_u64_add(numnegzaps, 1);
 		goto zap_and_exit;
@@ -2201,9 +2220,11 @@ vfs_cache_lookup(struct vop_lookup_args *ap)
 	*vpp = NULL;
 	dvp = ap->a_dvp;
 
+	// dvp 表示的应该是目标文件所在的目录
 	if (dvp->v_type != VDIR)
 		return (ENOTDIR);
 
+	// 判断文件系统挂载的时候是不是以只读模式挂载的
 	if ((flags & ISLASTCN) && (dvp->v_mount->mnt_flag & MNT_RDONLY) &&
 	    (cnp->cn_nameiop == DELETE || cnp->cn_nameiop == RENAME))
 		return (EROFS);
@@ -2213,6 +2234,10 @@ vfs_cache_lookup(struct vop_lookup_args *ap)
 		return (error);
 
 	error = cache_lookup(dvp, vpp, cnp, NULL, NULL);
+	/*
+		当 cache_lookup 返回值为0的时候，还要继续调用文件系统的 lookup 函数，说明在 cache 中没有找到
+		对应的文件项。如果返回值为-1的话，则直接返回0
+	*/
 	if (error == 0)
 		return (VOP_CACHEDLOOKUP(dvp, vpp, cnp));
 	if (error == -1)

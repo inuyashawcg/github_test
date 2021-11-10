@@ -118,7 +118,7 @@ struct mount *rootdevmp;
 
 char *rootdevnames[2] = {NULL, NULL};
 
-// 创建一个专门用于控制root_hold的锁
+// 创建一个专门用于控制 root_hold 的锁
 struct mtx root_holds_mtx;
 MTX_SYSINIT(root_holds, &root_holds_mtx, "root_holds", MTX_DEF);
 
@@ -257,7 +257,6 @@ set_rootvnode(void)
 static int
 vfs_mountroot_devfs(struct thread *td, struct mount **mpp)
 {
-	/* mpp 现在还是一个空数据 */
 	struct vfsoptlist *opts;	// operation链表
 	struct vfsconf *vfsp;
 	struct mount *mp;
@@ -268,14 +267,20 @@ vfs_mountroot_devfs(struct thread *td, struct mount **mpp)
 	if (rootdevmp != NULL) {
 		/*
 		 * Already have /dev; this happens during rerooting.
-		 * 如果rootdevmp不为空的话，就将其标记为busy状态
+		 * 如果 rootdevmp 不为空的话，就将其标记为 busy 状态
 		 */
 		error = vfs_busy(rootdevmp, 0);
 		if (error != 0)
 			return (error);
 		*mpp = rootdevmp;
 	} else {
-		/* 处理 rootdevmp 为 null 的代码分支 */
+		/* 
+			处理 rootdevmp 为 null 的代码分支。VFS_SET 宏定义就是将每个文件系统对应的 vfsconf 结构体进行了封装
+			并注册进了内核当中。启动启动的时候会调用 vfs_modevent 函数，然后再调用 vfs_register 函数，该函数就是
+			对全局 vfsconf 链表进行填充。
+			感觉到这里的时候全局 vfsconf 链表中已经包含有所有注册的文件系统结构，这里调用 vfs_byname 函数就从链表
+			中通过名称拿到了结构体数据。后面调用注册函数的时候就对应到了 devfs 注册的函数
+		*/
 		vfsp = vfs_byname("devfs");	// 应该就是查找相应的文件系统设备文件，设置名称
 		KASSERT(vfsp != NULL, ("Could not find devfs by name"));
 		if (vfsp == NULL)
@@ -287,7 +292,7 @@ vfs_mountroot_devfs(struct thread *td, struct mount **mpp)
 		*/
 		mp = vfs_mount_alloc(NULLVP, vfsp, "/dev", td->td_ucred);
 
-		error = VFS_MOUNT(mp);	// 挂载 /dev
+		error = VFS_MOUNT(mp);	// 挂载 /dev，执行的是 devfs_mount 函数
 		KASSERT(error == 0, ("VFS_MOUNT(devfs) failed %d", error));
 		if (error)
 			return (error);
@@ -1091,7 +1096,7 @@ vfs_mountroot(void)
 	td = curthread;
 
 	sb = sbuf_new_auto();
-	vfs_mountroot_conf0(sb); // 将获取到的文件系统的配置信息放到sbuf当中
+	vfs_mountroot_conf0(sb); // 将获取到的文件系统的配置信息放到 sbuf 当中
 	sbuf_finish(sb);
 
 	error = vfs_mountroot_devfs(td, &mp);
