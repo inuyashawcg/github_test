@@ -277,7 +277,6 @@ fdused(struct filedesc *fdp, int fd)
 
 /*
  * Mark a file descriptor as unused.
- * 标识一个文件描述符已经被使用了
  */
 static void
 fdunused(struct filedesc *fdp, int fd)
@@ -834,7 +833,7 @@ kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
 	int error, maxfd;
 
 	p = td->td_proc;
-	fdp = p->p_fd;
+	fdp = p->p_fd;	// 进程描述符结构
 
 	MPASS((flags & ~(FDDUP_FLAG_CLOEXEC)) == 0);
 	MPASS(mode < FDDUP_LASTMODE);
@@ -846,12 +845,14 @@ kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
 	 * Verify we have a valid descriptor to dup from and possibly to
 	 * dup to. Unlike dup() and dup2(), fcntl()'s F_DUPFD should
 	 * return EINVAL when the new descriptor is out of bounds.
+	 * dup 和 fcntl 命令对于文件描述符号超出允许范围的处理方式不同，一个是返回 EBADF，
+	 * 另一个返回的是 EINVAL
 	 */
 	if (old < 0)
 		return (EBADF);
 	if (new < 0)
 		return (mode == FDDUP_FCNTL ? EINVAL : EBADF);
-	maxfd = getmaxfd(td);
+	maxfd = getmaxfd(td);	// 获取进程允许的最大文件描述符号
 	if (new >= maxfd)
 		return (mode == FDDUP_FCNTL ? EINVAL : EBADF);
 
@@ -860,6 +861,7 @@ kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
 	if (fget_locked(fdp, old) == NULL)
 		goto unlock;
 	if ((mode == FDDUP_FIXED || mode == FDDUP_MUSTREPLACE) && old == new) {
+		// td->td_retval 字段表示的是一个寄存器组
 		td->td_retval[0] = new;
 		if (flags & FDDUP_FLAG_CLOEXEC)
 			fdp->fd_ofiles[new].fde_flags |= UF_EXCLOSE;
@@ -871,6 +873,8 @@ kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
 	 * If the caller specified a file descriptor, make sure the file
 	 * table is large enough to hold it, and grab it.  Otherwise, just
 	 * allocate a new descriptor the usual way.
+	 * 如果调用者指定了文件描述符，请确保文件表足够大，可以容纳它，然后抓取它。否则，
+	 * 只需按照通常的方式分配一个新的描述符
 	 */
 	switch (mode) {
 	case FDDUP_NORMAL:
@@ -916,10 +920,14 @@ kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
 	KASSERT(old != new, ("new fd is same as old"));
 
 	oldfde = &fdp->fd_ofiles[old];
-	fhold(oldfde->fde_file);
-	newfde = &fdp->fd_ofiles[new];
+	fhold(oldfde->fde_file);	// 增加 old 文件描述符引用计数
+	newfde = &fdp->fd_ofiles[new];	// new 是获取到的新的文件描述符号
 	delfp = newfde->fde_file;
 
+	/*
+		old inctls and new ioctls
+		释放掉新文件的属性信息，拷贝一份旧文件的属性信息
+	*/ 
 	oioctls = filecaps_free_prep(&newfde->fde_caps);
 	nioctls = filecaps_copy_prep(&oldfde->fde_caps);
 
@@ -929,6 +937,9 @@ kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
 #ifdef CAPABILITIES
 	seq_write_begin(&newfde->fde_seq);
 #endif
+	/*
+		将旧的文件描述符拷贝到新的文件描述符，并设置新文件描述符的属性信息
+	*/
 	memcpy(newfde, oldfde, fde_change_size);
 	filecaps_copy_finish(&oldfde->fde_caps, &newfde->fde_caps,
 	    nioctls);
@@ -940,7 +951,10 @@ kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
 	seq_write_end(&newfde->fde_seq);
 #endif
 	filecaps_free_finish(oioctls);
-	td->td_retval[0] = new;
+	/*
+		前面把旧文件描述符号写入线程寄存器表第一个元素，这里更新为新文件描述符
+	*/
+	td->td_retval[0] = new;	
 
 	error = 0;
 
@@ -1876,7 +1890,7 @@ fdallocn(struct thread *td, int minfd, int *fds, int n)
  * being preempted and the entry in the descriptor table closed after we
  * release the FILEDESC lock.
  * 创建一个新的打开文件结构，并为引用它的进程分配一个文件描述符。我们为 descriptor 表和
- * resultfp 添加了一个对文件的引用。这是为了防止我们在释放FILEDESC锁后被抢占，描述符表
+ * resultfp 添加了一个对文件的引用。这是为了防止我们在释放 FILEDESC 锁后被抢占，描述符表
  * 中的条目被关闭
  */
 int
@@ -1956,6 +1970,7 @@ falloc_noinstall(struct thread *td, struct file **resultfp)
 
 /*
  * Install a file in a file descriptor table.
+		将 file 结构填充到进程文件描述符表
  */
 void
 _finstall(struct filedesc *fdp, struct file *fp, int fd, int flags,
@@ -1967,7 +1982,10 @@ _finstall(struct filedesc *fdp, struct file *fp, int fd, int flags,
 	if (fcaps != NULL)
 		filecaps_validate(fcaps, __func__);
 	FILEDESC_XLOCK_ASSERT(fdp);
-
+	/*
+		fd 已经是经过检索之后获取到的可用的文件描述符在表中的索引，然后下面就是对该元素进行
+		数据填充
+	*/
 	fde = &fdp->fd_ofiles[fd];
 #ifdef CAPABILITIES
 	seq_write_begin(&fde->fde_seq);
@@ -1983,6 +2001,9 @@ _finstall(struct filedesc *fdp, struct file *fp, int fd, int flags,
 #endif
 }
 
+/*
+	从上级调用函数来看，fd 传入的参数可能是 -1。代码注释中多次提及 dupfdopen 函数，要着重多留意
+*/
 int
 finstall(struct thread *td, struct file *fp, int *fd, int flags,
     struct filecaps *fcaps)
@@ -1994,12 +2015,19 @@ finstall(struct thread *td, struct file *fp, int *fd, int flags,
 	MPASS(fd != NULL);
 
 	FILEDESC_XLOCK(fdp);
+	/*
+		申请一个文件描述符并添加到进程文件描述符表中
+	*/
 	if ((error = fdalloc(td, 0, fd))) {
 		FILEDESC_XUNLOCK(fdp);
 		return (error);
 	}
-	fhold(fp);
+	fhold(fp);	// 增加 fp 的引用计数
 	_finstall(fdp, fp, *fd, flags, fcaps);
+	/*
+		_finstall 执行完成之后，fp 已经添加到了数组中的元素当中，文件描述符所支持的一些
+		属性也被获取到，保存在 fcaps 当中
+	*/
 	FILEDESC_XUNLOCK(fdp);
 	return (0);
 }
@@ -2017,6 +2045,10 @@ fdinit(struct filedesc *fdp, bool prepfiles)
 	struct filedesc0 *newfdp0;
 	struct filedesc *newfdp;
 
+	/*
+		名字中带0的可能就是用于系统启动时的数据创建，zalloc 函数就是把其中所有的字段
+		都置零。所以它其实仅仅获取了一块空的内存区域
+	*/
 	newfdp0 = uma_zalloc(filedesc0_zone, M_WAITOK | M_ZERO);
 	newfdp = &newfdp0->fd_fd;
 
@@ -2030,6 +2062,9 @@ fdinit(struct filedesc *fdp, bool prepfiles)
 	newfdp->fd_files = (struct fdescenttbl *)&newfdp0->fd_dfiles;
 	newfdp->fd_files->fdt_nfiles = NDFILE;
 
+	/*
+		init_main 函数中传入的 fdp = null，所以对直接返回 newfdp
+	*/
 	if (fdp == NULL)
 		return (newfdp);
 
@@ -2811,7 +2846,7 @@ fget_unlocked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
 /*
  * Extract the file pointer associated with the specified descriptor for the
  * current user process.
- * 提取与当前用户进程的指定描述符关联的文件指针，fd应该就是描述符标号
+ * 提取与当前用户进程的指定描述符关联的文件指针，fd 应该就是描述符标号
  *
  * If the descriptor doesn't exist or doesn't match 'flags', EBADF is
  * returned.
@@ -3131,6 +3166,9 @@ int
 dupfdopen(struct thread *td, struct filedesc *fdp, int dfd, int mode,
     int openerror, int *indxp)
 {
+	/*
+		执行赋值操作的貌似不是单个 struct file，而是 filedescent
+	*/
 	struct filedescent *newfde, *oldfde;
 	struct file *fp;
 	u_long *ioctls;
@@ -3143,13 +3181,16 @@ dupfdopen(struct thread *td, struct filedesc *fdp, int dfd, int mode,
 	 * If the to-be-dup'd fd number is greater than the allowed number
 	 * of file descriptors, or the fd to be dup'd has already been
 	 * closed, then reject.
+	 * 如果要复制的 fd 编号大于允许的文件描述符编号，或者要复制的fd已关闭，则拒绝
 	 */
 	FILEDESC_XLOCK(fdp);
 	if ((fp = fget_locked(fdp, dfd)) == NULL) {
 		FILEDESC_XUNLOCK(fdp);
 		return (EBADF);
 	}
-
+	/*
+		从进程文件描述符表中获取一个文件件描述符，并将索引保存到 indx
+	*/
 	error = fdalloc(td, 0, &indx);
 	if (error != 0) {
 		FILEDESC_XUNLOCK(fdp);
@@ -3163,12 +3204,15 @@ dupfdopen(struct thread *td, struct filedesc *fdp, int dfd, int mode,
 	 *
 	 * For ENXIO steal away the file structure from (dfd) and store it in
 	 * (indx).  (dfd) is effectively closed by this operation.
+	 * 对于 ENODEV，只需将 dup(dfd) 复制到文件描述符(indx)并返回
+		 对于 ENXIO，从(dfd)中窃取文件结构并将其存储在(indx)中。(dfd) 通过此操作有效关闭
 	 */
 	switch (openerror) {
-	case ENODEV:
+	case ENODEV:	// Not such device
 		/*
 		 * Check that the mode the file is being opened for is a
 		 * subset of the mode of the existing descriptor.
+		 * 检查打开文件的模式是否为现有描述符模式的子集
 		 */
 		if (((mode & (FREAD|FWRITE)) | fp->f_flag) != fp->f_flag) {
 			fdunused(fdp, indx);
@@ -3178,7 +3222,7 @@ dupfdopen(struct thread *td, struct filedesc *fdp, int dfd, int mode,
 		fhold(fp);
 		newfde = &fdp->fd_ofiles[indx];
 		oldfde = &fdp->fd_ofiles[dfd];
-		ioctls = filecaps_copy_prep(&oldfde->fde_caps);
+		ioctls = filecaps_copy_prep(&oldfde->fde_caps);	// 需要利用一个特定的函数拷贝文件属性
 #ifdef CAPABILITIES
 		seq_write_begin(&newfde->fde_seq);
 #endif
@@ -3189,9 +3233,10 @@ dupfdopen(struct thread *td, struct filedesc *fdp, int dfd, int mode,
 		seq_write_end(&newfde->fde_seq);
 #endif
 		break;
-	case ENXIO:
+	case ENXIO:	// Device not configured
 		/*
 		 * Steal away the file pointer from dfd and stuff it into indx.
+		    从dfd中窃取文件指针并将其填充到indx中
 		 */
 		newfde = &fdp->fd_ofiles[indx];
 		oldfde = &fdp->fd_ofiles[dfd];
@@ -4322,6 +4367,8 @@ invfo_sendfile(struct file *fp, int sockfd, struct uio *hdr_uio,
  * descriptor N belonging to the calling process.  Note that this driver
  * consists of only the ``open()'' routine, because all subsequent
  * references to this file will be direct to the other driver.
+ * 打开次要设备N dup（）s连接到属于调用进程的文件描述符N的文件（如果有）。请注意，
+ * 此驱动程序只包含“open（）”例程，因为对该文件的所有后续引用都将直接指向另一个驱动程序
  *
  * XXX: we could give this one a cloning event handler if necessary.
  */
@@ -4338,6 +4385,13 @@ fdopen(struct cdev *dev, int mode, int type, struct thread *td)
 	 * by vn_open. Open will detect this special error and take the
 	 * actions in dupfdopen below. Other callers of vn_open or VOP_OPEN
 	 * will simply report the error.
+	 * 将 curthread->td_dupfd 设置为包含要复制的文件描述符的值。确保在该设备的 vnode 被 vn_open 释放的
+	 * 前提下返回错误。open 将会检测这个特殊的错误并在下面的 dupfdopen 中采取行动。vn_open 或者 VOP_OPEN
+	 * 的其他调用者将仅仅简单的报告错误
+	 * 
+	 * dev2unit 函数返回的是 cdev->si_drv0 成员的值，make_dev_credf 函数会逐层调用到
+	 * newdev 函数，该函数会将 unit 参数赋值给 si_drv0。这样就把 0/1/2 和 stdin/out/err
+	 * 对应起来了
 	 */
 	td->td_dupfd = dev2unit(dev);
 	return (ENODEV);
@@ -4353,13 +4407,20 @@ static void
 fildesc_drvinit(void *unused)
 {
 	struct cdev *dev;
-
+	/*
+		首先是调用 make_dev_credf 函数创建设备文件节点 /dev/fd/0，然后再调用 make_dev_alias 给刚刚
+		创建的设备节点再创建一个别名，即 /dev/stdin；
+			file /dev/stdin --> stdin:  symbolic link to fd/0
+		其实就是创建了一个链接文件
+	*/
 	dev = make_dev_credf(MAKEDEV_ETERNAL, &fildesc_cdevsw, 0, NULL,
 	    UID_ROOT, GID_WHEEL, 0666, "fd/0");
 	make_dev_alias(dev, "stdin");
+
 	dev = make_dev_credf(MAKEDEV_ETERNAL, &fildesc_cdevsw, 1, NULL,
 	    UID_ROOT, GID_WHEEL, 0666, "fd/1");
 	make_dev_alias(dev, "stdout");
+
 	dev = make_dev_credf(MAKEDEV_ETERNAL, &fildesc_cdevsw, 2, NULL,
 	    UID_ROOT, GID_WHEEL, 0666, "fd/2");
 	make_dev_alias(dev, "stderr");

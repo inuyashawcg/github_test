@@ -757,6 +757,9 @@ make_dev_args_init_impl(struct make_dev_args *args, size_t sz)
 	args->mda_size = sz;
 }
 
+/*
+	ap 是从上级函数传递下来的可变参数包，fmt 表示设备文件的权限信息-rwx
+*/
 static int
 make_dev_sv(struct make_dev_args *args1, struct cdev **dres,
     const char *fmt, va_list ap)
@@ -765,6 +768,9 @@ make_dev_sv(struct make_dev_args *args1, struct cdev **dres,
 	struct make_dev_args args;
 	int res;
 
+	/*
+		将 args 对象置零后拷贝参数数据
+	*/
 	bzero(&args, sizeof(args));
 	if (sizeof(args) < args1->mda_size)
 		return (EINVAL);
@@ -773,20 +779,30 @@ make_dev_sv(struct make_dev_args *args1, struct cdev **dres,
 	    (args.mda_flags & MAKEDEV_NOWAIT) == 0,
 	    ("make_dev_sv: both WAITOK and NOWAIT specified"));
 
-	// 返回一个cdev类型的对象，/dev本质上也是一个字符设备文件
+	/*
+		分配一个设备文件结点。/dev 下的显示出来的文件应该都是 devfs 中的节点
+		(应该就是理起来的 cdev 结构树)
+	*/
 	dev_new = devfs_alloc(args.mda_flags);
 	if (dev_new == NULL)
 		return (ENOMEM);
 	dev_lock();
 
-	// 可以认为是初始化cdevsw
+	// 可以认为是初始化 cdevsw
 	res = prep_cdevsw(args.mda_devsw, args.mda_flags);
 	if (res != 0) {
 		dev_unlock();
 		devfs_free(dev_new);
 		return (res);
 	}
-	dev = newdev(&args, dev_new);
+	/*
+		在该函数中，会把 dev->si_drv0 成员赋值为 args->unit 成员，这在创建标准输入输出设备
+		文件的时候会用到
+	*/
+	dev = newdev(&args, dev_new);	// 构造一个新的 cdev 设备节点
+	/*
+		如果还没有创建设备别名，执行下面的代码分支
+	*/
 	if ((dev->si_flags & SI_NAMED) == 0) {
 		res = prep_devname(dev, fmt, ap);
 		if (res != 0) {
@@ -803,7 +819,8 @@ make_dev_sv(struct make_dev_args *args1, struct cdev **dres,
 				dev_unlock();
 			return (res);
 		}
-	}
+	}	// end if 
+
 	if ((args.mda_flags & MAKEDEV_REF) != 0)
 		dev_refl(dev);
 	if ((args.mda_flags & MAKEDEV_ETERNAL) != 0)
@@ -842,6 +859,9 @@ make_dev_sv(struct make_dev_args *args1, struct cdev **dres,
 	return (0);
 }
 
+/*
+	va_list / va_start / va_end 都是用于可变参数
+*/
 int
 make_dev_s(struct make_dev_args *args, struct cdev **dres,
     const char *fmt, ...)
@@ -850,11 +870,15 @@ make_dev_s(struct make_dev_args *args, struct cdev **dres,
 	int res;
 
 	va_start(ap, fmt);
+	// 将可变参数打包传递给调用函数
 	res = make_dev_sv(args, dres, fmt, ap);
 	va_end(ap);
 	return (res);
 }
 
+/*
+	fmt: 表示的应该是文件的权限-rwx
+*/
 static int
 make_dev_credv(int flags, struct cdev **dres, struct cdevsw *devsw, int unit,
     struct ucred *cr, uid_t uid, gid_t gid, int mode, const char *fmt,
@@ -873,6 +897,10 @@ make_dev_credv(int flags, struct cdev **dres, struct cdevsw *devsw, int unit,
 	return (make_dev_sv(&args, dres, fmt, ap));
 }
 
+/*
+	下面这几个函数功能类似，只是传入的参数多少或者类型有所区别，它们的核心逻辑还是通过 make_dev_credv
+	来实现的，它又是调用 make_dev_sv。所以核心逻辑就是由 make_dev_sv 函数实现
+*/
 struct cdev *
 make_dev(struct cdevsw *devsw, int unit, uid_t uid, gid_t gid, int mode,
     const char *fmt, ...)
@@ -907,6 +935,10 @@ make_dev_cred(struct cdevsw *devsw, int unit, struct ucred *cr, uid_t uid,
 	return (dev);
 }
 
+/*
+	unit: 表示的应该是设备的次设备号。以 FD 为例，stdin / stdout /stderr 分别表示 fd/0
+	fd/1 fd/2 三个设备，fd 表示的就是驱动名称，后面的数字就由 unit 参数来设置
+*/
 struct cdev *
 make_dev_credf(int flags, struct cdevsw *devsw, int unit, struct ucred *cr,
     uid_t uid, gid_t gid, int mode, const char *fmt, ...)

@@ -585,7 +585,7 @@ struct proc {
 	LIST_ENTRY(proc) p_sibling;	/* (e) List of sibling processes. 同级进程列表 */
 	LIST_HEAD(, proc) p_children;	/* (e) Pointer to list of children. 指向子进程链表(一个进程可以派生多个子进程) */
 	struct proc	*p_reaper;	/* (e) My reaper(收割者). */
-	LIST_HEAD(, proc) p_reaplist;	/* (e) List of my descendants 我的后代名单
+	LIST_HEAD(, proc) p_reaplist;	/* (e) List of my descendants
 					       (if I am reaper). */
 	LIST_ENTRY(proc) p_reapsibling;	/* (e) List of siblings - descendants of
 					       the same reaper. */

@@ -35,3 +35,12 @@ inode。奇海系统可能就要把 class file 做成静态的，为每一个文
 该机制还需要做修改；
 
   需要评估注册 class file 可能会对当前系统造成的影响
+
+  
+
+////////////// 20211111 //////////////
+  p td->td_proc->p_fd->fd_files->fdt_ofiles[2]->fde_file->f_vnode->v_data
+  p (struct devfs_dirent*)td->td_proc->p_fd->fd_files->fdt_ofiles[0]->fde_file->f_vnode->v_data
+
+  linux 中对于pub命令的详细作用流程可以参考：
+    https://www.cnblogs.com/pengdonglin137/p/3286627.html

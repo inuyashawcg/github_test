@@ -454,14 +454,14 @@ proc0_init(void *dummy __unused)
 	int i;
 
 	GIANT_REQUIRED;
-	p = &proc0;
+	p = &proc0;	// 系统初始进程
 	td = &thread0;
 	
 	/*
 	 * Initialize magic number and osrel.
 	 */
 	p->p_magic = P_MAGIC;
-	p->p_osrel = osreldate;
+	p->p_osrel = osreldate;	// ELF 注释
 
 	/*
 	 * Initialize thread and process structures.

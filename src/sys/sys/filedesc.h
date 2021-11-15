@@ -100,7 +100,7 @@ struct filedesc {
 	struct	vnode *fd_cdir;		/* current directory 当前目录 */
 	struct	vnode *fd_rdir;		/* root directory 根目录 */
 	struct	vnode *fd_jdir;		/* jail root directory 监控根目录 */
-	NDSLOTTYPE *fd_map;		/* bitmap of free fds */
+	NDSLOTTYPE *fd_map;		/* bitmap of free fds 类似文件系统中块位图，用来查找可用的文件描述符 */
 	int	fd_lastfile;		/* high-water mark of fd_ofiles */
 	int	fd_freefile;		/* approx. next free file 表示的应该是目前空闲的文件描述符的标号 */
 	u_short	fd_cmask;		/* mask for file creation */

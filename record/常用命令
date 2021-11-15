@@ -20,3 +20,5 @@
   mdconfig -d -u ${device_name}
 
 #! /usr/local/bin/bash
+
+  aptitude

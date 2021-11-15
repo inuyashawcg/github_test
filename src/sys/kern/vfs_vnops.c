@@ -185,7 +185,7 @@ vn_open(struct nameidata *ndp, int *flagp, int cmode, struct file *fp)
 }
 
 /*
- * Common code for vnode open operations via a name lookup. 通过查找到的名字打开vnode结点
+ * Common code for vnode open operations via a name lookup. 通过查找到的名字打开 vnode 结点
  * Lookup the vnode and invoke(调用) VOP_CREATE if needed.
  * Check permissions, and call the VOP_OPEN or VOP_CREATE routine.
  * 

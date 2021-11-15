@@ -354,6 +354,7 @@ kern_execve(struct thread *td, struct image_args *args, struct mac *mac_p)
 /*
  * In-kernel implementation of execve().  All arguments are assumed to be
  * userspace pointers from the passed thread.
+ * 在 execve 的内核实现中。所有参数都假定为来自所传递线程的用户空间指针
  */
 static int
 do_execve(struct thread *td, struct image_args *args, struct mac *mac_p)
@@ -393,6 +394,8 @@ do_execve(struct thread *td, struct image_args *args, struct mac *mac_p)
 	 * necessary to avoid race conditions - e.g. in ptrace() -
 	 * that might allow a local user to illicitly obtain elevated
 	 * privileges.
+	 * 锁定进程并设置P_inceec标志，以指示在我们完成此操作之前，应将其置于一旁。
+	 * 这对于避免可能允许本地用户非法获得提升权限的竞争条件，例如在ptrace中是必要的。
 	 */
 	PROC_LOCK(p);
 	KASSERT((p->p_flag & P_INEXEC) == 0,
@@ -447,6 +450,9 @@ interpret:
 		if (error)
 			goto exec_fail;
 
+		/*
+			获取所要执行的文件对应的 vnode
+		*/
 		newtextvp = nd.ni_vp;
 		imgp->vp = newtextvp;
 	} else {

@@ -255,7 +255,8 @@ int clone_create(struct clonedevs **, struct cdevsw *, int *unit, struct cdev **
 #define	MAKEDEV_WHTOUT		0x02
 #define	MAKEDEV_NOWAIT		0x04
 #define	MAKEDEV_WAITOK		0x08
-#define	MAKEDEV_ETERNAL		0x10
+// eternal: 不朽的，永生的
+#define	MAKEDEV_ETERNAL		0x10	
 #define	MAKEDEV_CHECKNAME	0x20
 struct make_dev_args {
 	size_t		 mda_size;

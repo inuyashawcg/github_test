@@ -1104,7 +1104,7 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 		 * If the vn_open replaced the method vector, something
 		 * wonderous happened deep below and we just pass it up
 		 * pretending we know what we do.
-		 * 如果vn_open取代了方法向量，那么下面就会发生一些奇妙的事情，我们只是
+		 * 如果 vn_open 取代了方法向量，那么下面就会发生一些奇妙的事情，我们只是
 		 * 假装知道自己在做什么就放弃它
 		 */
 		if (error == ENXIO && fp->f_ops != &badfileops)
@@ -1116,6 +1116,7 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 		 * Don't do this for relative (capability) lookups; we don't
 		 * understand exactly what would happen, and we don't think
 		 * that it ever should.
+		 * 对于相对（能力）查找，不要这样做；我们不知道会发生什么，我们也不认为会发生什么
 		 */
 		if ((nd.ni_lcf & NI_LCF_STRICTRELATIVE) == 0 &&
 		    (error == ENODEV || error == ENXIO) &&
@@ -1166,6 +1167,7 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 success:
 	/*
 	 * If we haven't already installed the FD (for dupfdopen), do so now.
+	 		如果我们尚未安装FD（用于dupfdopen），请立即安装
 	 */
 	if (indx == -1) {
 		struct filecaps *fcaps;

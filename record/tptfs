@@ -1,0 +1,76 @@
+(gdb) p* td->td_proc->p_fd->fd_files->fdt_ofiles 
+$19 = {
+  fde_file = 0xffffffd006d79690,
+  fde_caps = {
+    fc_rights = {
+      cr_rights = {144123984168878079, 288230376153808895}
+    },
+    fc_ioctls = 0x0,
+    fc_nioctls = -1,
+    fc_fcntls = 120
+  },
+  fde_flags = 0 '\000',
+  fde_seqc = 242
+}
+
+(gdb) p* td->td_proc->p_fd->fd_files->fdt_ofiles[1] 
+Structure has no component named operator*.
+(gdb) p td->td_proc->p_fd->fd_files->fdt_ofiles[1] 
+$20 = {
+  fde_file = 0xffffffd006d79690,
+  fde_caps = {
+    fc_rights = {
+      cr_rights = {144123984168878079, 288230376153808895}
+    },
+    fc_ioctls = 0x0,
+    fc_nioctls = -1,
+    fc_fcntls = 120
+  },
+  fde_flags = 0 '\000',
+  fde_seqc = 174
+}
+
+(gdb) p td->td_proc->p_fd->fd_files->fdt_ofiles[0] 
+$21 = {
+  fde_file = 0xffffffd006d79690,
+  fde_caps = {
+    fc_rights = {
+      cr_rights = {144123984168878079, 288230376153808895}
+    },
+    fc_ioctls = 0x0,
+    fc_nioctls = -1,
+    fc_fcntls = 120
+  },
+  fde_flags = 0 '\000',
+  fde_seqc = 242
+}
+
+(gdb) p td->td_proc->p_fd->fd_files->fdt_ofiles[2] 
+$22 = {
+  fde_file = 0xffffffd006d79690,
+  fde_caps = {
+    fc_rights = {
+      cr_rights = {144123984168878079, 288230376153808895}
+    },
+    fc_ioctls = 0x0,
+    fc_nioctls = -1,
+    fc_fcntls = 120
+  },
+  fde_flags = 0 '\000',
+  fde_seqc = 182
+}
+
+(gdb) p td->td_proc->p_fd->fd_files->fdt_ofiles[3] 
+$23 = {
+  fde_file = 0x0,
+  fde_caps = {
+    fc_rights = {
+      cr_rights = {0, 0}
+    },
+    fc_ioctls = 0x0,
+    fc_nioctls = 0,
+    fc_fcntls = 0
+  },
+  fde_flags = 0 '\000',
+  fde_seqc = 280
+}
