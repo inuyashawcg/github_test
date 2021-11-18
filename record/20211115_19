@@ -3,3 +3,42 @@
 
   进程文件描述符：
     https://zhuanlan.zhihu.com/p/105086274
+
+  执行 echo 3 > hello.c 命令，其实会就会触发 sys_dup 系统调用，执行结果如下：
+
+  (gdb) p* (struct inode*)td->td_proc->p_fd->fd_files->fdt_ofiles[1]->fde_file->
+    $46 = {
+      i_nextsnap = {
+        tqe_next = 0x0,
+        tqe_prev = 0x0
+      },
+      i_vnode = 0xffffffd00951d5b8,
+      i_ump = 0xffffffd00555be00,
+      i_dquot = {0x0, 0x0},
+      i_un = {
+        dirhash = 0x0,
+        snapblklist = 0x0
+      },
+      dinode_u = {
+        din1 = 0xffffffd0054ec400,
+        din2 = 0xffffffd0054ec400
+      },
+      i_number = 24079,
+      ...
+
+  root@qemu:/ # ls -li hello.c 
+    24079 -rw-r--r--  1 root  wheel  2 Nov 15 08:48 hello.c
+
+  我们相当于是把原来的标准输出重定向到了 hello.c 文件当中，所以会用到 kern_dup 函数进行文件描述符的重定位，把指向标准输入的
+指针指向 hello.c。从结果来看，i_number 刚好是对应上的
+  重定向其实是需要文件描述符进行拷贝的，拷贝完成后进行替换，等到进程执行完成之后猜测是会进行还原。进程应该是要给 hello.c 文件
+也分配一个文件描述符的，正常情况下是分配已使用文件描述符的下一个索引，但实际调试的发现貌似分配的是第 19 个，还是说 19 是 1 描述符
+拷贝到的位置？
+
+  watch proc0->p_fd->fd_files->fdt_ofiles[15]
+
+
+////////////// 20211116 //////////////
+  tptfs 继承了 ext2 的文件查找机制，当目录项越来越多时，会创建一个 htree 来管理所有的文件，查找的时候也是按照树的查找方式来实现。
+上层还利用了 vfs 提供的 namecache 机制来加快查找速度。htree 需要分配新的内存页来存放树的结点，在没有 namecache 的情况下还是会
+一层一层往下查找文件。所以，GR 可以将上述两者的功能替代掉，然后将目录项按照线性查找的方式进行排布，这样就可以节省一部分存储空间

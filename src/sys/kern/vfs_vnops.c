@@ -180,7 +180,7 @@ vn_open(struct nameidata *ndp, int *flagp, int cmode, struct file *fp)
 
 	// cmode: create mode
 	// 从调用情况来看，fp 指向的是一个已经创建好的 struct file，只是其中的一些属性还是空的,
-	// 后面肯定还要对它做进一步的填充
+	// 后面肯定还要对它做进一步的填充。从实际调用场景来看，此时 fp 还没有添加到进程描述符表
 	return (vn_open_cred(ndp, flagp, cmode, 0, td->td_ucred, fp));
 }
 
@@ -205,7 +205,7 @@ vn_open_cred(struct nameidata *ndp, int *flagp, int cmode, u_int vn_open_flags,
 	int fmode, error;
 
 restart:
-	fmode = *flagp;
+	fmode = *flagp;	// 文件属性的设置
 	if ((fmode & (O_CREAT | O_EXCL | O_DIRECTORY)) == (O_CREAT |
 	    O_EXCL | O_DIRECTORY))
 		return (EINVAL);
@@ -270,6 +270,7 @@ restart:
 			fmode &= ~O_TRUNC;
 			vp = ndp->ni_vp;
 		} else {
+			// 处理 ndp->ni_vp 不为空的情况
 			if (ndp->ni_dvp == ndp->ni_vp)
 				vrele(ndp->ni_dvp);
 			else
@@ -284,6 +285,7 @@ restart:
 		}
 	} else {
 		/*
+			处理 fmode 不包含 create 属性的情况
 			从代码结构来看，vn_open 主要面对的是两种类型的操作，一个是 create，另外一个是 lookup，
 			感觉 exec 应该也算是一个吧。两个代码分支都包含了 namei 函数，说明它才是获取指定文件 vnode
 			的主要功能函数

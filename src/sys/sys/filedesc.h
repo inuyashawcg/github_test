@@ -244,7 +244,9 @@ fdeget_locked(struct filedesc *fdp, int fd)
 
 	if (fd < 0 || fd > fdp->fd_lastfile)
 		return (NULL);
-
+	/*
+		根据 fd 获取文件描述符表中对应的 entry
+	*/
 	fde = &fdp->fd_ofiles[fd];
 	if (fde->fde_file == NULL)
 		return (NULL);

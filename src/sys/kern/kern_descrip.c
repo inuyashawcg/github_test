@@ -193,7 +193,7 @@ void __read_mostly (*mq_fdclose)(struct thread *td, int fd, struct file *fp);
 static int
 fd_first_free(struct filedesc *fdp, int low, int size)
 {
-	NDSLOTTYPE *map = fdp->fd_map;
+	NDSLOTTYPE *map = fdp->fd_map;	// 通过检索 map 来查找可用的文件描述符
 	NDSLOTTYPE mask;
 	int off, maxoff;
 
@@ -2135,7 +2135,7 @@ fdshare(struct filedesc *fdp)
 
 /*
  * Unshare a filedesc structure, if necessary by making a copy
- * 取消共享filedesc结构，如果需要，可以制作一个副本
+ * 取消共享 filedesc 结构，如果需要，可以制作一个副本
  */
 void
 fdunshare(struct thread *td)
@@ -2173,24 +2173,36 @@ fdcopy(struct filedesc *fdp)
 
 	MPASS(fdp != NULL);
 
+	/*
+		重新申请一块空间存放新的文件描述符，通常父进程在 fork 一个子进程的时候，会判断两个进程是
+		共享文件描述符还是拷贝一份。如果是共享，则直接调用 fdshare，该函数会将原有的文件描述符的
+		引用计数+1，但是不会申请新的内存空间
+	*/
 	newfdp = fdinit(fdp, true);
-	/* copy all passable descriptors (i.e. not kqueue) */
+	/* copy all passable descriptors (i.e. not kqueue) 
+		fdp 对应的应该是父进程文件描述符
+	*/
 	newfdp->fd_freefile = -1;
 	for (i = 0; i <= fdp->fd_lastfile; ++i) {
 		ofde = &fdp->fd_ofiles[i];
+		/*
+			当父进程中的文件描述符表项为空的时候，子进程就直接设置 fd_freefile 为该表项的索引值，
+			说明它还未被使用
+		*/
 		if (ofde->fde_file == NULL ||
 		    (ofde->fde_file->f_ops->fo_flags & DFLAG_PASSABLE) == 0) {
 			if (newfdp->fd_freefile == -1)
 				newfdp->fd_freefile = i;
 			continue;
-		}
+		}	// end if
 		nfde = &newfdp->fd_ofiles[i];
 		*nfde = *ofde;
 		filecaps_copy(&ofde->fde_caps, &nfde->fde_caps, true);
-		fhold(nfde->fde_file);
-		fdused_init(newfdp, i);
+		fhold(nfde->fde_file);	// 应用计数+1
+		fdused_init(newfdp, i);	// 设置第i个文件描述符表项已经被使用了
 		newfdp->fd_lastfile = i;
-	}
+	}	// end for
+
 	if (newfdp->fd_freefile == -1)
 		newfdp->fd_freefile = i;
 	newfdp->fd_cmask = fdp->fd_cmask;
@@ -2685,7 +2697,10 @@ fget_cap_locked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
 	int error;
 
 	FILEDESC_LOCK_ASSERT(fdp);
-
+	/*
+		从 fdeget_locked 代码逻辑可以看出，fd 表示的就是进程文件描述符表索引，通过它我们就
+		可以获取 entry
+	*/
 	fde = fdeget_locked(fdp, fd);
 	if (fde == NULL) {
 		error = EBADF;
@@ -2697,11 +2712,11 @@ fget_cap_locked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
 	if (error != 0)
 		goto out;
 #endif
-
+	// 拷贝描述符表项的属性信息
 	if (havecapsp != NULL)
 		filecaps_copy(&fde->fde_caps, havecapsp, true);
 
-	*fpp = fde->fde_file;
+	*fpp = fde->fde_file;	// 获取文件描述符
 
 	error = 0;
 out:
@@ -3026,6 +3041,10 @@ fgetvp(struct thread *td, int fd, cap_rights_t *rightsp, struct vnode **vpp)
 	return (_fgetvp(td, fd, 0, rightsp, vpp));
 }
 
+/*
+	needrightsp: need rights pointer，表示的应该就是我们定位某一个 struct file
+	需要传递的 rights 参数
+*/
 int
 fgetvp_rights(struct thread *td, int fd, cap_rights_t *needrightsp,
     struct filecaps *havecaps, struct vnode **vpp)
@@ -3036,6 +3055,9 @@ fgetvp_rights(struct thread *td, int fd, cap_rights_t *needrightsp,
 	int error;
 
 	fdp = td->td_proc->p_fd;
+	/*
+		利用 fd 获取进程文件描述符表对应索引的 entry，得到了 file 结构和属性信息
+	*/
 	error = fget_cap_locked(fdp, fd, needrightsp, &fp, &caps);
 	if (error != 0)
 		return (error);
@@ -3049,7 +3071,7 @@ fgetvp_rights(struct thread *td, int fd, cap_rights_t *needrightsp,
 	}
 
 	*havecaps = caps;
-	*vpp = fp->f_vnode;
+	*vpp = fp->f_vnode;	// 得到了所要查找的 vnode
 	vrefact(*vpp);
 
 	return (0);

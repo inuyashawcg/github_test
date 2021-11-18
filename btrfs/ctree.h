@@ -125,20 +125,26 @@ static inline unsigned long btrfs_chunk_item_size(int num_stripes)
  * Runtime (in-memory) states of filesystem
  */
 enum {
-	/* Global indicator of serious filesystem errors */
+	/* Global indicator of serious filesystem errors 
+		严重文件系统错误的全局指示器
+	*/
 	BTRFS_FS_STATE_ERROR,
 	/*
 	 * Filesystem is being remounted, allow to skip some operations, like
 	 * defrag
+	 * 正在重新安装文件系统，请允许跳过某些操作，如碎片整理
 	 */
 	BTRFS_FS_STATE_REMOUNTING,
-	/* Filesystem in RO mode */
+	/* Filesystem in RO mode 文件系统处于只读模式 */
 	BTRFS_FS_STATE_RO,
-	/* Track if a transaction abort has been reported on this filesystem */
+	/* Track if a transaction abort has been reported on this filesystem 
+		跟踪是否在此文件系统上报告了事务中止
+	*/
 	BTRFS_FS_STATE_TRANS_ABORTED,
 	/*
 	 * Bio operations should be blocked on this filesystem because a source
 	 * or target device is being destroyed as part of a device replace
+	 * 应阻止此文件系统上的Bio操作，因为源或目标设备正在作为设备替换的一部分被销毁
 	 */
 	BTRFS_FS_STATE_DEV_REPLACING,
 	/* The btrfs_fs_info created for self-tests */
@@ -155,25 +161,31 @@ enum {
 
 /*
  * every tree block (leaf or node) starts with this header.
+		不管是 leaf 还是 node，每个树的块都是以 header 作为开头
  */
 struct btrfs_header {
-	/* these first four must match the super block */
+	/* these first four must match the super block 前四个必须匹配超级块 */
 	u8 csum[BTRFS_CSUM_SIZE];
 	u8 fsid[BTRFS_FSID_SIZE]; /* FS specific uuid */
+	/*
+		virtual address of block
+	*/
 	__le64 bytenr; /* which block this node is supposed to live in */
 	__le64 flags;
 
 	/* allowed to be different from the super from here on down */
 	u8 chunk_tree_uuid[BTRFS_UUID_SIZE];
 	__le64 generation;
+	// the object id of the tree this block belongs to, for example BTRFS_ROOT_TREE_OBJECTID
 	__le64 owner;
-	__le32 nritems;
-	u8 level;
+	__le32 nritems;	// item number?
+	u8 level;	// leaf node 的等级是0
 } __attribute__ ((__packed__));
 
 /*
  * this is a very generous portion of the super block, giving us
  * room to translate 14 chunks with 3 stripes each.
+ * 这是超级块的一个非常慷慨的部分，让我们有空间翻译14个块，每个块有3个条纹。
  */
 #define BTRFS_SYSTEM_CHUNK_ARRAY_SIZE 2048
 
@@ -181,6 +193,8 @@ struct btrfs_header {
  * just in case we somehow lose the roots and are not able to mount,
  * we store an array of the roots from previous transactions
  * in the super.
+ * 只是在我们不知何故失去了根并且无法安装的情况下，我们将 super 中以前事务中的一系列
+ * 根存储在 super 中。对文件系统的一个管理数据备份
  */
 #define BTRFS_NUM_BACKUP_ROOTS 4
 struct btrfs_root_backup {
@@ -218,24 +232,30 @@ struct btrfs_root_backup {
 	u8 unused_8[10];
 } __attribute__ ((__packed__));
 
-#define BTRFS_SUPER_INFO_OFFSET			SZ_64K
-#define BTRFS_SUPER_INFO_SIZE			4096
+#define BTRFS_SUPER_INFO_OFFSET			SZ_64K	// 超级块偏移量
+#define BTRFS_SUPER_INFO_SIZE			4096	// 超级块大小
 
 /*
  * the super block basically lists the main trees of the FS
  * it currently lacks any block count etc etc
+ * btrfs 超级块会存放在四个不同的位置，用作系统备份，挂载的时候只读取第一个位置的数据
  */
 struct btrfs_super_block {
-	/* the first 4 fields must match struct btrfs_header */
+	/* the first 4 fields must match struct btrfs_header 
+		前四个结构体成员跟 btrfs_header 是一样的。在 FreeBSD htree 中也遇到过类似的设计
+	*/
 	u8 csum[BTRFS_CSUM_SIZE];
 	/* FS specific UUID, visible to user */
 	u8 fsid[BTRFS_FSID_SIZE];
-	__le64 bytenr; /* this block number */
+	__le64 bytenr; /* this block number 块物理地址 */
 	__le64 flags;
 
 	/* allowed to be different from the btrfs_header from here own down */
 	__le64 magic;
 	__le64 generation;
+	/*
+		貌似是代表三种不同功能的树，在超级块中注册它们的根节点。表示的是三种树结构的逻辑地址
+	*/
 	__le64 root;
 	__le64 chunk_root;
 	__le64 log_root;
@@ -244,7 +264,7 @@ struct btrfs_super_block {
 	__le64 log_root_transid;
 	__le64 total_bytes;
 	__le64 bytes_used;
-	__le64 root_dir_objectid;
+	__le64 root_dir_objectid;	// root inode number? usually 6
 	__le64 num_devices;
 	__le32 sectorsize;
 	__le32 nodesize;
@@ -252,15 +272,20 @@ struct btrfs_super_block {
 	__le32 stripesize;
 	__le32 sys_chunk_array_size;
 	__le64 chunk_root_generation;
-	__le64 compat_flags;
+	__le64 compat_flags;	// compatible: 兼容的
 	__le64 compat_ro_flags;
-	__le64 incompat_flags;
+	__le64 incompat_flags;	// incompatible: 不兼容的
+	/*
+		 Btrfs currently uses the CRC32c little-endian hash function with seed -1.
+	*/
 	__le16 csum_type;
 	u8 root_level;
 	u8 chunk_root_level;
 	u8 log_root_level;
 	struct btrfs_dev_item dev_item;
-
+	/*
+		label (may not contain '/' or '\\')
+	*/
 	char label[BTRFS_LABEL_SIZE];
 
 	__le64 cache_generation;
@@ -271,17 +296,25 @@ struct btrfs_super_block {
 
 	/* future expansion */
 	__le64 reserved[28];
+	/*
+		(n bytes valid) Contains (KEY, CHUNK_ITEM) pairs for all SYSTEM chunks. 
+		This is needed to bootstrap the mapping from logical addresses to physical.
+	*/
 	u8 sys_chunk_array[BTRFS_SYSTEM_CHUNK_ARRAY_SIZE];
+	/*
+		Contain super_roots (4 btrfs_root_backup)
+	*/
 	struct btrfs_root_backup super_roots[BTRFS_NUM_BACKUP_ROOTS];
 
 	/* Padded to 4096 bytes */
 	u8 padding[565];
-} __attribute__ ((__packed__));
+} __attribute__ ((__packed__));	// 告诉编译器取消数据对齐
 static_assert(sizeof(struct btrfs_super_block) == BTRFS_SUPER_INFO_SIZE);
 
 /*
  * Compat flags that we support.  If any incompat flags are set other than the
  * ones specified below then we will fail to mount
+ * 我们支持的 Compat 标志。如果除了下面指定的标志之外设置了任何不兼容的标志，那么我们将无法安装
  */
 #define BTRFS_FEATURE_COMPAT_SUPP		0ULL
 #define BTRFS_FEATURE_COMPAT_SAFE_SET		0ULL
@@ -317,6 +350,20 @@ static_assert(sizeof(struct btrfs_super_block) == BTRFS_SUPER_INFO_SIZE);
 /*
  * A leaf is full of items. offset and size tell us where to find
  * the item in the leaf (relative to the start of the data area)
+ * 在一个叶节点中装满了 items，offset 和 size 告诉我们如何在叶节点中找到 item
+ * 
+ * The btrfs_key is one of the fundamental btrfs data structures. 
+ * Every item in every tree in the file system is located using its key. 
+ * The btrfs_key can be more accurately described as a 3-tuple used to 
+ * locate any item in any tree in the file system.
+ * 
+ * btrfs_key objects only exists in memory and is in CPU byte order. 
+ * btrfs_disk_key is identical to btrfs_key except that objectid and 
+ * offset are in little endian (disk) byte order and are part of the 
+ * file system on-disk format.
+ * 
+ * key 主要用于每个 item 的数据定位，它分为两种类型，一个是在内存中的，一个是在磁盘上的。
+ * 数据成员一致，只不过磁盘格式是小端
  */
 struct btrfs_item {
 	struct btrfs_disk_key key;
@@ -327,6 +374,7 @@ struct btrfs_item {
 /*
  * leaves have an item area and a data area:
  * [item0, item1....itemN] [free space] [dataN...data1, data0]
+ * 对比 ext2 中的扩展属性 block
  *
  * The data is separate from the items to get the keys closer together
  * during searches.
@@ -339,6 +387,9 @@ struct btrfs_leaf {
 /*
  * all non-leaf blocks are nodes, they hold only keys and pointers to
  * other blocks
+ * 所有非叶块都是节点，它们只包含其他块的键和指针
+ * 
+ * btrfs_key_ptr: btrfs key pointer
  */
 struct btrfs_key_ptr {
 	struct btrfs_disk_key key;
@@ -376,22 +427,30 @@ enum {
  * btrfs_paths remember the path taken from the root down to the leaf.
  * level 0 is always the leaf, and nodes[1...BTRFS_MAX_LEVEL] will point
  * to any other levels that are present.
+ * btrfs_path 用来记录从根节点到叶节点的路径信息。叶节点的 level 总是 0，节点
+ * [1 … BTRFS_MAX_LEVEL] 将指向存在的任何其他级别
  *
  * The slots array records the index of the item or block pointer
  * used while walking the tree.
+ * slots 数组记录遍历树时使用的项或块指针的索引
  */
 struct btrfs_path {
 	struct extent_buffer *nodes[BTRFS_MAX_LEVEL];
 	int slots[BTRFS_MAX_LEVEL];
-	/* if there is real range locking, this locks field will change */
+	/* if there is real range locking, this locks field will change
+		如果存在实际范围锁定，此锁定字段将更改
+	*/
 	u8 locks[BTRFS_MAX_LEVEL];
 	u8 reada;
-	/* keep some upper locks as we walk down */
+	/* keep some upper locks as we walk down 
+		我们走下去的时候，把上面的锁留着
+	*/
 	u8 lowest_level;
 
 	/*
 	 * set by btrfs_split_item, tells search_slot to keep all locks
 	 * and to force calls to keep space in the nodes
+	 * 由 btrfs_split_item 设置，告诉 search_slot 保留所有锁，并强制调用以保留节点中的空间
 	 */
 	unsigned int search_for_split:1;
 	unsigned int keep_locks:1;
@@ -403,6 +462,9 @@ struct btrfs_path {
 	 * Indicate that new item (btrfs_search_slot) is extending already
 	 * existing item and ins_len contains only the data size and not item
 	 * header (ie. sizeof(struct btrfs_item) is not included).
+	 * 
+	 * 指示新项目(btrfs_search_slot）正在扩展现有项目，ins_len 仅包含数据大小，而不包含项目标题
+	 * (即不包括 sizeof(struct btrfs_item))
 	 */
 	unsigned int search_for_extension:1;
 };
@@ -415,7 +477,7 @@ struct btrfs_dev_replace {
 	atomic64_t num_write_errors;
 	atomic64_t num_uncorrectable_read_errors;
 
-	u64 cursor_left;
+	u64 cursor_left;	// cursor: 光标，游标
 	u64 committed_cursor_left;
 	u64 cursor_left_last_write_of_item;
 	u64 cursor_right;
@@ -424,11 +486,11 @@ struct btrfs_dev_replace {
 
 	int is_valid;
 	int item_needs_writeback;
-	struct btrfs_device *srcdev;
-	struct btrfs_device *tgtdev;
+	struct btrfs_device *srcdev;	// src device?
+	struct btrfs_device *tgtdev;	// target device?
 
 	struct mutex lock_finishing_cancel_unmount;
-	struct rw_semaphore rwsem;
+	struct rw_semaphore rwsem;	// semaphore: 信号量
 
 	struct btrfs_scrub_progress scrub_progress;
 
@@ -440,6 +502,8 @@ struct btrfs_dev_replace {
  * free clusters are used to claim free space in relatively large chunks,
  * allowing us to do less seeky writes. They are used for all metadata
  * allocations. In ssd_spread mode they are also used for data allocations.
+ * 自由集群用于在相对较大的块中声明自由空间，从而允许我们进行不太起眼的写入；
+ * 它们用于所有元数据分配。在 ssd_spread 模式中，它们还用于数据分配
  */
 struct btrfs_free_cluster {
 	spinlock_t lock;
@@ -610,6 +674,7 @@ enum {
 
 /*
  * Exclusive operations (device replace, resize, device add/remove, balance)
+ 		独占操作（设备更换、调整大小、设备添加/删除、平衡）
  */
 enum btrfs_exclusive_operation {
 	BTRFS_EXCLOP_NONE,
@@ -621,6 +686,9 @@ enum btrfs_exclusive_operation {
 	BTRFS_EXCLOP_SWAP_ACTIVATE,
 };
 
+/*
+	保存的应该是整个 btrfs 文件系统的信息。btrfs_root* 应该就是整个文件所包含的树的根节点
+*/
 struct btrfs_fs_info {
 	u8 chunk_tree_uuid[BTRFS_UUID_SIZE];
 	unsigned long flags;
@@ -635,29 +703,34 @@ struct btrfs_fs_info {
 	struct btrfs_root *free_space_root;
 	struct btrfs_root *data_reloc_root;
 
-	/* the log root tree is a directory of all the other log roots */
+	/* the log root tree is a directory of all the other log roots 
+		其他树中也会包含有 log root，这里的 logroot 应该是其他所有 log root 的 root
+	*/
 	struct btrfs_root *log_root_tree;
 
 	spinlock_t fs_roots_radix_lock;
-	struct radix_tree_root fs_roots_radix;
+	struct radix_tree_root fs_roots_radix;	// 利用 radix tree 管理所有 root？
 
 	/* block group cache stuff */
 	spinlock_t block_group_cache_lock;
 	u64 first_logical_byte;
-	struct rb_root block_group_cache_tree;
+	struct rb_root block_group_cache_tree;	// 利用红黑树管理 group cache
 
-	/* keep track of unallocated space */
+	/* keep track of unallocated space 跟踪未分配的空间 */
 	atomic64_t free_chunk_space;
 
-	/* Track ranges which are used by log trees blocks/logged data extents */
+	/* Track ranges which are used by log trees blocks/logged data extents 
+		日志树块/记录的数据范围使用的轨迹范围
+	*/
 	struct extent_io_tree excluded_extents;
 
-	/* logical->physical extent mapping */
+	/* logical->physical extent mapping 逻辑地址到物理地址的区域映射 */
 	struct extent_map_tree mapping_tree;
 
 	/*
 	 * block reservation for extent, checksum, root tree and
 	 * delayed dir index item
+	 * btrfs 貌似会为不同类型的数据保留一些空间
 	 */
 	struct btrfs_block_rsv global_block_rsv;
 	/* block reservation for metadata operations */
@@ -684,6 +757,7 @@ struct btrfs_fs_info {
 	/*
 	 * Track requests for actions that need to be done during transaction
 	 * commit (like for some mount options).
+	 * 跟踪事务提交期间需要执行的操作请求（如某些装载选项）
 	 */
 	unsigned long pending_changes;
 	unsigned long compress_type:4;
@@ -1128,6 +1202,7 @@ struct btrfs_qgroup_swapped_blocks {
  * and for the extent tree extent_root root.
  */
 struct btrfs_root {
+	// 内容缓存，其中包含有 page array
 	struct extent_buffer *node;
 
 	struct extent_buffer *commit_root;
@@ -1135,6 +1210,11 @@ struct btrfs_root {
 	struct btrfs_root *reloc_root;
 
 	unsigned long state;
+	/*
+		This structure holds defines the the root of a btree. It is associated with 
+		the ROOT_ITEM type. This structure is never used outside of this item.
+		root_item 表示的是 root 节点的一些基本内容，比如对应的 inode_item、时间信息、大小等等
+	*/
 	struct btrfs_root_item root_item;
 	struct btrfs_key root_key;
 	struct btrfs_fs_info *fs_info;
@@ -1181,17 +1261,21 @@ struct btrfs_root {
 	int orphan_cleanup_state;
 
 	spinlock_t inode_lock;
-	/* red-black tree that keeps track of in-memory inodes */
+	/* red-black tree that keeps track of in-memory inodes 
+		跟踪内存中索引节点的红黑树
+	*/
 	struct rb_root inode_tree;
 
 	/*
 	 * radix tree that keeps track of delayed nodes of every inode,
 	 * protected by inode_lock
+	 * 基数树，跟踪每个 inode 的延迟节点，受 inode_lock 保护
 	 */
 	struct radix_tree_root delayed_nodes_tree;
 	/*
 	 * right now this just gets used so that a root has its own devid
 	 * for stat.  It may be used for more later
+	 * 现在，这只是用来让一个根目录有自己的用于 stat 的 devid
 	 */
 	dev_t anon_dev;
 
@@ -1212,7 +1296,7 @@ struct btrfs_root {
 	struct mutex ordered_extent_mutex;
 	/*
 	 * this is used by the balancing code to wait for all the pending
-	 * ordered extents
+	 * ordered extents 平衡代码使用它来等待所有挂起的有序扩展数据块
 	 */
 	spinlock_t ordered_extent_lock;
 
@@ -1220,6 +1304,8 @@ struct btrfs_root {
 	 * all of the data=ordered extents pending writeback
 	 * these can span multiple transactions and basically include
 	 * every dirty data page that isn't from nodatacow
+	 * 所有 data=ordered 区段挂起写回这些区段可以跨越多个事务，基本上包括不是来自
+	 * nodatacow 的每个脏数据页
 	 */
 	struct list_head ordered_extents;
 	struct list_head ordered_root;
@@ -1239,12 +1325,13 @@ struct btrfs_root {
 	 */
 	int send_in_progress;
 	/*
-	 * Number of currently running deduplication operations that have a
-	 * destination inode belonging to this root. Protected by the lock
-	 * root_item_lock.
+	 * Number of currently running deduplication(重复数据删除) operations that have a
+	 * destination inode belonging to this root. Protected by the lock root_item_lock.
 	 */
 	int dedupe_in_progress;
-	/* For exclusion of snapshot creation and nocow writes */
+	/* For exclusion of snapshot creation and nocow writes 
+		用于排除快照创建和nocow写入； nocow: no copy-on-write, 非写时赋值
+	*/
 	struct btrfs_drew_lock snapshot_lock;
 
 	atomic_t snapshot_force_cow;
@@ -1258,10 +1345,14 @@ struct btrfs_root {
 	/* Number of active swapfiles */
 	atomic_t nr_swapfiles;
 
-	/* Record pairs of swapped blocks for qgroup */
+	/* Record pairs of swapped blocks for qgroup 
+		记录一个 qgroup 中 swapped block 的对数
+	*/
 	struct btrfs_qgroup_swapped_blocks swapped_blocks;
 
-	/* Used only by log trees, when logging csum items */
+	/* Used only by log trees, when logging csum items 
+		当记录csum项目时，仅由日志树使用
+	*/
 	struct extent_io_tree log_csum_range;
 
 #ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS

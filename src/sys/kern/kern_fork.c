@@ -384,6 +384,10 @@ fail:
 	return (error);
 }
 
+/*
+	p2 表示新创建的进程指针
+	fp_procdesc: 在父进程中创建的一个文件描述符，表示的是新进程对应的可执行文件
+*/
 static void
 do_fork(struct thread *td, struct fork_req *fr, struct proc *p2, struct thread *td2,
     struct vmspace *vm2, struct file *fp_procdesc)
@@ -397,7 +401,7 @@ do_fork(struct thread *td, struct fork_req *fr, struct proc *p2, struct thread *
 	sx_assert(&proctree_lock, SX_LOCKED);
 	sx_assert(&allproc_lock, SX_XLOCKED);
 
-	p1 = td->td_proc;
+	p1 = td->td_proc;	// p1 对应的应该是父线程
 
 	trypid = fork_findpid(fr->fr_flags);
 
@@ -439,6 +443,9 @@ do_fork(struct thread *td, struct fork_req *fr, struct proc *p2, struct thread *
 
 	/*
 	 * Copy filedesc.
+	 		RFCFDG：关闭所有的文件描述符，清空文件描述符表
+			RFFDG：复制文件描述符，所有的文件描述符应该还是指向同一个文件
+			或者是父进程和子进程共享同一个文件描述符表，不进行数据拷贝
 	 */
 	if (fr->fr_flags & RFCFDG) {
 		fd = fdinit(p1->p_fd, false);
@@ -857,6 +864,7 @@ fork1(struct thread *td, struct fork_req *fr)
 	/*
 	 * Here we don't create a new process, but we divorce
 	 * certain parts of a process from itself.
+	 * 这里我们不创建新的进程，但是会将进程的某些部分与进程本身分离
 	 */
 	if ((flags & RFPROC) == 0) {
 		if (fr->fr_procp != NULL)
@@ -877,9 +885,13 @@ fork1(struct thread *td, struct fork_req *fr)
 	 * create. There are hard-limits as to the number of processes
 	 * that can run, established by the KVA and memory usage for
 	 * the process data.
+	 * 在分配之前增加nprocs资源。尽管流程条目是动态创建的，但我们仍然对将创建的
+	 * 最大数量保持全局限制。对于可以运行的进程数量，有硬限制，由KVA和进程数据的
+	 * 内存使用情况确定
 	 *
 	 * Don't allow a nonprivileged user to use the last ten
 	 * processes; don't let root exceed the limit.
+	 * 不允许非特权用户使用最后十个进程；不要让 root 超过限制。
 	 */
 	nprocs_new = atomic_fetchadd_int(&nprocs, 1) + 1;
 	if ((nprocs_new >= maxproc - 10 && priv_check_cred(td->td_ucred,
@@ -899,6 +911,8 @@ fork1(struct thread *td, struct fork_req *fr)
 	 * If required, create a process descriptor in the parent first; we
 	 * will abandon it if something goes wrong. We don't finit() until
 	 * later.
+	 * 如果需要，首先在父进程中创建一个进程描述符；如果出了问题，我们将放弃它。这个文件描述符
+	 * 应该是对应一个可执行文件
 	 */
 	if (flags & RFPROCDESC) {
 		error = procdesc_falloc(td, &fp_procdesc, fr->fr_pd_fd,

@@ -1094,6 +1094,8 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 	/* 
 		填充 nameidata 结构体，把这些零散的数据进行打包处理。所以此时 nameidata 结构体中包含
 		了一些基本信息，比如路径信息、权限信息、线程信息
+		fd = -100？ 这里其实是我们需要查找某一个文件，所以当前我们并不知道这个文件是否存在，可能
+		处理方式的话就直接给 fd 赋值一个 -100，表明我们正在执行查抄文件的过程
 	*/
 	NDINIT_ATRIGHTS(&nd, LOOKUP, FOLLOW | AUDITVNODE1, pathseg, path, fd,
 	    &rights, td);
@@ -1148,7 +1150,7 @@ kern_openat(struct thread *td, int fd, char *path, enum uio_seg pathseg,
 	 * If the file wasn't claimed by devfs bind it to the normal
 	 * vnode operations here.
 	 * 如果 devfs 没有声明该文件，则将其绑定到此处的正常 vnode 操作。通过 gdb 调试来看，fp->f_ops
-	 * 当前还是 badfileops，然后调用finit(13.0版本中是 finit_vnode 函数)将 vnops 赋给 ops 字段
+	 * 当前还是 badfileops，然后调用 finit (13.0版本中是 finit_vnode 函数)将 vnops 赋给 ops 字段
 	 */
 	if (fp->f_ops == &badfileops) {
 		KASSERT(vp->v_type != VFIFO, ("Unexpected fifo."));

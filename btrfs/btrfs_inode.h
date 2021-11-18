@@ -62,11 +62,15 @@ enum {
 
 /* in memory btrfs inode */
 struct btrfs_inode {
-	/* which subvolume this inode belongs to */
+	/* which subvolume this inode belongs to
+		Subvolumes are basically a named btree that holds files and directories.
+		指定此 inode 属于哪个 subvolume
+	*/
 	struct btrfs_root *root;
 
 	/* key used to find this inode on disk.  This is used by the code
 	 * to read in roots of subvolumes
+	 	用于在磁盘上查找此索引节点的密钥。代码使用它读取 subvolume root
 	 */
 	struct btrfs_key location;
 
@@ -78,7 +82,9 @@ struct btrfs_inode {
 	 */
 	spinlock_t lock;
 
-	/* the extent_tree has caches of all the extent mappings to disk */
+	/* the extent_tree has caches of all the extent mappings to disk 
+			区段树具有所有到磁盘的区段映射的缓存
+	*/
 	struct extent_map_tree extent_tree;
 
 	/* the io_tree does range state (DIRTY, LOCKED etc) */
@@ -86,12 +92,14 @@ struct btrfs_inode {
 
 	/* special utility tree used to record which mirrors have already been
 	 * tried when checksums fail for a given block
+	 		用于记录在给定块的校验和失败时已尝试的镜像的特殊实用程序树
 	 */
 	struct extent_io_tree io_failure_tree;
 
 	/*
 	 * Keep track of where the inode has extent items mapped in order to
 	 * make sure the i_size adjustments are accurate
+	 * 跟踪 inode 映射数据块项目的位置，以确保 i_size 调整的准确性
 	 */
 	struct extent_io_tree file_extent_tree;
 
@@ -170,6 +178,7 @@ struct btrfs_inode {
 	/*
 	 * total number of bytes pending defrag, used by stat to check whether
 	 * it needs COW.
+	 * 挂起碎片整理的字节总数，stat用于检查是否需要COW (copy-on-write)
 	 */
 	u64 defrag_bytes;
 
@@ -177,16 +186,21 @@ struct btrfs_inode {
 	 * the size of the file stored in the metadata on disk.  data=ordered
 	 * means the in-memory i_size might be larger than the size on disk
 	 * because not all the blocks are written yet.
+	 * 存储在磁盘元数据中的文件大小。data=ordered 表示内存中的 i_size 可能大于磁盘上的大小，
+	 * 因为尚未写入所有块
 	 */
 	u64 disk_i_size;
 
 	/*
 	 * if this is a directory then index_cnt is the counter for the index
 	 * number for new files that are created
+	 * 如果这是一个目录，则 index_cnt 是创建的新文件的索引号的计数器
 	 */
 	u64 index_cnt;
 
-	/* Cache the directory index number to speed the dir/file remove */
+	/* Cache the directory index number to speed the dir/file remove
+			缓存目录索引号以加快目录/文件的删除速度
+	*/
 	u64 dir_index;
 
 	/* the fsync log has some corner cases that mean we have to check

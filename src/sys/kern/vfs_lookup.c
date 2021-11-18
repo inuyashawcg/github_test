@@ -340,7 +340,7 @@ namei(struct nameidata *ndp)
 	struct filedesc *fdp;	/* pointer to file descriptor state */
 	char *cp;		/* pointer into pathname argument */
 
-	/* 貌似对于目录或者文件的访问，都是通过关联的vnode进行的 */
+	/* 貌似对于目录或者文件的访问，都是通过关联的 vnode 进行的 */
 	struct vnode *dp;	/* the directory we are searching 我们正在查找的目录 */
 	struct iovec aiov;		/* uio for reading symbolic links */
 	struct componentname *cnp;
@@ -428,6 +428,10 @@ namei(struct nameidata *ndp)
 #endif
 	if (error != 0) {
 		namei_cleanup_cnp(cnp);	// 如果数据拷贝出错，则释放掉 componentname 的存储空间
+		/*
+			返回前将 ndp->ni_vp 设置为了空，说明这个函数最终目的就是获取对应文件的 vnode 并赋值
+			给 ndp->ni_vp
+		*/
 		ndp->ni_vp = NULL;
 		return (error);
 	}
@@ -473,10 +477,10 @@ namei(struct nameidata *ndp)
 			如果不为空，则填充 dp，更新 startdir_used。说明 dp 是用于存储路径搜索起始目录的 vnode
 		*/
 		if (ndp->ni_startdir != NULL) {
-			dp = ndp->ni_startdir;	// 用 nameidata 中的成员填充
+			dp = ndp->ni_startdir;
 			startdir_used = 1;
 		} else if (ndp->ni_dirfd == AT_FDCWD) {
-			dp = fdp->fd_cdir;	// 用 filedesc 中的成员填充
+			dp = fdp->fd_cdir;
 			vrefact(dp);
 		} else {
 			rights = ndp->ni_rightsneeded;
@@ -486,6 +490,10 @@ namei(struct nameidata *ndp)
 				AUDIT_ARG_ATFD1(ndp->ni_dirfd);
 			if (cnp->cn_flags & AUDITVNODE2)
 				AUDIT_ARG_ATFD2(ndp->ni_dirfd);
+			/*
+				当上述两种情况都不存在的时候，就只能调用 fgetvp_rights 来获取 dp。注意其中传入了 rights 和
+				ndp->ni_filecaps，推测是利用这两个参数来定位到目标 file，进而获取对应的 vnode
+			*/
 			error = fgetvp_rights(td, ndp->ni_dirfd,
 			    &rights, &ndp->ni_filecaps, &dp);
 			/*
@@ -509,7 +517,9 @@ namei(struct nameidata *ndp)
 			}
 #endif
 		}
-		/* dp 表示的是根目录或者路径搜索起始目录 */
+		/* 
+			dp 表示的是根目录或者路径搜索起始目录，要注意不是普通文件
+		*/
 		if (error == 0 && dp->v_type != VDIR)
 			error = ENOTDIR;
 	}	// 绝对路径和相对路径处理初步完成
@@ -534,7 +544,10 @@ namei(struct nameidata *ndp)
 	SDT_PROBE3(vfs, namei, lookup, entry, dp, cnp->cn_pnbuf,
 	    cnp->cn_flags);
 
-	/* 到这里代码的主要功能是获取 rootdir 或者 startdir 对应的 vnode */
+	/*
+		for 循环会首先更新 ndp->ni_startdir，推测是每次循环都会处理一个级别的目录项，然后进行
+		下一个目录项的处理，所以才会每次都更新一下 nameidata 中的成员
+	*/
 	for (;;) {
 		ndp->ni_startdir = dp;
 		error = lookup(ndp);
@@ -1428,7 +1441,7 @@ NDINIT_ALL(struct nameidata *ndp, u_long op, u_long flags, enum uio_seg segflg,
 	ndp->ni_cnd.cn_flags = flags;
 	ndp->ni_segflg = segflg;	// 指定是用户空间还是内核空间
 	ndp->ni_dirp = namep;	// 路径信息
-	ndp->ni_dirfd = dirfd;
+	ndp->ni_dirfd = dirfd;	// 从调用情况来看，这里传入的参数为 -100
 	ndp->ni_startdir = startdir;	// 实际调用情况来看，startdir = NULL
 	if (rightsp != NULL)
 		ndp->ni_rightsneeded = *rightsp;

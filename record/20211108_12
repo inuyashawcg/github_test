@@ -40,7 +40,16 @@ inode。奇海系统可能就要把 class file 做成静态的，为每一个文
 
 ////////////// 20211111 //////////////
   p td->td_proc->p_fd->fd_files->fdt_ofiles[2]->fde_file->f_vnode->v_data
-  p (struct devfs_dirent*)td->td_proc->p_fd->fd_files->fdt_ofiles[0]->fde_file->f_vnode->v_data
+  p* (struct devfs_dirent*)td->td_proc->p_fd->fd_files->fdt_ofiles[0]->fde_file->f_vnode->v_data
 
   linux 中对于pub命令的详细作用流程可以参考：
     https://www.cnblogs.com/pengdonglin137/p/3286627.html
+
+  
+////////////// 周会总结 //////////////
+  当前进程中对于 struct file 的分配其实是动态的，即只有在打开文件的时候才会创建。但是在 GR 中需要注册的则是文件的静态信息，比如文件在内存或者硬盘的
+哪个位置、大小、修改的时间等。
+  挂载操作在 GR 中要如何来处理；链接文件要如何来处理。挂载点相当于是两个文件系统的分界线，但我们访问到挂载点的时候，其实就是进入到了另外一个文件系统当中
+并对其中的文件进行操作，需要用到另外一个文件系统注册的函数来执行命令
+  文件系统应该要以树的方式来进行管理
+  

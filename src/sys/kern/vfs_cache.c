@@ -2205,7 +2205,6 @@ retry:
  * through the vop_cachedlookup only if needed.
  * 执行规范检查和缓存查找，并仅在需要时通过 vop_cachedlookup 传递到文件系统。
  */
-
 int
 vfs_cache_lookup(struct vop_lookup_args *ap)
 {
