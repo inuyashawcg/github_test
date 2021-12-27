@@ -164,6 +164,11 @@ TAILQ_HEAD(vnodelst, vnode);
 
 /* Mount options list */
 TAILQ_HEAD(vfsoptlist, vfsopt);
+
+/*
+	文件系统挂载的时候会涉及到多种挂载选项 (其实就类似于shell命令的那些参数吧)。该结构体就表示
+	具体的一个挂载选项，然后所有的这些选项组合成一个链表，就构成了整个文件系统挂载的所有选项
+*/
 struct vfsopt {
 	TAILQ_ENTRY(vfsopt) link;
 	char	*name;
@@ -197,20 +202,20 @@ struct mount {
 	struct vfsops	*mnt_op;		/* operations on fs fs的操作函数表 */
 	struct vfsconf	*mnt_vfc;		/* configuration info 文件系统的配置信息 */
 	struct vnode	*mnt_vnodecovered;	/* vnode we mounted on 我们所挂载的vnode？ */
-	struct vnode	*mnt_syncer;		/* syncer vnode 同步器vnode */
+	struct vnode	*mnt_syncer;		/* syncer vnode 同步器 vnode */
 	int		mnt_ref;		/* (i) Reference count - mount引用计数 */
-	struct vnodelst	mnt_nvnodelist;		/* (i) list of vnodes 管理所有的vnode */
+	struct vnodelst	mnt_nvnodelist;		/* (i) list of vnodes 管理所有的 vnode */
 	int		mnt_nvnodelistsize;	/* (i) # of vnodes */
 	int		mnt_writeopcount;	/* (i) write syscalls pending 写入系统调用挂起 */
 	int		mnt_kern_flag;		/* (i) kernel only flags 内核才有的flag？ */
 	uint64_t	mnt_flag;		/* (i) flags shared with user 和用户空间共享的flag */
-	struct vfsoptlist *mnt_opt;		/* current mount options */
+	struct vfsoptlist *mnt_opt;		/* current mount options 当前的 mount 选项 */
 	struct vfsoptlist *mnt_optnew;		/* new options passed to fs 传递给fs的新option，update */
 	int		mnt_maxsymlinklen;	/* max size of short symlink */
 	struct statfs	mnt_stat;		/* cache of filesystem stats 文件系统状态缓存 */
 	struct ucred	*mnt_cred;		/* credentials of mounter - mounter证书？ */
 	void *		mnt_data;		/* private data */
-	time_t		mnt_time;		/* last time written*/
+	time_t		mnt_time;		/* last time written */
 	int		mnt_iosize_max;		/* max size for clusters, etc */
 	struct netexport *mnt_export;		/* export list */
 	struct label	*mnt_label;		/* MAC label for the fs 好像是表示文件系统的存储类型 */
@@ -222,10 +227,10 @@ struct mount {
 #define	mnt_endzero	mnt_gjprovider
 	char		*mnt_gjprovider;	/* gjournal provider name */
 	struct mtx	mnt_listmtx;
-	struct vnodelst	mnt_activevnodelist;	/* (l) list of active vnodes 活跃的vnode list */
+	struct vnodelst	mnt_activevnodelist;	/* (l) list of active vnodes 活跃的 vnode 链表 */
 	int		mnt_activevnodelistsize;/* (l) # of active vnodes */
-	struct vnodelst	mnt_tmpfreevnodelist;	/* (l) list of free vnodes 空闲的vnode list */
-	int		mnt_tmpfreevnodelistsize;/* (l) # of free vnodes */
+	struct vnodelst	mnt_tmpfreevnodelist;	/* (l) list of free vnodes 空闲的 vnode 链表 */
+	int		mnt_tmpfreevnodelistsize;/* (l) # of free vnodes 空闲 vnode 链表的大小 */
 	struct lock	mnt_explock;		/* vfs_export walkers lock */
 	TAILQ_ENTRY(mount) mnt_upper_link;	/* (m) we in the all uppers */
 	TAILQ_HEAD(, mount) mnt_uppers;		/* (m) upper mounts over us*/
@@ -516,10 +521,10 @@ struct nfs_public {
  */
 struct vfsconf {
 	u_int	vfc_version;		/* ABI version number */
-	char	vfc_name[MFSNAMELEN];	/* filesystem type name */
-	struct	vfsops *vfc_vfsops;	/* filesystem operations vector */
-	int	vfc_typenum;		/* historic filesystem type number */
-	int	vfc_refcount;		/* number mounted of this type */
+	char	vfc_name[MFSNAMELEN];	/* filesystem type name 文件系统类型名 */
+	struct	vfsops *vfc_vfsops;	/* filesystem operations vector 文件系统操作向量 */
+	int	vfc_typenum;		/* historic filesystem type number 历史文件系统类型号 */
+	int	vfc_refcount;		/* number mounted of this type 该文件类型挂载的次数 */
 	int	vfc_flags;		/* permanent flags */
 	int	vfc_prison_flag;	/* prison allow.mount.* flag */
 	struct	vfsoptdecl *vfc_opts;	/* mount options */

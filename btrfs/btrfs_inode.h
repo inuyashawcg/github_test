@@ -64,13 +64,13 @@ enum {
 struct btrfs_inode {
 	/* which subvolume this inode belongs to
 		Subvolumes are basically a named btree that holds files and directories.
-		指定此 inode 属于哪个 subvolume
+		指定此 inode 属于哪个 subvolume；子卷基本上是一个包含文件和目录的命名btree
 	*/
 	struct btrfs_root *root;
 
 	/* key used to find this inode on disk.  This is used by the code
 	 * to read in roots of subvolumes
-	 	用于在磁盘上查找此索引节点的密钥。代码使用它读取 subvolume root
+	 		用于在磁盘上查找此索引节点的密钥。代码使用它读取 subvolume root
 	 */
 	struct btrfs_key location;
 

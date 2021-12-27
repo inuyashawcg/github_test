@@ -194,7 +194,9 @@ nameicap_tracker_add(struct nameidata *ndp, struct vnode *dp)
 	vhold(dp);	// 增加 tracker 的引用计数
 	nt->dp = dp;	// 指定对应的 vnode
 	/*
-		nameidata 中包含了一个 tracker 的链表，这里执行的是插入操作
+		nameidata 中包含了一个 tracker 的链表，这里执行的是插入操作。该函数会在 lookup 函数执行的
+		时候被调用，所以推测它的功能就是保留所有查找过程中所申请的所有节点的 vnode。这样在后续查找 vnode
+		的过程中就可以通过遍历该链表获得
 	*/
 	TAILQ_INSERT_TAIL(&ndp->ni_cap_tracker, nt, nm_link);
 }
@@ -212,6 +214,7 @@ nameicap_cleanup(struct nameidata *ndp)
 	*/
 	TAILQ_FOREACH_SAFE(nt, &ndp->ni_cap_tracker, nm_link, nt1) {
 		TAILQ_REMOVE(&ndp->ni_cap_tracker, nt, nm_link);
+		// vhold 和 vdrop 会对 vnode 加锁
 		vdrop(nt->dp);
 		uma_zfree(nt_zone, nt);
 	}
@@ -223,6 +226,13 @@ nameicap_cleanup(struct nameidata *ndp)
  * during the operation.  Also fail dotdot lookups for non-local
  * filesystems, where external agents might assist local lookups to
  * escape the compartment.
+ * 留意注释中第一句话的表述，仅当结果目录项已经被 traversed(横穿，横渡，越过) 之后，我们才会
+ * 允许组件查找成功。意思应该就是当我们检测到路径中含有 .. 组件的时候，对应的上级目录必须已经
+ * 被查找过了，否则将不允许返回成功；
+ * 非本地文件系统可能指的是 NFS？
+ * 
+ * dp 表示的是 directory vnode pointer，当我们处理到 .. 组件的时候，dp 应该会指向当前文件的
+ * 父节点，然后我们要检查父节点是否保存在 tracker 链表当中。如果在的话才能返回成功，否则就是失败
  */
 static int
 nameicap_check_dotdot(struct nameidata *ndp, struct vnode *dp)
@@ -240,6 +250,7 @@ nameicap_check_dotdot(struct nameidata *ndp, struct vnode *dp)
 		关联的 vnode 结构。
 		lookup_cap_dotdot_nonlocal 表示的应该是查找非本地存储(非持久化内存)文件系统的 .. 目录，遍历
 		所有的 tracker 链表元素，对比与dp是否一致
+		非本地可能不是表示非持久化，可能是类似 NFS 的文件系统
 	*/
 	if (lookup_cap_dotdot_nonlocal == 0 && mp != NULL &&
 	    (mp->mnt_flag & MNT_LOCAL) == 0)
@@ -299,7 +310,8 @@ namei_handle_root(struct nameidata *ndp, struct vnode **dpp)
 	}
 	/*
 		将 rootdir 对应的 vnode 结构赋值给 dpp，说明 nameidata 当前已经知道 rootdir 对应的 vnode
-		的指针？
+		的指针？ 从上层的调用函数逻辑可以看出，ni_rootdir 要么是rootnode，要么是进程描述符中保存的根目录
+		对应的 vnode
 	*/
 	*dpp = ndp->ni_rootdir;
 	vrefact(*dpp);
@@ -449,7 +461,7 @@ namei(struct nameidata *ndp)
 	 */
 	FILEDESC_SLOCK(fdp);	// slock: shared lock
 	ndp->ni_rootdir = fdp->fd_rdir;	// 文件描述符中保存的根目录
-	vrefact(ndp->ni_rootdir);
+	vrefact(ndp->ni_rootdir);		// 貌似仅仅是增加引用计数，而不会进行加锁解锁
 	ndp->ni_topdir = fdp->fd_jdir;	// rootdir 和 topdir 可能是同一个
 
 	/*
@@ -525,7 +537,8 @@ namei(struct nameidata *ndp)
 	}	// 绝对路径和相对路径处理初步完成
 	FILEDESC_SUNLOCK(fdp);
 	/*
-		当起始目录不为空并且 startdir_used 为0的时候，要将起始目录的的引用计数减一
+		当起始目录不为空并且 startdir_used 为0的时候，要将起始目录的的引用计数减一；
+		vrele 接收一个 unlocked vnode，返回仍然是一个 unlocked vnode
 	*/
 	if (ndp->ni_startdir != NULL && !startdir_used)
 		vrele(ndp->ni_startdir);
@@ -555,6 +568,7 @@ namei(struct nameidata *ndp)
 			goto out;
 		/*
 		 * If not a symbolic link, we're done.
+		 		如果不是符号链接的话，我们就算完成了
 		 */
 		if ((cnp->cn_flags & ISSYMLINK) == 0) {
 			vrele(ndp->ni_rootdir);
@@ -566,6 +580,9 @@ namei(struct nameidata *ndp)
 			SDT_PROBE2(vfs, namei, lookup, return, 0, ndp->ni_vp);
 			return (0);
 		}
+		/*
+			链接文件的深度其实是有限制的，超过这个就会报错
+		*/
 		if (ndp->ni_loopcnt++ >= MAXSYMLINKS) {
 			error = ELOOP;
 			break;
@@ -611,16 +628,21 @@ namei(struct nameidata *ndp)
 			break;
 		}
 		if (ndp->ni_pathlen > 1) {
+			/*
+				C语言中的定义：void bcopy(const void *src, void *dest, int n)
+				意思就是把原有路径缓存中的剩余字符拷贝到 cp + linklen 处，说明链接文件可能会出现在路径中的任意位置
+			*/
 			bcopy(ndp->ni_next, cp + linklen, ndp->ni_pathlen);
 			uma_zfree(namei_zone, cnp->cn_pnbuf);
-			cnp->cn_pnbuf = cp;
+			cnp->cn_pnbuf = cp;	// 更新 cnp 中的路径缓存地址
 		} else
 			cnp->cn_pnbuf[linklen] = '\0';
-		ndp->ni_pathlen += linklen;
+		ndp->ni_pathlen += linklen;	// 更新路径中的剩余字节数
 		vput(ndp->ni_vp);
-		dp = ndp->ni_dvp;
+		dp = ndp->ni_dvp;	// dp 更新为当前目录
 		/*
 		 * Check if root directory should replace current directory.
+		 		如果链接文件中存放的是绝对路径，则从 rootdir 重新开始查找
 		 */
 		cnp->cn_nameptr = cnp->cn_pnbuf;
 		if (*(cnp->cn_nameptr) == '/') {
@@ -637,6 +659,9 @@ namei(struct nameidata *ndp)
 out:
 	vrele(ndp->ni_rootdir);
 	namei_cleanup_cnp(cnp);
+	/*
+		该函数会对 tracker 队列进行清理，所以在 namei 函数之外，tracker 队列应该是没有任何作用的
+	*/
 	nameicap_cleanup(ndp);
 	SDT_PROBE2(vfs, namei, lookup, return, error, NULL);
 	return (error);
@@ -660,15 +685,17 @@ compute_cn_lkflags(struct mount *mp, int lkflags, int cnflags)
 static __inline int
 needs_exclusive_leaf(struct mount *mp, int flags)
 {
-
 	/*
 	 * Intermediate nodes can use shared locks, we only need to
 	 * force an exclusive lock for leaf nodes.
+	 * 中间节点可以使用共享锁，我们只需要为叶节点强制一个独占锁
 	 */
 	if ((flags & (ISLASTCN | LOCKLEAF)) != (ISLASTCN | LOCKLEAF))
 		return (0);
 
-	/* Always use exclusive locks if LOCKSHARED isn't set. */
+	/* Always use exclusive locks if LOCKSHARED isn't set. 
+			如果未设置LOCKSHARED，请始终使用独占锁
+	*/
 	if (!(flags & LOCKSHARED))
 		return (1);
 
@@ -676,6 +703,8 @@ needs_exclusive_leaf(struct mount *mp, int flags)
 	 * For lookups during open(), if the mount point supports
 	 * extended shared operations, then use a shared lock for the
 	 * leaf node, otherwise use an exclusive lock.
+	 * 对于 open 期间的查找，如果装载点支持扩展共享操作，则对叶节点使用共享锁，
+	 * 否则使用独占锁
 	 */
 	if ((flags & ISOPEN) != 0)
 		return (!MNT_EXTENDED_SHARED(mp));
@@ -683,6 +712,7 @@ needs_exclusive_leaf(struct mount *mp, int flags)
 	/*
 	 * Lookup requests outside of open() that specify LOCKSHARED
 	 * only need a shared lock on the leaf vnode.
+	 * 在 open 之外指定 LOCKSHARED 的查找请求只需要叶 vnode 上的共享锁
 	 */
 	return (0);
 }
@@ -727,13 +757,19 @@ needs_exclusive_leaf(struct mount *mp, int flags)
  *	    if LOCKPARENT set, return locked parent in ni_dvp
  *	    if WANTPARENT set, return unlocked parent in ni_dvp
  */
+
+/*
+	通过 namei 函数测处理，我们已经获取到了当前目录项对应的 vnode。如果是绝对路径的话，那就是根节点的 vnode，
+	也就是进程描述符中的 rootdir；如果是相对路径，那就是进程描述符中的当前目录 curdir。lookup 函数解析路径并
+	获取第一个组件名，其实就是当前目录下的一个文件节点
+*/
 int
 lookup(struct nameidata *ndp)
 {
 	char *cp;			/* pointer into pathname argument */
 	char *prev_ni_next;		/* saved ndp->ni_next */
 	struct vnode *dp = NULL;	/* the directory we are searching */
-	struct vnode *tdp;		/* saved dp - target directory pointer，应该是用于保存目标 vnode */
+	struct vnode *tdp;		/* saved dp - target directory pointer，目标目录项的 vnode */
 	struct mount *mp;		/* mount table entry */
 	struct prison *pr;
 	size_t prev_ni_pathlen;		/* saved ndp->ni_pathlen 用于保存路径长度 */
@@ -741,7 +777,7 @@ lookup(struct nameidata *ndp)
 	int wantparent;			/* 1 => wantparent or lockparent flag 判断父目录要不要加锁 */
 	int rdonly;			/* lookup read-only flag bit 是否是只读的 */
 	int error = 0;
-	int dpunlocked = 0;		/* dp has already been unlocked - 目录 vnode 已经被加锁了 */
+	int dpunlocked = 0;		/* dp has already been unlocked - 目录 vnode 已经被解锁了 */
 	int relookup = 0;		/* do not consume the path component 不要使用路径组件 */
 	struct componentname *cnp = &ndp->ni_cnd;
 	int lkflags_save;
@@ -749,13 +785,20 @@ lookup(struct nameidata *ndp)
 	
 	/*
 	 * Setup: break out flag bits into variables.
+	 		设置：将标志位分解为变量。它应该是标记中间目录是否加锁的标志，这个应该是把 flags 中的属性放到
+			变量当中，应该是为了方便判断
 	 */
 	ni_dvp_unlocked = 0;
+	/*
+		这个操作很奇怪，应该就是只要包含这两个属性的其中一个就设置 wantparent 标志位
+	*/
 	wantparent = cnp->cn_flags & (LOCKPARENT | WANTPARENT);
 	KASSERT(cnp->cn_nameiop == LOOKUP || wantparent,
 	    ("CREATE, DELETE, RENAME require LOCKPARENT or WANTPARENT."));
 	/*
-		判断是否需要缓存
+		判断是否需要缓存。从代码逻辑可以看到，默认情况是需要根据 cn_flags 来判断是不是需要进行
+		名称缓存。当我们所要执行的操作是 delete；或者指定父节点 vnode 需要加锁，并且不是执行
+		创建和查找操作，此时则不需要进行名称缓存
 	*/
 	docache = (cnp->cn_flags & NOCACHE) ^ NOCACHE;
 	if (cnp->cn_nameiop == DELETE ||
@@ -763,23 +806,29 @@ lookup(struct nameidata *ndp)
 	     cnp->cn_nameiop != LOOKUP))
 		docache = 0;
 	rdonly = cnp->cn_flags & RDONLY;
-	cnp->cn_flags &= ~ISSYMLINK;	// 遇到链接文件需要找到真实的文件？
-	ndp->ni_dvp = NULL;
+	cnp->cn_flags &= ~ISSYMLINK;	// 遇到链接文件需要找到真实的文件？应该是初始化为非链接文件
+	ndp->ni_dvp = NULL;	// 首先将路径中间目录项对应的 vnode
 	/*
 	 * We use shared locks until we hit the parent of the last cn then
 	 * we adjust based on the requesting flags.
-	 * 我们使用共享锁，直到到达最后一个cn的父级，然后根据请求的标志进行调整
+	 * 我们使用共享锁，直到到达最后一个 cn 的父级，然后根据请求的标志进行调整。也就是说路径中间的组件
+	 * 对应的 vnode 都是利用共享锁进行锁操作，只有到最后一个目录的时候，在根据 flag 进行调整
 	 */
 	cnp->cn_lkflags = LK_SHARED;
-	dp = ndp->ni_startdir;	// 获取初始目录项
-	ndp->ni_startdir = NULLVP;	// 然后将 start directory 置空
+	/*
+		从 namei 函数调用情况可以知道，ni_startdir 在 for 循环中都是被指定过的。所以，这里获取到的就是
+		需要处理的当前目录项，它会随着路径信息的处理而不断更新
+	*/
+	dp = ndp->ni_startdir;
+	ndp->ni_startdir = NULLVP;	// 将 start directory 置空，等待下次更新
 	vn_lock(dp,
 	    compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags | LK_RETRY,
-	    cnp->cn_flags));
+	    cnp->cn_flags));	// 对 vnode 进行加锁
 
 dirloop:
 	/*
-	 * Search a new directory.	lookup 函数可能只对目录项进行查找
+	 * Search a new directory. dirloop 循环中 cnp->flags 每次循环都要计算一下，在奇海系统中
+	 		我们是通过绝对路径查找，所以应该只需要在处理完路径之后计算一次就可以
 	 *
 	 * The last component of the filename is left accessible via
 	 * cnp->cn_nameptr for callers that need the name. Callers needing
@@ -796,9 +845,17 @@ dirloop:
 		continue;
 	/*
 		componentname 中的路径名长度已经发生了改变，此时 cp 应该是指向 '/' 或者 '\0'；
-		cnp->cn_nameptr 在 for 循环中是没有发生变化的
+		cnp->cn_nameptr 在 for 循环中是没有发生变化的；
+		这里把 namelen 进行了更新，下面代码中就没有再进行赋值操作。namelen 代表的是什么？其实是我们从路径中解析出的
+		第一个组件名字的长度，它应该就是当前目录中的一个子目录项的名字，该项可能是文件，也可能是一个目录。当前目录的 vnode
+		也已经知道，这样就可以定位到目录对应的 inode，再进一步就可以知道我们所要查找的子目录项对应的 inode。这样我们
+		就得到了子目录项的信息(通过 VOP_LOOKUP 函数)。然后我们就可以为子目录项分配一个 vnode？ 把名字加入到名称缓存
+		当中，下次查找的时候就可以加快查找速度。
+		下面代码中调用了 VOP_LOOKUP 函数，namelen 就是这里指定的长度，说明操作系统对路径名中的各个组件都进行了相同操作，
+		整个解析下来每个组件都会拥有自己的 vnode 节点。所以，我们只要查找过一个文件，对应路径上的所有组件都会被分配一个 vnode，
+		名字也可能会加载到缓存当中
 	*/
-	cnp->cn_namelen = cp - cnp->cn_nameptr;	
+	cnp->cn_namelen = cp - cnp->cn_nameptr;	// 获取一个组件名长度
 	if (cnp->cn_namelen > NAME_MAX) {
 		error = ENAMETOOLONG;
 		goto bad;
@@ -809,7 +866,7 @@ dirloop:
 	printf("{%s}: ", cnp->cn_nameptr);
 	*cp = c; }
 #endif
-	prev_ni_pathlen = ndp->ni_pathlen;	// 此次处理之前的路径名长度
+	prev_ni_pathlen = ndp->ni_pathlen;	// 此次处理之前的路径名长度，这个变量会在 relookup 情况下使用
 	ndp->ni_pathlen -= cnp->cn_namelen;	// 更新 nameidata 的路径长度，减去的是一个路径组件名称
 	KASSERT(ndp->ni_pathlen <= PATH_MAX,
 	    ("%s: ni_pathlen underflow to %zd\n", __func__, ndp->ni_pathlen));
@@ -852,11 +909,11 @@ dirloop:
 	ndp->ni_next = cp;	// 此时 cp 有可能就是 '/0'
 
 	cnp->cn_flags |= MAKEENTRY;	// 添加名称缓存属性
-	// 这里应该就是把所有情况统一处理，处理 cp 为 '/0' 的情况
+	// 这里应该就是把所有情况统一处理，处理 cp 为 '\0' 的情况
 	if (*cp == '\0' && docache == 0)
-		cnp->cn_flags &= ~MAKEENTRY;
+		cnp->cn_flags &= ~MAKEENTRY;	// 不要将名字添加到名称缓存
 
-	/* 判断是不是 dotdot 目录 */	
+	/* 判断是不是 dotdot 目录 */
 	if (cnp->cn_namelen == 2 &&
 	    cnp->cn_nameptr[1] == '.' && cnp->cn_nameptr[0] == '.')
 		cnp->cn_flags |= ISDOTDOT;
@@ -884,13 +941,16 @@ dirloop:
 		goto bad;
 	}
 
-	/* 将目录项对应的 tracker 添加到队列当中 */
+	/* 将当前目录对应的 tracker 添加到队列当中 */
 	nameicap_tracker_add(ndp, dp);
 
 	/*
 	 * Check for degenerate(退化的) name (e.g. / or "")
 	 * which is a way of talking about a directory,
 	 * e.g. like "/." or ".".
+	 * cnp->cn_nameptr 指向的是所要查找的组件名称，按理说不应该是空，即使是到了最后一个组件，也应该是cp指针
+	 * 为空，cn_nameptr 应该还是指向组件名称的起始位置，除非该组件本身就是空的，比如 /a/b/c/ 这种以 / 作为
+	 * 结尾的路径名。这个可以认为是我们所要访问的就是c这个目录项，所以代码分支中会出现 ndp->ni_vp = dp
 	 */
 	if (cnp->cn_nameptr[0] == '\0') {
 		if (dp->v_type != VDIR) {
@@ -911,14 +971,18 @@ dirloop:
 			AUDIT_ARG_VNODE1(dp);
 		else if (cnp->cn_flags & AUDITVNODE2)
 			AUDIT_ARG_VNODE2(dp);
-
+		/*
+			当我们访问的是一个以"/"结尾的目录时， 根据 LOCKPARENT | LOCKLEAF 两个标志去判断是否需要
+			对 dp 加锁
+		*/
 		if (!(cnp->cn_flags & (LOCKPARENT | LOCKLEAF)))
 			VOP_UNLOCK(dp, 0);
 		/* XXX This should probably move to the top of function. */
 		if (cnp->cn_flags & SAVESTART)
 			panic("lookup: SAVESTART");
 		goto success;
-	}	// 当 componentname 中路径名指针指向字符 '\0' 时的处理逻辑，说明路径名已经解析完毕
+	}	// 当 componentname 中路径名指针指向字符 '\0' 时的处理逻辑，说明路径名已经解析完毕，
+	// 或者传入的字符本身就是空
 
 	/*
 	 * Handle "..": five special cases.
@@ -976,7 +1040,7 @@ dirloop:
 			error = EINVAL;
 			goto bad;
 		}
-		
+
 		for (;;) {
 			for (pr = cnp->cn_cred->cr_prison; pr != NULL;
 			     pr = pr->pr_parent)
@@ -989,20 +1053,31 @@ dirloop:
 			    pr != NULL ||
 			    ((dp->v_vflag & VV_ROOT) != 0 &&
 			     (cnp->cn_flags & NOCROSSMOUNT) != 0)) {
-				/* 我们查找的文件不一定就是普通文件，有很大概率是目录文件 */
+				/*
+					当 dp 已经是顶层目录、根目录或者是 rootvnode 的时候，或者pr不为0的时候，亦或 dp 是某个
+					文件系统的根节点对应的 vnode、并且设定不能跨文件系统查找的时候，直接赋值
+				*/
 				ndp->ni_dvp = dp;
 				ndp->ni_vp = dp;
 				VREF(dp);	// 增加 dp 的引用计数
 				goto nextname;
 			}
+			/*
+				该 if 条件判断的是 dp 不是一个根节点，说明就是一个正常的结点。如果是根节点的话，它必定是某个
+				文件系统所挂载点。所以后面的代码分支就是处理该节点是根节点，即某个文件系统的挂载点时候的情况。
+				mnt_vnodecovered 表示的是在原文件系统中，该目录对应的 vnode
+			*/
 			if ((dp->v_vflag & VV_ROOT) == 0)
 				break;
 			if (dp->v_iflag & VI_DOOMED) {	/* forced unmount */
 				error = ENOENT;
 				goto bad;
 			}
-			tdp = dp;
-			// 处理目录项是挂载点
+			/*
+				tdp 保存的是当前文件系统该节点对应的 vnode，后面的话需要将 dp 更新为原文件系统该节点对应的 vnode。
+				应该就是处理挂载点的时候会用到这个
+			*/
+			tdp = dp;	
 			dp = dp->v_mount->mnt_vnodecovered;
 			VREF(dp);
 			vput(tdp);
@@ -1039,6 +1114,8 @@ unionlookup:
 	/*
 	 * If we have a shared lock we may need to upgrade the lock for the
 	 * last operation.
+	 * 如果处理到当前路径的最后一个组件，并且 flag 中包含有 LOCKPARENT 属性，才会执行下面
+	 * 的代码分支
 	 */
 	if ((cnp->cn_flags & LOCKPARENT) && (cnp->cn_flags & ISLASTCN) &&
 	    dp != vp_crossmp && VOP_ISLOCKED(dp) == LK_SHARED)
@@ -1050,6 +1127,7 @@ unionlookup:
 	/*
 	 * If we're looking up the last component and we need an exclusive
 	 * lock, adjust our lkflags.
+	 * 最后一个组件的话也是需要判断是否需要设置独占锁
 	 */
 	if (needs_exclusive_leaf(dp->v_mount, cnp->cn_flags))
 		cnp->cn_lkflags = LK_EXCLUSIVE;
@@ -1061,6 +1139,9 @@ unionlookup:
 	    cnp->cn_flags);
 	error = VOP_LOOKUP(dp, &ndp->ni_vp, cnp);
 	cnp->cn_lkflags = lkflags_save;
+	/*
+		当调用文件系统底层查找函数出现错误的时候，执行下面的代码分支
+	*/
 	if (error != 0) {
 		KASSERT(ndp->ni_vp == NULL, ("leaf should be empty"));
 #ifdef NAMEI_DIAGNOSTIC
@@ -1080,6 +1161,7 @@ unionlookup:
 			goto unionlookup;
 		}
 
+		// 该错误貌似只有在 autofs 中才会出现
 		if (error == ERELOOKUP) {
 			vref(dp);
 			ndp->ni_vp = dp;
@@ -1189,6 +1271,10 @@ nextname:
 	 */
 	KASSERT((cnp->cn_flags & ISLASTCN) || *ndp->ni_next == '/',
 	    ("lookup: invalid path state."));
+	/*
+		relookup 貌似只有在 autofs_lookup 中才会返回这个错误，所以推测这个可能就是针对
+		该文件系统所做的一个特殊处理
+	*/
 	if (relookup) {
 		relookup = 0;
 		ndp->ni_pathlen = prev_ni_pathlen;

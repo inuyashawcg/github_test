@@ -86,14 +86,14 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/vfs_mountroot.c 337837 2018-08-15 12:12
  * If the environment variable vfs.root.mountfrom is a space separated list,
  * each list element is tried in turn and the root filesystem will be mounted
  * from the first one that succeeds.
- * 如果环境变量vfs.root.mountfrom是一个以空格分隔的列表，依次尝试每个列表元素，
+ * 如果环境变量 vfs.root.mountfrom 是一个以空格分隔的列表，依次尝试每个列表元素，
  * 根文件系统将从第一个成功的文件系统装入
  *
  * The environment variable vfs.root.mountfrom.options is a comma delimited
  * set of string mount options.  These mount options must be parseable
  * by nmount() in the kernel.
- * 环境变量vfs.root.mountfrom.options是一组以逗号分隔的字符串装载选项。这些装载选项必须
-   可由内核中的nmount解析
+ * 环境变量 vfs.root.mountfrom.options 是一组以逗号分隔的字符串装载选项。这些装载选项必须
+   可由内核中的 nmount 解析
  */
 
 static int parse_mount(char **);
@@ -105,7 +105,7 @@ static int vfs_mountroot_wait_if_neccessary(const char *fs, const char *dev);
 /*
  * The vnode of the system's root (/ in the filesystem, without chroot
  * active.) 
- * rootvnode表示的应该就是文件系统中的根目录“/”
+ * rootvnode 表示的应该就是文件系统中的根目录“/”
  * chroot: change root，更改根目录
  */
 struct vnode *rootvnode;	

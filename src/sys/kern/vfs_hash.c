@@ -79,9 +79,10 @@ vfs_hash_bucket(const struct mount *mp, u_int hash)
 }
 
 /*
-	主要逻辑就是通过hash值在哈希表中找到某个vnode，所以可以推断一下，hash table里边其实就是存放的vnode，
-	我们要找的时候，就利用mount和外部提供的某个hash值来确定它位于哪个元素(vnode list)，然后在根据相应的
+	主要逻辑就是通过 hash 值在哈希表中找到某个 vnode，所以可以推断一下，hash table 里边其实就是存放的 vnode，
+	我们要找的时候，就利用 mount 和外部提供的某个 hash 值来确定它位于哪个元素(vnode list)，然后在根据相应的
 	属性进行匹配
+	在 ext2 文件系统中，hash 传入的是 inode number
 */
 int
 vfs_hash_get(const struct mount *mp, u_int hash, int flags, struct thread *td,
@@ -92,6 +93,7 @@ vfs_hash_get(const struct mount *mp, u_int hash, int flags, struct thread *td,
 
 	while (1) {
 		rw_rlock(&vfs_hash_lock);
+
 		LIST_FOREACH(vp, vfs_hash_bucket(mp, hash), v_hashlist) {
 			if (vp->v_hash != hash)
 				continue;
@@ -110,7 +112,8 @@ vfs_hash_get(const struct mount *mp, u_int hash, int flags, struct thread *td,
 				return (error);
 			*vpp = vp;
 			return (0);
-		}
+		}	// end for each
+
 		if (vp == NULL) {
 			rw_runlock(&vfs_hash_lock);
 			*vpp = NULL;

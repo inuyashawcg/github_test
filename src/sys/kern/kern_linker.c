@@ -1269,7 +1269,7 @@ kern_kldload(struct thread *td, const char *file, int *fileid)
 	 * 
 	 * VNET是虚拟化网络堆栈的技术名称。基本思想是将全局资源（尤其是变量）更改为每个
 	 * 网络堆栈资源，并让函数、sysctl、eventhandlers等在正确实例的上下文中访问和
-	 * 处理它们。每个（虚拟）网络堆栈都连接到一个监督模块，vnet0是基本系统的无限制默认
+	 * 处理它们。每个（虚拟）网络堆栈都连接到一个监督模块，vnet0 是基本系统的无限制默认
 	 * 网络堆栈
 	 */
 	CURVNET_SET(TD_TO_VNET(td));
@@ -1299,7 +1299,7 @@ kern_kldload(struct thread *td, const char *file, int *fileid)
 	sx_xlock(&kld_sx);
 
 	/*
-		将获取到的linker file保存到lf(linker_file**类型)，parent和verinfo都是NULL
+		将获取到的 linker file 保存到lf(linker_file**类型)，parent和verinfo都是NULL
 	*/
 	error = linker_load_module(kldname, modname, NULL, NULL, &lf);
 	if (error) {

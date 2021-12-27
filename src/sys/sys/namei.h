@@ -195,6 +195,9 @@ struct nameidata {
 
 /*
  * Flags in ni_lcf, valid for the duration of the namei call.
+		vfs 层级当中貌似会包含一些特殊的标识来指定查找的方式。NI_LCF_STRICTRELATIVE 表示的好像是传入的参数一定要是相对路径，不能是
+		绝对路径； NI_LCF_CAP_DOTDOT 表示是否支持 .. 查找，应该就是如果设置了，那我们就可以正常使用 .. 进行查找，如果没有设置的话，
+		那路径中就不能出现 ..，因为它不会被处理
  */
 #define	NI_LCF_STRICTRELATIVE	0x0001	/* relative lookup only 仅限相对查找 */
 #define	NI_LCF_CAP_DOTDOT	0x0002	/* ".." in strictrelative case */

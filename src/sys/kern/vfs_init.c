@@ -123,8 +123,10 @@ vfs_byname_locked(const char *name)
 	struct vfsconf *vfsp;
 
 	sx_assert(&vfsconf_sx, SA_LOCKED);
+	// 如果文件系统类型名是 ffs，则要统一换成 ufs
 	if (!strcmp(name, "ffs"))
 		name = "ufs";
+	// 遍历全局队列
 	TAILQ_FOREACH(vfsp, &vfsconf, vfc_list) {
 		if (!strcmp(name, vfsp->vfc_name))
 			return (vfsp);
@@ -155,7 +157,7 @@ vfs_byname_kld(const char *fstype, struct thread *td, int *error)
 		return (vfsp);
 
 	/* Try to load the respective module. 
-		这里用到的是linker中提供的接口函数，用于加载module(.ko)的，所以文件系统也是一个
+		这里用到的是 linker 中提供的接口函数，用于加载 module(.ko) 的，所以文件系统也是一个
 		内核模块
 	*/
 	*error = kern_kldload(td, fstype, &fileid);
@@ -170,6 +172,7 @@ vfs_byname_kld(const char *fstype, struct thread *td, int *error)
 	*/
 	vfsp = vfs_byname(fstype);
 	if (vfsp == NULL) {
+		// 如果挂载没有成功，则执行 unload 函数
 		if (loaded)
 			(void)kern_kldunload(td, fileid, LINKER_UNLOAD_FORCE);
 		*error = ENODEV;

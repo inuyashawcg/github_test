@@ -72,6 +72,9 @@ SYSCTL_NODE(_vfs, OID_AUTO, tmpfs, CTLFLAG_RW, 0, "tmpfs file system");
 
 static long tmpfs_pages_reserved = TMPFS_PAGES_MINRESERVED;
 
+/*
+	设置文件系统所占用的内存大小
+*/
 static int
 sysctl_mem_reserved(SYSCTL_HANDLER_ARGS)
 {
@@ -144,7 +147,7 @@ tmpfs_pages_check_avail(struct tmpfs_mount *tmp, size_t req_pages)
 void
 tmpfs_ref_node(struct tmpfs_node *node)
 {
-
+	// 增加节点的引用计数，需要增加锁
 	TMPFS_NODE_LOCK(node);
 	tmpfs_ref_node_locked(node);
 	TMPFS_NODE_UNLOCK(node);
@@ -179,12 +182,12 @@ tmpfs_ref_node_locked(struct tmpfs_node *node)
  *
  * If the node type is set to 'VBLK' or 'VCHR', then the rdev parameter
  * specifies the device the node represents.
- * 如果节点类型设置为“VBLK”或“VCHR”，则rdev参数指定节点所代表的设备
+ * 如果节点类型设置为“VBLK”或“VCHR”，则 rdev 参数指定节点所代表的设备
  *
  * If the node type is set to 'VLNK', then the parameter target specifies
  * the file name of the target file for the symbolic link that is being
  * created.
- * 如果节点类型设置为“VLNK”，则参数target指定正在创建的符号链接的目标文件的文件名
+ * 如果节点类型设置为“VLNK”，则参数 target 指定正在创建的符号链接的目标文件的文件名
  *
  * Note that new nodes are retrieved from the available list if it has
  * items or, if it is empty, from the node pool as long as there is enough
@@ -206,7 +209,7 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 	/* If the root directory of the 'tmp' file system is not yet
 	 * allocated, this must be the request to do it. 
 	 * 如果尚未分配“tmp”文件系统的根目录，则必须请求分配
-	 * MPASS的作用就是生成assert，生成一些提示信息
+	 * MPASS 的作用就是生成 assert，生成一些提示信息
 	 * */
 	MPASS(IMPLIES(tmp->tm_root == NULL, parent == NULL && type == VDIR));
 	KASSERT(tmp->tm_root == NULL || mp->mnt_writeopcount > 0,
@@ -272,8 +275,8 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 
 	case VDIR:
 		/* 如果是目录，那就要初始化 node 链表和一些相关操作 */
-		RB_INIT(&nnode->tn_dir.tn_dirhead);
-		LIST_INIT(&nnode->tn_dir.tn_dupindex);
+		RB_INIT(&nnode->tn_dir.tn_dirhead);	// 红黑树
+		LIST_INIT(&nnode->tn_dir.tn_dupindex);	// 目录项链表
 		MPASS(parent != nnode);
 		MPASS(IMPLIES(parent == NULL, tmp->tm_root == NULL));
 		nnode->tn_dir.tn_parent = (parent == NULL) ? nnode : parent;
@@ -353,13 +356,18 @@ tmpfs_free_node_locked(struct tmpfs_mount *tmp, struct tmpfs_node *node,
 	vm_object_t uobj;
 
 	TMPFS_MP_ASSERT_LOCKED(tmp);
-	TMPFS_NODE_ASSERT_LOCKED(node);
+	TMPFS_NODE_ASSERT_LOCKED(node);	// 操作的是 node 内部锁，而不是全局锁
 	KASSERT(node->tn_refcount > 0, ("node %p refcount zero", node));
 
+	/*
+		节点引用计算还是要有的，因为同一个节点可能被不同的进程访问，如果一个进程中有删除操作，
+		则要判断是否有别的进程还在访问它。只有当所有的进程都不在访问该节点并且有删除操作的时候，
+		释放该节点
+	*/
 	node->tn_refcount--;
 	if (node->tn_attached && (detach || node->tn_refcount == 0)) {
 		MPASS(tmp->tm_nodes_inuse > 0);
-		tmp->tm_nodes_inuse--;
+		tmp->tm_nodes_inuse--;	// 总节点计数-1
 		LIST_REMOVE(node, tn_entries);
 		node->tn_attached = false;
 	}
@@ -806,7 +814,7 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 	MPASS(cnp->cn_flags & HASBUF);	/* 判断是否含有 pathname buffer */
 
 	tmp = VFS_TO_TMPFS(dvp->v_mount);
-	dnode = VP_TO_TMPFS_DIR(dvp);
+	dnode = VP_TO_TMPFS_DIR(dvp);	// 获取目录项对应的 node
 	*vpp = NULL;
 
 	/* If the entry we are creating is a directory, we cannot overflow
@@ -839,7 +847,7 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 		return (error);
 
 	/* Allocate a directory entry that points to the new file. 
-		获取到的目录结点填充de
+		获取到的目录结点填充 de
 	*/
 	error = tmpfs_alloc_dirent(tmp, node, cnp->cn_nameptr, cnp->cn_namelen,
 	    &de);
@@ -873,6 +881,7 @@ tmpfs_dir_first(struct tmpfs_node *dnode, struct tmpfs_dir_cursor *dc)
 {
 	struct tmpfs_dirent *de;
 
+	// 找到红黑树中的最左侧的节点
 	de = RB_MIN(tmpfs_dir, &dnode->tn_dir.tn_dirhead);
 	dc->tdc_tree = de;
 	if (de != NULL && tmpfs_dirent_duphead(de))
@@ -986,6 +995,8 @@ out:
  * 
  * Returns a pointer to the entry when found, otherwise NULL.
  * 如果查找到了就返回对应的指针，否则返回NULL
+ * 
+ * 从调用情况来看，node 表示的是所要查找文件所在目录对应的 tmpfs_node
  */
 struct tmpfs_dirent *
 tmpfs_dir_lookup(struct tmpfs_node *node, struct tmpfs_node *f,
@@ -1001,9 +1012,14 @@ tmpfs_dir_lookup(struct tmpfs_node *node, struct tmpfs_node *f,
 	TMPFS_VALIDATE_DIR(node);
 
 	hash = tmpfs_dirent_hash(cnp->cn_nameptr, cnp->cn_namelen);
+	/*
+		在红黑树中去查找目录节点。貌似目录项的查找才会用到红黑树，普通文件的查找应该就是
+		直接在 node 下的链表进行。de 对应的是目录 tmpfs_dirent 结构
+	*/
 	de = tmpfs_dir_xlookup_hash(node, hash);
 	if (de != NULL && tmpfs_dirent_duphead(de)) {
 		duphead = &de->ud.td_duphead;
+		// 遍历链表查找对应的目录项
 		LIST_FOREACH(de, duphead, uh.td_dup.entries) {
 			if (TMPFS_DIRENT_MATCHES(de, cnp->cn_nameptr,
 			    cnp->cn_namelen))
@@ -1023,7 +1039,7 @@ tmpfs_dir_lookup(struct tmpfs_node *node, struct tmpfs_node *f,
 /*
  * Attach duplicate-cookie directory entry nde to dnode and insert to dupindex
  * list, allocate new cookie value.
- * 将重复的cookie目录条目nde附加到dnode并插入到dupindex列表，分配新的cookie值
+ * 将重复的 cookie 目录条目 nde 附加到 dnode 并插入到 dupindex 列表，分配新的 cookie 值
  */
 static void
 tmpfs_dir_attach_dup(struct tmpfs_node *dnode,
@@ -1105,7 +1121,7 @@ tmpfs_dir_attach(struct vnode *vp, struct tmpfs_dirent *de)
 	MPASS(de->td_hash >= TMPFS_DIRCOOKIE_MIN);
 	MPASS(de->td_cookie == de->td_hash);
 
-	dnode = VP_TO_TMPFS_DIR(vp);
+	dnode = VP_TO_TMPFS_DIR(vp);	// 目录
 	dnode->tn_dir.tn_readdir_lastn = 0;
 	dnode->tn_dir.tn_readdir_lastp = NULL;
 

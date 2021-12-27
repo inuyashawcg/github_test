@@ -159,7 +159,7 @@ struct vnode {
 	/*
 	 * vfs_hash: (mount + inode) -> vnode hash.  The hash value
 	 * itself is grouped with other int fields, to avoid padding.
-	 * 哈希值本身与其他int字段分组，以避免填充
+	 * 哈希值本身与其他 int 字段分组，以避免填充
 	 */
 	LIST_ENTRY(vnode)	v_hashlist;
 

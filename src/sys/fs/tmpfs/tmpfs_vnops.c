@@ -88,15 +88,17 @@ tmpfs_lookup1(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 	struct tmpfs_mount *tm;
 	int error;
 
-	dnode = VP_TO_TMPFS_DIR(dvp);
-	*vpp = NULLVP;
+	dnode = VP_TO_TMPFS_DIR(dvp);	// 当前目录项对应的 vnode
+	*vpp = NULLVP;	// 目标文件对应的 vnode，现在应该还未填充，只是刚分配
 
 	/* Check accessibility of requested node as a first step. */
 	error = VOP_ACCESS(dvp, VEXEC, cnp->cn_cred, cnp->cn_thread);
 	if (error != 0)
 		goto out;
 
-	/* We cannot be requesting the parent directory of the root node. */
+	/* We cannot be requesting the parent directory of the root node. 
+		我们无法请求根节点的父目录。
+	*/
 	MPASS(IMPLIES(dnode->tn_type == VDIR &&
 	    dnode->tn_dir.tn_parent == dnode,
 	    !(cnp->cn_flags & ISDOTDOT)));
@@ -107,19 +109,28 @@ tmpfs_lookup1(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 		goto out;
 	}
 	if (cnp->cn_flags & ISDOTDOT) {
+		/*
+			通过 component name 的属性判断我们所要查找的对象是不是一个 dotdot。如果是的话，
+			parent node = tn_parent，并且增加其引用计数
+		*/
 		tm = VFS_TO_TMPFS(dvp->v_mount);
 		pnode = dnode->tn_dir.tn_parent;
 		tmpfs_ref_node(pnode);
+
+		// 申请 vnode
 		error = vn_vget_ino_gen(dvp, tmpfs_vn_get_ino_alloc,
 		    pnode, cnp->cn_lkflags, vpp);
-		tmpfs_free_node(tm, pnode);
+		tmpfs_free_node(tm, pnode);	// 引用计数-1
 		if (error != 0)
 			goto out;
 	} else if (cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.') {
+		// 处理是 dot 的情况
 		VREF(dvp);
-		*vpp = dvp;
+		*vpp = dvp;	// 返回当前目录项对应的 vnode
 		error = 0;
 	} else {
+		// 前面的代码分支处理 dot 和 dotdot，该分支处理其他目录项
+		// de 对应的是目录的 tmpfs_dirent 结构
 		de = tmpfs_dir_lookup(dnode, NULL, cnp);
 		if (de != NULL && de->td_node == NULL)
 			cnp->cn_flags |= ISWHITEOUT;
@@ -156,6 +167,7 @@ tmpfs_lookup1(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 			/*
 			 * The entry was found, so get its associated
 			 * tmpfs_node.
+			 * 只是找到了 entry，还要为其分配一个 node
 			 */
 			tnode = de->td_node;
 
@@ -214,6 +226,8 @@ tmpfs_lookup1(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 	 * Store the result of this lookup in the cache.  Avoid this if the
 	 * request was for creation, as it does not improve timings on
 	 * emprical tests.
+	 * 将此查找的结果存储在缓存中。如果请求是为了创建，请避免这种情况，因为它不会改进
+	 * 实验测试的计时。
 	 */
 	if ((cnp->cn_flags & MAKEENTRY) != 0 && tmpfs_use_nc(dvp))
 		cache_enter(dvp, *vpp, cnp);
@@ -221,7 +235,7 @@ tmpfs_lookup1(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 out:
 	/*
 	 * If there were no errors, *vpp cannot be null and it must be
-	 * locked.
+	 * locked. 如果没有错误，那么 *vpp 不可能是空并且它一定是锁上的
 	 */
 	MPASS(IFF(error == 0, *vpp != NULLVP && VOP_ISLOCKED(*vpp)));
 
@@ -274,6 +288,13 @@ tmpfs_mknod(struct vop_mknod_args *v)
 	return tmpfs_alloc_file(dvp, vpp, vap, cnp, NULL);
 }
 
+/*
+	从这里可以看到，当执行到这一步的时候，其实 vnode 跟 tmpfs_node 已经关联到一起了。
+	说明之前在已经申请了新的 vnode。vfs 层的处理流程是要不断解析文件路径，找到最终的
+	目标文件之后为其分配一个 vnode，然后在执行底层文件系统的 open 函数。如果没有找到
+	就直接创建一个，同时分配一个 vnode。所以，不论是哪种情况，代码走到这里就一定会有
+	vnode 与 tmpfs_node 对应
+*/
 static int
 tmpfs_open(struct vop_open_args *v)
 {
@@ -285,15 +306,20 @@ tmpfs_open(struct vop_open_args *v)
 
 	MPASS(VOP_ISLOCKED(vp));
 
-	node = VP_TO_TMPFS_NODE(vp);
+	node = VP_TO_TMPFS_NODE(vp);	// 获取 tmpfs_node 结构
 
 	/* The file is still active but all its names have been removed
 	 * (e.g. by a "rmdir $(pwd)").  It cannot be opened any more as
-	 * it is about to die. */
+	 * it is about to die. 
+	 * 该文件仍处于活动状态，但其所有名称都已删除 (例如，由“rmdir$（pwd）”删除)。
+	 * 它不能再打开了，因为它即将死亡
+	 **/
 	if (node->tn_links < 1)
 		return (ENOENT);
 
-	/* If the file is marked append-only, deny write requests. */
+	/* If the file is marked append-only, deny write requests. 
+			如果文件标记为仅追加，请拒绝写入请求。
+	*/
 	if (node->tn_flags & APPEND && (mode & (FWRITE | O_APPEND)) == FWRITE)
 		error = EPERM;
 	else {
@@ -1485,6 +1511,7 @@ tmpfs_vptocnp_fill(struct vnode *vp, struct tmpfs_node *tn,
 	return (error);
 }
 
+// vnode to component name
 static int
 tmpfs_vptocnp(struct vop_vptocnp_args *ap)
 {

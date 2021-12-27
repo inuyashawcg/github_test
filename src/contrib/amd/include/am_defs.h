@@ -1424,12 +1424,12 @@ typedef struct mnttab mntent_t;
 #   error Could not find definition for struct mntent or struct mnttab!
 #  else /* not MOUNT_TABLE_ON_FILE */
 typedef struct _am_mntent {
-  char	*mnt_fsname;		/* name of mounted file system */
-  char	*mnt_dir;		/* file system path prefix */
+  char	*mnt_fsname;		/* name of mounted file system 挂载的文件系统的名称 */
+  char	*mnt_dir;		/* file system path prefix 文件系统路径前缀 */
   char	*mnt_type;		/* MNTTAB_TYPE_* */
   char	*mnt_opts;		/* MNTTAB_OPT_* */
   int	mnt_freq;		/* dump frequency, in days */
-  int	mnt_passno;		/* pass number on parallel fsck */
+  int	mnt_passno;		/* pass number on parallel fsck 并行fsck上的通过编号 */
 } mntent_t;
 #  endif /* not MOUNT_TABLE_ON_FILE */
 # endif /* not HAVE_STRUCT_MNTTAB */

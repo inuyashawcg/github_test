@@ -82,7 +82,7 @@ hashinit_flags(int elements, struct malloc_type *type, u_long *hashmask,
 /*
  * Allocate and initialize a hash table with default flag: may sleep.
  * 申请并初始化具有默认标识的哈希表
- * 在vfs中，elements表示的期望的vnode的总数量
+ * 在vfs中，elements 表示的期望的 vnode 的总数量
  */
 void *
 hashinit(int elements, struct malloc_type *type, u_long *hashmask)

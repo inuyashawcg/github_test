@@ -1639,7 +1639,7 @@ alloc:
 
 /*
  * Delete from old mount point vnode list, if on one.
- * 从旧装载点vnode列表中删除（如果在一个上）
+ * 从旧装载点 vnode 列表中删除（如果在一个上）
  */
 static void
 delmntque(struct vnode *vp)
@@ -1685,7 +1685,7 @@ insmntque_stddtr(struct vnode *vp, void *dtr_arg)
 
 /*
  * Insert into list of vnodes for the new mount point, if available.
- * 插入新装入点的vnode列表（如果可用）
+ * 插入新装入点的 vnode 列表（如果可用）
  */
 int
 insmntque1(struct vnode *vp, struct mount *mp,
@@ -2151,7 +2151,7 @@ gbincore(struct bufobj *bo, daddr_t lblkno)
 }
 
 /*
- * Associate a buffer with a vnode. 将缓冲区与vnode关联
+ * Associate a buffer with a vnode. 将缓冲区与 vnode 关联
  */
 void
 bgetvp(struct vnode *vp, struct buf *bp)
@@ -2176,7 +2176,7 @@ bgetvp(struct vnode *vp, struct buf *bp)
 }
 
 /*
- * Disassociate a buffer from a vnode. 解除缓冲区与vnode的关联
+ * Disassociate a buffer from a vnode. 解除缓冲区与 vnode 的关联
  */
 void
 brelvp(struct buf *bp)
@@ -2685,7 +2685,7 @@ v_decr_devcount(struct vnode *vp)
  * is being destroyed.  Only callers who specify LK_RETRY will
  * see doomed vnodes.  If inactive processing was delayed in
  * vput try to do it here.
- * 从空闲列表中获取一个特定的vnode，增加它的引用计数并锁定它
+ * 从空闲列表中获取一个特定的 vnode，增加它的引用计数并锁定它
  *
  * Notes on lockless counter manipulation:
  * _vhold, vputx and other routines make various decisions based

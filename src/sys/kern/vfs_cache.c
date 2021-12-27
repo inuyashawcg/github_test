@@ -99,11 +99,11 @@ SDT_PROBE_DEFINE3(vfs, namecache, shrink_negative, done, "struct vnode *",
 /*
  * This structure describes the elements in the cache of recent
  * names looked up by namei.
- * 此结构描述namei查找的最近名称的缓存中的元素
+ * 此结构描述 namei 查找的最近名称的缓存中的元素
  */
 
 struct	namecache {
-	LIST_ENTRY(namecache) nc_hash;	/* hash chain */
+	LIST_ENTRY(namecache) nc_hash;	/* hash chain 应该也是通过 hash 来查找 entry */
 	LIST_ENTRY(namecache) nc_src;	/* source vnode list */
 	TAILQ_ENTRY(namecache) nc_dst;	/* destination vnode list 指向目标位置 */
 	struct	vnode *nc_dvp;		/* vnode of parent of name 表示的是目标文件所在目录对应的 vnode */
@@ -160,12 +160,12 @@ struct	namecache_ts {
  *
  * If it is a "negative" entry, (i.e. for a name that is known NOT to
  * exist) the vnode pointer will be NULL.
- * 如果是“负”条目（即已知不存在的名称），vnode指针将为空
+ * 如果是“负”条目（即已知不存在的名称），vnode 指针将为空
  *
  * Upon reaching the last segment of a path, if the reference
  * is for DELETE, or NOCACHE is set (rewrite), and the
  * name is located in the cache, it will be dropped.
- * 在到达路径的最后一段时，如果引用是用于删除的，或者设置了NOCACHE（重写），
+ * 在到达路径的最后一段时，如果引用是用于删除的，或者设置了 NOCACHE（重写），
  * 并且名称位于缓存中，那么它将被丢弃
  *
  * These locks are used (in the order in which they can be taken):
@@ -173,9 +173,11 @@ struct	namecache_ts {
  * vnodelock	mtx	vnode lists and v_cache_dd field protection
  * bucketlock	rwlock	for access to given set of hash buckets
  * neglist	mtx	negative entry LRU management
+ * bucket 是在哈希表中会用到的一种数据类型
  *
  * Additionally, ncneg_shrink_lock mtx is used to have at most one thread
  * shrinking the LRU list.
+ * 此外，ncneg_shrink_lock mtx最多用于一个线程收缩 LRU 列表
  *
  * It is legal to take multiple vnodelock and bucketlock locks. The locking
  * order is lower address first. Both are recursive.
@@ -220,11 +222,11 @@ struct	namecache_ts {
 */
 static __read_mostly LIST_HEAD(nchashhead, namecache) *nchashtbl;/* Hash Table */
 
-static u_long __read_mostly	nchash;			/* size of hash table */
+static u_long __read_mostly	nchash;			/* size of hash table 定义 hash table 的大小 */
 SYSCTL_ULONG(_debug, OID_AUTO, nchash, CTLFLAG_RD, &nchash, 0,
     "Size of namecache hash table");
 
-static u_long __read_mostly	ncnegfactor = 12; /* ratio of negative entries - negative entries所占比例 */
+static u_long __read_mostly	ncnegfactor = 12; /* ratio of negative entries - negative entries 所占比例 */
 SYSCTL_ULONG(_vfs, OID_AUTO, ncnegfactor, CTLFLAG_RW, &ncnegfactor, 0,
     "Ratio of negative namecache entries");
 
@@ -233,7 +235,7 @@ static u_long __exclusive_cache_line	numneg;	/* number of negative entries alloc
 SYSCTL_ULONG(_debug, OID_AUTO, numneg, CTLFLAG_RD, &numneg, 0,
     "Number of negative entries in namecache");
 
-/* 分配的缓存项数，这个应该表示的是namecache总的数量 */
+/* 分配的缓存项数，这个应该表示的是 namecache 总的数量 */
 static u_long __exclusive_cache_line	numcache;/* number of cache entries allocated */
 SYSCTL_ULONG(_debug, OID_AUTO, numcache, CTLFLAG_RD, &numcache, 0,
     "Number of namecache entries");
@@ -289,13 +291,22 @@ NCP2NEGLIST(struct namecache *ncp)
 #define	numbucketlocks (ncbuckethash + 1)
 static u_int __read_mostly  ncbuckethash;
 static struct rwlock_padalign __read_mostly  *bucketlocks;
+/*
+	bucketlocks 表示的应该是 bucket lock 数组，我们利用 hash 和 ncbuckethash 计算出
+	锁结构在数组中的索引
+*/
 #define	HASH2BUCKETLOCK(hash) \
 	((struct rwlock *)(&bucketlocks[((hash) & ncbuckethash)]))
 
 /* namecache vnode hash，感觉是用来表示包含有 vnode 的 namecache */
 #define	numvnodelocks (ncvnodehash + 1)
 static u_int __read_mostly  ncvnodehash;
+/*
+	管理所有 vnode lock 的全局静态数组，在 namecache 初始化过程中进行初始化
+*/
 static struct mtx __read_mostly *vnodelocks;
+
+// vnode to vnode lock
 static inline struct mtx *
 VP2VNODELOCK(struct vnode *vp)
 {
@@ -434,7 +445,7 @@ STATNODE_ULONG(cache_lock_vnodes_cel_3_failures,
 
 static void cache_zap_locked(struct namecache *ncp, bool neg_locked);
 
-// 获取vnode的完整路径
+// 获取 vnode 的完整路径
 static int vn_fullpath1(struct thread *td, struct vnode *vp, struct vnode *rdir,
     char *buf, char **retbuf, u_int buflen);
 
@@ -1720,16 +1731,17 @@ cache_enter_unlock(struct celockstate *cel)
 
 /*
  * Add an entry to the cache.
+		注意参数 cnp 表示的是 componentname，而不是 pathname 或者 nameidata
  */
 void
 cache_enter_time(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
     struct timespec *tsp, struct timespec *dtsp)
 {
-	struct celockstate cel;
+	struct celockstate cel;	// namecache lock state
 	struct namecache *ncp, *n2, *ndd;
 	struct namecache_ts *ncp_ts, *n2_ts;
-	struct nchashhead *ncpp;
-	struct neglist *neglist;
+	struct nchashhead *ncpp;	// namecache hash table
+	struct neglist *neglist;	// negtive entry list
 	uint32_t hash;
 	int flag;
 	int len;
@@ -1747,25 +1759,30 @@ cache_enter_time(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
 
 	/*
 	 * Avoid blowout in namecache entries.
+	 		避免名称缓存条目中出现井喷
 	 */
 	if (__predict_false(numcache >= desiredvnodes * ncsizefactor))
 		return;
 
-	cache_celockstate_init(&cel);
+	cache_celockstate_init(&cel);	// cache lock state init
 	ndd = NULL;
 	ncp_ts = NULL;
 	flag = 0;
+
+	// 处理 dot 和 dotdot 目录项
 	if (cnp->cn_nameptr[0] == '.') {
 		if (cnp->cn_namelen == 1)
 			return;
 		if (cnp->cn_namelen == 2 && cnp->cn_nameptr[1] == '.') {
 			len = cnp->cn_namelen;
-			hash = cache_get_hash(cnp->cn_nameptr, len, dvp);
-			cache_enter_lock_dd(&cel, dvp, vp, hash);
+			hash = cache_get_hash(cnp->cn_nameptr, len, dvp);	// 计算 directory hash
+			cache_enter_lock_dd(&cel, dvp, vp, hash);	// dotdot namecache 会单独处理
 			/*
 			 * If dotdot entry already exists, just retarget it
 			 * to new parent vnode, otherwise continue with new
 			 * namecache entry allocation.
+			 * 如果 dotdot 条目已经存在，只需将其重新定位到新的父 vnode，
+			 * 否则继续分配新的 namecache 条目
 			 */
 			if ((ncp = dvp->v_cache_dd) != NULL &&
 			    ncp->nc_flag & NCF_ISDOTDOT) {
@@ -1974,17 +1991,23 @@ nchinit(void *dummy __unused)
 	    NULL, NULL, NULL, NULL, UMA_ALIGNOF(struct namecache_ts),
 	    UMA_ZONE_ZINIT);
 
-	/* 初始化 namecache table */
+	/* 初始化 namecache table，ncache 为哈希表的大小 */
 	nchashtbl = hashinit(desiredvnodes * 2, M_VFSCACHE, &nchash);
 	ncbuckethash = cache_roundup_2(mp_ncpus * 64) - 1;
 	if (ncbuckethash > nchash)
 		ncbuckethash = nchash;
+	
+	/*
+		为 bucket lock 数组分配内存空间，numbucketlocks = ncbuckethash + 1
+	*/
 	bucketlocks = malloc(sizeof(*bucketlocks) * numbucketlocks, M_VFSCACHE,
 	    M_WAITOK | M_ZERO);
 	for (i = 0; i < numbucketlocks; i++)
 		rw_init_flags(&bucketlocks[i], "ncbuc", RW_DUPOK | RW_RECURSE);
 
-	/* namecache vnode hash */
+	/* namecache vnode hash 
+			前面是对 bucket lock 分配内存空间，这里是对 vnode lock 分配空间，然后初始化
+	*/
 	ncvnodehash = cache_roundup_2(mp_ncpus * 64) - 1;
 	vnodelocks = malloc(sizeof(*vnodelocks) * numvnodelocks, M_VFSCACHE,
 	    M_WAITOK | M_ZERO);
@@ -2045,7 +2068,7 @@ cache_changesize(int newmaxvnodes)
 	 * Move everything from the old hash table to the new table.
 	 * None of the namecache entries in the table can be removed
 	 * because to do so, they have to be removed from the hash table.
-	 * 将所有内容从旧哈希表移到新表。不能删除表中的namecache项，因为要删除，
+	 * 将所有内容从旧哈希表移到新表。不能删除表中的 namecache 项，因为要删除，
 	 * 必须将它们从哈希表中删除
 	 */
 	cache_lock_all_vnodes();
@@ -2251,7 +2274,9 @@ static int __read_mostly disablecwd;
 SYSCTL_INT(_debug, OID_AUTO, disablecwd, CTLFLAG_RW, &disablecwd, 0,
    "Disable the getcwd syscall");
 
-/* Implementation of the getcwd syscall. */
+/* Implementation of the getcwd syscall. 
+		用于获取绝对路径
+*/
 int
 sys___getcwd(struct thread *td, struct __getcwd_args *uap)
 {
@@ -2277,7 +2302,7 @@ kern___getcwd(struct thread *td, char *buf, enum uio_seg bufseg, size_t buflen,
 		buflen = path_max;
 
 	tmpbuf = malloc(buflen, M_TEMP, M_WAITOK);
-	fdp = td->td_proc->p_fd;
+	fdp = td->td_proc->p_fd;	// 获取进程的文件描述符结构
 	FILEDESC_SLOCK(fdp);
 	cdir = fdp->fd_cdir;
 	vrefact(cdir);
@@ -2313,7 +2338,7 @@ SYSCTL_INT(_debug, OID_AUTO, disablefullpath, CTLFLAG_RW, &disablefullpath, 0,
 /*
  * Retrieve the full filesystem path that correspond to a vnode from the name
  * cache (if available)
- * 从名称缓存中检索与vnode对应的完整文件系统路径（如果可用）
+ * 从名称缓存中检索与 vnode 对应的完整文件系统路径（如果可用）
  */
 int
 vn_fullpath(struct thread *td, struct vnode *vn, char **retbuf, char **freebuf)
@@ -2372,6 +2397,7 @@ vn_fullpath_global(struct thread *td, struct vnode *vn,
 	return (error);
 }
 
+// vnode to component
 int
 vn_vptocnp(struct vnode **vp, struct ucred *cred, char *buf, u_int *buflen)
 {
@@ -2382,6 +2408,10 @@ vn_vptocnp(struct vnode **vp, struct ucred *cred, char *buf, u_int *buflen)
 
 	vlp = VP2VNODELOCK(*vp);
 	mtx_lock(vlp);
+	/*
+		vnode->v_cache_dst 表示的应该是路径上层组件节点对应的 namecache。在 cache_enter 函数中会包含
+		有 namecache 往 v_cache_dst 中的插入操作
+	*/
 	TAILQ_FOREACH(ncp, &((*vp)->v_cache_dst), nc_dst) {
 		if ((ncp->nc_flag & NCF_ISDOTDOT) == 0)
 			break;
@@ -2593,6 +2623,10 @@ vn_commname(struct vnode *vp, char *buf, u_int buflen)
 void	cache_enter(struct vnode *dvp, struct vnode *vp,
 	    struct componentname *cnp);
 
+/*
+	dvp: directory vnode
+	vp: target vnode
+*/
 void
 cache_enter(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 {
@@ -2603,7 +2637,7 @@ cache_enter(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 /*
  * This function updates path string to vnode's full global path
  * and checks the size of the new path string against the pathlen argument.
- * 此函数用于将路径字符串更新为vnode的完整全局路径，并根据pathlen参数检查新路径字符串的大小
+ * 此函数用于将路径字符串更新为 vnode 的完整全局路径，并根据 pathlen 参数检查新路径字符串的大小
  *
  * Requires a locked, referenced vnode.
  * Vnode is re-locked on success or ENODEV, otherwise unlocked.

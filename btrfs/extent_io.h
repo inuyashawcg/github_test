@@ -79,11 +79,14 @@ typedef blk_status_t (extent_submit_bio_start_t)(struct inode *inode,
 		struct bio *bio, u64 dio_file_offset);
 
 #define INLINE_EXTENT_BUFFER_PAGES     (BTRFS_MAX_METADATA_BLOCKSIZE / PAGE_SIZE)
+/*
+	该结构体表示的应该是磁盘数据的缓存
+*/
 struct extent_buffer {
 	u64 start;
-	unsigned long len;
+	unsigned long len;	// buffer 长度
 	unsigned long bflags;
-	struct btrfs_fs_info *fs_info;
+	struct btrfs_fs_info *fs_info;	// 对应的文件系统信息
 	spinlock_t refs_lock;
 	atomic_t refs;
 	atomic_t io_pages;

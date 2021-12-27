@@ -43,6 +43,17 @@
 #include <machine/riscvreg.h>
 #include <machine/pte.h>
 
+	/*
+		.globl / .global 可以认为是声明了一个符号，使得链接器ld可以识别到该符号，这样其他
+		链接模块也可以使用。
+		.global _start 让 _star 符号成为可见的标示符，这样链接器就知道跳转到程序中的什么地方并开始执行。
+		linux寻找这个 _start标签作为程序的默认进入点。
+		在汇编和C混合编程中，在 GNU ARM 编译环境下，汇编程序中要使用 .global 伪操作声明汇编程序为全局的函数，
+		意即可被外部函数调用，同时C程序中要使用 extern 声明要调用的汇编语言程序。
+
+		.extern XXXX 说明xxxx为外部函数，调用的时候可以遍访所有文件找到该函数并且使用它。跟 .globl 作用
+		还是有点区别的
+	*/
 	.globl	kernbase
 	.set	kernbase, KERNBASE
 
@@ -57,7 +68,7 @@ _start:
 	la	t0, virt_map
 	ld	t1, 0(t0)
 	sub	t1, t1, t0
-	li	t2, KERNBASE
+	li	t2, KERNBASE	/* 将 KERNBASE 加载到 t2 寄存器当中 */
 	sub	s9, t2, t1	/* s9 = physmem base */
 	mv	s10, a0		/* s10 = hart id */
 	mv	s11, a1		/* s11 = dtbp */

@@ -343,14 +343,23 @@ nextentry:
 int
 ext2_lookup(struct vop_cachedlookup_args *ap)
 {
+	/*
+		vfs_lookup.c 文件 lookup 函数中调用了 VOP_LOOKUP 宏，对应到不同文件系统中的 lookup 函数。
+		传入参数一共包含3个，a_dvp 表示的是当前文件所在的目录项对应的 vnode。如果该目录项是一个挂载点
+		的情况是如何处理的？
+	*/
 	return (ext2_lookup_ino(ap->a_dvp, ap->a_vpp, ap->a_cnp, NULL));
 }
 
+/*
+	ext2_lookup_ino 函数将查找、重命名、创建等操作都统一到了一个函数当中，从函数的代码分支中可以看出。
+	目录树需不需要分解？
+*/
 static int
 ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp, struct componentname *cnp,
     ino_t *dd_ino)
 {
-	struct inode *dp;		/* inode for directory being searched 正在搜索的目录的inode */
+	struct inode *dp;		/* inode for directory being searched 正在搜索的目录的 inode */
 	struct buf *bp;			/* a buffer of directory entries 目录项的缓冲区 */
 	struct ext2fs_direct_2 *ep;	/* the current directory entry 当前目录项 */
 	int entryoffsetinblock;		/* offset of ep in bp's buffer 表示的应该是 htree entry 在 block 中的 offset */
@@ -360,8 +369,8 @@ ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp, struct componentname *cnp
 	int numdirpasses;		/* strategy for directory search 目录查找策略 */
 	doff_t endsearch;		/* offset to end directory search 目录查找终止位置的偏移量 */
 	doff_t prevoff;			/* prev entry dp->i_offset 上一个 entry 的 offset */
-	struct vnode *pdp;		/* saved dp during symlink work 符号链接时候保存的vnode指针 */
-	struct vnode *tdp;		/* returned by VFS_VGET 宏定义返回的vnode指针 */
+	struct vnode *pdp;		/* saved dp during symlink work 符号链接时候保存的 vnode 指针 */
+	struct vnode *tdp;		/* returned by VFS_VGET 宏定义返回的 vnode 指针 */
 	doff_t enduseful;		/* pointer past last used dir slot 指向最后一次使用的目录slot后？ */
 	u_long bmask;			/* block offset mask 块偏移标志，应该是用于计算数据在块中所占大小，偏移等 */
 	int error;
@@ -377,7 +386,7 @@ ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp, struct componentname *cnp
 	if (vpp != NULL)
 		*vpp = NULL;
 
-	/* 表示的应该是目录项inode节点 */
+	/* 表示的应该是目录项 inode 节点 */
 	dp = VTOI(vdp);
 	bmask = VFSTOEXT2(vdp->v_mount)->um_mountp->mnt_stat.f_iosize - 1;
 restart:
@@ -399,19 +408,26 @@ restart:
 	 * 
 	 * 从注释中我们可以看到， i_diroff 表示的是用于查找最后一个 dirent。它可能表示两种情况，第一种就是
 	 * 表示在块最后的那个 entry 所在的位置；第二种情况表示的是当前已有的 entry 的最后一个。 ufs 中也有
-	 * 对应的字段，可以通过 gdb 调试看一下其表示的具体含义
+	 * 对应的字段，可以通过 gdb 调试看一下其表示的具体含义。
+	 * 另外一种可能就是 i_diroff 只用于定位目录文件最后一个数据块，而不是定位到某个具体的 entry？
+	 * 
+	 * dp 表示的是目标文件所在的目录项，i_diroff 赋值的是一个目录文件对应的字段，普通文件对应字段有什么差别？
 	 */
 	i_diroff = dp->i_diroff;	/* 用于查找目录中的最后一个 entry */
-	ss.slotstatus = FOUND;	/* 把search slot的状态设置为 found */
-	ss.slotfreespace = ss.slotsize = ss.slotneeded = 0;	/* slot相关属性全置空 */
+	ss.slotstatus = FOUND;	/* 把 search slot 的状态设置为 found */
+	ss.slotfreespace = ss.slotsize = ss.slotneeded = 0;	/* slot 相关属性全置零 */
 
 	/*
 		如果我们要执行的操作是创建、重命名并且得是路径的最后一个组件名称，那么就执行 if 代码分支
 	*/
 	if ((nameiop == CREATE || nameiop == RENAME) &&
 	    (flags & ISLASTCN)) {
-		ss.slotstatus = NONE;	/* 将状态设置为NONE */
-		ss.slotneeded = EXT2_DIR_REC_LEN(cnp->cn_namelen);	/* tptfs 中应该要设置为 256 */
+		/* 
+			当我们执行的不是查找操作的时候，设置 slot 的状态为 NONE。slotneeded 表示的应该是我当前
+			需要找到一块多大的空闲区域去填充新建的 entry，而不是已有的 entry
+		*/
+		ss.slotstatus = NONE;
+		ss.slotneeded = EXT2_DIR_REC_LEN(cnp->cn_namelen);
 		/*
 		 * was ss.slotneeded = (sizeof(struct direct) - MAXNAMLEN +
 		 * cnp->cn_namelen + 3) &~ 3;
@@ -427,6 +443,8 @@ restart:
 	 * 也就是说，目录项的查找目前有两种方式：树搜索和线性搜索。在调试 tptfs 创建新的文件的时候，我们所要查找的
 	 * 就不是 . 和 .. 两个目录，所以下面的代码分支是会执行的。判断条件中一个带！一个不带，这两个函数的实现逻辑
 	 * 是一致的
+	 * HTree 在构造的时候会在数据块起始位置放 . / .. 两个目录项，其他的目录项在超过整个数据块大小之后开始分裂，
+	 * 但是 . / .. 仍然是之前的状态。可能是这个原因使得对于它们的查找依然采用线性查找的方式
 	 */
 	if (!ext2_is_dot_entry(cnp) && ext2_htree_has_idx(dp)) {
 		numdirpasses = 1;	/* 采用策略1 */
@@ -443,6 +461,9 @@ restart:
 			    (i_offset & bmask));
 			goto foundentry;
 		case ENOENT:
+			/*
+				如果没有找到对应的 entry，更新 i_offset 的值为目录项的大小，
+			*/
 			i_offset = roundup2(dp->i_size, DIRBLKSIZ);
 			goto notfound;
 		default:
@@ -465,7 +486,7 @@ restart:
 	 * profiling time and hence has been removed in the interest
 	 * of simplicity.
 	 * 如果在此目录的上一次搜索中有缓存信息，请选择上次停止的位置。我们只缓存查找，因为这些是最常见的，
-	 * 并且有最大的回报。缓存CREATE没有什么好处，因为它通常必须搜索整个目录以确定条目不存在。缓存最后
+	 * 并且有最大的回报。缓存 CREATE 没有什么好处，因为它通常必须搜索整个目录以确定条目不存在。缓存最后
 	 * 一次删除或重命名的位置并没有减少分析时间，因此为了简单起见，已将其删除
 	 * 
 	 * 上面的代码分支执行的是 hash index 的查找方式，如果查找出错，那么将执行下面的代码分支。可以看一下
@@ -477,13 +498,23 @@ restart:
 		/*
 			线性查找过程除了 . 和 .. 两个目录项，其他的应该就不会再涉及到 root node，都是直接操作存储目录项的
 			数据块。所以 entryoffsetinblock 表示的应该是目录项在块数据中的偏移，应该不是 hash 查找中的 entry
+
+			这里表示的就是不利用缓存信息，从头开始遍历整个数据块。i_diroff > dp->i_size 可能的情况就是目录中的
+			一个中间的 entry 删除了，所以就会有多一个空闲空间。原本 i_diroff 跟 i_size 可能是相等的，删除之后
+			就会出现上述情况。
+			i_offset 表示的可用空间的偏移量。当目录没有空洞的时候，它应该指向最后一个 entry 的下一个位置。但是当
+			出现空洞的时候，那我们查找可用空间存放新创建的 entry 时，应该就要从头开始查找，也就是将 i_offset 置零，
+			同时 entryoffsetinblock 置零
 		*/
 		entryoffsetinblock = 0;
 		i_offset = 0;
 		numdirpasses = 1;
 	} else {
+		/*
+			当我们执行查找操作的时候，我们会利用上一次查找遗留的相关信息接着查找。遗留的信息应该就是对应到 i_diroff 或者
+			i_offset 当中，所以这里直接将 entryoffsetinblock 赋值为 i_offset，也就是 i_diroff
+		*/
 		i_offset = i_diroff;
-		/* 判断读取 i_offset 所在数据块是否出错 */
 		if ((entryoffsetinblock = i_offset & bmask) &&
 		    (error = ext2_blkatoff(vdp, (off_t)i_offset, NULL,
 		    &bp)))
@@ -491,7 +522,17 @@ restart:
 		numdirpasses = 2;
 		nchstats.ncs_2passes++;
 	}
+	/*
+		从上面的注释可以看到，当我们执行的是 lookup 操作的时候，可以利用上次的缓存信息，可能就不需要重新遍历
+		整个数据块中的 entry；但如果我们执行的是 create 操作，那就必须重新搜索整个数据块，确保 entry 不存在。
+		所以也就不需要利用缓存信息，不走 else 分支。就是为了获取 i_offset，即上一次在目录项查找的 offset
+	*/
 	prevoff = i_offset;
+	/*
+		roundup2 宏的作用应该类似于四舍五入。这里的话就比如说目录的大小为 4000 个字节，但是每个数据块的大小是
+		4096 个字节，利用 roundup2 就可以将 4000 扩展到距离最近的 4096 的整数倍，也就是 4096 * 1。所以，
+		endsearch = 4096 * n。
+	*/
 	endsearch = roundup2(dp->i_size, DIRBLKSIZ);
 	enduseful = 0;
 
@@ -499,19 +540,23 @@ searchloop:
 	while (i_offset < endsearch) {
 		/*
 		 * If necessary, get the next directory block.
+		 		如果有必要的话，获取下一个文件项的数据块。当 i_offset < endsearch 的时，跳出 while 循环。说明下面
+				代码肯定会有增大 i_offset 的操作。
 		 */
 		if (bp != NULL)
 			brelse(bp);
-
-		/* 读取偏移量 i_offset 所在的数据块 */
+		/* 
+			读取偏移量 i_offset 所在的数据块。ext2_blkatoff 函数参数2表示的是数据在文件中的相对偏移量，
+			所以可以知道 i_offset 表示的就是数据在目录文件中的相对偏移量
+		*/
 		error = ext2_blkatoff(vdp, (off_t)i_offset, NULL, &bp);
 		if (error != 0)
 			return (error);
 
-		entryoffsetinblock = 0;
+		entryoffsetinblock = 0;	// entryoffsetinblock 重新置零
 		if (ss.slotstatus == NONE) {
 			ss.slotoffset = -1;
-			ss.slotfreespace = 0;
+			ss.slotfreespace = 0;	// 注意，这里将 freespace 设置为了0
 		}
 
 		error = ext2_search_dirblock(dp, bp->b_data, &entry_found,
@@ -529,11 +574,16 @@ foundentry:
 			ino = ep->e2d_ino;	/* inode number 赋值 */
 			goto found;
 		}
-	}
+	}	// end while
 notfound:
 	/*
 	 * If we started in the middle of the directory and failed
 	 * to find our target, we must check the beginning as well.
+	 * 
+	 * 从注释可以看出，i_diroff 可以认为是一个指针，当我们上次已经查找过该目录项之后，它会停止到一个位置。
+	 * 当我们下次又要查找该目录项的时候，我们就从这个中间位置开始查找，所以肯定会有找不到目标文件的情况。如果
+	 * 出现了，则令 i_offset = 0，endsearch 设置为中间位置(即 i_diroff)，相当与就是查找目录的前一部分。
+	 * numdirpasses = 1 应该就表示从头开始查找，如果是 2 就表示从中间某个位置开始查找
 	 */
 	if (numdirpasses == 2) {
 		numdirpasses--;
@@ -781,6 +831,8 @@ found:
 
 /*
 	从 ext2_htree.c 中的实际调用情况来看，entry offset in block pointer 传入的值是0
+	foundp：指示我们是否找到 entry 的标志位
+	ss：执行查找操作或者是 CREATE/RENAME 时，ss 的初始化是不一样的
 */
 int
 ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
@@ -864,7 +916,8 @@ ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
 					}
 				}
 			}	// end if (size > 0)
-		}
+		}	// 处理当 ssp->slotstatus ！= FOUND，也就是创建、重命名并且是最后一个组件的情况
+	
 		/*
 		 * Check for a name match.
 		 */

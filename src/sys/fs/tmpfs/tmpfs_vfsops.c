@@ -220,7 +220,7 @@ tmpfs_mount(struct mount *mp)
 	 * allowed to use, based on the maximum size the user passed in
 	 * the mount structure.  A value of zero is treated as if the
 	 * maximum available space was requested. 
-	 * 根据用户在mount结构体中传递的最大size，获取这个文件系统被允许使用的最大内存页数量。
+	 * 根据用户在 mount 结构体中传递的最大 size，获取这个文件系统被允许使用的最大内存页数量。
 	 * 如果值为零，则视为请求了最大可用空间
 	 * */
 	if (size_max == 0 || size_max > OFF_MAX - PAGE_SIZE ||
@@ -300,8 +300,8 @@ tmpfs_mount(struct mount *mp)
 	mp->mnt_data = tmp;
 	mp->mnt_stat.f_namemax = MAXNAMLEN;
 	/*
-		最后会调用 vfs 提供的一些接口，首先是给 tmpfs 分一个文件系统id，然后调用 vfs_mountedfrom，搜索一下可以发现，
-		很多文件系统mount操作都有相同的操作，所以这个应该就是 vfs 中的某个管理机制
+		最后会调用 vfs 提供的一些接口，首先是给 tmpfs 分一个文件系统 id，然后调用 vfs_mountedfrom，搜索一下可以发现，
+		很多文件系统 mount 操作都有相同的操作，所以这个应该就是 vfs 中的某个管理机制
 	*/
 	vfs_getnewfsid(mp);	/* 设置 mnt_stat->f_fsid.val[*] */
 	vfs_mountedfrom(mp, "tmpfs");	/* 设置 mnt_stat 成员中包含的挂载的文件系统名称 */

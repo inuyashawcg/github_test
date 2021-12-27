@@ -41,7 +41,7 @@
  */
 #define	RB_AUTOBOOT	0	/* flags for system auto-booting itself */
 
-#define	RB_ASKNAME	0x001	/* force prompt of device of root filesystem */
+#define	RB_ASKNAME	0x001	/* force prompt of device of root filesystem 根文件系统设备的强制提示 */
 #define	RB_SINGLE	0x002	/* reboot to single user only */
 #define	RB_NOSYNC	0x004	/* dont sync before reboot */
 #define	RB_HALT		0x008	/* don't reboot, just halt */

@@ -81,6 +81,7 @@ static int	usermount = 0;
 SYSCTL_INT(_vfs, OID_AUTO, usermount, CTLFLAG_RW, &usermount, 0,
     "Unprivileged users may mount and unmount file systems");
 
+// default automatic read only?
 static bool	default_autoro = false;
 SYSCTL_BOOL(_vfs, OID_AUTO, default_autoro, CTLFLAG_RW, &default_autoro, 0,
     "Retry failed r/w mount as r/o if no explicit ro/rw option is specified");
@@ -103,6 +104,7 @@ EVENTHANDLER_LIST_DEFINE(vfs_unmounted);
 
 /*
  * Global opts, taken by all filesystems
+ 		全局选项，由所有文件系统执行
  */
 static const char *global_opts[] = {
 	"errmsg",
@@ -119,7 +121,7 @@ static int
 mount_init(void *mem, int size, int flags)
 {
 	struct mount *mp;
-
+	// 初始化锁操作
 	mp = (struct mount *)mem;
 	mtx_init(&mp->mnt_mtx, "struct mount mtx", NULL, MTX_DEF);
 	mtx_init(&mp->mnt_listmtx, "struct mount vlist mtx", NULL, MTX_DEF);
@@ -131,7 +133,7 @@ static void
 mount_fini(void *mem, int size)
 {
 	struct mount *mp;
-
+	// 释放锁
 	mp = (struct mount *)mem;
 	lockdestroy(&mp->mnt_explock);
 	mtx_destroy(&mp->mnt_listmtx);
@@ -151,11 +153,11 @@ SYSINIT(vfs_mount, SI_SUB_VFS, SI_ORDER_ANY, vfs_mount_init, NULL);
 /*
  * ---------------------------------------------------------------------
  * Functions for building and sanitizing the mount options
- * 用于构建和清理mount选项的函数
+ * 用于构建和清理 mount 选项的函数
  */
 
 /* Remove one mount option. 
-	清除一些mount选项
+	清除某一个 mount 选项
 */
 static void
 vfs_freeopt(struct vfsoptlist *opts, struct vfsopt *opt)
@@ -168,7 +170,9 @@ vfs_freeopt(struct vfsoptlist *opts, struct vfsopt *opt)
 	free(opt, M_MOUNT);
 }
 
-/* Release all resources related to the mount options. 对应上面描述，这里是清除所有 */
+/* Release all resources related to the mount options. 
+	对应上面描述，这里是清除所有 
+*/
 void
 vfs_freeopts(struct vfsoptlist *opts)
 {
@@ -181,7 +185,7 @@ vfs_freeopts(struct vfsoptlist *opts)
 	free(opts, M_MOUNT);
 }
 
-/* 通过对比名称删除掉一些mount选项 */
+/* 通过对比名称删除掉一些 mount 选项 */
 void
 vfs_deleteopt(struct vfsoptlist *opts, const char *name)
 {
@@ -195,7 +199,7 @@ vfs_deleteopt(struct vfsoptlist *opts, const char *name)
 	}
 }
 
-/* 判断mount选项是否为只读类型 */ 
+/* 判断 mount 选项是否为只读类型 */ 
 static int
 vfs_isopt_ro(const char *opt)
 {
@@ -217,7 +221,7 @@ vfs_isopt_rw(const char *opt)
 
 /*
  * Check if options are equal (with or without the "no" prefix).
- * 判断两个mount选项是否一致
+ * 判断两个 mount 选项是否一致
  */
 static int
 vfs_equalopts(const char *opt1, const char *opt2)
@@ -255,7 +259,7 @@ vfs_equalopts(const char *opt1, const char *opt2)
  * If a mount option is specified several times,
  * (with or without the "no" prefix) only keep
  * the last occurrence of it.
- * 如果一个mount选项被多次指定（有或没有“no”前缀），则只保留它的最后一次出现
+ * 如果一个 mount 选项被多次指定（有或没有“no”前缀），则只保留它的最后一次出现
  */
 static void
 vfs_sanitizeopts(struct vfsoptlist *opts)
@@ -278,26 +282,26 @@ vfs_sanitizeopts(struct vfsoptlist *opts)
 
 /*
  * Build a linked list of mount options from a struct uio.
- * 依据uio发送的过来的信息，构建一个挂载选项的链表
- * uio涉及到了用户态操作，新系统是要舍弃的，统一为内核态
+ * 依据 uio 发送的过来的信息，构建一个挂载选项的链表
+ * uio 涉及到了用户态操作，新系统是要舍弃的，统一为内核态
  */
 int
 vfs_buildopts(struct uio *auio, struct vfsoptlist **options)
 {
-	struct vfsoptlist *opts;
-	struct vfsopt *opt;
+	struct vfsoptlist *opts;	// 挂载选项链表
+	struct vfsopt *opt;	// 表示某一个挂载选项
 	size_t memused, namelen, optlen;
 	unsigned int i, iovcnt;
 	int error;
 
-	// 局部变量，用于构建链表
+	// 构建一个挂载选项链表
 	opts = malloc(sizeof(struct vfsoptlist), M_MOUNT, M_WAITOK);
 	TAILQ_INIT(opts);
 	memused = 0;
 	iovcnt = auio->uio_iovcnt;
 
 	/*
-		没两个元素一组，每组第一个元素表示name length，第二个元素表示 option length，
+		每两个元素一组，每组第一个元素表示name length，第二个元素表示 option length，
 		memused 就表示需要分配的内存的大小
 	*/
 	for (i = 0; i < iovcnt; i += 2) {
@@ -369,7 +373,7 @@ bad:
 /*
  * Merge the old mount options with the new ones passed
  * in the MNT_UPDATE case.
- * 在 MNT_UPDATE 情况下，要把新的options和旧的options进行合并
+ * 在 MNT_UPDATE 情况下，要把新的 options 和旧的 options 进行合并
  *
  * XXX: This function will keep a "nofoo" option in the new
  * options.  E.g, if the option's canonical name is "foo",
@@ -380,7 +384,9 @@ static void
 vfs_mergeopts(struct vfsoptlist *toopts, struct vfsoptlist *oldopts)
 {
 	struct vfsopt *opt, *new;
-
+	/*
+		遍历旧的挂载选项链表，将每个挂载选项更新，然后插入到新的挂载选项链表当中
+	*/
 	TAILQ_FOREACH(opt, oldopts, link) {
 		new = malloc(sizeof(struct vfsopt), M_MOUNT, M_WAITOK);
 		new->name = strdup(opt->name, M_MOUNT);
@@ -409,7 +415,7 @@ struct nmount_args {
 int
 sys_nmount(struct thread *td, struct nmount_args *uap)
 {
-	struct uio *auio;
+	struct uio *auio;	// uio 中存放的都是从用户空间传入的挂载选项
 	int error;
 	u_int iovcnt;
 	uint64_t flags;
@@ -442,7 +448,7 @@ sys_nmount(struct thread *td, struct nmount_args *uap)
 	/*
 	 * Check that we have an even number of iovec's
 	 * and that we have at least two options. 
-	 * 检查是否有偶数个iovec，并且至少有两个选项
+	 * 检查是否有偶数个 iovec，并且至少有两个选项
 	 */
 	if ((iovcnt & 1) || (iovcnt < 4)) {
 		CTR2(KTR_VFS, "%s: failed for invalid iovcnt %d", __func__,
@@ -490,37 +496,46 @@ vfs_rel(struct mount *mp)
 /*
  * Allocate and initialize the mount point struct.
  * 每个挂载的文件系统都会有一个 mount 结构体来进行管理，注意其中有几个 vnode 队列，功能类似与内存页管理机制
+ * 每个文件系统也会为自身创建一个 *_mount 结构，这里是创建 mount，两个结构是不一样的
  */
 struct mount *
 vfs_mount_alloc(struct vnode *vp, struct vfsconf *vfsp, const char *fspath,
     struct ucred *cred)
 {
 	struct mount *mp;
-	/* 给mp分配内存空间 */
+	// 重新创建一个 mount 结构，并清空挂载链表
 	mp = uma_zalloc(mount_zone, M_WAITOK);
 	bzero(&mp->mnt_startzero,
 	    __rangeof(struct mount, mnt_startzero, mnt_endzero));
-	/* 初始化 mount 所管理的 vnode 链表 */
+
+	// 初始化 mount 所管理的 vnode 链表
 	TAILQ_INIT(&mp->mnt_nvnodelist); // 初始化vnode list
 	mp->mnt_nvnodelistsize = 0;
+
 	/* 活跃的 vnode 链表 */
 	TAILQ_INIT(&mp->mnt_activevnodelist);	// active vnode list
 	mp->mnt_activevnodelistsize = 0;
+
 	/* 初始化空闲 vnode 链表 */
 	TAILQ_INIT(&mp->mnt_tmpfreevnodelist);	// free vnode list
 	mp->mnt_tmpfreevnodelistsize = 0;
 	mp->mnt_ref = 0;	/* mount引用计数初始化为0 */
+
 	(void) vfs_busy(mp, MBF_NOWAIT);
 	atomic_add_acq_int(&vfsp->vfc_refcount, 1); // vfsconf 结构体的引用计数+1
+
 	mp->mnt_op = vfsp->vfc_vfsops;
 	mp->mnt_vfc = vfsp;
 	mp->mnt_stat.f_type = vfsp->vfc_typenum;
 	mp->mnt_gen++;
+
 	/* 初始化文件系统名称 */
 	strlcpy(mp->mnt_stat.f_fstypename, vfsp->vfc_name, MFSNAMELEN);
+	/* 从这里我们可以看出，mnt_vnodecovered 表示的是挂载点原来对应的 vnode */
 	mp->mnt_vnodecovered = vp;
 	mp->mnt_cred = crdup(cred);
 	mp->mnt_stat.f_owner = cred->cr_uid;
+
 	/* 初始化文件系统挂载点名称 */
 	strlcpy(mp->mnt_stat.f_mntonname, fspath, MNAMELEN);
 	mp->mnt_iosize_max = DFLTPHYS;
@@ -610,30 +625,32 @@ vfs_should_downgrade_to_ro_mount(uint64_t fsflags, int error)
 }
 
 /*
-	sys_nmount 函数中调用了这个函数，里边有出现了uio结构体，大致可以推测出来应该是
-	应用程序向内核发送请求挂载某个文件系统，uio中保存了option信息。然后再调用 vfs_donmount
-	函数执行具体的操作
+	sys_nmount 函数中调用了这个函数，里边有出现了 uio 结构体，大致可以推测出来应该是
+	应用程序向内核发送请求挂载某个文件系统，uio 中保存了 option 信息。然后再调用 vfs_donmount
+	函数执行具体的操作。
+	一直不太理解为什么该函数的名字是 do not mount，因为此时系统还没有将挂载选项解析完毕，所以还不能
+	直接去挂载，所以这个函数主要是对这些数据的解析。处理完之后调用 vfs_domount 函数真正开始挂载操作
 */ 
 int
 vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 {
-	struct vfsoptlist *optlist;
+	struct vfsoptlist *optlist;	// 挂载选型链表
 	struct vfsopt *opt, *tmp_opt;
 	char *fstype, *fspath, *errmsg;
 	int error, fstypelen, fspathlen, errmsg_len, errmsg_pos;
 	bool autoro;
 
-	errmsg = fspath = NULL;
-	errmsg_len = fspathlen = 0;
-	errmsg_pos = -1;
-	autoro = default_autoro;
+	errmsg = fspath = NULL;	// 挂载路径
+	errmsg_len = fspathlen = 0;	// 挂载路径数据长度
+	errmsg_pos = -1;	// 判断是否包含挂载出错信息？
+	autoro = default_autoro;	// automatic read only?
 
-	// 获取mount的options链表
+	// 获取 mount 的挂载选项链表
 	error = vfs_buildopts(fsoptions, &optlist);
 	if (error)
 		return (error);
 
-	// 查看option list中是否有以 errmsg 命名的option，有的话就填充 errmsg_pos
+	// 查看 option list 中是否有以 errmsg 命名的 option，有的话就填充 errmsg_pos
 	if (vfs_getopt(optlist, "errmsg", (void **)&errmsg, &errmsg_len) == 0)
 		errmsg_pos = vfs_getopt_pos(optlist, "errmsg");
 
@@ -641,10 +658,11 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 	 * We need these two options before the others,
 	 * and they are mandatory for any filesystem.
 	 * Ensure they are NUL terminated as well.
-	 * mount options中有两个是比较重要的，一个是fstype，另外一个是fspath，必须确保
+	 * 
+	 * mount options 中有两个是比较重要的，一个是 fstype，另外一个是 fspath，必须确保
 	 * 这两个参数是可用的
 	 */
-	fstypelen = 0;
+	fstypelen = 0;	// 获取文件系统类型
 	error = vfs_getopt(optlist, "fstype", (void **)&fstype, &fstypelen);
 	if (error || fstype[fstypelen - 1] != '\0') {
 		error = EINVAL;
@@ -653,7 +671,7 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 		goto bail;
 	}
 
-	fspathlen = 0;
+	fspathlen = 0;	// 获取挂载路径长度
 	error = vfs_getopt(optlist, "fspath", (void **)&fspath, &fspathlen);
 	if (error || fspath[fspathlen - 1] != '\0') {
 		error = EINVAL;
@@ -667,7 +685,8 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 	 * before we call vfs_domount(), since vfs_domount() has special
 	 * logic based on MNT_UPDATE.  This is very important
 	 * when we want to update the root filesystem.
-	 * update属性好像也是比较重要的，vfs_domount 函数执行之前要确认是否有update选项
+	 * 
+	 * update 属性好像也是比较重要的，vfs_domount 函数执行之前要确认是否有 update 选项
 	 */
 	TAILQ_FOREACH_SAFE(opt, optlist, link, tmp_opt) {
 		if (strcmp(opt->name, "update") == 0) {
@@ -758,21 +777,22 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 		}
 	}
 	/*
-		从上面的操作中我们可以反推出mount options list中大致可能包含的
-		内容有哪些，也可以中命名中看出这些options所起的作用是什么
+		从上面的操作中我们可以反推出 mount options list 中大致可能包含的
+		内容有哪些，也可以中命名中看出这些 options 所起的作用是什么
 	*/
 
 	/*
 	 * Be ultra-paranoid about making sure the type and fspath
 	 * variables will fit in our mp buffers, including the
 	 * terminating NUL.
+	 * 在确保 type 和 fspath 变量适合我们的 mp 缓冲区(包括终止NUL)时，要极端偏执
 	 */
 	if (fstypelen > MFSNAMELEN || fspathlen > MNAMELEN) {
 		error = ENAMETOOLONG;
 		goto bail;
 	}
 
-	// 貌似真正挂载文件系统的是vfs_domount，vfs_donmount还是个中间层函数
+	// 貌似真正挂载文件系统的是 vfs_domount
 	error = vfs_domount(td, fstype, fspath, fsflags, &optlist);
 
 	/*
@@ -780,6 +800,12 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 	 * that it could be possible and the mount options allow for that.
 	 * Never try it if "[no]{ro|rw}" has been explicitly requested and not
 	 * overridden by "autoro".
+	 * 如果错误代码表明可能，并且装载选项允许，请查看是否可以以只读模式装载。
+	 * 如果“[no]{ro | rw}”已被明确请求且未被“autoro”覆盖，则千万不要尝试。
+	 * 
+	 * 从注释信息来看，如果文件系统挂载出现错误的时候，错误信息中可能会提示以只读的方式挂载文件系统。
+	 * 但是如果已经明确表明不允许这样做，那就绝对不要尝试。下面的代码分支应该就是处理允许自动挂载成
+	 * 只读模式的情况
 	 */
 	if (autoro && vfs_should_downgrade_to_ro_mount(fsflags, error)) {
 		printf("%s: R/W mount failed, possibly R/O media,"
@@ -788,7 +814,7 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 		error = vfs_domount(td, fstype, fspath, fsflags, &optlist);
 	}
 bail:
-	/* copyout the errmsg */
+	/* copyout the errmsg 将错误信息拷贝至 uio，并返回进程用户空间 */
 	if (errmsg_pos != -1 && ((2 * errmsg_pos + 1) < fsoptions->uio_iovcnt)
 	    && errmsg_len > 0 && errmsg != NULL) {
 		if (fsoptions->uio_segflg == UIO_SYSSPACE) {
@@ -800,7 +826,7 @@ bail:
 			    fsoptions->uio_iov[2 * errmsg_pos + 1].iov_base,
 			    fsoptions->uio_iov[2 * errmsg_pos + 1].iov_len);
 		}
-	}
+	}	// end if
 
 	if (optlist != NULL)
 		vfs_freeopts(optlist);
@@ -843,6 +869,7 @@ sys_mount(struct thread *td, struct mount_args *uap)
 	 * MNT_UPDATE on the root file system to work.
 	 * MNT_ROOTFS should only be set by the kernel when mounting its
 	 * root file system.
+	 * 过滤掉根文件系统挂载属性
 	 */
 	flags &= ~MNT_ROOTFS;
 
@@ -851,9 +878,12 @@ sys_mount(struct thread *td, struct mount_args *uap)
 	if (error) {
 		free(fstype, M_TEMP);
 		return (error);
-	}
+	}	// 获取文件系统类型
 
 	AUDIT_ARG_TEXT(fstype);
+	/*
+		通过链接器将对应的文件系统 module 加载到内核当中。每个文件系统应该都是编译成一个.ko文件
+	*/
 	vfsp = vfs_byname_kld(fstype, td, &error);
 	free(fstype, M_TEMP);
 	if (vfsp == NULL)
@@ -873,8 +903,13 @@ sys_mount(struct thread *td, struct mount_args *uap)
 
 /*
  * vfs_domount_first(): first file system mount (not update)
- * rootfs加载是通过这个函数，其他文件系统经过kldload到系统当中，首次挂载的时候也是通过
+ * rootfs 加载是通过这个函数，其他文件系统经过 kldload 到系统当中，首次挂载的时候也是通过
  * 这个函数，而不是说仅仅针对特定类型的文件系统
+ * vp 是该目录项对应的原有文件系统中的 vnode，struct mount->mnt_vnodecovered 也是表示该对象。挂载点 vnode
+ * 成员 v_mountedhere 会在挂载完成之后被赋值新文件系统的 mount 结构。vfs lookup 函数执行的时候会对这个成员
+ * 进行判断，如果不为空并且允许穿透文件系统到新文件系统中继续查找，那么就会执行 vfs_root 函数给新的文件系统分配
+ * 一个 root vnode，并将其传递给进程。进程在对文件进行查找的时候，根目录对应的 vnode 就会跳转到刚才分配的新 vnode。
+ * 这样后续文件的查找就会到新的文件系统中执行
  */
 static int
 vfs_domount_first(
@@ -897,6 +932,7 @@ vfs_domount_first(
 	/*
 	 * If the jail of the calling thread lacks permission for this type of
 	 * file system, deny immediately.
+	 * 如果调用线程的线程缺少对此类文件系统的权限，请立即拒绝
 	 */
 	if (jailed(td->td_ucred) && !prison_allow(td->td_ucred,
 	    vfsp->vfc_prison_flag)) {
@@ -907,10 +943,10 @@ vfs_domount_first(
 	/*
 	 * If the user is not root, ensure that they own the directory
 	 * onto which we are attempting to mount.
-	 * 如果用户不是root用户，请确保他们拥有我们试图装载到的目录。进一步说明roofs也是
+	 * 如果用户不是 root 用户，请确保他们拥有我们试图装载到的目录。进一步说明roofs也是
 	 * 通过这个函数挂载的
 	 */
-	error = VOP_GETATTR(vp, &va, td->td_ucred);	// 获取vnode属性
+	error = VOP_GETATTR(vp, &va, td->td_ucred);	// 获取 vnode 属性
 	if (error == 0 && va.va_uid != td->td_ucred->cr_uid)
 		error = priv_check_cred(td->td_ucred, PRIV_VFS_ADMIN, 0);
 	if (error == 0)
@@ -932,9 +968,8 @@ vfs_domount_first(
 	VOP_UNLOCK(vp, 0);
 
 	/* Allocate and initialize the filesystem. 
-		每个挂载的文件系统都会对应一个mount，这里申请一块内存给mount结构体，并且
-		利用vfs相关信息对其进行填充。后面做完相应的处理后，添加到mount list队列
-		当中
+		每个挂载的文件系统都会对应一个 mount，这里申请一块内存给 mount 结构体，并且
+		利用 vfs 相关信息对其进行填充。后面做完相应的处理后，添加到 mount 队列当中
 	*/
 	mp = vfs_mount_alloc(vp, vfsp, fspath, td->td_ucred);
 	/* XXXMAC: pass to vfs_mount_alloc? */
@@ -1191,7 +1226,7 @@ vfs_domount(
 
 	/*
 	 * Do not allow NFS export or MNT_SUIDDIR by unprivileged users.
-	 * 非特权用户不被允许NFS export或者标识 MNT_SUIDDIR，所以下面会对flags
+	 * 非特权用户不被允许 NFS export 或者标识 MNT_SUIDDIR，所以下面会对 flags
 	 * 进行检查，如果包含有上述宏标识，那么就要进行权限检查，一旦不符合权限，就
 	 * 直接报错
 	 */
@@ -1217,12 +1252,12 @@ vfs_domount(
 	/* Load KLDs before we lock the covered vnode to avoid reversals. 
 		在锁定覆盖的vnode之前加载kld以避免反转？？
 	*/
-	vfsp = NULL;
+	vfsp = NULL;	// 获取到 vfscnof 结构体指针，也就是要获取文件系统注册信息
 	if ((fsflags & MNT_UPDATE) == 0) {
 		/* Don't try to load KLDs if we're mounting the root. 
 			首先判断是否有update这个选项，如果没有的话，再判断文件系统的类型。如果是
 			rootfs，执行vfs_byname。否则就执行 vfs_byname_kld 函数，这个是找到
-			对应生成的.ko文件，然后load
+			对应生成的.ko文件，然后 load
 		*/
 		if (fsflags & MNT_ROOTFS)
 			vfsp = vfs_byname(fstype);
@@ -1234,18 +1269,25 @@ vfs_domount(
 
 	/*
 	 * Get vnode to be covered or mount point's vnode in case of MNT_UPDATE.
+	 		获取要覆盖的 vnode 或挂载点的 vnode，以防 MNT_UPDATE
 	 */
 	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF | AUDITVNODE1,
 	    UIO_SYSSPACE, fspath, td);
+	/*
+		查找挂载点目录所对应的 vnode，获取到的 vnode 存放在 ni_vp 当中
+	*/
 	error = namei(&nd);
 	if (error != 0)
 		return (error);
 	NDFREE(&nd, NDF_ONLY_PNBUF);
 	vp = nd.ni_vp;
+	/*
+		这里要判断我们所执行的操作是不是要升级
+	*/
 	if ((fsflags & MNT_UPDATE) == 0) {
 		pathbuf = malloc(MNAMELEN, M_TEMP, M_WAITOK);
 		strcpy(pathbuf, fspath);
-		// 将vnode路径转换为全局路径，并且检查路径是否满足要求
+		// 将 vnode 路径转换为全局路径，并且检查路径是否满足要求
 		error = vn_path_to_global_path(td, vp, pathbuf, MNAMELEN);
 		/* debug.disablefullpath == 1 results in ENODEV */
 		if (error == 0 || error == ENODEV) {

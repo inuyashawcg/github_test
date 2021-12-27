@@ -138,6 +138,7 @@ ext2_mount(struct mount *mp)
 	if (strlen(path) >= MAXMNTLEN)
 		return (ENAMETOOLONG);
 
+	// 磁盘文件系统需要指定挂载设备路径，所以会有一个 from 属性
 	fspec = NULL;
 	error = vfs_getopt(opts, "from", (void **)&fspec, &len);
 	if (!error && fspec[len - 1] != '\0')
@@ -236,12 +237,15 @@ ext2_mount(struct mount *mp)
 	 */
 	if (fspec == NULL)
 		return (EINVAL);
+	
+	// 查找要进行挂载操作的设备文件对应的 vnode
 	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, fspec, td);
 	if ((error = namei(ndp)) != 0)
 		return (error);
 	NDFREE(ndp, NDF_ONLY_PNBUF);
-	devvp = ndp->ni_vp;
+	devvp = ndp->ni_vp;	// 获取设备文件
 
+	// 判断 vnode 是否对应的是一个磁盘设备文件
 	if (!vn_isdisk(devvp, &error)) {
 		vput(devvp);
 		return (error);
@@ -250,11 +254,12 @@ ext2_mount(struct mount *mp)
 	/*
 	 * If mount by non-root, then verify that user has necessary
 	 * permissions on the device.
-	 * 判断用户是不是非root模式挂载，如果是的话，用户将拥有关于 device 的必要的权限
-	 *
+	 * 判断用户是不是非 root 模式挂载，如果是的话，用户将拥有关于 device 的必要的权限
+	 * 
 	 * XXXRW: VOP_ACCESS() enough?
 	 */
 	accmode = VREAD;
+	// 判断是不是以 read-only 模式挂载
 	if ((mp->mnt_flag & MNT_RDONLY) == 0)
 		accmode |= VWRITE;
 	error = VOP_ACCESS(devvp, accmode, td->td_ucred, td);
@@ -656,6 +661,7 @@ loop:
 
 /*
  * Common code for mount and mountroot.
+		devvp 是设备文件对应的 vnode
  */
 static int
 ext2_mountfs(struct vnode *devvp, struct mount *mp)
@@ -731,6 +737,7 @@ ext2_mountfs(struct vnode *devvp, struct mount *mp)
 			goto out;
 		}
 	}
+	// 需要创建 ext2 文件系统自身的 ext2mount 结构
 	ump = malloc(sizeof(*ump), M_EXT2MNT, M_WAITOK | M_ZERO);
 
 	/*
@@ -745,7 +752,9 @@ ext2_mountfs(struct vnode *devvp, struct mount *mp)
 	ump->um_e2fs->e2fs = malloc(sizeof(struct ext2fs),
 	    M_EXT2MNT, M_WAITOK);
 	mtx_init(EXT2_MTX(ump), "EXT2FS", "EXT2FS Lock", MTX_DEF);	/* 初始化 ext2 文件系统锁 */
-	bcopy(es, ump->um_e2fs->e2fs, (u_int)sizeof(struct ext2fs));	/* 将从磁盘读取到的超级块数据进行拷贝 */
+
+	// 将从磁盘读取到的超级块数据进行拷贝，这也是前面读取超级块数据的用意所在
+	bcopy(es, ump->um_e2fs->e2fs, (u_int)sizeof(struct ext2fs));	
 	if ((error = compute_sb_data(devvp, ump->um_e2fs->e2fs, ump->um_e2fs)))	/* 猜测是计算校验和 */
 		goto out;
 
@@ -789,6 +798,7 @@ ext2_mountfs(struct vnode *devvp, struct mount *mp)
 		fs->e2fs_fmod = 1;	/* mark it modified */
 		fs->e2fs->e2fs_state &= ~E2FS_ISCLEAN;	/* set fs invalid */
 	}
+	// vfs mount 与 ext2 文件系统 ext2mount 建立映射
 	mp->mnt_data = ump;
 	mp->mnt_stat.f_fsid.val[0] = dev2udev(dev);
 	mp->mnt_stat.f_fsid.val[1] = mp->mnt_vfc->vfc_typenum;
@@ -796,7 +806,7 @@ ext2_mountfs(struct vnode *devvp, struct mount *mp)
 	MNT_ILOCK(mp);
 	mp->mnt_flag |= MNT_LOCAL;
 	MNT_IUNLOCK(mp);
-	ump->um_mountp = mp;
+	ump->um_mountp = mp;	// 同上
 	ump->um_dev = dev;
 	ump->um_devvp = devvp;
 	ump->um_bo = &devvp->v_bufobj;

@@ -161,25 +161,37 @@ enum {
 
 /*
  * every tree block (leaf or node) starts with this header.
-		不管是 leaf 还是 node，每个树的块都是以 header 作为开头
+		不管是 leaf 还是 node，每个树的块都是以 header 作为开头。node 节点中的数据跟 leaf 节点是不一样的。
+		node 节点中是 key pointer;
+		fsid 表示的文件系统的 id，应该是用于区分文件系统类型；uuid 可以认为是特定文件系统中的一个对象独有的 id。
+		感觉应该表示的是这个块独有的 id，文件系统就可以通过该 id 定位到该数据块。
+		从 btrfs_tree.h 文件中可以看到，objectid 对应的是其实是 inode number：
+			objectid corresponds to the inode number.
  */
 struct btrfs_header {
-	/* these first four must match the super block 前四个必须匹配超级块 */
+	/* these first four must match the super block 前四个必须匹配超级块 
+		在低层次的节点当中是不将csum保存在节点指针当中的，用于简化回写代码。
+	*/
 	u8 csum[BTRFS_CSUM_SIZE];
 	u8 fsid[BTRFS_FSID_SIZE]; /* FS specific uuid */
 	/*
 		virtual address of block
 	*/
-	__le64 bytenr; /* which block this node is supposed to live in */
+	__le64 bytenr; /* which block this node is supposed to live in 表示该节点在哪个块中 */
 	__le64 flags;
 
 	/* allowed to be different from the super from here on down */
 	u8 chunk_tree_uuid[BTRFS_UUID_SIZE];
+	/*
+		当我们将节点插入到 btree 当中的时候，我们才会得知该块的 generation number。但是 checksum 只有在回写到磁盘的时候
+		才回去检查。推测磁盘块中是不包含有 checksum 的，只是当我们从磁盘读取完数据到内存之后计算得到，并且存放到节点当中
+		generation 字段对应于分配块的事务 id，它支持轻松的增量备份，并由写时拷贝事务子系统使用
+	*/
 	__le64 generation;
 	// the object id of the tree this block belongs to, for example BTRFS_ROOT_TREE_OBJECTID
 	__le64 owner;
 	__le32 nritems;	// item number?
-	u8 level;	// leaf node 的等级是0
+	u8 level;	// leaf node 的等级是 0，感觉有点像是节点的高度或者深度，或者是相反的？
 } __attribute__ ((__packed__));
 
 /*
@@ -356,6 +368,8 @@ static_assert(sizeof(struct btrfs_super_block) == BTRFS_SUPER_INFO_SIZE);
  * Every item in every tree in the file system is located using its key. 
  * The btrfs_key can be more accurately described as a 3-tuple used to 
  * locate any item in any tree in the file system.
+ * btrfs_key 是基本的 btrfs 数据结构之一。文件系统中每个树中的每个项都使用其密钥进行定位。
+ * btrfs_key 可以更准确地描述为3元组，用于定位文件系统中任何树中的任何项
  * 
  * btrfs_key objects only exists in memory and is in CPU byte order. 
  * btrfs_disk_key is identical to btrfs_key except that objectid and 
@@ -387,9 +401,12 @@ struct btrfs_leaf {
 /*
  * all non-leaf blocks are nodes, they hold only keys and pointers to
  * other blocks
- * 所有非叶块都是节点，它们只包含其他块的键和指针
+ * 所有非叶块都是节点，它们只包含键值和指向其他块的指针
  * 
  * btrfs_key_ptr: btrfs key pointer
+ * disk key 中会包含有一个 offset 成员，从文档提供的信息来看，它表示的是特定的 item 在 object 中的字节偏移。
+ * 感觉 object 应该就是代表文件，文件对应的每一个磁盘数据块由一个 item 来进行管理，item disk key 中的 offset
+ * 表示的就是该数据块在文件中的偏移位置？
  */
 struct btrfs_key_ptr {
 	struct btrfs_disk_key key;
@@ -397,6 +414,10 @@ struct btrfs_key_ptr {
 	__le64 generation;
 } __attribute__ ((__packed__));
 
+/*
+	该结构体表示的是 btrfs 非叶节点，可以看到其基本结构体跟叶节点是类似的。只不过其中包含的数据不同，叶节点包含的
+	是 item 和 对应的 data，而非叶节点包含的则是 key pointer
+*/
 struct btrfs_node {
 	struct btrfs_header header;
 	struct btrfs_key_ptr ptrs[];
@@ -1200,6 +1221,7 @@ struct btrfs_qgroup_swapped_blocks {
 /*
  * in ram representation of the tree.  extent_root is used for all allocations
  * and for the extent tree extent_root root.
+ * 在ram中表示树。区段根用于所有分配和区段树区段根
  */
 struct btrfs_root {
 	// 内容缓存，其中包含有 page array
@@ -1217,6 +1239,9 @@ struct btrfs_root {
 	*/
 	struct btrfs_root_item root_item;
 	struct btrfs_key root_key;
+	/*
+		btrfs_fs_info 结构中包含有多种类型的树根节点
+	*/
 	struct btrfs_fs_info *fs_info;
 	struct extent_io_tree dirty_log_pages;
 
@@ -1351,7 +1376,7 @@ struct btrfs_root {
 	struct btrfs_qgroup_swapped_blocks swapped_blocks;
 
 	/* Used only by log trees, when logging csum items 
-		当记录csum项目时，仅由日志树使用
+		当记录 csum 项目时，仅由日志树使用
 	*/
 	struct extent_io_tree log_csum_range;
 
