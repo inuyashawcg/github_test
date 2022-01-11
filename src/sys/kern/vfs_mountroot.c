@@ -863,6 +863,19 @@ retry:
 	error = (mp == NULL) ? 0 : EDOOFUS;
 	root_mount_onfail = A_CONTINUE;
 	while (mp == NULL) {
+		/*
+			parse_skipto() 函数感觉应该是跳过字符串中的通用空白符，实际调试中 sbuf 中的数据变化情况：
+			  .onfail panic\n.timeout 3\nufs:/dev/vtbd0 \nufs:/dev/vtbd0p3\n.ask\n
+				\n.timeout 3\nufs:/dev/vtbd0 \nufs:/dev/vtbd0p3\n.ask\n
+				.timeout 3\nufs:/dev/vtbd0 \nufs:/dev/vtbd0p3\n.ask\n
+				\nufs:/dev/vtbd0 \nufs:/dev/vtbd0p3\n.ask\n
+				ufs:/dev/vtbd0 \nufs:/dev/vtbd0p3\n.ask\n
+				\nufs:/dev/vtbd0p3\n.ask\n
+			
+			处理到 ufs:/dev/vtbd0 时就会跳转到 parse_mount 函数，该函数解析之后就可以知道根文件系统
+			类型是 ufs，对应设备文件路径是 /dev/vtbd0。该函数就会调用 kernel_mount 函数挂载 ufs，
+			然后系统就能正常启动了
+		*/
 		error = parse_skipto(&conf, CC_NONWHITESPACE);
 		if (error == PE_EOL) {
 			parse_advance(&conf);
@@ -872,9 +885,15 @@ retry:
 			break;
 		switch (parse_peek(&conf)) {
 		case '#':
+			/*
+				这里是跳转到 \n，然后回到循环开头，跳过空白，然后就会指向下一个字符串的起始位置
+			*/
 			error = parse_skipto(&conf, '\n');
 			break;
 		case '.':
+			/*
+				处理字符串开头是 . 的情况
+			*/
 			error = parse_directive(&conf);
 			break;
 		default:
@@ -933,6 +952,7 @@ vfs_mountroot_conf0(struct sbuf *sb)
 	if (boothowto & RB_DFLTROOT)
 		sbuf_printf(sb, "%s\n", ROOTDEVNAME);
 #endif
+	// 处理设备是只读光盘的情况
 	if (boothowto & RB_CDROM) {
 		sbuf_printf(sb, "cd9660:/dev/cd0 ro\n");
 		sbuf_printf(sb, ".timeout 0\n");
@@ -1080,6 +1100,14 @@ vfs_mountroot_wait_if_neccessary(const char *fs, const char *dev)
 	return (0);
 }
 
+/*
+	根文件系统挂载流程：
+		- 系统 init_main() 阶段执行 vfs_mountroot()
+		- vfs_mountroot_conf0：获取环境变量并格式化，将数据存放在 struct sbuf 当中
+		- vfs_mountroot_parse：解析刚才获取到的环境变量信息
+		- parse_mount：解析到环境变量中的 ufs:/dev/vtbd0 (qemu环境)，将 ufs 作为根文件系统
+		- 执行挂载操作
+*/
 void
 vfs_mountroot(void)
 {

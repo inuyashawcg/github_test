@@ -1579,6 +1579,7 @@ vn_poll(struct file *fp, int events, struct ucred *active_cred,
 /*
  * Acquire the requested lock and then check for validity.  LK_RETRY
  * permits vn_lock to return doomed vnodes.
+ * 获取请求的锁，并且检查其有效性。LK_RETRY 标志允许 vn_lock 返回失败的 vnode
  */
 int
 _vn_lock(struct vnode *vp, int flags, char *file, int line)

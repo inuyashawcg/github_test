@@ -791,6 +791,8 @@ lookup(struct nameidata *ndp)
 	ni_dvp_unlocked = 0;
 	/*
 		这个操作很奇怪，应该就是只要包含这两个属性的其中一个就设置 wantparent 标志位
+		LOCKPARENT：返回加锁状态的 parent vnode
+		WANTPARENT：返回不加锁状态的 parent vnode
 	*/
 	wantparent = cnp->cn_flags & (LOCKPARENT | WANTPARENT);
 	KASSERT(cnp->cn_nameiop == LOOKUP || wantparent,
@@ -961,9 +963,12 @@ dirloop:
 			error = EISDIR;
 			goto bad;
 		}
+		/*
+			wantparent 存在的时候要注意 vnode 状态，可能是需要增加其引用计数并加锁
+		*/
 		if (wantparent) {
 			ndp->ni_dvp = dp;
-			VREF(dp);	// 返回的指针处于加锁状态
+			VREF(dp);	// 增加 vnode 引用计数并使得它处于加锁状态
 		}
 		ndp->ni_vp = dp;
 
@@ -973,7 +978,7 @@ dirloop:
 			AUDIT_ARG_VNODE2(dp);
 		/*
 			当我们访问的是一个以"/"结尾的目录时， 根据 LOCKPARENT | LOCKLEAF 两个标志去判断是否需要
-			对 dp 加锁
+			对 dp 加锁。因为此时 ni_dvp 字段跟 ni_vp 字段表示的是同一个 vnode，所以只需要解锁一次
 		*/
 		if (!(cnp->cn_flags & (LOCKPARENT | LOCKLEAF)))
 			VOP_UNLOCK(dp, 0);
@@ -1040,8 +1045,14 @@ dirloop:
 			error = EINVAL;
 			goto bad;
 		}
-
+		/*
+			.. 操作涉及到的情况会比较复杂，因为我们不知道上级目录的特性到底是什么样的，或者是传入路径的上层
+			依然是一个 ..(这可能也是此处要用一个for循环来处理的原因)
+		*/
 		for (;;) {
+			/*
+				首先遍历 cnp->cr_prison，判断 dp 是不是 pr->pr_root 节点。如果是的话就直接退出循环
+			*/
 			for (pr = cnp->cn_cred->cr_prison; pr != NULL;
 			     pr = pr->pr_parent)
 				if (dp == pr->pr_root)
@@ -1059,8 +1070,8 @@ dirloop:
 				*/
 				ndp->ni_dvp = dp;
 				ndp->ni_vp = dp;
-				VREF(dp);	// 增加 dp 的引用计数
-				goto nextname;
+				VREF(dp);	// 增加 dp 的引用计数并且会加锁。这里处理的是挂载点的情况，也就是文件系统根节点
+				goto nextname;	// 通过绝对路径或者是在另外一个文件系统中查找文件
 			}
 			/*
 				该 if 条件判断的是 dp 不是一个根节点，说明就是一个正常的结点。如果是根节点的话，它必定是某个
@@ -1079,8 +1090,17 @@ dirloop:
 			*/
 			tdp = dp;	
 			dp = dp->v_mount->mnt_vnodecovered;
-			VREF(dp);
-			vput(tdp);
+			/*
+				该操作应该就类似于平时对多线程的同步处理机制。vnode 其实就是对所有的文件系统和进程都是共享的，可能当某一个
+				进程需要访问某个文件进而处理到挂载点的时候，我们就需要对挂载点对应的 vnode 进行加锁操作，防止被其他进程在
+				此期间进行修改。因为当前继承要使用它了，所以就同时增加它的引用计数
+			*/
+			VREF(dp);	// 增加引用计数并给 vnode 加锁
+			/*
+				原有文件系统对应的 vnode 由于挂载的缘故现在就不再需要使用它了，所以我们就将其解锁，这样其他的进程就可以访问
+				该 vnode，同时再减少 vnode 的引用计数
+			*/
+			vput(tdp);	// 输入是一个已经加锁的vnode，然后减少应用计数并返回一个 unlocked 状态的 vnode
 			vn_lock(dp,
 			    compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags |
 			    LK_RETRY, ISDOTDOT));
@@ -1097,7 +1117,10 @@ dirloop:
 
 	/*
 	 * We now have a segment name to search for, and a directory to search.
-	 * 我们现在有一个要搜索的段名和一个要搜索的目录
+	 * 我们现在有一个要搜索的段名和一个要搜索的目录。Linux/FreeBSD 应该都是支持 union mount，也就是说
+	 * 多个文件系统可以同时挂载到同一个挂载点下，并且按照类似于栈的形式分布。最先挂载的文件系统位于栈底，
+	 * 最后挂载的文件系统位于栈顶，也就是我们当前所看到的文件系统。union loop 应该就是对此类型 mount 进行
+	 * 处理
 	 */
 unionlookup:
 #ifdef MAC
@@ -1138,7 +1161,7 @@ unionlookup:
 	cnp->cn_lkflags = compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags,
 	    cnp->cn_flags);
 	error = VOP_LOOKUP(dp, &ndp->ni_vp, cnp);
-	cnp->cn_lkflags = lkflags_save;
+	cnp->cn_lkflags = lkflags_save;	// 现根据 vnode 属性计算 lock flags，执行完 vop_lookup 之后再还原
 	/*
 		当调用文件系统底层查找函数出现错误的时候，执行下面的代码分支
 	*/
@@ -1153,6 +1176,11 @@ unionlookup:
 			tdp = dp;
 			dp = dp->v_mount->mnt_vnodecovered;
 			VREF(dp);
+			/*
+				vput 接受一个 locked vnode，处理完成后返回的是一个 locked vnode。说明挂载点当前的 vnode
+				是处于一个加锁的状态。当我们要处理 union mount 情形的时候，就需要对其进行解锁，减少引用计数，
+				然后在处理下一个层级挂载的文件系统的根节点 vnode。先执行 vref 然后判断是否需要升级或者降级？
+			*/
 			vput(tdp);
 			vn_lock(dp,
 			    compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags |
@@ -1169,7 +1197,11 @@ unionlookup:
 			relookup = 1;
 			goto good;
 		}
-
+		/*
+			当返回值不为 EJUSTRETURN 的时候，直接 goto bad。说明 EJUSTRETURN 表示的是正常的情况。从文件系统
+			lookup 函数的实现我们可以发现，只有当我们创建或者重命名、并且处理的对象刚好是路径中最后一个组件的时候，
+			函数才会返回该值
+		*/
 		if (error != EJUSTRETURN)
 			goto bad;
 		/*
@@ -1256,6 +1288,7 @@ good:
 		}
 		/*
 		 * Symlink code always expects an unlocked dvp.
+		 		处理链接文件的代码一般都是要求 directory vnode 处于解锁状态
 		 */
 		if (ndp->ni_dvp != ndp->ni_vp) {
 			VOP_UNLOCK(ndp->ni_dvp, 0);
@@ -1308,6 +1341,10 @@ nextname:
 		goto dirloop;
 	}
 	/*
+		注意，这里是 dirloop 最后一次出现的地方，也就是说后面的代码不会再返回到循环当中处理
+		路径信息。所以下面的代码就是对路径信息处理完成后进行的一些属性的操作
+	*/
+	/*
 	 * If we're processing a path with a trailing slash,
 	 * check that the end result is a directory.
 	 */
@@ -1316,7 +1353,6 @@ nextname:
 		goto bad2;
 	}
 	/*
-	 * Disallow directory write attempts on read-only filesystems.
 	 */
 	if (rdonly &&
 	    (cnp->cn_nameiop == DELETE || cnp->cn_nameiop == RENAME)) {
@@ -1327,6 +1363,12 @@ nextname:
 		ndp->ni_startdir = ndp->ni_dvp;
 		VREF(ndp->ni_startdir);
 	}
+	/*
+		从前面的代码可以看到，wantparent 其实是两个 flag 组合而成的，所以如果 wantparent 标志不成立
+		的话，其实就是这两个 flag 都是不支持的，所以 ni_dvp_unlocked = 2。else if 分支应该就是只判断
+		LOCKPARENT 不支持的情况，所以才令 ni_dvp_unlocked = 1。后面的话就根据该变量来进行不同的错误
+		操作
+	*/
 	if (!wantparent) {
 		ni_dvp_unlocked = 2;
 		if (ndp->ni_dvp != dp)
@@ -1349,6 +1391,10 @@ success:
 	/*
 	 * Because of shared lookup we may have the vnode shared locked, but
 	 * the caller may want it to be exclusively locked.
+	 * 因为 shared lookup 的缘故我们可能会有一个 vnode 处于 shared locked 状态。但是调用者可能希望
+	 * 它是一个独占锁的状态，此时我们就要对该对象的锁操作进行升级，从共享锁升级为独占锁。此时的 dp 已经是
+	 * ndp->ni_vp 字段。
+	 * if 分支处理的是当调用者希望返回独占锁对象、但是当前该对象却是非独占锁状态的时候，要升级为独占锁
 	 */
 	if (needs_exclusive_leaf(dp->v_mount, cnp->cn_flags) &&
 	    VOP_ISLOCKED(dp) != LK_EXCLUSIVE) {

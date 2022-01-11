@@ -99,25 +99,27 @@ struct vpollinfo {
 
 /*
  * Reading or writing any of these items requires holding the appropriate lock.
+		访问 vnode 中任何一个字段都需要持有合适的锁
  *
  * Lock reference:
  *	c - namecache mutex
  *	i - interlock
  *	l - mp mnt_listmtx or freelist mutex
  *	I - updated with atomics, 0->1 and 1->0 transitions with interlock held
- *	m - mount point interlock
+ *	m - mount point interlock	挂载点内部锁
  *	p - pollinfo lock
- *	u - Only a reference to the vnode is needed to read.
+ *	u - Only a reference to the vnode is needed to read. 只需读取对vnode的引用即可
  *	v - vnode lock
- *
+
+ * Vnode可以在许多列表中找到。处理在列表上的vnode上操作的一般方法是：
  * Vnodes may be found on many lists.  The general way to deal with operating
  * on a vnode that is on a list is:
- *	1) Lock the list and find the vnode.
- *	2) Lock interlock so that the vnode does not go away.
- *	3) Unlock the list to avoid lock order reversals.
- *	4) vget with LK_INTERLOCK and check for ENOENT, or
+ *	1) Lock the list and find the vnode.	锁住整个链表然后查找 vnode
+ *	2) Lock interlock so that the vnode does not go away. 锁定互锁使得 vnode 不会消失
+ *	3) Unlock the list to avoid lock order reversals. 解锁列表以避免锁定顺序反转
+ *	4) vget with LK_INTERLOCK and check for ENOENT, or		vget() 会利用 LK_INTERLOCK 和检查 ENOENT
  *	5) Check for DOOMED if the vnode lock is not required.
- *	6) Perform your operation, then vput().
+ *	6) Perform your operation, then vput(). 执行你的操作，然后 vput()
  */
 
 #if defined(_KERNEL) || defined(_KVM_VNODE)

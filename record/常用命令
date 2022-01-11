@@ -22,3 +22,5 @@
 #! /usr/local/bin/bash
 
   aptitude
+
+  chrome://flags/

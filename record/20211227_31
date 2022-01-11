@@ -1,1 +1,359 @@
 ////////////// 20211227 //////////////
+  union mount 是 linux 系统支持的一种机制，也就是在同一个挂载点上可以挂载多个文件系统，FreeBSD 中有一个宏定义 MNT_UNION
+专门用来表示该特性。其作用效果类似于栈，最早挂载的那个文件系统位于栈底，最后挂载的文件系统位于栈顶，并且是当前正在显示的文件系统。
+  FreeBSD lookup 函数中有对 union mount 情况的处理逻辑。相关内容可以参考：
+    https://lwn.net/Articles/312641/
+
+
+////////////// 20211228 //////////////
+root@qemu:/tpt # ls a/b/
+
+(gdb) p* ndp
+$32 = {
+  ni_dirp = 0x40818138 <error: Cannot access memory at address 0x40818138>,
+  ni_segflg = UIO_USERSPACE,
+  ni_rightsneeded = 0xffffffc0006510b8 <cap_fstat_rights>,
+  ni_startdir = 0xffffffd00962e7a0,   // tptfs 根节点 vnode
+  ni_rootdir = 0xffffffd0054b25b8,    // ufs vnode
+  ni_topdir = 0x0,
+  ni_dirfd = -100,
+  ni_lcf = 0,
+  ni_filecaps = {
+    fc_rights = {
+      cr_rights = {0, 0}
+    },
+    fc_ioctls = 0x0,
+    fc_nioctls = -1,
+    fc_fcntls = 0
+  },
+  ni_vp = 0x0,
+  ni_dvp = 0x40803000,
+  ni_resflags = 0,
+  ni_debugflags = 0,
+  ni_loopcnt = 0,
+  ni_pathlen = 5,   // pathlen 应该是包括字符串之后一个结束符的
+  ni_next = 0x0,
+  ni_cnd = {
+    cn_origflags = 0,
+    cn_flags = 262468,
+    cn_thread = 0xffffffc0cc21a100,
+    cn_cred = 0xffffffd005546100,
+    cn_nameiop = LOOKUP,
+    cn_lkflags = -48,
+    cn_pnbuf = 0xffffffd005614c00 "a/b/",
+    cn_nameptr = 0xffffffd005614c00 "a/b/",
+    cn_namelen = -205999545168
+--Type <RET> for more, q to quit, c to continue without paging--
+  },
+  ni_cap_tracker = {
+    tqh_first = 0x0,
+    tqh_last = 0xffffffc0987d6a10
+  }
+}
+
+root@qemu:/ # ./mt.sh 
+root@qemu:/ # cd /tpt
+root@qemu:/tpt # ls -al
+total 1
+spin lock 0xffffffc0014bf0c0 (sched lock 0) held by 0xffffffc003306000 (tid 100040) too long
+timeout stopping cpus   // 出现这种提示信息应该就是死锁造成的
+panic: spin lock held too long
+cpuid = 0
+time = 1640768905
+KDB: stack backtrace:
+#0 0xffffffc0002cb684 at kdb_backtrace+0x56
+#1 0xffffffc000280912 at vpanic+0x158
+#2 0xffffffc0002807b6 at panic+0x2a
+#3 0xffffffc000260cc6 at _mtx_trylock_flags_+0x14e
+#4 0xffffffc000260e38 at thread_lock_flags_+0xea
+#5 0xffffffc000260d48 at _thread_lock+0x7e
+#6 0xffffffc000217a6a at statclock+0xc2
+#7 0xffffffc000218346 at hardclockintr+0x4fe
+#8 0xffffffc000218c82 at cpu_initclocks_bsp+0x6b2
+#9 0xffffffc0004a7578 at DELAY+0x278
+#10 0xffffffc0002445f6 at intr_event_handle+0xae
+#11 0xffffffc0002c899c at intr_isrc_dispatch+0x30
+#12 0xffffffc00049980a at riscv_cpu_intr+0x4a
+#13 0xffffffc0004a76cc at do_trap_supervisor+0x66
+#14 0xffffffc000496278 at cpu_exception_handler_supervisor+0x68
+#15 0xffffffc000476fa0 at pagedaemon_wakeup+0xa36
+#16 0xffffffc000476cae at pagedaemon_wakeup+0x744
+#17 0xffffffc000241422 at fork_exit+0x70
+Uptime: 1m36s
+
+
+bufspace_daemon_wait (bd=0xffffffc000655880 <bdomain+5504>)
+    at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_bio.c:645
+645		atomic_store_int(&bd->bd_running, 0);
+(gdb) n
+646		if (bd->bd_bufspace < bd->bd_bufspacethresh &&
+(gdb) 
+647		    bd->bd_freebuffers > bd->bd_lofreebuffers) {
+(gdb) bt
+#0  bufspace_daemon_wait (bd=0xffffffc000655880 <bdomain+5504>)
+    at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_bio.c:647
+#1  bufspace_daemon (arg=0xffffffc000655880 <bdomain+5504>)
+    at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_bio.c:854
+#2  0xffffffc000241426 in fork_exit (callout=0xffffffc00032d152 <bufspace_daemon>, 
+    arg=0xffffffc000655880 <bdomain+5504>, frame=0xffffffc098747c40)
+    at /home/mercury/Documents/code/qihai/qihai/kernel/kern_fork.c:1069
+#3  0xffffffc000496bae in fork_trampoline ()
+    at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/swtch.S:385
+
+
+////////////// 20211229 //////////////
+  用 qemu 调试程序被卡死的时候，可以查看一下进程相关信息找找原因。例如调试文件系统 ls -al 命令系统卡死，
+可以查看进程/线程相关信息，在系统调用处打断点，获取相关结构体。例如在 sys_open 函数打断点
+
+  p *td
+  ...  
+  td_dupfd = 0,
+  td_sqqueue = 0,
+  td_wchan = 0x0,   // 通过观察 td_wchan 和 td_wmesg 信息来确定 sleep 的线程
+  td_wmesg = 0x0,
+  td_owepreempt = 0 '\000',
+  td_tsqueue = 0 '\000',
+  td_locks = 0,
+  td_rw_rlocks = 0,
+  ...
+
+  可以在这两个地方加 watchpoint，定位到目标线程
+
+  (gdb) p /x &td->td_wchan
+  $2 = 0xffffffc0cc2ba798
+  (gdb) p /x &td->td_wmesg
+  $3 = 0xffffffc0cc2ba7a0
+  (gdb) watch *0xffffffc0cc2ba798
+  Hardware watchpoint 2: *0xffffffc0cc2ba798
+  (gdb) watch *0xffffffc0cc2ba7a0
+  Hardware watchpoint 3: *0xffffffc0cc2ba7a0
+  (gdb) c
+  Continuing.
+
+  Thread 6 hit Breakpoint 1, sys_open (td=0xffffffc0cc2ba680, uap=0xffffffc0cc2baa68)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_syscalls.c:1073
+  1073		return (kern_openat(td, AT_FDCWD, uap->path, UIO_USERSPACE,
+  (gdb) d 1
+  (gdb) c
+  Continuing.
+
+  Thread 6 hit Hardware watchpoint 2: *0xffffffc0cc2ba798
+
+  Old value = 0
+  New value = 165891040
+  sleepq_add (wchan=0xffffffd009e34be0, lock=<optimized out>, wmesg=0xffffffc0004f81a6 "tptfs", flags=4, queue=0)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/subr_sleepqueue.c:382
+  382		if (flags & SLEEPQ_INTERRUPTIBLE) {
+  (gdb) bt
+  #0  sleepq_add (wchan=0xffffffd009e34be0, lock=<optimized out>, wmesg=0xffffffc0004f81a6 "tptfs", flags=4, queue=0)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/subr_sleepqueue.c:382
+  #1  0xffffffc000257016 in sleeplk (lk=0xffffffd009e34be0, flags=541696, ilk=<optimized out>, wmesg=0xffffffc0004f81a6 "tptfs", 
+      pri=<optimized out>, timo=6, queue=0) at /home/mercury/Documents/code/qihai/qihai/kernel/kern_lock.c:286
+  #2  0xffffffc000255f98 in lockmgr_xlock_hard (lk=0xffffffd009e34be0, flags=541696, ilk=0x0, file=<optimized out>, 
+      line=<optimized out>, lwa=<optimized out>) at /home/mercury/Documents/code/qihai/qihai/kernel/kern_lock.c:932
+  #3  0xffffffc00025689a in lockmgr_xlock (lk=0x0, flags=<optimized out>, file=0x0, line=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_lock.c:1262
+  #4  0xffffffc000339a04 in vop_lock (ap=<optimized out>) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_default.c:588
+  #5  0xffffffc0003599b4 in VOP_LOCK1 (vp=0xffffffd009e34b70, 
+      file=0xffffffc000507955 "/home/mercury/Documents/code/qihai/qihai/kernel/vfs_acl.c", flags=<optimized out>, line=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.h:1127
+  #6  _vn_lock (vp=0xffffffd009e34b70, flags=525312, 
+      file=0xffffffc000507955 "/home/mercury/Documents/code/qihai/qihai/kernel/vfs_acl.c", line=274)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1742
+  #7  0xffffffc0003212d0 in vacl_get_acl (td=<optimized out>, vp=<optimized out>, type=<optimized out>, aclp=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_acl.c:274
+  #8  0xffffffc000321016 in kern___acl_get_path (td=0xffffffc0cc2ba680, path=<optimized out>, aclp=0x4085e000, follow=0, 
+      type=<optimized out>) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_acl.c:383
+  #9  sys___acl_get_link (td=0xffffffc0cc2ba680, uap=<optimized out>) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_acl.c:369
+  #10 0xffffffc0004a7c18 in syscallenter (td=0xffffffc0cc2ba680)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/../../kernel/subr_syscall:189
+  #11 ecall_handler () at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:167
+  #12 do_trap_user (frame=<optimized out>) at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:371
+  #13 0xffffffc000496346 in cpu_exception_handler_user () at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/exception.S:229
+
+  从 gdb 提示信息可以看出，应该是锁操作出现错误导致的
+
+
+////////////// 20211230 //////////////
+
+  kern___acl_get_path (td=<optimized out>, path=<optimized out>, aclp=<optimized out>, 
+    follow=<optimized out>, type=<optimized out>)
+    at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_acl.c:382
+  382		if (error == 0) {
+  (gdb) bt
+  #0  kern___acl_get_path (td=<optimized out>, path=<optimized out>, aclp=<optimized out>, 
+      follow=<optimized out>, type=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_acl.c:382
+  #1  sys___acl_get_link (td=<optimized out>, uap=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_acl.c:369
+  #2  0xffffffc0004a7c18 in syscallenter (td=0xffffffc0cc21cb00)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/../../kernel/subr_syscall:189
+  #3  ecall_handler () at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:167
+  #4  do_trap_user (frame=<optimized out>) at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:371
+  #5  0xffffffc000496346 in cpu_exception_handler_user ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/exception.S:229
+  Backtrace stopped: frame did not save the PC
+  (gdb) n
+  383			error = vacl_get_acl(td, nd.ni_vp, type, aclp);
+  (gdb) s
+  vacl_get_acl (td=0xffffffc0cc21cb00, vp=0xffffffd00956b1e8, type=2, aclp=0x4085e000)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_acl.c:272
+  272		AUDIT_ARG_VALUE(type);
+  (gdb) n
+  273		inkernelacl = acl_alloc(M_WAITOK | M_ZERO);
+  (gdb) 
+  274		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+  (gdb) 
+
+  执行到 vacl_get_acl() 函数中的 vn_lock 宏的时候卡住了。将vop_lock/unlock 等注册函数改成默认注册函数时，提示如下错误：
+  root@qemu:~ # cd /
+  root@qemu:/ # ./mt.sh 
+  root@qemu:/ # cd /tpt
+  root@qemu:/tpt # ls
+  panic: lockmgr_xlock_hard: recursing on non recursive lockmgr 0xffffffd0095ac258 @ /home/mercury/Documents/code/qihai/qihai/kernel/vfs_subr.c:2974
+
+  cpuid = 6
+  time = 1640843382
+  KDB: stack backtrace:
+  #0 0xffffffc0002cb684 at kdb_backtrace+0x56
+  #1 0xffffffc000280912 at vpanic+0x158
+  #2 0xffffffc0002807b6 at panic+0x2a
+  #3 0xffffffc000255db4 at lockmgr_lock_flags+0x604
+  #4 0xffffffc000256322 at __lockmgr_args+0x11c
+  #5 0xffffffc000255898 at lockmgr_lock_flags+0xe8
+  #6 0xffffffc000338580 at vop_stdlock+0x1c
+  #7 0xffffffc0003599b0 at _vn_lock+0x4a
+  #8 0xffffffc000346736 at vget_finish+0x26
+  #9 0xffffffc00033bfa2 at vfs_hash_get+0xc2
+  #10 0xffffffc0004cd4e4 at _ZN11TptFileNode8GetVnodeEiPP5vnode+0x92
+  #11 0xffffffc0004a9620 at _ZN9VFileTree6LookupEP9nameidata+0x70c
+  #12 0xffffffc0004ae0d2 at namei+0x24a
+  #13 0xffffffc00035302a at kern_statat+0x88
+  #14 0xffffffc000352f80 at sys_fstatat+0x1e
+  #15 0xffffffc0004a7c14 at do_trap_user+0x1f4
+  #16 0xffffffc000496342 at cpu_exception_handler_user+0x72
+  Uptime: 2m50s
+
+
+  Thread 3 hit Hardware watchpoint 2: *0xffffffd009606088
+
+  Old value = 1
+  New value = -870216832
+  0xffffffc000255e72 in atomic_fcmpset_64 (p=<optimized out>, cmpval=0xffffffc0987bd0b0, 
+      newval=18446743802256395136) at /home/mercury/Documents/code/qihai/qihai/riscv/include/atomic.h:369
+  369		__asm __volatile(
+  (gdb) bt
+  #0  0xffffffc000255e72 in atomic_fcmpset_64 (p=<optimized out>, cmpval=0xffffffc0987bd0b0, 
+      newval=18446743802256395136) at /home/mercury/Documents/code/qihai/qihai/riscv/include/atomic.h:369
+  #1  atomic_fcmpset_acq_64 (p=<optimized out>, cmpval=0xffffffc0987bd0b0, newval=18446743802256395136)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/include/atomic.h:469
+  #2  lockmgr_xlock_hard (lk=0xffffffd009606070, flags=2106368, ilk=0xffffffd0096060a0, 
+      file=<optimized out>, line=<optimized out>, lwa=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_lock.c:836
+  #3  0xffffffc000256326 in __lockmgr_args (lk=0xffffffd009606070, flags=2106368, ilk=0xffffffd0096060a0, 
+      wmesg=<optimized out>, pri=<optimized out>, timo=<optimized out>, 
+      file=0xffffffc0005134bb "/home/mercury/Documents/code/qihai/qihai/kernel/VFile.cpp", line=106)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_lock.c:1368
+  #4  0xffffffc00025589c in lockmgr_lock_flags (lk=0xffffffd009606070, flags=2106368, 
+      ilk=0xffffffd0096060a0, file=0x0, line=106)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_lock.c:1089
+  #5  0xffffffc000338584 in vop_stdlock (ap=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_default.c:532
+  #6  0xffffffc0003599b4 in VOP_LOCK1 (vp=0xffffffd009606000, 
+      file=0xffffffc0005134bb "/home/mercury/Documents/code/qihai/qihai/kernel/VFile.cpp", 
+      flags=<optimized out>, line=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.h:1127
+  #7  _vn_lock (vp=0xffffffd009606000, flags=2106368, 
+      file=0xffffffc0005134bb "/home/mercury/Documents/code/qihai/qihai/kernel/VFile.cpp", line=106)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1742
+  #8  0xffffffc0004a900e in VFileTree::Lookup (ndp=0xffffffc0987bd950)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/VFile.cpp:104
+  #9  0xffffffc0004ae18c in namei (ndp=0xffffffc0987bd950)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_lookup.cpp:611
+  #10 0xffffffc00035302e in kern_statat (td=<optimized out>, flag=<optimized out>, fd=<optimized out>, 
+      path=<optimized out>, pathseg=<optimized out>, sbp=<optimized out>, hook=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_syscalls.c:2399
+  #11 0xffffffc000352f84 in sys_fstatat (td=0x1, uap=0xffffffc0cc218f68)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_syscalls.c:2377
+  #12 0xffffffc0004a7c18 in syscallenter (td=0xffffffc0cc218b80)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/../../kernel/subr_syscall:189
+  #13 ecall_handler () at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:167
+  #14 do_trap_user (frame=<optimized out>) at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:371
+  #15 0xffffffc000496346 in cpu_exception_handler_user ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/exception.S:229
+  Backtrace stopped: frame did not save the PC
+  (gdb) c
+  Continuing.
+  [Switching to Thread 1.4]
+
+  Thread 4 hit Hardware watchpoint 2: *0xffffffd009606088
+
+  Old value = -870216832
+  New value = -870216960
+
+  正常情况下，old 和 new 应该是从一个负值变成1，再由1变成一个负值。这里出现了错误
+
+
+  Old value = 1
+  New value = -870166272
+  0xffffffc000255e72 in atomic_fcmpset_64 (p=<optimized out>, cmpval=0xffffffc0987ea6a0, 
+      newval=18446743802256445696) at /home/mercury/Documents/code/qihai/qihai/riscv/include/atomic.h:369
+  369		__asm __volatile(
+  (gdb) bt
+  #0  0xffffffc000255e72 in atomic_fcmpset_64 (p=<optimized out>, cmpval=0xffffffc0987ea6a0, 
+      newval=18446743802256445696) at /home/mercury/Documents/code/qihai/qihai/riscv/include/atomic.h:369
+  #1  atomic_fcmpset_acq_64 (p=<optimized out>, cmpval=0xffffffc0987ea6a0, newval=18446743802256445696)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/include/atomic.h:469
+  #2  lockmgr_xlock_hard (lk=0xffffffd00964f810, flags=2098176, ilk=0xffffffd00964f840, 
+      file=<optimized out>, line=<optimized out>, lwa=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_lock.c:836
+  #3  0xffffffc000256326 in __lockmgr_args (lk=0xffffffd00964f810, flags=2098176, ilk=0xffffffd00964f840, 
+      wmesg=<optimized out>, pri=<optimized out>, timo=<optimized out>, 
+      file=0xffffffc0004feb0f "/home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c", line=479)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_lock.c:1368
+  #4  0xffffffc00025589c in lockmgr_lock_flags (lk=0xffffffd00964f810, flags=2098176, 
+      ilk=0xffffffd00964f840, file=0x0, line=479)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_lock.c:1089
+  #5  0xffffffc000338584 in vop_stdlock (ap=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_default.c:532
+  #6  0xffffffc000359baa in VOP_LOCK1 (vp=0xffffffd00964f7a0, flags=2098176, file=<optimized out>, line=479)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.h:1127
+  #7  _vn_lock (vp=0xffffffd00964f7a0, flags=2098176, file=<optimized out>, line=479)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1742
+  #8  vn_close1 (vp=0xffffffd00964f7a0, flags=1, file_cred=0xffffffd00552e000, td=0xffffffc0cc225100, 
+      keep_ref=false) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:479
+  #9  0xffffffc00035852e in vn_closefile (fp=0xffffffd0094ea690, td=0xffffffc0004feb0f)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1763
+  #10 0xffffffc000227e7a in fo_close (fp=0xffffffd0094ea690, td=0x1)
+      at /home/mercury/Documents/code/qihai/qihai/sys/file.h:377
+  #11 _fdrop (fp=0xffffffd0094ea690, td=0x1)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_descrip.c:3510
+  #12 0xffffffc00022b30a in closef (fp=0xffffffd0094ea690, td=0xffffffc0cc225100)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_descrip.c:2828
+  #13 0xffffffc00022ab20 in fdescfree_fds (td=0xffffffc0cc225100, fdp=0xffffffc0cc2170c0, needclose=true)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_descrip.c:2541
+  #14 0xffffffc00022a59a in fdescfree (td=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_descrip.c:2584
+  #15 0xffffffc00023a73c in exit1 (td=0xffffffc0cc225100, rval=<optimized out>, signo=0)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_exit.c:379
+  #16 0xffffffc00023a2c2 in sys_sys_exit (td=0x1, uap=<optimized out>)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/kern_exit.c:194
+  #17 0xffffffc0004a7c18 in syscallenter (td=0xffffffc0cc225100)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/../../kernel/subr_syscall:189
+  #18 ecall_handler () at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:167
+  #19 do_trap_user (frame=<optimized out>) at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:371
+  #20 0xffffffc000496346 in cpu_exception_handler_user ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/exception.S:229
+  Backtrace stopped: frame did not save the PC
+  (gdb) c
+  Continuing.
+
+  Thread 7 hit Hardware watchpoint 8: *0xffffffd00964f828
+
+  Old value = -870166272
+  New value = 1
+
+    p/x &ndp->ni_startdir->v_lock->lk_lock
+
+  要注意获取vnode时不同情况下传入的 lock flags 是不一样的。如果是在 lookup 过程中并且是最后一个需要处理的组件时，对于
+flag 的操作有更多的约束，具体要参考文件系统的实现，不能全部采用独占锁类型

@@ -37,12 +37,18 @@
 #include <sys/_stack.h>
 #endif
 
+/*
+	lock_object 则可以认为是一个类对象。lk_lock 表示的就是锁操作对应的变量。
+	锁机制就类似与原子操作，假设当锁值为0的时候，表示该锁已经释放，目前可以被获取。假设值为1的时候，锁
+	已经被占有，其他模块需要申请的时候就要等待，当它的值再次变成0的时候就表示可以获取到了
+*/
 struct lock {
 	struct lock_object	lock_object;
 	volatile uintptr_t	lk_lock;
 	u_int			lk_exslpfail;
 	int			lk_timo;
 	int			lk_pri;
+	// 如果要调试锁的话，需要为其分配一个堆栈
 #ifdef DEBUG_LOCKS
 	struct stack		lk_stack;
 #endif

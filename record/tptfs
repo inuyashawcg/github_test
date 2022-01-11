@@ -1,7 +1,35 @@
-21
-23
-46
-207
-277
-331
-2162
+(gdb) p/x *sbp
+$31 = {
+  st_dev = 0xffffffc098dbba40,
+  st_ino = 0xffffffc00040ed6c,
+  st_nlink = 0xffffffc098dbba60,
+  st_mode = 0x20c0,
+  st_padding0 = 0x327,
+  st_uid = 0xffffffc0,
+  st_gid = 0x32720c0,
+  st_padding1 = 0xffffffc0,
+  st_rdev = 0xffffffc0cc41e680,
+  st_atim = {
+    tv_sec = 0xffffffc098dbba60,
+    tv_nsec = 0xffffffc00040d96a
+  },
+  st_mtim = {
+    tv_sec = 0xffffffc0032720c0,
+    tv_nsec = 0xffffffc0cc41e680
+  },
+  st_ctim = {
+    tv_sec = 0xffffffc098dbbaf0,
+    tv_nsec = 0xffffffc00040c512
+  },
+  st_birthtim = {
+    tv_sec = 0xffffffc098dbba90,
+    tv_nsec = 0xffffffc000772360
+  },
+  st_size = 0x3,
+  st_blocks = 0x7,
+  st_blksize = 0xffffffff,
+  st_flags = 0x1,
+  st_gen = 0x0,
+  st_spare = {0x40962000, 0x0, 0x1, 0xffffffc001a152e8, 0xffffffc098dbbb00, 0xffffffc000773e32, 
+    0x0, 0xffffffc0cc41ea58, 0xffffffc0cc41ea70, 0xffffffc098dbbd10}
+}

@@ -37,6 +37,9 @@ struct lock_object {
 	const	char *lo_name;		/* Individual lock name. */
 	u_int	lo_flags;
 	u_int	lo_data;		/* General class specific data. */
+	/*
+		witness 可以认为是一个锁管理器，它会检测锁当前的状态、调用顺序是否正确等等信息
+	*/
 	struct	witness *lo_witness;	/* Data for witness. */
 };
 

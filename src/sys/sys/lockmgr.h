@@ -41,7 +41,7 @@
 #define	LK_SHARE			0x01
 #define	LK_SHARED_WAITERS		0x02
 #define	LK_EXCLUSIVE_WAITERS		0x04
-#define	LK_EXCLUSIVE_SPINNERS		0x08
+#define	LK_EXCLUSIVE_SPINNERS		0x08	// 自旋锁？
 #define	LK_ALL_WAITERS							\
 	(LK_SHARED_WAITERS | LK_EXCLUSIVE_WAITERS)
 #define	LK_FLAGMASK							\
@@ -144,12 +144,15 @@ _lockmgr_args_rw(struct lock *lk, u_int flags, struct rwlock *ilk,
  * Flags for lockinit().
  */
 #define	LK_INIT_MASK	0x0000FF
-#define	LK_CANRECURSE	0x000001
-#define	LK_NODUP	0x000002
-#define	LK_NOPROFILE	0x000004
-#define	LK_NOSHARE	0x000008
-#define	LK_NOWITNESS	0x000010
-#define	LK_QUIET	0x000020
+/*
+	Allow recursion on an exclusive lock.  For every lock there must be a release.
+*/
+#define	LK_CANRECURSE	0x000001	// Allow recursive exclusive locks.
+#define	LK_NODUP	0x000002	// witness(4) should log messages about	duplicate locks being acquired.
+#define	LK_NOPROFILE	0x000004	// Disable lock	profiling for this lock.
+#define	LK_NOSHARE	0x000008	// Allow exclusive locks only.
+#define	LK_NOWITNESS	0x000010	// Instruct witness(4) to ignore this lock.
+#define	LK_QUIET	0x000020	// Disable ktr(4) logging for this lock.
 #define	LK_ADAPTIVE	0x000040
 #define	LK_IS_VNODE	0x000080	/* Tell WITNESS about a VNODE lock */
 
@@ -157,11 +160,20 @@ _lockmgr_args_rw(struct lock *lk, u_int flags, struct rwlock *ilk,
  * Additional attributes to be used in lockmgr().
  */
 #define	LK_EATTR_MASK	0x00FF00
+/*
+	Unlock the interlock (which	should be locked already).
+*/
 #define	LK_INTERLOCK	0x000100
+/*
+	Do not allow the call to sleep.  This can be used to test the	lock.
+*/
 #define	LK_NOWAIT	0x000200
 #define	LK_RETRY	0x000400
+/*
+	Fail if operation has slept.
+*/
 #define	LK_SLEEPFAIL	0x000800
-#define	LK_TIMELOCK	0x001000
+#define	LK_TIMELOCK	0x001000	// Use timo during a sleep; otherwise, 0 is used.
 #define	LK_NODDLKTREAT	0x002000
 #define	LK_VNHELD	0x004000
 
@@ -169,13 +181,43 @@ _lockmgr_args_rw(struct lock *lk, u_int flags, struct rwlock *ilk,
  * Operations for lockmgr().
  */
 #define	LK_TYPE_MASK	0xFF0000
-#define	LK_DOWNGRADE	0x010000
-#define	LK_DRAIN	0x020000
-#define	LK_EXCLOTHER	0x040000
+/*
+	Downgrade exclusive	lock to	a shared lock.	Downgrading a shared lock is not permitted.  
+	If	an exclusive lock has been recursed, the	system will panic(9).
+*/
+#define	LK_DOWNGRADE	0x010000	// Exclusive-to-shared downgrade.
+/*
+	Wait for all activity on the lock to end, then mark it decommissioned. 
+	This is used before freeing	a lock that is part of a piece of memory that
+	is about to	be freed.  (As documented in <sys/lockmgr.h>.)
+*/
+#define	LK_DRAIN	0x020000	// Wait for all lock activity to end.
+#define	LK_EXCLOTHER	0x040000	// exclother：互斥的，排他的
+/*
+	Acquire an exclusive lock.	If an exclusive	locks already held, 
+	and LK_CANRECURSE is not set, the system will	panic(9).
+*/
 #define	LK_EXCLUSIVE	0x080000	/* 专用的 */
-#define	LK_RELEASE	0x100000
-#define	LK_SHARED	0x200000
-#define	LK_UPGRADE	0x400000
+/*
+	Release the	lock.  Releasing a lock	that is	not held can cause a panic(9).
+*/
+#define	LK_RELEASE	0x100000	// Release any type of lock.
+/*
+	Acquire a shared lock.  If an exclusive lock is currently held, 
+	EDEADLK will be returned.
+*/
+#define	LK_SHARED	0x200000	// Shared lock.
+/*
+	Upgrade a shared lock to an	exclusive lock.	 If this call fails, the shared	lock 
+	is	lost, even if the	LK_NOWAIT flag is specified.  During the upgrade, the shared 
+	lock could be temporarily dropped.  Attempts to upgrade an exclusive lock will cause 
+	a panic(9).
+*/
+#define	LK_UPGRADE	0x400000	// Shared-to-exclusive upgrade.
+/*
+	try	to upgrade a shared lock to an exclusive lock. The	failure	to upgrade 
+	does	not result in the dropping of	the shared lock	ownership.
+*/
 #define	LK_TRYUPGRADE	0x800000
 
 #define	LK_TOTAL_MASK	(LK_INIT_MASK | LK_EATTR_MASK | LK_TYPE_MASK)

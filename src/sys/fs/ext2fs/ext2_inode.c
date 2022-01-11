@@ -255,7 +255,7 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 {
 	struct vnode *ovp = vp;
 	e4fs_daddr_t lastblock;	/* 最后一个数据块 */
-	struct inode *oip;
+	struct inode *oip;	// oip：old inode pointer？意思可能是表示状态改变之前的 inode
 	e4fs_daddr_t bn, lbn, lastiblock[EXT2_NIADDR], indir_lbn[EXT2_NIADDR];
 	uint32_t oldblks[EXT2_NDADDR + EXT2_NIADDR];
 	uint32_t newblks[EXT2_NDADDR + EXT2_NIADDR];
@@ -264,7 +264,7 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	int offset, size, level;
 	e4fs_daddr_t count, nblocks, blocksreleased = 0;	/* 释放掉的数据块的个数 */
 	int error, i, allerror;
-	off_t osize;
+	off_t osize;	// old size?
 #ifdef INVARIANTS
 	struct bufobj *bo;
 #endif
@@ -282,6 +282,7 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	 * value of osize is 0, length will be at least 1.
 	 * 延长文件的大小。我们必须确保文件的最后一个字节已分配。由于 osize 的最小值
 	 * 为0，因此长度至少为1
+	 * osize 表示的是 inode 对应文件的原有数据量大小，length 表示的应该是
 	 */
 	if (osize < length) {
 		if (length > oip->i_e2fs->e2fs_maxfilesize)
@@ -365,9 +366,9 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 		减去直接块个数之后，剩余的数据块个数。可以用作判断被截取后文件大小的一个标志，当数组的第一个元素小于 0 的时候，
 		就意味着变化后的文件用直接块就可以完全表示，不再需要间接索引，下面同理
 	*/
-	lastiblock[SINGLE] = lastblock - EXT2_NDADDR;	
-	lastiblock[DOUBLE] = lastiblock[SINGLE] - NINDIR(fs);	/* 去除掉直接索引和一级间接索引之后，剩余的数据块 */
-	lastiblock[TRIPLE] = lastiblock[DOUBLE] - NINDIR(fs) * NINDIR(fs);	/* 去除掉直接、一级和二级间接索引后剩余数据块个数 */
+	lastiblock[SINGLE] = lastblock - EXT2_NDADDR;	// 一级间接索引的起始块号
+	lastiblock[DOUBLE] = lastiblock[SINGLE] - NINDIR(fs);	/* 二级间接索引的其实块号 */
+	lastiblock[TRIPLE] = lastiblock[DOUBLE] - NINDIR(fs) * NINDIR(fs);	/* 三级间接索引的起始块号 */
 	nblocks = btodb(fs->e2fs_bsize);	/* 文件系统块号与磁盘块号的转换，tptfs 中是 1 */
 	/*
 	 * Update file and block pointers on disk before we start freeing

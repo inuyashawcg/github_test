@@ -427,6 +427,12 @@ owner_lockmgr(const struct lock_object *lock, struct thread **owner)
 }
 #endif
 
+/*
+	lkp    A pointer to the lock to initialize.
+  prio   The	priority passed	to sleep(9).
+	wmesg  The	lock message.  This is used for	both debugging output and sleep(9).
+	timo   The	timeout	value passed to	sleep(9).
+*/
 void
 lockinit(struct lock *lk, int pri, const char *wmesg, int timo, int flags)
 {

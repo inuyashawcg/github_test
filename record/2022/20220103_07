@@ -1,0 +1,124 @@
+////////////// 20220104 //////////////
+  ext2 文件系统在挂载点处执行 ls -al a 时对应的 struct component 字段，重点关注 lkflags
+
+  Thread 4 hit Breakpoint 3, ext2_lookup_ino (vdp=0xffffffd0096937a0, vpp=0xffffffc098dff930, 
+      cnp=0xffffffc098dff958, dd_ino=0x0)
+      at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_lookup.c:343
+  343		struct ucred *cred = cnp->cn_cred;
+  (gdb) p cnp
+  $1 = (struct componentname *) 0xffffffc098dff958
+  (gdb) p* cnp
+  $2 = {
+    cn_origflags = 18446743798839591224,
+    cn_flags = 335806724,
+    cn_thread = 0xffffffc0cc464680,
+    cn_cred = 0xffffffd005256100,
+    cn_nameiop = LOOKUP,
+    cn_lkflags = 2105344,
+    cn_pnbuf = 0xffffffd009516800 "a",
+    cn_nameptr = 0xffffffd009516800 "a",
+    cn_namelen = 1
+  }
+
+  (gdb) p/x *cnp 
+  $3 = {
+    cn_origflags = 0xffffffc000794138,
+    cn_flags = 0x14040104,
+    cn_thread = 0xffffffc0cc464680,
+    cn_cred = 0xffffffd005256100,
+    cn_nameiop = 0x0,
+    cn_lkflags = 0x202000,
+    cn_pnbuf = 0xffffffd009516800,
+    cn_nameptr = 0xffffffd009516800,
+    cn_namelen = 0x1
+  }
+
+  修改了 VFileTree->Lookup() 函数逻辑实现之后，修改 tptfs 注册函数
+    .vop_lock1 =  vop_lock,
+    .vop_unlock =   vop_unlock,
+    .vop_islocked =   vop_islocked,
+  
+  执行上述命令之后不会发生 lock panic，函数实现上的差异？
+
+
+////////////// 20220105 //////////////
+  当前基本上所有的文件系统都是对于文件的写操作都是截断式的。比如一个 1G 的文件，用户在中间删除了一个字节的数据，那么文件系统
+会将其后的所有数据都向前进行搬移，因为每个数据块中都不能包含有空洞，否则文件读取的时候一定会出现问题。如此操作文件系统的效率
+将会是相当低下的。所以需要考虑一种新的数据管理方式，尽可能减少文件写过程中的内存拷贝
+
+可能的解决方法：
+  1、将文件对应的所有数据块做成链表的形式，这样就可以动态添加和删除数据，避免过多的内存拷贝。这种方式也存在一些问题：
+    - 当其中一个节点数据损坏的时候，该结点后面的数据会全部丢失
+    - 当要定位数据位置的时候，就需要从前往后逐个计算每个页中数据量
+  
+  2、将数据块利用树状结构组织起来。这种有利于快速定位数据位置，但是会增加维护难度(树的偏转)
+
+方向：
+  1、绝对不能出现大规模的遍历操作，最好是能通过简单计算就可以得到
+  2、最大限度减少文件数据在内存中的拷贝，可以适当放宽元数据项的移动操作
+
+
+////////////// 20220106 //////////////
+当在 Lookup 函数中关闭缓存的时候，会出现找不到对应文件的一些错误，需要反复多次才能成功。
+猜测是与 vnode 查抄和回收机制有关
+
+  root@qemu:/tpt/a/b # cd c
+  c: No such file or directory.
+  root@qemu:/tpt/a/b # cd c 
+  c: No such file or directory.
+  root@qemu:/tpt/a/b # cd c
+  Lookup: GetVnode --- 888
+  Lookup: vput----555
+  root@qemu:/tpt/a/b/c # cd ../
+  Lookup: GetVnode --- 777
+  Lookup: vput----333
+  Lookup: GetVnode --- 888
+  Lookup: vput----555
+  root@qemu:/tpt/a/b # cd c
+  Lookup: GetVnode --- 888
+  Lookup: vput----555
+  root@qemu:/tpt/a/b/c # ls
+
+
+  file hello.c 正常情况下的 struct stat 字段
+    (gdb) p/x *sbp 
+    $14 = {
+      st_dev = 0xffffffffffffffff,
+      st_ino = 0x3,
+      st_nlink = 0x1,
+      st_mode = 0x81a4,
+      st_padding0 = 0x0,
+      st_uid = 0x0,
+      st_gid = 0x0,
+      st_padding1 = 0x0,
+      st_rdev = 0xffffffffffffffff,
+      st_atim = {
+        tv_sec = 0x61d69472,
+        tv_nsec = 0x0
+      },
+      st_mtim = {
+        tv_sec = 0x61d69472,
+        tv_nsec = 0x0
+      },
+      st_ctim = {
+        tv_sec = 0x61d69472,
+        tv_nsec = 0x0
+      },
+      st_birthtim = {
+        tv_sec = 0x61d69472,
+        tv_nsec = 0x0
+      },
+      st_size = 0x4c,
+      st_blocks = 0x1,
+      st_blksize = 0x1000,
+      st_flags = 0x0,
+      st_gen = 0x645ee80e,
+      st_spare = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}
+    }
+
+////////////// 20220106 //////////////
+  root@qemu:/tpt # mv a b
+  mv: rename a to b: Resource deadlock avoided
+
+  提示该错误的原因应该就是 Lookup 函数并没有支持对 rename / delete /symlink 等文件操作功能的支持，要尝试修改函数
+代码的实现逻辑

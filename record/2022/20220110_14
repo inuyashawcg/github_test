@@ -1,0 +1,247 @@
+////////////// 20220110 //////////////
+  Operation not supported 错误提示在调试过程中发现是 TptStat 函数导致的，主要原因是 struct stat->st_mode 字段赋值错误导致的，
+修改原有代码逻辑之后错误提示消失
+
+
+commit a27c39059aa95846bdb37c00beb36b0bf17558f0 (HEAD -> user/wcg, origin/user/wcg)
+Author: chenguang.wang <chenguang.wang@terapines.com>
+Date:   Fri Jan 7 16:51:00 2022 +0800
+
+    Add file tree lookup function
+
+
+  在 tptfs 下创建一个文本文件 a，执行 echo > 命令。正常来说应该是会覆盖掉之前的文件数据，可是这里还是会包含有原来的数据。说明源文件中
+的数据并没有完全删除，而可能就只是在新数据的后面直接添加 '\0'
+
+  root@qemu:/tpt # echo "hello" > a
+  root@qemu:/tpt # file a
+  a: ASCII text
+  root@qemu:/tpt # cat a
+  hello
+  root@qemu:/tpt # echo "" > a
+  root@qemu:/tpt # cat a
+
+  ello
+
+
+gdb 打印信息：
+
+  Thread 8 hit Hardware watchpoint 10: *0xffffffc640003268
+
+  Old value = 0
+  New value = 6
+  0xffffffc0007a466a in TptInodeOps::TptIndTruncate (vp=0xffffffd00943b988, length=0, flags=0, 
+      cred=0xffffffd005691600, td=0xffffffc0cc407680)
+      at /home/mercury/Documents/code/qihai/qihai/fs/tptfs/tptfs_inode.cpp:321
+  321	  oip->tpti_size = osize;
+  (gdb) bt
+  #0  0xffffffc0007a466a in TptInodeOps::TptIndTruncate (vp=0xffffffd00943b988, length=0, flags=0, 
+      cred=0xffffffd005691600, td=0xffffffc0cc407680)
+      at /home/mercury/Documents/code/qihai/qihai/fs/tptfs/tptfs_inode.cpp:321
+  #1  0xffffffc0007a41be in TptInodeOps::TptTruncate (vp=0xffffffd00943b988, length=0, flags=0, 
+      cred=0xffffffd005691600, td=0xffffffc0cc407680)
+      at /home/mercury/Documents/code/qihai/qihai/fs/tptfs/tptfs_inode.cpp:69
+  #2  0xffffffc0007ab3c6 in TptfsVnode::TptSetAttr (ap=0xffffffc098d6b778)
+      at /home/mercury/Documents/code/qihai/qihai/fs/tptfs/tptfs_vnops.cpp:1327
+  #3  0xffffffc000532a74 in VOP_SETATTR_APV (vop=0xffffffc000911078 <tpt_vnodeops>, 
+      a=0xffffffc098d6b778) at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.c:927
+  #4  0xffffffc00052b83a in VOP_SETATTR (vp=0xffffffd00943b988, vap=0xffffffc098d6b7d0, 
+      cred=0xffffffd005691600) at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.h:485
+  #5  0xffffffc00052b7ce in vn_truncate_locked (vp=0xffffffd00943b988, length=0, sync=false, 
+      cred=0xffffffd005691600) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1593
+  #6  0xffffffc0005278c8 in vn_truncate (fp=0xffffffd0054a0dc0, length=0, 
+      active_cred=0xffffffd005691600, td=0xffffffc0cc407680)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1565
+  #7  0xffffffc00051e5e8 in fo_truncate (fp=0xffffffd0054a0dc0, length=0, 
+      active_cred=0xffffffd005691600, td=0xffffffc0cc407680)
+      at /home/mercury/Documents/code/qihai/qihai/sys/file.h:346
+  #8  0xffffffc00051e254 in kern_openat (td=0xffffffc0cc407680, fd=-100, 
+      path=0x40808bf0 <error: Cannot access memory at address 0x40808bf0>, pathseg=UIO_USERSPACE, 
+      flags=1026, mode=438) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_syscalls.c:1191
+  #9  0xffffffc00051e3ae in sys_openat (td=0xffffffc0cc407680, uap=0xffffffc0cc407a68)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_syscalls.c:1090
+  #10 0xffffffc000773818 in syscallenter (td=0xffffffc0cc407680)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/../../kernel/subr_syscall:189
+  #11 0xffffffc000773132 in ecall_handler ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:167
+  #12 0xffffffc000772f7e in do_trap_user (frame=0xffffffc098d6bc50)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:371
+  #13 0xffffffc000756296 in cpu_exception_handler_user ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/exception.S:229
+  Backtrace stopped: frame did not save the PC
+
+
+ext2 中的 ip->i_size 的变化情况如下：
+ 
+  Thread 6 hit Hardware watchpoint 2: *0xffffffd005547760
+  Old value = 6
+  New value = 0
+  ext2_ind_truncate (vp=0xffffffd0096657a0, length=0, flags=0, cred=0xffffffd005250300, 
+      td=0xffffffc098f74580) at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_inode.c:294
+  294		} else {
+  (gdb) bt
+  #0  ext2_ind_truncate (vp=0xffffffd0096657a0, length=0, flags=0, cred=0xffffffd005250300, 
+      td=0xffffffc098f74580) at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_inode.c:294
+  #1  0xffffffc000747cd4 in ext2_truncate (vp=0xffffffd0096657a0, length=0, flags=0, 
+      cred=0xffffffd005250300, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_inode.c:583
+  #2  0xffffffc00075226c in ext2_setattr (ap=0xffffffc098d69778)
+      at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_vnops.c:480
+  #3  0xffffffc000532a74 in VOP_SETATTR_APV (vop=0xffffffc0009130a0 <ext2_vnodeops>, 
+      a=0xffffffc098d69778) at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.c:927
+  #4  0xffffffc00052b83a in VOP_SETATTR (vp=0xffffffd0096657a0, vap=0xffffffc098d697d0, 
+      cred=0xffffffd005250300) at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.h:485
+  #5  0xffffffc00052b7ce in vn_truncate_locked (vp=0xffffffd0096657a0, length=0, sync=false, 
+      cred=0xffffffd005250300) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1593
+  #6  0xffffffc0005278c8 in vn_truncate (fp=0xffffffd005523c80, length=0, 
+      active_cred=0xffffffd005250300, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1565
+  #7  0xffffffc00051e5e8 in fo_truncate (fp=0xffffffd005523c80, length=0, 
+      active_cred=0xffffffd005250300, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/sys/file.h:346
+  #8  0xffffffc00051e254 in kern_openat (td=0xffffffc098f74580, fd=-100, 
+      path=0x40808540 <error: Cannot access memory at address 0x40808540>, pathseg=UIO_USERSPACE, 
+      flags=1026, mode=438) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_syscalls.c:1191
+  #9  0xffffffc00051e3ae in sys_openat (td=0xffffffc098f74580, uap=0xffffffc098f74968)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_syscalls.c:1090
+  #10 0xffffffc000773818 in syscallenter (td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/../../kernel/subr_syscall:189
+  #11 0xffffffc000773132 in ecall_handler ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:167
+  #12 0xffffffc000772f7e in do_trap_user (frame=0xffffffc098d69c50)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:371
+  #13 0xffffffc000756296 in cpu_exception_handler_user ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/exception.S:229
+  Backtrace stopped: frame did not save the PC
+
+
+  Thread 6 hit Hardware watchpoint 2: *0xffffffd005547760
+  Old value = 0
+  New value = 6
+  ext2_ind_truncate (vp=0xffffffd0096657a0, length=0, flags=0, cred=0xffffffd005250300, 
+      td=0xffffffc098f74580) at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_inode.c:360
+  360		error = vtruncbuf(ovp, length, (int)fs->e2fs_bsize);
+  (gdb) bt
+  #0  ext2_ind_truncate (vp=0xffffffd0096657a0, length=0, flags=0, cred=0xffffffd005250300, 
+      td=0xffffffc098f74580) at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_inode.c:360
+  #1  0xffffffc000747cd4 in ext2_truncate (vp=0xffffffd0096657a0, length=0, flags=0, 
+      cred=0xffffffd005250300, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_inode.c:583
+  #2  0xffffffc00075226c in ext2_setattr (ap=0xffffffc098d69778)
+      at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_vnops.c:480
+  #3  0xffffffc000532a74 in VOP_SETATTR_APV (vop=0xffffffc0009130a0 <ext2_vnodeops>, 
+      a=0xffffffc098d69778) at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.c:927
+  #4  0xffffffc00052b83a in VOP_SETATTR (vp=0xffffffd0096657a0, vap=0xffffffc098d697d0, 
+      cred=0xffffffd005250300) at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.h:485
+  #5  0xffffffc00052b7ce in vn_truncate_locked (vp=0xffffffd0096657a0, length=0, sync=false, 
+      cred=0xffffffd005250300) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1593
+  #6  0xffffffc0005278c8 in vn_truncate (fp=0xffffffd005523c80, length=0, 
+      active_cred=0xffffffd005250300, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1565
+  #7  0xffffffc00051e5e8 in fo_truncate (fp=0xffffffd005523c80, length=0, 
+      active_cred=0xffffffd005250300, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/sys/file.h:346
+  #8  0xffffffc00051e254 in kern_openat (td=0xffffffc098f74580, fd=-100, 
+      path=0x40808540 <error: Cannot access memory at address 0x40808540>, pathseg=UIO_USERSPACE, 
+      flags=1026, mode=438) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_syscalls.c:1191
+  #9  0xffffffc00051e3ae in sys_openat (td=0xffffffc098f74580, uap=0xffffffc098f74968)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_syscalls.c:1090
+  #10 0xffffffc000773818 in syscallenter (td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/../../kernel/subr_syscall:189
+  #11 0xffffffc000773132 in ecall_handler ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:167
+  #12 0xffffffc000772f7e in do_trap_user (frame=0xffffffc098d69c50)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:371
+  #13 0xffffffc000756296 in cpu_exception_handler_user ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/exception.S:229
+
+
+  Thread 6 hit Hardware watchpoint 2: *0xffffffd005547760
+  Old value = 6
+  New value = 0
+  ext2_ind_truncate (vp=0xffffffd0096657a0, length=0, flags=0, cred=0xffffffd005250300, 
+      td=0xffffffc098f74580) at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_inode.c:452
+  452		if (oip->i_blocks >= blocksreleased)
+  (gdb) bt
+  #0  ext2_ind_truncate (vp=0xffffffd0096657a0, length=0, flags=0, cred=0xffffffd005250300, 
+      td=0xffffffc098f74580) at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_inode.c:452
+  #1  0xffffffc000747cd4 in ext2_truncate (vp=0xffffffd0096657a0, length=0, flags=0, 
+      cred=0xffffffd005250300, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_inode.c:583
+  #2  0xffffffc00075226c in ext2_setattr (ap=0xffffffc098d69778)
+      at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_vnops.c:480
+  #3  0xffffffc000532a74 in VOP_SETATTR_APV (vop=0xffffffc0009130a0 <ext2_vnodeops>, 
+      a=0xffffffc098d69778) at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.c:927
+  #4  0xffffffc00052b83a in VOP_SETATTR (vp=0xffffffd0096657a0, vap=0xffffffc098d697d0, 
+      cred=0xffffffd005250300) at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.h:485
+  #5  0xffffffc00052b7ce in vn_truncate_locked (vp=0xffffffd0096657a0, length=0, sync=false, 
+      cred=0xffffffd005250300) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1593
+  #6  0xffffffc0005278c8 in vn_truncate (fp=0xffffffd005523c80, length=0, 
+      active_cred=0xffffffd005250300, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1565
+  #7  0xffffffc00051e5e8 in fo_truncate (fp=0xffffffd005523c80, length=0, 
+      active_cred=0xffffffd005250300, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/sys/file.h:346
+  #8  0xffffffc00051e254 in kern_openat (td=0xffffffc098f74580, fd=-100, 
+      path=0x40808540 <error: Cannot access memory at address 0x40808540>, pathseg=UIO_USERSPACE, 
+      flags=1026, mode=438) at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_syscalls.c:1191
+  #9  0xffffffc00051e3ae in sys_openat (td=0xffffffc098f74580, uap=0xffffffc098f74968)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_syscalls.c:1090
+  #10 0xffffffc000773818 in syscallenter (td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/../../kernel/subr_syscall:189
+  #11 0xffffffc000773132 in ecall_handler ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:167
+  #12 0xffffffc000772f7e in do_trap_user (frame=0xffffffc098d69c50)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:371
+  #13 0xffffffc000756296 in cpu_exception_handler_user ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/exception.S:229
+
+
+  Thread 6 hit Hardware watchpoint 2: *0xffffffd005547760
+  Old value = 0
+  New value = 1
+  0xffffffc000752bf0 in ext2_write (ap=0xffffffc098d697f8)
+      at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_vnops.c:2269
+  2269				ip->i_size = uio->uio_offset + xfersize;
+  (gdb) bt
+  #0  0xffffffc000752bf0 in ext2_write (ap=0xffffffc098d697f8)
+      at /home/mercury/Documents/code/qihai/qihai/fs/ext2fs/ext2_vnops.c:2269
+  #1  0xffffffc0005330c4 in VOP_WRITE_APV (vop=0xffffffc0009130a0 <ext2_vnodeops>, a=0xffffffc098d697f8)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.c:1169
+  #2  0xffffffc00052a7e8 in VOP_WRITE (vp=0xffffffd0096657a0, uio=0xffffffc098d69aa8, ioflag=131073, 
+      cred=0xffffffd005250300) at /home/mercury/Documents/code/qihai/qihai/kernel/vnode_if.h:600
+  #3  0xffffffc000530c4a in vn_write (fp=0xffffffd005523c80, uio=0xffffffc098d69aa8, 
+      active_cred=0xffffffd005250300, flags=1, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1111
+  #4  0xffffffc000527762 in vn_io_fault (fp=0xffffffd005523c80, uio=0xffffffc098d69aa8, 
+      active_cred=0xffffffd005250300, flags=0, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/vfs_vnops.c:1419
+  #5  0xffffffc0004743d0 in fo_write (fp=0xffffffd005523c80, uio=0xffffffc098d69aa8, 
+      active_cred=0xffffffd005250300, flags=0, td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/sys/file.h:338
+  #6  0xffffffc0004702a8 in dofilewrite (td=0xffffffc098f74580, fd=1, fp=0xffffffd005523c80, 
+      auio=0xffffffc098d69aa8, offset=-1, flags=0)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/sys_generic.c:565
+  #7  0xffffffc00046fee8 in kern_writev (td=0xffffffc098f74580, fd=1, auio=0xffffffc098d69aa8)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/sys_generic.c:492
+  #8  0xffffffc00046fe5e in sys_write (td=0xffffffc098f74580, uap=0xffffffc098f74968)
+      at /home/mercury/Documents/code/qihai/qihai/kernel/sys_generic.c:407
+  #9  0xffffffc000773818 in syscallenter (td=0xffffffc098f74580)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/../../kernel/subr_syscall:189
+  #10 0xffffffc000773132 in ecall_handler ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:167
+  #11 0xffffffc000772f7e in do_trap_user (frame=0xffffffc098d69c50)
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/trap.c:371
+  #12 0xffffffc000756296 in cpu_exception_handler_user ()
+      at /home/mercury/Documents/code/qihai/qihai/riscv/riscv/exception.S:229
+
+
+////////////// 20220111 //////////////
+- 链接文件数据其实是放在 inode 数据块索引所在的区域当中的，也就是在 struct tpt_inode 结构体的内部，而不是分配一个数据块
+- 存放的数据就是被链接文件的绝对路径或者是相对路径
+
+    (gdb) p (char*)&ip->tpti_db[0]
+    $7 = 0xffffffc6400035a0 "/ext2/b"
+
+    (gdb) p (char*)&ip->tpti_db[0]
+    $10 = 0xffffffc6400036a0 "a"
