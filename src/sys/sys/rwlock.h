@@ -51,9 +51,17 @@
  * dependent on the value of the first bit.  For a write lock, it is a
  * pointer to the thread holding the lock, similar to the mtx_lock field of
  * mutexes.  For read locks, it is a count of read locks that are held.
+ * 
+ * rw_lock 其实是一个32位或者64位的一个变量，它本身会包含非常多的属性信息。低位表示锁是
+ * 用读（共享）锁还是写（独占）锁锁定的。0 表示一个写锁，1表示一个读锁。bit 1 是一个布尔值，
+ * 表示是否有一个进程在等待一个读锁。bit 2 表示是否有进程正在等待一个写锁。变量定义的其余部分
+ * 取决于第一位的值。对于写锁，它是指向持有锁的线程的指针，类似于互斥锁的 mtx_lock 字段。
+ * 对于读锁，它是持有的读锁的计数。
  *
  * When the lock is not locked by any thread, it is encoded as a read lock
  * with zero waiters.
+ * 当锁未被任何线程锁定时，它被编码为具有零等待者的读锁
+ * 
  */
 
 #define	RW_LOCK_READ		0x01
@@ -61,9 +69,11 @@
 #define	RW_LOCK_WRITE_WAITERS	0x04
 #define	RW_LOCK_WRITE_SPINNER	0x08
 #define	RW_LOCK_WRITER_RECURSED	0x10
+
 #define	RW_LOCK_FLAGMASK						\
 	(RW_LOCK_READ | RW_LOCK_READ_WAITERS | RW_LOCK_WRITE_WAITERS |	\
 	RW_LOCK_WRITE_SPINNER | RW_LOCK_WRITER_RECURSED)
+
 #define	RW_LOCK_WAITERS		(RW_LOCK_READ_WAITERS | RW_LOCK_WRITE_WAITERS)
 
 #define	RW_OWNER(x)		((x) & ~RW_LOCK_FLAGMASK)
@@ -83,7 +93,9 @@
 
 /* Very simple operations on rw_lock. */
 
-/* Try to obtain a write lock once. */
+/* Try to obtain a write lock once. 
+	尝试获取一次写锁
+*/
 #define	_rw_write_lock(rw, tid)						\
 	atomic_cmpset_acq_ptr(&(rw)->rw_lock, RW_UNLOCKED, (tid))
 
@@ -101,6 +113,7 @@
  * Full lock operations that are suitable to be inlined in non-debug
  * kernels.  If the lock cannot be acquired or released trivially then
  * the work is deferred to another function.
+ * 适合内联在非调试内核中的全锁操作。如果锁不能被获取或释放，那么工作将被推迟到另一个函数。
  */
 
 /* Acquire a write lock. */
@@ -164,8 +177,16 @@ void	__rw_assert(const volatile uintptr_t *c, int what, const char *file,
 	_rw_init_flags(&(rw)->rw_lock, n, 0)
 #define	rw_init_flags(rw, n, o)						\
 	_rw_init_flags(&(rw)->rw_lock, n, o)
+/*
+	This functions destroys a lock previously initialized with rw_init(). 
+	The rw lock must be unlocked.
+*/
 #define	rw_destroy(rw)							\
 	_rw_destroy(&(rw)->rw_lock)
+/*
+	This function returns a non-zero value if the current thread owns an 
+	exclusive lock on rw.
+*/
 #define	rw_wowned(rw)							\
 	_rw_wowned(&(rw)->rw_lock)
 #define	_rw_wlock(rw, f, l)						\
@@ -207,6 +228,11 @@ void	__rw_assert(const volatile uintptr_t *c, int what, const char *file,
 	__rw_downgrade_int(rw)
 #endif
 #if defined(INVARIANTS) || defined(INVARIANT_SUPPORT)
+/*
+	his function allows assertions specified in what to be made about rw.	
+	If the assertions are not true and the kernel is compiled with options
+	INVARIANTS and options INVARIANT_SUPPORT, the kernel will panic.
+*/
 #define	_rw_assert(rw, w, f, l)						\
 	__rw_assert(&(rw)->rw_lock, w, f, l)
 #endif
@@ -223,27 +249,77 @@ void	__rw_assert(const volatile uintptr_t *c, int what, const char *file,
 #define	rw_wlock(rw)		_rw_wlock((rw), LOCK_FILE, LOCK_LINE)
 #define	rw_wunlock(rw)		_rw_wunlock((rw), LOCK_FILE, LOCK_LINE)
 #else
+/*
+	Lock rw as	a writer.  If there are	any shared owners of the lock, the current thread	blocks.
+	The rw_wlock() function can be called recursively only if rw has been initialized with the 
+	RW_RECURSE option enabled.
+	将rw锁定为编写器。如果存在锁的任何共享所有者，则当前线程将阻塞。只有在启用了 RW_RECURSE 选项的情况下初始化rw时，
+	才能递归调用 rw_wlock 函数
+*/
 #define	rw_wlock(rw)							\
 	__rw_wlock((rw), curthread, LOCK_FILE, LOCK_LINE)
+/*
+	This function releases an exclusive lock previously acquired by rw_wlock().
+*/
 #define	rw_wunlock(rw)							\
 	__rw_wunlock((rw), curthread, LOCK_FILE, LOCK_LINE)
 #endif
+/*
+	Lock rw as a reader. If any thread holds this lock exclusively, the current thread blocks,
+	and its	priority is propagated to the exclusive holder. The rw_rlock() function	can be called
+	when the thread has	already	acquired reader	access on rw. This is called "recursing on a lock".
+
+	将rw锁定为读卡器。如果任何线程以独占方式持有此锁，则当前线程将阻塞，其优先级将传播到独占持有者。当线程已经获得rw上的
+	读卡器访问权限时，可以调用rw_rlock（）函数。这被称为“在锁上递归”
+*/
 #define	rw_rlock(rw)		_rw_rlock((rw), LOCK_FILE, LOCK_LINE)
+/*
+	This function releases a shared lock previously acquired by rw_rlock().
+*/
 #define	rw_runlock(rw)		_rw_runlock((rw), LOCK_FILE, LOCK_LINE)
+/*
+	Try to lock rw as a reader. This function	will return true if the operation succeeds, 
+	otherwise 0 will be returned.
+*/
 #define	rw_try_rlock(rw)	_rw_try_rlock((rw), LOCK_FILE, LOCK_LINE)
+/*
+	Attempt to upgrade a single shared lock to an exclusive lock. The current thread must hold a 
+	shared lock	of rw. This will only succeed if the current thread holds the only shared lock on rw,
+	and it only holds a single shared lock. If the attempt succeeds rw_try_upgrade() will return a 
+	non-zero value, and	the current thread will hold an exclusive lock. If the attempt fails rw_try_upgrade()
+	will return zero,	and the	current	thread will still hold a shared lock.
+*/
 #define	rw_try_upgrade(rw)	_rw_try_upgrade((rw), LOCK_FILE, LOCK_LINE)
+/*
+	Try to lock rw as a writer. This function	will return true if the operation succeeds, 
+	otherwise 0 will be returned.
+*/
 #define	rw_try_wlock(rw)	_rw_try_wlock((rw), LOCK_FILE, LOCK_LINE)
+/*
+	Convert an exclusive lock into a single shared lock. The current thread must hold 
+	an exclusive lock	of rw.
+*/
 #define	rw_downgrade(rw)	_rw_downgrade((rw), LOCK_FILE, LOCK_LINE)
+/*
+	This function releases a shared lock previously acquired by rw_rlock() or an exclusive lock 
+	previously acquired by rw_wlock().
+*/
 #define	rw_unlock(rw)	do {						\
 	if (rw_wowned(rw))						\
 		rw_wunlock(rw);						\
 	else								\
 		rw_runlock(rw);						\
 } while (0)
+/*
+	Atomically	release	rw while waiting for an	event. For more details on the parameters to 
+	this function, see sleep(9).
+*/
 #define	rw_sleep(chan, rw, pri, wmesg, timo)				\
 	_sleep((chan), &(rw)->lock_object, (pri), (wmesg),		\
 	    tick_sbt * (timo), 0, C_HARDCLOCK)
-
+/*
+	This function returns non-zero if rw has been initialized, and zero otherwise.
+*/
 #define	rw_initialized(rw)	lock_initialized(&(rw)->lock_object)
 
 struct rw_args {
@@ -268,11 +344,32 @@ struct rw_args {
 /*
  * Options passed to rw_init_flags().
  */
+/*
+	Witness should not log messages about duplicate locks being acquired.
+*/
 #define	RW_DUPOK	0x01
+/*
+	Do not profile this lock. 不要配置此锁
+*/
 #define	RW_NOPROFILE	0x02
+/*
+	Instruct witness(4) to ignore this lock.
+*/
 #define	RW_NOWITNESS	0x04
+/*
+	Do not log any operations for this lock via ktr(4).
+*/
 #define	RW_QUIET	0x08
+/*
+	Allow threads to recursively	acquire	exclusive locks for rw
+	允许线程递归调用此锁
+*/
 #define	RW_RECURSE	0x10
+/*
+	If the kernel has been compiled with option INVARIANTS, rw_init_flags() 
+	will assert that the rw has not been initialized multiple times without 
+	intervening calls to rw_destroy() unless this option is specified.
+*/
 #define	RW_NEW		0x20
 
 /*
@@ -283,10 +380,28 @@ struct rw_args {
  * _rw_assert() must build.
  */
 #if defined(INVARIANTS) || defined(INVARIANT_SUPPORT)
+/*
+	Assert that current thread holds either a shared or exclusive lock of rw.
+*/
 #define	RA_LOCKED		LA_LOCKED
+/*
+	Assert that current thread holds a shared lock of rw.
+*/
 #define	RA_RLOCKED		LA_SLOCKED
+/*
+	Assert that current thread holds an exclusive	lock of rw.
+*/
 #define	RA_WLOCKED		LA_XLOCKED
+/*
+	Assert that current thread holds neither a shared nor exclusive	lock of	rw.
+*/
 #define	RA_UNLOCKED		LA_UNLOCKED
+/*
+	In addition, one of the following optional flags may be specified
+	with RA_LOCKED, RA_RLOCKED, or RA_WLOCKED:
+		RA_RECURSED  Assert that the current thread holds a recursive lock of rw.
+		RA_NOTRECURSED  Assert that the current thread does not hold a recursive lock of rw.
+*/
 #define	RA_RECURSED		LA_RECURSED
 #define	RA_NOTRECURSED		LA_NOTRECURSED
 #endif

@@ -99,7 +99,9 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/vfs_subr.c 337977 2018-08-17 16:07:06Z 
 #include <ddb/ddb.h>
 #endif
 
-/* static类型的函数在class中应该要声明为private */
+/* 
+	static类型的函数在class中应该要声明为private
+*/
 static void	delmntque(struct vnode *vp);
 static int	flushbuflist(struct bufv *bufv, int flags, struct bufobj *bo,
 		    int slpflag, int slptimeo);
@@ -125,6 +127,9 @@ static void	destroy_vpollinfo(struct vpollinfo *vi);
  * by the interlock, but we have some internal assertions that check vnode
  * flags without acquiring the lock.  Thus, these fences are INVARIANTS-only
  * for now.
+ * 这些围栏适用于需要在访问v_iFlag和无锁vnode refcount（v_holdcnt和v_usecount）更新
+ * 之间进行同步的情况。对v_iflags的访问通常由联锁同步，但我们有一些内部断言，它们在不获取锁
+ * 的情况下检查vnode标志。因此，这些围栏只是暂时不变的
  */
 #ifdef INVARIANTS
 #define	VNODE_REFCOUNT_FENCE_ACQ()	atomic_thread_fence_acq()
@@ -137,7 +142,7 @@ static void	destroy_vpollinfo(struct vpollinfo *vi);
 /*
  * Number of vnodes in existence.  Increased whenever getnewvnode()
  * allocates a new vnode, decreased in vdropl() for VI_DOOMED vnode.
- * 表示目前已经存在的vnode的数量，而且是静态的，也是全局参数
+ * 表示目前已经存在的 vnode 的数量，而且是静态的，也是全局参数
  */
 static unsigned long	numvnodes;
 
@@ -152,7 +157,7 @@ SYSCTL_COUNTER_U64(_vfs, OID_AUTO, vnodes_created, CTLFLAG_RD, &vnodes_created,
     "Number of vnodes created by getnewvnode");
 
 /*
-	mount中的free list对于 vnode数量的限制
+	mount中的 free list 对于 vnode 数量的限制
 */
 static u_long mnt_free_list_batch = 128;
 SYSCTL_ULONG(_vfs, OID_AUTO, mnt_free_list_batch, CTLFLAG_RW,
@@ -186,6 +191,7 @@ static TAILQ_HEAD(freelst, vnode) vnode_free_list;
  * of this sub-cache with its complement to try to prevent either from
  * thrashing while the other is relatively inactive.  The targets express
  * a preference for the best balance.
+ * 
  * 空闲的vnode很少是完全空闲的，只是相比较而言回收成本比较低而已；它们通常用于已统计但
  * 未读取的文件；这些文件通常附带 inode 和 namecache 数据。此目标是主要由此类文件组成的子
  * 缓存的首选最小大小。系统平衡这个子缓存的大小和它的补码，以防止其中一个在另一个相对不
@@ -233,7 +239,8 @@ SYSCTL_COUNTER_U64(_vfs, OID_AUTO, free_owe_inact, CTLFLAG_RD, &free_owe_inact,
     "owing inactivation"); // 由于 VFS 失活而保留在活动列表上的可用 Vnode 的次数
 
 /* To keep more than one thread at a time from running vfs_getnewfsid 
-	保证每个时刻都至少一个线程运行 vfs_getnewfsid 函数
+	保证每个时刻都至少一个线程运行 vfs_getnewfsid 函数。这个锁貌似是专门用来处理获取文件系统
+	id 时候才会用到的，应用场景比较单一
 */
 static struct mtx mntid_mtx;
 
@@ -291,6 +298,7 @@ static uma_zone_t vnodepoll_zone;
  * 系统SYNCER进程驱动）。syncer_delayno变量表示要处理的下一个队列。需要尽快处理的项目
  * 将放置在此队列中 
  * 	syncer_workitem_pending[syncer_delayno]
+ * 
  * 延迟15秒是通过在队列中稍后放置15个条目来完成的：
  * 	syncer_workitem_pending[(syncer_delayno + 15) & syncer_mask]
  */
@@ -340,15 +348,24 @@ static int syncer_worklist_len;
 static enum { SYNCER_RUNNING, SYNCER_SHUTTING_DOWN, SYNCER_FINAL_DELAY }
     syncer_state;
 
-/* Target for maximum number of vnodes. */
+/* Target for maximum number of vnodes.
+	desiredvnodes 是根据RAM大小和进程数等等系统参数预估的一个值，然后根据它建立 vfs 哈希表，就是一个初始值。
+	vnode 实际生成跟它没有任何关系的，只会增加 numvnodes 和 vnodes_created 的值。所以，numvnodes 是可以
+	增长到比 desiredvnodes 要大的。free_list 其实也是实例化出的 vnode 不再被使用之后，添加到其中的。所以
+	链表大小跟 desiredvnodes 也是没有关系的，阅读代码的时候就把它们独立来看就好。
+	numvnodes 表示的 vnode 应该是要分散在两个部分，一个是正在被使用的 vnode，另外一个是空闲的 vnode？
+*/
 int desiredvnodes;
 static int gapvnodes;		/* gap between wanted and desired */
 static int vhiwat;		/* enough extras after expansion 扩展后有足够的额外功能 */
 static int vlowat;		/* minimal extras before expansion */
-static int vstir;		/* nonzero to stir non-free vnodes */
+static int vstir;		/* nonzero to stir(扰动，搅动) non-free vnodes */
+/*
+	trigger：触发，引发
+*/
 static volatile int vsmalltrigger = 8;	/* pref to keep if > this many pages */
 
-/* 更新desiredvnodes，sysctl其实就是在用户态控制内核态中的一些属性参数 */
+/* 更新 desiredvnodes，sysctl 其实就是在用户态控制内核态中的一些属性参数 */
 static int
 sysctl_update_desiredvnodes(SYSCTL_HANDLER_ARGS)
 {
@@ -377,7 +394,8 @@ SYSCTL_INT(_debug, OID_AUTO, vnlru_nowhere, CTLFLAG_RW,
 
 /* Shift count for (uintptr_t)vp to initialize vp->v_hash. 
 	(uintptr_t)vp 的移位计数来初始化 vp->v_hash
-	展开来看就是: vnode size to log，表示的是移位计数
+	展开来看就是: vnode size to log，表示的是移位计数。
+	vnode size to log，将 vnode 的大小转换成 2 的对数 
 */
 static int vnsz2log;
 
@@ -506,9 +524,9 @@ vntblinit(void *dummy __unused)
 	 * must not exceed 1/10th of the kernel's heap size.
 	 * 
 	 * Desiredvnodes 是物理内存大小和内核堆大小的函数。一般来说，它随物理内存大小而扩展。
-	 * 在 desiredvnodes 超过98304之前，desiredvnodes 与物理内存大小的比率为1:16
+	 * 在 desiredvnodes 超过 98304 之前，desiredvnodes 与物理内存大小的比率为1:16
 	 * 此后，期望 vnode 与物理内存大小的边际比率为1:64。但是，DesiredVnode 受到内核堆大小的限制。
-	 * desiredvnodes vnodes 和 v m对象所需的内存不得超过内核堆大小的十分之一
+	 * desiredvnodes vnodes 和 vm 对象所需的内存不得超过内核堆大小的十分之一
 	 */
 	physvnodes = maxproc + pgtok(vm_cnt.v_page_count) / 64 +
 	    3 * min(98304 * 16, pgtok(vm_cnt.v_page_count)) / 64;
@@ -587,14 +605,16 @@ SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_FIRST, vntblinit, NULL);
  * For a mountpoint mp, vfs_busy-enforced lock is before lock of any
  * vnode belonging to mp.
  *
- * Lookup uses vfs_busy() to traverse mount points.
+ * Lookup uses vfs_busy() to traverse(穿过) mount points.
  * root fs			var fs
  * / vnode lock		A	/ vnode lock (/var)		D
  * /var vnode lock	B	/log vnode lock(/var/log)	E
  * vfs_busy lock	C	vfs_busy lock			F
  *
  * Within each file system, the lock order is C->A->B and F->D->E.
- *
+ * 跨文件系统访问的时候，我们应该是要先锁住原文件系统中对应节点的vnode，然后再锁住挂载的文件系统
+ * 对应节点分配的 vnode
+ * 
  * When traversing across mounts, the system follows that lock order:
  *
  *        C->A->B
@@ -621,7 +641,7 @@ vfs_busy(struct mount *mp, int flags)
 	MPASS((flags & ~MBF_MASK) == 0);
 	CTR3(KTR_VFS, "%s: mp %p with flags %d", __func__, mp, flags);
 
-	MNT_ILOCK(mp);
+	MNT_ILOCK(mp);	// 给 mount 加锁，然后增加引用计数
 	MNT_REF(mp);
 	/*
 	 * If mount point is currently being unmounted, sleep until the
@@ -634,6 +654,7 @@ vfs_busy(struct mount *mp, int flags)
 	 * reference on the mount point in this case and return with ENOENT,
 	 * telling the caller that mount mount it tried to busy is no longer
 	 * valid.
+	 * 在我们先要通过flag判断一下挂载点是否可用
 	 */
 	while (mp->mnt_kern_flag & MNTK_UNMOUNT) {
 		if (flags & MBF_NOWAIT || mp->mnt_kern_flag & MNTK_REFEXPIRE) {
@@ -645,7 +666,7 @@ vfs_busy(struct mount *mp, int flags)
 		}
 		if (flags & MBF_MNTLSTLOCK)
 			mtx_unlock(&mountlist_mtx);
-		mp->mnt_kern_flag |= MNTK_MWAIT;
+		mp->mnt_kern_flag |= MNTK_MWAIT;	// 等待umount操作结束
 		msleep(mp, MNT_MTX(mp), PVFS | PDROP, "vfs_busy", 0);
 		if (flags & MBF_MNTLSTLOCK)
 			mtx_lock(&mountlist_mtx);
@@ -653,8 +674,11 @@ vfs_busy(struct mount *mp, int flags)
 	}
 	if (flags & MBF_MNTLSTLOCK)
 		mtx_unlock(&mountlist_mtx);
+	/*
+		从这里可以看出，
+	*/
 	mp->mnt_lockref++;
-	MNT_IUNLOCK(mp);
+	MNT_IUNLOCK(mp);	// 对应开始的mount加锁
 	return (0);
 }
 
@@ -667,7 +691,7 @@ vfs_unbusy(struct mount *mp)
 
 	CTR2(KTR_VFS, "%s: mp %p", __func__, mp);
 	MNT_ILOCK(mp);
-	MNT_REL(mp);
+	MNT_REL(mp);	// 减少 mount 结构的引用计数
 	KASSERT(mp->mnt_lockref > 0, ("negative mnt_lockref"));
 	mp->mnt_lockref--;
 	if (mp->mnt_lockref == 0 && (mp->mnt_kern_flag & MNTK_DRAINING) != 0) {
@@ -681,6 +705,7 @@ vfs_unbusy(struct mount *mp)
 
 /*
  * Lookup a mount point by filesystem identifier.
+		通过检索文件系统对应的 id 号获得 mount 结构
  */
 struct mount *
 vfs_getvfs(fsid_t *fsid)
@@ -689,10 +714,11 @@ vfs_getvfs(fsid_t *fsid)
 
 	CTR2(KTR_VFS, "%s: fsid %p", __func__, fsid);
 	mtx_lock(&mountlist_mtx);
+	// 这里遍历全局链表使用的是 mutex 锁
 	TAILQ_FOREACH(mp, &mountlist, mnt_list) {
 		if (mp->mnt_stat.f_fsid.val[0] == fsid->val[0] &&
 		    mp->mnt_stat.f_fsid.val[1] == fsid->val[1]) {
-			vfs_ref(mp);
+			vfs_ref(mp);	// ref 增加引用计数，rel减少引用计数
 			mtx_unlock(&mountlist_mtx);
 			return (mp);
 		}
@@ -711,13 +737,23 @@ vfs_getvfs(fsid_t *fsid)
  * the fact that struct mount's are never freed.  In worst case we may
  * get pointer to unmounted or even different filesystem, so we have to
  * check what we got, and go slow way if so.
+ * 
+ * 为了避免 mountlist_mtx 上的拥塞，为流行的文件系统标识符实现简单的直接映射缓存。
+ * 缓存是无锁的，因为结构挂载永远不会被释放。在最坏的情况下，我们可能会得到指向未
+ * 安装的文件系统甚至不同文件系统的指针，所以我们必须检查我们得到了什么，如果是这样的话，
+ * 就慢慢来
  */
 struct mount *
 vfs_busyfs(fsid_t *fsid)
 {
 #define	FSID_CACHE_SIZE	256
+	/*
+		volatile 关键字会使得编译器对访问该变量的代码就不再进行优化，从而可以提供对特殊地址的稳定访问。
+		当要求使用 volatile 声明的变量的值的时候，系统总是重新从它所在的内存读取数据，即使它前面的指令
+		刚刚从该处读取过数据。而且读取的数据立刻被保存。
+	*/
 	typedef struct mount * volatile vmp_t;
-	static vmp_t cache[FSID_CACHE_SIZE];
+	static vmp_t cache[FSID_CACHE_SIZE];	// 静态的 mount cache
 	struct mount *mp;
 	int error;
 	uint32_t hash;
@@ -751,7 +787,7 @@ slow:
 				mtx_unlock(&mountlist_mtx);
 				return (NULL);
 			}
-			cache[hash] = mp;
+			cache[hash] = mp;	// 将查找到的 mount 结构做缓存处理
 			return (mp);
 		}
 	}
@@ -773,6 +809,7 @@ vfs_suser(struct mount *mp, struct thread *td)
 		/*
 		 * If the jail of the calling thread lacks permission for
 		 * this type of file system, deny immediately.
+		 * 如果调用线程缺少对该类型文件系统的访问权限，立刻拒绝
 		 */
 		if (!prison_allow(td->td_ucred, mp->mnt_vfc->vfc_prison_flag))
 			return (EPERM);
@@ -780,6 +817,7 @@ vfs_suser(struct mount *mp, struct thread *td)
 		/*
 		 * If the file system was mounted outside the jail of the
 		 * calling thread, deny immediately.
+		 * 如果文件系统安装在调用线程的外部，请立即拒绝
 		 */
 		if (prison_check(td->td_ucred, mp->mnt_cred) != 0)
 			return (EPERM);
@@ -823,6 +861,7 @@ vfs_getnewfsid(struct mount *mp)
 	int mtype;
 
 	CTR2(KTR_VFS, "%s: mp %p", __func__, mp);
+	// mntid_mtx 貌似是专门处理文件系统 id 才设置的
 	mtx_lock(&mntid_mtx);
 	mtype = mp->mnt_vfc->vfc_typenum;
 	tfsid.val[1] = mtype;
@@ -833,6 +872,10 @@ vfs_getnewfsid(struct mount *mp)
 		mntid_base++;
 		if ((nmp = vfs_getvfs(&tfsid)) == NULL)
 			break;
+		/*
+			如果某个 fsid 的 mount 已经存在在管理链表当中，则会获取到该 mount 对象，并增加引用计数。
+			因为这里只是用来确定该 id 是否已经存在，并不会做其他操作，所以最后要把引用计数减去
+		*/
 		vfs_rel(nmp);
 	}
 	mp->mnt_stat.f_fsid.val[0] = tfsid.val[0];
@@ -842,6 +885,7 @@ vfs_getnewfsid(struct mount *mp)
 
 /*
  * Knob to control the precision of file timestamps:
+ * 控制文件时间戳精度的旋钮
  *
  *   0 = seconds only; nanoseconds zeroed.
  *   1 = seconds and nanoseconds, accurate within 1/HZ.
@@ -920,8 +964,8 @@ vattr_null(struct vattr *vap)
  * have VM backing store (VM backing store is typically the cause
  * of a vnode blowout so we want to do this).  Therefore, this operation
  * is not considered cheap.
- * 当我们有太多的vnode时调用这个例程。它尝试释放<count>vnode，并可能释放仍具有VM 
- * backing store的vnode（VM backing store通常是vnode井喷的原因，因此我们希望这样做）。
+ * 当我们有太多的 vnode 时调用这个例程。它尝试释放<count>vnode，并可能释放仍具有VM 
+ * backing store 的 vnode（VM backing store通常是vnode井喷的原因，因此我们希望这样做）。
  * 因此，这种操作并不便宜
  *
  * A number of conditions may prevent a vnode from being reclaimed(回收).
@@ -931,11 +975,18 @@ vattr_null(struct vattr *vap)
  * desirable to reuse such vnodes.  These conditions may cause the
  * number of vnodes to reach some minimum value regardless of what
  * you set kern.maxvnodes to.  Do not set kern.maxvnodes too low.
+ * 
  * 许多情况可能会阻止回收 vnode. 缓冲区缓存可能在 vnode 上有引用，目录 vnode 可能
  * 由于表示底层文件的 namei 缓存而仍有引用，或者 vnode 可能处于活动使用状态。不希望重用
  * 此类 vnode。这些情况可能会导致 vnode 的数量达到某个最小值，而不管您将 kern.maxvnodes
  * 设置为什么。不要将 kern.maxvnodes 设置得太低
  */
+/*
+	vnode LRU（Least recently used，最近最少使用） reclaim，最近最少使用的 vnode 回收。
+	如果是放到奇海操作系统中的话，我们就不需要进行回收操作，因为所有的文件类都只对应一个文件，可以
+	认为是一个静态的存在，只要文件存在，这个类就存在，只是当前用不用的问题;
+	trigger 貌似是跟虚拟页有关系
+*/
 static int
 vlrureclaim(struct mount *mp, int reclaim_nc_src, int trigger)
 {
@@ -943,9 +994,13 @@ vlrureclaim(struct mount *mp, int reclaim_nc_src, int trigger)
 	int count, done, target;
 
 	done = 0;
+	/*
+		当我们需要对挂载点进行写操作的时候，需要先做一些准备动作，比如一些 flag 的设置、
+		引用计数的加减等等，这时可以根据具体需要调用 vn_start_write
+	*/
 	vn_start_write(NULL, &mp, V_WAIT);
 	MNT_ILOCK(mp);
-	count = mp->mnt_nvnodelistsize;
+	count = mp->mnt_nvnodelistsize;	// mount 当前管理的 vnode 数量
 	target = count * (int64_t)gapvnodes / imax(desiredvnodes, 1);
 	target = target / 10 + 1;
 	while (count != 0 && done < target) {
@@ -971,7 +1026,12 @@ vlrureclaim(struct mount *mp, int reclaim_nc_src, int trigger)
 		 * free list for technical reasons.  This tends to thrash
 		 * the free list to keep very unrecently used held vnodes.
 		 * The problem is mitigated by keeping the free list large.
+		 * 
 		 */
+		/*
+			仅仅是将指针移动到链表的尾部，好像没有真正将内存释放掉？这里的实现逻辑是首先将该元素
+			移动到链表尾部，后面在调用 vdropl 函数将 vnode 真正释放掉
+		*/
 		TAILQ_REMOVE(&mp->mnt_nvnodelist, vp, v_nmntvnodes);
 		TAILQ_INSERT_TAIL(&mp->mnt_nvnodelist, vp, v_nmntvnodes);
 		--count;
@@ -982,6 +1042,10 @@ vlrureclaim(struct mount *mp, int reclaim_nc_src, int trigger)
 		 * referenced, or it exceeds the trigger, skip it.
 		 * Also skip free vnodes.  We are trying to make space
 		 * to expand the free list, not reduce it.
+		 * 
+		 * 如果它已经被解构，它仍然被引用，或者它超过了触发器，请跳过它。
+		 * 也可以跳过免费的vnodes。我们正试图腾出空间来扩展免费列表，
+		 * 而不是减少它
 		 */
 		if (vp->v_usecount ||
 		    (!reclaim_nc_src && !LIST_EMPTY(&vp->v_cache_src)) ||
@@ -1038,7 +1102,7 @@ yield:
 		kern_yield(PRI_USER);
 relock_mnt:
 		MNT_ILOCK(mp);
-	}
+	}	// end while
 	MNT_IUNLOCK(mp);
 	vn_finished_write(mp);
 	return done;
@@ -1051,7 +1115,10 @@ SYSCTL_INT(_debug, OID_AUTO, max_vnlru_free, CTLFLAG_RW, &max_vnlru_free,
 
 /*
  * Attempt to reduce the free list by the requested amount.
- * count 就表示我们想要减少的数量
+ * count 就表示我们想要减少的数量。numvnodes 表示的应该就是当前正在被使用的和在空闲链表中的
+ * vnode 的总的数量。当我们通过 sysctl 调整 desiredvnodes 数量之后，可能系统中当前存在的
+ * vnode 的数量就比它更大，那此时我们要释放掉一些 vnode(应该就是丢掉了，后续也不会在使用)。
+ * 首先就是要先从空闲链表中释放，这样对系统的影响是最小的
  */
 static void
 vnlru_free_locked(int count, struct vfsops *mnt_op)
@@ -1064,7 +1131,8 @@ vnlru_free_locked(int count, struct vfsops *mnt_op)
 	mtx_assert(&vnode_free_list_mtx, MA_OWNED);
 
 	/*
-		从free list中减少成员数量的时候会有限制，最大不超过 max_vnlru_free
+		从free list中减少成员数量的时候会有限制，最大不超过 max_vnlru_free。
+		从注释来看是每次调用最多允许访问的 vnode 数量
 	*/
 	if (count > max_vnlru_free)
 		count = max_vnlru_free;
@@ -1075,6 +1143,7 @@ vnlru_free_locked(int count, struct vfsops *mnt_op)
 		/*
 		 * The list can be modified while the free_list_mtx
 		 * has been dropped and vp could be NULL here.
+		 * batch: 一批，分批处理
 		 */
 		if (vp == NULL) {
 			if (tried_batches)
@@ -1131,10 +1200,11 @@ vnlru_free_locked(int count, struct vfsops *mnt_op)
 		 * If the recycled succeeded this vdrop will actually free
 		 * the vnode.  If not it will simply place it back on
 		 * the free list.
+		 * 如果回收成功，此vdrop将实际释放vnode。如果不是的话，它只会把它放回 free list
 		 */
 		vdrop(vp);
 		mtx_lock(&vnode_free_list_mtx);
-	}
+	}	// end for
 }
 
 void
@@ -1147,7 +1217,9 @@ vnlru_free(int count, struct vfsops *mnt_op)
 }
 
 
-/* XXX some names and initialization are bad for limits and watermarks. */
+/* XXX some names and initialization are bad for limits and watermarks.
+		有些名称和初始化不利于限制和水平线标志
+*/
 static int
 vspace(void)
 {
@@ -1171,6 +1243,9 @@ vnlru_return_batch_locked(struct mount *mp)
 
 	mtx_assert(&mp->mnt_listmtx, MA_OWNED);
 
+	/*
+		判断 mount 空闲链表的大小
+	*/
 	if (mp->mnt_tmpfreevnodelistsize == 0)
 		return;
 
@@ -1180,10 +1255,13 @@ vnlru_return_batch_locked(struct mount *mp)
 		vp->v_mflag &= ~VMP_TMPMNTFREELIST;
 	}
 	mtx_lock(&vnode_free_list_mtx);
+	/*
+		将该 mount 结构对应的空闲链表嫁接到 vnode_free_list 末尾
+	*/
 	TAILQ_CONCAT(&vnode_free_list, &mp->mnt_tmpfreevnodelist, v_actfreelist);
 	freevnodes += mp->mnt_tmpfreevnodelistsize;
 	mtx_unlock(&vnode_free_list_mtx);
-	mp->mnt_tmpfreevnodelistsize = 0;
+	mp->mnt_tmpfreevnodelistsize = 0;	// 置零
 }
 
 static void
@@ -1229,11 +1307,15 @@ next:
 static struct proc *vnlruproc;
 static int vnlruproc_sig;
 
+/* 
+	系统貌似会单独开启一个进程去管理 vnode，使得各个指标都尽量处于一个比较健康的
+	动态平衡状态
+*/
 static void
 vnlru_proc(void)
 {
 	struct mount *mp, *nmp;
-	unsigned long onumvnodes;
+	unsigned long onumvnodes;	// old vnode number
 	int done, force, reclaim_nc_src, trigger, usevnodes;
 
 	// 注册一个内核事件来触发 kproc_shutdown
@@ -1241,6 +1323,9 @@ vnlru_proc(void)
 	    SHUTDOWN_PRI_FIRST);
 
 	force = 0;
+	/*
+		下面的 for 循环应该就是进程的主循环，不停检查 vnode 的使用情况并作出相应的调整
+	*/
 	for (;;) {
 		kproc_suspend_check(vnlruproc);	// 用户挂起或者恢复内核进程
 		mtx_lock(&vnode_free_list_mtx);
@@ -1248,8 +1333,10 @@ vnlru_proc(void)
 		 * If numvnodes is too large (due to desiredvnodes being
 		 * adjusted using its sysctl, or emergency growth), first
 		 * try to reduce it by discarding from the free list.
-		 * 如果numvnodes太大（由于desiredvnodes正在使用其sysctl或紧急增长进行调整），
-		 * 请首先尝试通过从空闲列表中丢弃来减少它，调用 vnlru_free_locked
+		 * 如果 numvnodes 太大（由于 desiredvnodes 正在使用其 sysctl 或紧急增长进行调整），
+		 * 请首先尝试通过从空闲列表中丢弃来减少它，调用 vnlru_free_locked()。该函数中会调用
+		 * vnlru_return_batches() 函数，从函数命名来看应该是每次处理一批 vnode，优先是从
+		 * 空闲链表中获取
 		 */
 		if (numvnodes > desiredvnodes)
 			vnlru_free_locked(numvnodes - desiredvnodes, NULL);
@@ -1259,6 +1346,8 @@ vnlru_proc(void)
 		 * or 9% expansion (by growing its size or inexcessively
 		 * reducing its free list).  Otherwise, try to reclaim
 		 * space for a 10% expansion.
+		 * 如果 vnode 缓存处于良好状态，请休眠。这是指它没有过满，并且有大约4%或9%的扩展空间
+		 * （通过增加其大小或不成功地减少其空闲列表）。否则，请尝试回收空间以进行10%的扩展
 		 */
 		if (vstir && force == 0) {
 			force = 1;
@@ -1282,7 +1371,8 @@ vnlru_proc(void)
 		 * are trying to recycle or at least free vnodes.
 		 * 计算回收参数。这些在整个循环中都是相同的，给人一种公平的假象。触发点是
 		 * 避免回收具有大量驻留页的vnode。我们不是在尝试释放内存，而是在尝试回收
-		 * 或至少释放vnode
+		 * 或至少释放vnode；
+		 * 计算目前正在被使用的 vnode 的数量
 		 */
 		if (numvnodes <= desiredvnodes)
 			usevnodes = numvnodes - freevnodes;
@@ -1297,12 +1387,21 @@ vnlru_proc(void)
 		 * it is effectively infinite in some congested and
 		 * misconfigured cases, and this is necessary.  Normally
 		 * it is about 8 to 100 (pages), which is quite large.
+		 * 
+		 * 选择触发器值是为了给出一个保守的大值，以确保它本身不会阻止取得进展。
+		 * 该值可能非常大，以至于在某些拥挤和配置错误的情况下实际上是无限的，
+		 * 这是必要的。通常是8到100页，相当大。
 		 */
 		trigger = vm_cnt.v_page_count * 2 / usevnodes;
 		if (force < 2)
 			trigger = vsmalltrigger;
 		reclaim_nc_src = force >= 3;
 		mtx_lock(&mountlist_mtx);
+		/*
+			注意这里是遍历整个 mount 链表，也就是说当前没有处于 busy 状态的挂载点
+			都要执行 vlrureclaim()，即当我们要回收 vnode 的时候，每个文件系统都要
+			平等的进行回收，而不是只处理其中某一个
+		*/
 		for (mp = TAILQ_FIRST(&mountlist); mp != NULL; mp = nmp) {
 			if (vfs_busy(mp, MBF_NOWAIT | MBF_MNTLSTLOCK)) {
 				nmp = TAILQ_NEXT(mp, mnt_list);
@@ -1312,7 +1411,7 @@ vnlru_proc(void)
 			mtx_lock(&mountlist_mtx);
 			nmp = TAILQ_NEXT(mp, mnt_list);
 			vfs_unbusy(mp);
-		}
+		}	// end for
 		mtx_unlock(&mountlist_mtx);
 		if (onumvnodes > desiredvnodes && numvnodes <= desiredvnodes)
 			uma_reclaim();
@@ -1333,14 +1432,15 @@ vnlru_proc(void)
 		/*
 		 * After becoming active to expand above low water, keep
 		 * active until above high water.
+		 * 在变得活跃，在低水位以上膨胀后，保持活跃，直到高水位以上
 		 */
 		force = vspace() < vhiwat;
-	}
+	}	// end for
 }
 
 /*
 	vnlru: 表示的意思可能是 vnode recycle run，可能是跟vnode回收机制相关的操作。
-	看下面的操作，感觉像是专门创建了一个进程来支持vnode回收
+	看下面的操作，感觉像是专门创建了一个进程来支持 vnode 回收
 */
 static struct kproc_desc vnlru_kp = {
 	"vnlru",
@@ -1352,6 +1452,7 @@ SYSINIT(vnlru, SI_SUB_KTHREAD_UPDATE, SI_ORDER_FIRST, kproc_start,
  
 /*
  * Routines having to do with the management of the vnode table.
+ 		与vnode表的管理有关的例程。
  */
 
 /*
@@ -1371,6 +1472,8 @@ vtryrecycle(struct vnode *vp)
 	/*
 	 * This vnode may found and locked via some other list, if so we
 	 * can't recycle it yet.
+	 * 这个 vnode 可能被其他链表查找或者加锁，所以我们现在不能回收它。这里的查找属性设置为
+	 * 独占和不等待，说明当我们要回收一个 vnode 的时候对它当前所处的状态有着严格的要求
 	 */
 	if (VOP_LOCK(vp, LK_EXCLUSIVE | LK_NOWAIT) != 0) {
 		CTR2(KTR_VFS,
@@ -1380,6 +1483,7 @@ vtryrecycle(struct vnode *vp)
 	}
 	/*
 	 * Don't recycle if its filesystem is being suspended.
+			当 vnode 所在的文件系统被挂起的时候也是不能回收的，这里也是设置的 NOWAIT
 	 */
 	if (vn_start_write(vp, &vnmp, V_NOWAIT) != 0) {
 		VOP_UNLOCK(vp, 0);
@@ -1393,9 +1497,13 @@ vtryrecycle(struct vnode *vp)
 	 * anyone picked up this vnode from another list.  If not, we will
 	 * mark it with DOOMED via vgonel() so that anyone who does find it
 	 * will skip over it.
+	 * 
+	 * 如果我们走到这一步，我们需要获取互锁，看看是否有人从另一个列表中选择了这个vnode。
+	 * 如果没有，我们将通过 vgonel 标记它为 DOOMED，这样任何找到它的人都会跳过它
 	 */
 	VI_LOCK(vp);
 	if (vp->v_usecount) {
+		// 回收 vnode 的时候要保证其引用计数为0
 		VOP_UNLOCK(vp, LK_INTERLOCK);
 		vn_finished_write(vnmp);
 		CTR2(KTR_VFS,
@@ -1446,15 +1554,21 @@ getnewvnode_wait(int suspended)
 		msleep(&vnlruproc_sig, &vnode_free_list_mtx, PVFS,
 		    "vlruwk", hz);
 	}
-	/* Post-adjust like the pre-adjust in getnewvnode(). */
+	/* Post-adjust like the pre-adjust in getnewvnode(). 
+			与getnewvnode（）中的预调整一样进行后期调整
+	*/
 	if (numvnodes + 1 > desiredvnodes && freevnodes > 1)
 		vnlru_free_locked(1, NULL);
+	/*
+		检测文件系统是否打开了太多的文件
+	*/
 	return (numvnodes >= desiredvnodes ? ENFILE : 0);
 }
 
 /*
  * This hack is fragile, and probably not needed any more now that the
  * watermark handling works.
+ * 这种攻击是脆弱的，可能不再需要水平线处理工作了。
  */
 void
 getnewvnode_reserve(u_int count)
@@ -1545,6 +1659,11 @@ getnewvnode(const char *tag, struct mount *mp, struct vop_vector *vops,
 	 * vnlru_proc() if we are getting short of space.  The watermarks
 	 * should be chosen so that we never wait or even reclaim from
 	 * the free list to below its target minimum.
+	 * 
+	 * 如果vnode缓存在增长后不超过其目标最大值，则增长该缓存。否则，如果空闲列表为非空，
+	 * 则在增长缓存之前尝试从中回收1项（如果回收失败或延迟，则可能高于其目标最大值）。
+	 * 否则，等待一些空间。在所有情况下，如果空间不足，请安排vnlru_proc（）。
+	 * 水印的选择应该确保我们永远不会等待，甚至不会从免费列表中回收到低于其目标最小值的内容。
 	 */
 	if (numvnodes + 1 <= desiredvnodes)
 		;
@@ -1657,6 +1776,9 @@ delmntque(struct vnode *vp)
 	     mp->mnt_activevnodelistsize, mp->mnt_nvnodelistsize));
 	active = vp->v_iflag & VI_ACTIVE;
 	vp->v_iflag &= ~VI_ACTIVE;
+	/*
+		判断 vnode 是否处于 active 状态
+	*/
 	if (active) {
 		mtx_lock(&mp->mnt_listmtx);
 		TAILQ_REMOVE(&mp->mnt_activevnodelist, vp, v_actfreelist);
@@ -1705,6 +1827,11 @@ insmntque1(struct vnode *vp, struct mount *mp,
 	 * manipulation of the vnode list and the vnode freelist
 	 * mutex protects only manipulation of the active vnode list.
 	 * Hence the need to hold the vnode interlock throughout.
+	 * 
+	 * 我们提前获取 vnode 联锁，以确保在 vnode 列表和活动 vnode 列表中都获取 
+	 * vnode 之前，另一个进程不能在其上释放 holdcnt 来回收 vnode。mount mutex
+	 * 只保护对 vnode 列表的操作，vnode freelist mutex 只保护对活动 vnode 
+	 * 列表的操作。因此，需要始终保持 vnode 互锁
 	 */
 	MNT_ILOCK(mp);
 	VI_LOCK(vp);
@@ -1746,7 +1873,10 @@ insmntque(struct vnode *vp, struct mount *mp)
 /*
  * Flush out and invalidate all buffers associated with a bufobj
  * Called with the underlying object locked.
- * 清除与bufobj关联的所有缓冲区并使其无效。在锁定基础对象的情况下调用
+ * 
+ * 清除与 bufobj 关联的所有缓冲区并使其无效。在锁定基础对象的情况下调用
+ * slpflag: sleep flag
+ * slptimeo: sleep time out
  */
 int
 bufobj_invalbuf(struct bufobj *bo, int flags, int slpflag, int slptimeo)
@@ -1754,12 +1884,16 @@ bufobj_invalbuf(struct bufobj *bo, int flags, int slpflag, int slptimeo)
 	int error;
 
 	BO_LOCK(bo);
+	// V_SAVE：判断是否需要先同步文件
 	if (flags & V_SAVE) {
 		error = bufobj_wwait(bo, slpflag, slptimeo);
 		if (error) {
 			BO_UNLOCK(bo);
 			return (error);
 		}
+		/*
+			bv_cnt 表示的应该是 buffer object 中的脏缓存页的个数。如果大于0，则需要进行同步操作
+		*/
 		if (bo->bo_dirty.bv_cnt > 0) {
 			BO_UNLOCK(bo);
 			if ((error = BO_SYNC(bo, MNT_WAIT)) != 0)
@@ -1768,7 +1902,7 @@ bufobj_invalbuf(struct bufobj *bo, int flags, int slpflag, int slptimeo)
 			 * XXX We could save a lock/unlock if this was only
 			 * enabled under INVARIANTS
 			 */
-			BO_LOCK(bo);
+			BO_LOCK(bo);	// 返回的时候需要将 object 锁住
 			if (bo->bo_numoutput > 0 || bo->bo_dirty.bv_cnt > 0)
 				panic("vinvalbuf: dirty bufs");
 		}
@@ -1777,8 +1911,17 @@ bufobj_invalbuf(struct bufobj *bo, int flags, int slpflag, int slptimeo)
 	 * If you alter this loop please notice that interlock is dropped and
 	 * reacquired in flushbuflist.  Special care is needed to ensure that
 	 * no race conditions occur from this.
+	 * 如果你改变了这个循环，请注意，在 flushbuflist 中，联锁被删除并重新获取。需要特别注意，
+	 * 以确保不会因此而出现竞争状况
+	 * 
+	 * flushbuflist() 函数会调用 bwrite 函数，这就会涉及到数据写入磁盘的方式是同步还是异步。
+	 * 如果是同步的话，当调用到 bwrite 函数时，会等待其将数据写完之后再返回。此时该线程可能就
+	 * 处在睡眠状态了，数据写完之后在重新唤醒，接着执行。如果是异步的话，bwrite 的执行不影响
+	 * 主线程的执行，所以函数返回值跟 bwrite 的执行结果是没有关系的。然后主线程中会添加一个
+	 * 等待操作(例如下面的 bufobj_wwait())，等 bwrite 执行完之后再接着执行
 	 */
 	do {
+		// 将 object 管理的干净缓存和脏缓存链表都释放掉
 		error = flushbuflist(&bo->bo_clean,
 		    flags, bo, slpflag, slptimeo);
 		if (error == 0 && !(flags & V_CLEANONLY))
@@ -1794,6 +1937,8 @@ bufobj_invalbuf(struct bufobj *bo, int flags, int slpflag, int slptimeo)
 	 * Wait for I/O to complete.  XXX needs cleaning up.  The vnode can
 	 * have write I/O in-progress but if there is a VM object then the
 	 * VM object can also have read-I/O in-progress.
+	 * 等待 I/O 完成。XXX 需要清理。vnode 可以有正在进行的写 I/O，但如果有VM对象，
+	 * 则 VM 对象也可以有正在进行的读 I/O
 	 */
 	do {
 		bufobj_wwait(bo, 0, 0);
@@ -1837,7 +1982,7 @@ bufobj_invalbuf(struct bufobj *bo, int flags, int slpflag, int slptimeo)
 /*
  * Flush out and invalidate all buffers associated with a vnode.
  * Called with the underlying object locked.
- * 清除与vnode关联的所有缓冲区并使其无效。在锁定基础对象的情况下调用
+ * 清除与 vnode 关联的所有缓冲区并使其无效。在锁定基础对象的情况下调用
  */
 int
 vinvalbuf(struct vnode *vp, int flags, int slpflag, int slptimeo)
@@ -1853,7 +1998,6 @@ vinvalbuf(struct vnode *vp, int flags, int slpflag, int slptimeo)
 /*
  * Flush out buffers on the specified list.
  * 清除指定列表上的缓冲区
- *
  */
 static int
 flushbuflist(struct bufv *bufv, int flags, struct bufobj *bo, int slpflag,
@@ -1866,7 +2010,7 @@ flushbuflist(struct bufv *bufv, int flags, struct bufobj *bo, int slpflag,
 
 	ASSERT_BO_WLOCKED(bo);
 
-	retval = 0;
+	retval = 0;	// return value
 	TAILQ_FOREACH_SAFE(bp, &bufv->bv_hd, b_bobufs, nbp) {
 		if (((flags & V_NORMAL) && (bp->b_xflags & BX_ALTDATA)) ||
 		    ((flags & V_ALT) && (bp->b_xflags & BX_ALTDATA) == 0)) {
@@ -1876,7 +2020,11 @@ flushbuflist(struct bufv *bufv, int flags, struct bufobj *bo, int slpflag,
 			lblkno = nbp->b_lblkno;
 			xflags = nbp->b_xflags & (BX_VNDIRTY | BX_VNCLEAN);
 		}
-		retval = EAGAIN;
+		retval = EAGAIN;	// try again
+		/*
+			这里为缓存区域设置一个锁，该锁貌似是会被指定一个特定的中断和超时。
+			ENOLCK： 没有可用的锁错误
+		*/
 		error = BUF_TIMELOCK(bp,
 		    LK_EXCLUSIVE | LK_SLEEPFAIL | LK_INTERLOCK, BO_LOCKPTR(bo),
 		    "flushbuf", slpflag, slptimeo);
@@ -1892,9 +2040,15 @@ flushbuflist(struct bufv *bufv, int flags, struct bufobj *bo, int slpflag,
 		 * believe there is a slight chance that a delayed
 		 * write will occur while sleeping just above, so
 		 * check for it.
+		 * 由于NFS没有节点锁，我相信在上面睡眠时有一点延迟写入的可能性，
+		 * 所以请检查一下
 		 */
 		if (((bp->b_flags & (B_DELWRI | B_INVAL)) == B_DELWRI) &&
 		    (flags & V_SAVE)) {
+			/*
+				该函数貌似只是设置了一下标志位，并不是真正释放掉缓存资源。设置标志位了之后，
+				系统就会在特定的链表中将它移除掉
+			*/
 			bremfree(bp);
 			bp->b_flags |= B_ASYNC;
 			bwrite(bp);
@@ -1909,6 +2063,10 @@ flushbuflist(struct bufv *bufv, int flags, struct bufobj *bo, int slpflag,
 		if (nbp == NULL)
 			break;
 		nbp = gbincore(bo, lblkno);
+		/*
+			BX_VNDIRTY / BX_VNCLEAN 表示的是当前获取到的这个 buf 是在脏缓存链表当中，还是在干净缓存
+			链表当中。如果都不是的话，说明该 buffer 不属于该 object？或者说缓存还存在另外一种状态？
+		*/
 		if (nbp == NULL || (nbp->b_xflags & (BX_VNDIRTY | BX_VNCLEAN))
 		    != xflags)
 			break;			/* nbp invalid */
@@ -1927,6 +2085,7 @@ bnoreuselist(struct bufv *bufv, struct bufobj *bo, daddr_t startn, daddr_t endn)
 
 	for (lblkno = startn;;) {
 again:
+		// 必须要给 bp 分配一个可用的锁
 		bp = BUF_PCTRIE_LOOKUP_GE(&bufv->bv_root, lblkno);
 		if (bp == NULL || bp->b_lblkno >= endn ||
 		    bp->b_lblkno < startn)
@@ -1951,6 +2110,9 @@ again:
 		 * pages backing each buffer in the range are unlikely to be
 		 * reused.  Dirty buffers will have the hint applied once
 		 * they've been written.
+		 * 
+		 * 在 VMIO 情况下，使用 B_NOREUSE 标志来提示支持该范围内每个缓冲区的页面
+		 * 不太可能被重用。一旦写入脏缓冲区，就会应用提示。
 		 */
 		if (bp->b_vp->v_object != NULL)
 			bp->b_flags |= B_NOREUSE;
@@ -1964,7 +2126,7 @@ again:
  * Truncate a file's buffer and pages to a specified length.  This
  * is in lieu of the old vinvalbuf mechanism, which performed unneeded
  * sync activity.
- * 将文件的缓冲区和页截断为指定的长度。这代替了旧的vinvalbuf机制，后者执行不需要的同步活动
+ * 将文件的缓冲区和页截断为指定的长度。这代替了旧的 vinvalbuf 机制，后者执行不需要的同步活动
  */
 int
 vtruncbuf(struct vnode *vp, struct ucred *cred, off_t length, int blksize)
@@ -2078,20 +2240,26 @@ buf_vlist_remove(struct buf *bp)
 	KASSERT((bp->b_xflags & (BX_VNDIRTY|BX_VNCLEAN)) !=
 	    (BX_VNDIRTY|BX_VNCLEAN),
 	    ("buf_vlist_remove: Buf %p is on two lists", bp));
+	/*
+		通过 b_xflags 判断该 buffer 是在干净缓存链表还是脏缓存链表
+	*/
 	if (bp->b_xflags & BX_VNDIRTY)
 		bv = &bp->b_bufobj->bo_dirty;
 	else
 		bv = &bp->b_bufobj->bo_clean;
+	// 从基数树中将 buffer 移除
 	BUF_PCTRIE_REMOVE(&bv->bv_root, bp->b_lblkno);
-	TAILQ_REMOVE(&bv->bv_hd, bp, b_bobufs);
+	TAILQ_REMOVE(&bv->bv_hd, bp, b_bobufs);	// 从链表中移除
 	bv->bv_cnt--;
-	bp->b_xflags &= ~(BX_VNDIRTY | BX_VNCLEAN);
+	bp->b_xflags &= ~(BX_VNDIRTY | BX_VNCLEAN);	// 更新 xflags
 }
 
 /*
- * Add the buffer to the sorted clean or dirty block list. 将缓冲区添加到已排序的干净或脏块列表中
+ * Add the buffer to the sorted clean or dirty block list.
+ 		将缓冲区添加到已排序的干净或脏块列表中
  *
  * NOTE: xflags is passed as a constant, optimizing this inline function!
+ * xflags 作为常量传递，优化了这个内联函数
  */
 static void
 buf_vlist_add(struct buf *bp, struct bufobj *bo, b_xflags_t xflags)
@@ -2115,6 +2283,7 @@ buf_vlist_add(struct buf *bp, struct bufobj *bo, b_xflags_t xflags)
 	 * Keep the list ordered.  Optimize empty list insertion.  Assume
 	 * we tend to grow at the tail so lookup_le should usually be cheaper
 	 * than _ge. 
+	 * 保持列表有序。优化空列表插入。假设我们倾向于在尾部增长，所以查找通常应该比搜索便宜
 	 */
 	if (bv->bv_cnt == 0 ||
 	    bp->b_lblkno > TAILQ_LAST(&bv->bv_hd, buflists)->b_lblkno)
@@ -2131,7 +2300,13 @@ buf_vlist_add(struct buf *bp, struct bufobj *bo, b_xflags_t xflags)
 
 /*
  * Look up a buffer using the buffer tries.
- * 从函数参数命名可以看出，这里给定的logical block number
+ * 从函数参数命名可以看出，这里给定的 logical block number。普通文件 vnode 的话，应该就是文件的逻辑块号。
+ * 但如果是设备文件 vnode 的话，传入的应该是在磁盘上的逻辑块号，或者是扇区号
+ * 
+ * gbincore: get buffer incore
+ * 从实际调用情况来看，bo 传入的是设备文件对应的 vnode->v_bufobj 成员指针。说明查找的应该是
+ * 磁盘设备对应的 buffer，文件系统的元数据缓存应该应该就是在这里边吧。
+ * 该函数不仅能够判断缓存中是否存在该缓冲区，貌似还能判断缓冲区当前是不是脏的
  */
 struct buf *
 gbincore(struct bufobj *bo, daddr_t lblkno)
@@ -2176,7 +2351,8 @@ bgetvp(struct vnode *vp, struct buf *bp)
 }
 
 /*
- * Disassociate a buffer from a vnode. 解除缓冲区与 vnode 的关联
+ * Disassociate a buffer from a vnode.
+ 		解除缓冲区与 vnode 的关联
  */
 void
 brelvp(struct buf *bp)
@@ -2313,7 +2489,7 @@ static int first_printf = 1;
 
 /*
  * System filesystem synchronizer daemon.
- * 系统文件系统同步程序守护程序，同步针对的对象好像是bufobj
+ * 系统文件系统同步程序守护程序，同步针对的对象好像是 bufobj
  */
 static void
 sched_sync(void)
@@ -2454,7 +2630,7 @@ sched_sync(void)
 			    hz / SYNCER_SHUTDOWN_SPEEDUP);
 		else if (time_uptime == starttime)
 			cv_timedwait(&sync_wakeup, &sync_mtx, hz);
-	}
+	} // end for
 }
 
 /*
@@ -2982,6 +3158,10 @@ _vhold(struct vnode *vp, bool locked)
 	    ("_vhold: vnode not on per mount vnode list"));
 	mp = vp->v_mount;
 	mtx_lock(&mp->mnt_listmtx);
+	/*
+		加入这个 vnode 当前是处在 mnt_tmpfreevnodelist，则先将其从链表中移除；否则应该是从
+		全局链表 vnode_free_list 中将其移除。然后插入到 mnt_activevnodelist 链表当中
+	*/
 	if ((vp->v_mflag & VMP_TMPMNTFREELIST) != 0) {
 		TAILQ_REMOVE(&mp->mnt_tmpfreevnodelist, vp, v_actfreelist);
 		mp->mnt_tmpfreevnodelistsize--;

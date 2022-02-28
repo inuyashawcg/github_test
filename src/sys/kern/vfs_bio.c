@@ -92,6 +92,10 @@ static MALLOC_DEFINE(M_BIOBUF, "biobuf", "BIO buffer");
 
 struct	bio_ops bioops;		/* I/O operation notification */
 
+/*
+	当我们新创建一个 vnode 的时候，将 buffer 所支持的一些操作一并注册进去。后续 bwrite 中调用
+	的时候就是直接定位到这里
+*/
 struct	buf_ops buf_ops_bio = {
 	.bop_name	=	"buf_ops_bio",
 	.bop_write	=	bufwrite,
@@ -100,6 +104,9 @@ struct	buf_ops buf_ops_bio = {
 	.bop_bdflush	=	bufbdflush,
 };
 
+/*
+	该结构体其实就可以看做是一个 buffer list header 的封装
+*/
 struct bufqueue {
 	struct mtx_padalign	bq_lock;
 	TAILQ_HEAD(, buf)	bq_queue;
@@ -126,13 +133,13 @@ struct bufdomain {
 	/* Constants */
 	long		bd_maxbufspace;	/* 最大的 buffer space size */
 	long		bd_hibufspace;	/* high buffer space */
-	long 		bd_lobufspace;	/* loew buffer space */
+	long 		bd_lobufspace;	/* low buffer space */
 	long 		bd_bufspacethresh;	/* thresh: 脱粒，翻滚，扭动？ */
-	int		bd_hifreebuffers;
-	int		bd_lofreebuffers;
-	int		bd_hidirtybuffers;
-	int		bd_lodirtybuffers;
-	int		bd_dirtybufthresh;
+	int		bd_hifreebuffers;	// high free buffers
+	int		bd_lofreebuffers;	// low free buffers
+	int		bd_hidirtybuffers;	// high dirty buffers
+	int		bd_lodirtybuffers;	// low dirty buffers
+	int		bd_dirtybufthresh;	// dirty buffer thresh
 	int		bd_lim;
 	/* atomics */
 	int		bd_wanted;	
@@ -153,6 +160,11 @@ struct bufdomain {
 
 static struct buf *buf;		/* buffer header pool */
 extern struct buf *swbuf;	/* Swap buffer header pool. */
+/*
+	感觉像是一个永远不会被 buffer 映射到的地址。作用是什么呢？应该是用于初始化一个未映射
+	的 buffer，如果需要一个被映射的 buffer 的时候，在利用功能函数为其分配 kernel virtual
+	address
+*/
 caddr_t unmapped_buf;
 
 /* Used below and for softdep flushing threads in ufs/ffs/ffs_softdep.c */
@@ -324,6 +336,7 @@ SYSCTL_INT(_vfs, OID_AUTO, maxbcachebuf, CTLFLAG_RDTUN, &maxbcachebuf, 0,
 
 /*
  * This lock synchronizes access to bd_request.
+		这个锁用于对 bd_request 的同步访问
  */
 static struct mtx_padalign __exclusive_cache_line bdlock;
 
@@ -342,6 +355,9 @@ static struct mtx_padalign __exclusive_cache_line bdirtylock;
  * Wakeup point for bufdaemon, as well as indicator of whether it is already
  * active.  Set to 1 when the bufdaemon is already "on" the queue, 0 when it
  * is idling.
+ * 
+ * bufdaemon的唤醒点，以及它是否已激活的指示器。当bufdaemon已经“在”队列上时，将其设置为1，
+ * 当其处于空闲状态时，将其设置为0
  */
 static int bd_request;
 
@@ -350,6 +366,9 @@ static int bd_request;
  * lodirtybuf.  This may be necessary to push out excess dependencies or
  * defragment the address space where a simple count of the number of dirty
  * buffers is insufficient to characterize the demand for flushing them.
+ * 
+ * 请求buf守护进程写入比 lodirtybuf 指示的缓冲区更多的缓冲区。这对于排除多余的依赖项或
+ * 对地址空间进行碎片整理可能是必要的，因为简单地计算脏缓冲区的数量不足以描述刷新它们的需求
  */
 static int bd_speedupreq;
 
@@ -357,6 +376,9 @@ static int bd_speedupreq;
  * Synchronization (sleep/wakeup) variable for active buffer space requests.
  * Set when wait starts, cleared prior to wakeup().
  * Used in runningbufwakeup() and waitrunningbufspace().
+ * 
+ * 活动缓冲区空间请求的同步（睡眠/唤醒）变量。设置等待何时开始，在唤醒前清除。
+ * 用于 runningbufwakeup 和 waitrunningbufspace
  */
 static int runningbufreq;
 
@@ -372,7 +394,8 @@ static int bdirtywait;
 #define QUEUE_EMPTY	1	/* empty buffer headers */
 #define QUEUE_DIRTY	2	/* B_DELWRI buffers */
 #define QUEUE_CLEAN	3	/* non-B_DELWRI buffers */
-#define QUEUE_SENTINEL	4	/* not an queue index, but mark for sentinel */
+#define QUEUE_SENTINEL	4	/* not an queue index, but mark for sentinel 
+															不是队列索引，而是sentinel的标记 */
 
 /* Maximum number of buffer domains. */
 #define	BUF_DOMAINS	8
@@ -380,12 +403,14 @@ static int bdirtywait;
 struct bufdomainset bdlodirty;		/* Domains > lodirty */
 struct bufdomainset bdhidirty;		/* Domains > hidirty */
 
-/* Configured number of clean queues. */
+/* Configured number of clean queues. 
+		已配置干净队列的数量
+*/
 static int __read_mostly buf_domains;
 
-BITSET_DEFINE(bufdomainset, BUF_DOMAINS);
+BITSET_DEFINE(bufdomainset, BUF_DOMAINS);		// 感觉应该是构造一个位图
 struct bufdomain __exclusive_cache_line bdomain[BUF_DOMAINS];
-struct bufqueue __exclusive_cache_line bqempty;
+struct bufqueue __exclusive_cache_line bqempty;	// 貌似仅用于初始化
 
 /*
  * per-cpu empty buffer cache.
@@ -531,6 +556,7 @@ bdirtywakeup(void)
  *
  *	Clear a domain from the appropriate bitsets when dirtybuffers
  *	is decremented.
+ 		当 dirtybuffers 递减时，从相应的位集中清除域
  */
 static void
 bd_clear(struct bufdomain *bd)
@@ -548,7 +574,8 @@ bd_clear(struct bufdomain *bd)
  *	bd_set:
  *
  *	Set a domain in the appropriate bitsets when dirtybuffers
- *	is incremented.
+ *	is incremented. 
+ 		当 dirtybuffers 递增时，在适当的位集中设置域
  */
 static void
 bd_set(struct bufdomain *bd)
@@ -2020,6 +2047,7 @@ bufkva_free(struct buf *bp)
  *	bufkva_alloc:
  *
  *	Allocate the buffer KVA and set b_kvasize and b_kvabase.
+ 		gbflags： get buffer flags
  */
 static int
 bufkva_alloc(struct buf *bp, int maxsize, int gbflags)
@@ -2033,17 +2061,30 @@ bufkva_alloc(struct buf *bp, int maxsize, int gbflags)
 	bufkva_free(bp);
 
 	addr = 0;
+	/*
+		利用uma机制从内核虚拟地址空间中申请一块连续的空间，大小应该是 maxsize。buffer_arena
+		参数指明我们从哪块区域申请，可以看出是从 buffer 空间申请，并且将虚拟内存起始地址指定给 addr
+	*/
 	error = vmem_alloc(buffer_arena, maxsize, M_BESTFIT | M_NOWAIT, &addr);
 	if (error != 0) {
 		/*
 		 * Buffer map is too fragmented.  Request the caller
 		 * to defragment the map.
+		 * 如果映射太过碎片化，则要求调用这对映射进行碎片整理
 		 */
 		return (error);
 	}
 	bp->b_kvabase = (caddr_t)addr;
 	bp->b_kvasize = maxsize;
+	/*
+		bufkvaspace: Kernel virtual memory used for buffers.
+		是一个全局量，表示 buffer 一共占用了多少内核虚拟地址空间
+	*/
 	counter_u64_add(bufkvaspace, bp->b_kvasize);
+	/*
+		还要对 get buffer flags 进行判断，该 buffer 是否需要执行 mmap 操作。应该也就是
+		为了判断这个 buffer 是否是需要共享的。注意不同情况下 bp->b_data 的赋值是不一样的
+	*/
 	if ((gbflags & GB_UNMAPPED) != 0) {
 		bp->b_data = unmapped_buf;
 		BUF_CHECK_UNMAPPED(bp);
@@ -2132,11 +2173,15 @@ breada(struct vnode * vp, daddr_t * rablkno, int * rabsize, int cnt,
  * must clear BIO_ERROR and B_INVAL prior to initiating I/O.  If B_CACHE
  * is set, the buffer is valid and we do not have to do anything, see
  * getblk(). Also starts asynchronous I/O on read-ahead blocks.
- * 获取具有指定数据的缓冲区。先查一下缓存。在启动I/O之前，必须清除 BIO_ERROR和B_INVAL
+ * 
+ * 获取具有指定数据的缓冲区。先查一下缓存。在启动I/O之前，必须清除 BIO_ERROR 和 B_INVAL
  * 如果设置了 B_CACHE，则缓冲区是有效的，我们不必执行任何操作，请参阅 getblk()。同时
  * 在预读块上启动异步I/O - rablkno：read-ahead blocks
  *
  * Always return a NULL buffer pointer (in bpp) when returning an error.
+ * 
+ * 该函数是读取存储设备中的块，vnode 可以是普通文件，也可以是磁盘设备文件。如果是普通文件，
+ * blkno
  */
 int
 breadn_flags(struct vnode *vp, daddr_t blkno, int size, daddr_t *rablkno,
@@ -2152,6 +2197,7 @@ breadn_flags(struct vnode *vp, daddr_t blkno, int size, daddr_t *rablkno,
 	/*
 	 * Can only return NULL if GB_LOCK_NOWAIT or GB_SPARSE flags
 	 * are specified.
+	 * 
 	 * 要注意这里已经给定块号了，也就是说我们已经知道所要读取的数据放在哪个块中，而不是凭空
 	 * 去查找。从函数命名也可以大致推测出来这个函数是做什么的，获取某个磁盘块中的数据
 	 * getblx 的作用可能仅限于查找在缓存中是否包含有对某个缓存块对应的缓存页。如果有的话，
@@ -2168,6 +2214,9 @@ breadn_flags(struct vnode *vp, daddr_t blkno, int size, daddr_t *rablkno,
 
 	/*
 	 * If not found in cache, do some I/O
+	 		FreeBSD 中每个磁盘块最多只能映射到一个缓存区当中。所以当我们调用 bread 函数的时候就需要先判断
+			得到的 bp 是否已经有数据在缓存当中了。如果有的话，应该就可以直接拿来用(判断标准就是 B_CACHE)。
+			如果没有的话，那就需要从磁盘中读取这个数据块，并且映射到缓冲区当中
 	 */
 	readwait = 0;
 	if ((bp->b_flags & B_CACHE) == 0) {
@@ -2192,19 +2241,25 @@ breadn_flags(struct vnode *vp, daddr_t blkno, int size, daddr_t *rablkno,
 			bp->b_rcred = crhold(cred);
 		vfs_busy_pages(bp, 0);
 		bp->b_iooffset = dbtob(bp->b_blkno);
+		/*
+			bstrategy 它可能只是对需要读取的数据进行排序操作，以求达到最高的磁盘读写效率。但是它本身
+			并不会去执行读写操作，真正进行读写的还是 bread 和 bwrite 相关函数
+		*/
 		bstrategy(bp);
 		++readwait;
 	}
 
 	/*
 	 * Attempt to initiate asynchronous I/O on read-ahead blocks.
-	 * 尝试在预读块上启动异步I/O
+	 * 尝试在预读块上启动异步I/O。但是当 B_CACHE 设置的时候，表示缓存区当前就是可用的。那么该函数
+	 * 就不需要做其他任何事情了，直接读取缓存区中的数据即可。上面的 bstrategy 相当于是提前把磁盘
+	 * 读取顺序排列好了，到这里只需要按照顺序读取即可
 	 */
 	breada(vp, rablkno, rabsize, cnt, cred, flags, ckhashfunc);
 
 	rv = 0;
 	if (readwait) {
-		rv = bufwait(bp);
+		rv = bufwait(bp);	// 这里会调用 msleep 函数，应该就是线程睡眠，等待缓存区可用
 		if (rv != 0) {
 			brelse(bp);
 			*bpp = NULL;
@@ -2217,12 +2272,19 @@ breadn_flags(struct vnode *vp, daddr_t blkno, int size, daddr_t *rablkno,
  * Write, release buffer on completion.  (Done by iodone
  * if async).  Do not bother writing anything if the buffer
  * is invalid.
+ * 
+ * 写入，完成后释放缓冲区。（异步时由iodone完成）。如果缓冲区无效，
+ * 不要费心写任何东西
  *
  * Note that we set B_CACHE here, indicating that buffer is
  * fully valid and thus cacheable.  This is true even of NFS
  * now so we set it generally.  This could be set either here 
  * or in biodone() since the I/O is synchronous.  We put it
  * here.
+ * 
+ * 注意，我们在这里设置了 B_CACHE，这表明缓冲区是完全有效的，因此是可缓存的。
+ * 即使是现在的 NFS 也是如此，所以我们一般都会设置它。这可以在这里设置，
+ * 也可以在 biodone() 中设置，因为 I/O 是同步的。我们把它放在这里了
  */
 int
 bufwrite(struct buf *bp)
@@ -2234,11 +2296,16 @@ bufwrite(struct buf *bp)
 
 	CTR3(KTR_BUF, "bufwrite(%p) vp %p flags %X", bp, bp->b_vp, bp->b_flags);
 	if ((bp->b_bufobj->bo_flag & BO_DEAD) != 0) {
+		// 表示这个 buffer 已经彻底失效了？
 		bp->b_flags |= B_INVAL | B_RELBUF;
 		bp->b_flags &= ~B_CACHE;
 		brelse(bp);
 		return (ENXIO);
 	}
+	/*
+		当我们想要把 buffer 中的数据写入到磁盘中时，发现它根本就没有管理有效的数据，
+		此时就需要释放掉 bp，然后直接返回
+	*/
 	if (bp->b_flags & B_INVAL) {
 		brelse(bp);
 		return (0);
@@ -2610,6 +2677,11 @@ buf_dirty_count_severe(void)
  *	Release a busy buffer and, if requested, free its resources.  The
  *	buffer will be stashed in the appropriate bufqueue[] allowing it
  *	to be accessed later as a cache entity or reused for other purposes.
+
+ 		释放繁忙的缓冲区，如果需要，释放其资源。缓冲区将存储在适当的 BUFQUE[]中，以便以后
+		作为缓存实体访问或用于其他目的。重用应该就是说保存该 buffer 结构，只释放它所管理
+		的数据。下次其他数据再需要用到 buffer 结构的时候就可以直接拿来用 (重用)，而不是
+		重新实例化对象？
  */
 void
 brelse(struct buf *bp)
@@ -3278,11 +3350,12 @@ getnewbuf_kva(struct buf *bp, int gbflags, int maxsize)
  *
  *	Find and initialize a new buffer header, freeing up existing buffers
  *	in the bufqueues as necessary.  The new buffer is returned locked.
+ 		查找并初始化一个新的缓冲区标头，根据需要释放 bufqueues 中的现有缓冲区。新缓冲区被锁定返回
  *
  *	We block if:
- *		We have insufficient buffer headers
+ *		We have insufficient(不足的，不够的) buffer headers
  *		We have insufficient buffer space
- *		buffer_arena is too fragmented ( space reservation fails )
+ *		buffer_arena is too fragmented ( space reservation(预订，预订) fails )
  *		If we have to flush dirty buffers ( but we try to avoid this )
  *
  *	The caller is responsible for releasing the reserved bufspace after
@@ -3790,6 +3863,9 @@ vfs_setdirty_locked_object(struct buf *bp)
  * Allocate the KVA mapping for an existing buffer.
  * If an unmapped buffer is provided but a mapped buffer is requested, take
  * also care to properly setup mappings between pages and KVA.
+ * 
+ * 为现有缓冲区分配KVA映射。如果提供了一个未映射的缓冲区，但请求了一个映射的缓冲区，那么还要
+ * 注意正确设置页面和页面之间的映射
  */
 static void
 bp_unmapped_get_kva(struct buf *bp, daddr_t blkno, int size, int gbflags)
@@ -3797,6 +3873,10 @@ bp_unmapped_get_kva(struct buf *bp, daddr_t blkno, int size, int gbflags)
 	int bsize, maxsize, need_mapping, need_kva;
 	off_t offset;
 
+	/*
+		首先去判断 buffer 中的 b_data 和 b_kvabase 两个字段是否是 unmapped buffer。
+		如果都不是的话，那就直接返回，说明该 buffer 已经映射到了某块虚拟地址空间
+	*/
 	need_mapping = bp->b_data == unmapped_buf &&
 	    (gbflags & GB_UNMAPPED) == 0;
 	need_kva = bp->b_kvabase == unmapped_buf &&
@@ -3812,6 +3892,7 @@ bp_unmapped_get_kva(struct buf *bp, daddr_t blkno, int size, int gbflags)
 		 * Buffer is not mapped, but the KVA was already
 		 * reserved at the time of the instantiation.  Use the
 		 * allocated space.
+		 * 缓冲区未映射，但KVA在实例化时已保留。使用分配的空间
 		 */
 		goto has_addr;
 	}
@@ -3820,11 +3901,12 @@ bp_unmapped_get_kva(struct buf *bp, daddr_t blkno, int size, int gbflags)
 	 * Calculate the amount of the address space we would reserve
 	 * if the buffer was mapped.
 	 */
+	// 判断 vnode 是否对应的是设备文件
 	bsize = vn_isdisk(bp->b_vp, NULL) ? DEV_BSIZE : bp->b_bufobj->bo_bsize;
 	KASSERT(bsize != 0, ("bsize == 0, check bo->bo_bsize"));
 	offset = blkno * bsize;
 	maxsize = size + (offset & PAGE_MASK);
-	maxsize = imax(maxsize, bsize);
+	maxsize = imax(maxsize, bsize);	// 计算所需要的最大内存空间
 
 	while (bufkva_alloc(bp, maxsize, gbflags) != 0) {
 		if ((gbflags & GB_NOWAIT_BD) != 0) {
@@ -3834,6 +3916,7 @@ bp_unmapped_get_kva(struct buf *bp, daddr_t blkno, int size, int gbflags)
 			 */
 			panic("GB_NOWAIT_BD and GB_UNMAPPED %p", bp);
 		}
+		// while 循环中的代码用于处理 buffer map 碎片化
 		counter_u64_add(mappingrestarts, 1);
 		bufspace_wait(bufdomain(bp), bp->b_vp, gbflags, 0, 0);
 	}
@@ -3935,7 +4018,7 @@ getblkx(struct vnode *vp, daddr_t blkno, int size, int slpflag, int slptimeo,
 	bo = &vp->v_bufobj;	
 	d_blkno = blkno;
 loop:
-	BO_RLOCK(bo);
+	BO_RLOCK(bo);	// 注意这里用的是 rlock，给 buffer object 加锁
 	/*
 		从 vnode 对应的 bufobj 中去查找我们所要找的那个 block 的数据现在是否还存在于 RAM 当中；如果有，
 		直接执行下面的分支；如果没有的话，则要从磁盘中的指定的位置读取
@@ -3943,7 +4026,7 @@ loop:
 		gbincore: get block in core
 	*/
 	bp = gbincore(bo, blkno);	/* 获取与 blkno 关联的一个 buf 缓冲区 */
-	if (bp != NULL) {	/* 如果我们需要的数据在 RAM 当中 */
+	if (bp != NULL) {	/* 说明 buffer 已经包含在了缓存区当中 */
 		int lockflags;
 		/*
 		 * Buffer is in-core.  If the buffer is not busy nor managed,
@@ -3955,6 +4038,9 @@ loop:
 		if ((flags & GB_LOCK_NOWAIT) != 0)
 			lockflags |= LK_NOWAIT;
 
+		/*
+			给 buffer 加锁，并且要指定 timeout
+		*/
 		error = BUF_TIMELOCK(bp, lockflags,
 		    BO_LOCKPTR(bo), "getblk", slpflag, slptimeo);
 
@@ -3982,6 +4068,10 @@ loop:
 		 * backing VM cache.
 		 * 缓冲区已锁定。如果缓冲区无效，则清除 B_CACHE。否则，对于非VMIO缓冲区，
 		 * 将设置 B_CACHE，对于VMIO缓冲区，将根据备份VM缓存调整 B_CACHE
+		 * 
+		 * B_INVAL 表示的是 buffer 中不包含有效信息。什么意思？就是说 buffer 这管理结构
+		 * 是在的，但是还没有将对应磁盘快中的数据读取到缓存当中(可能是磁盘块数据释放或者更新
+		 * 了，需要重新读取一下？)
 		 */
 		if (bp->b_flags & B_INVAL)
 			bp->b_flags &= ~B_CACHE;
@@ -3994,7 +4084,7 @@ loop:
 		if (bp->b_flags & B_MANAGED)
 			MPASS(bp->b_qindex == QUEUE_NONE);	
 		else
-			bremfree(bp);	/* 仍然是对 b_flags 进行设置 */
+			bremfree(bp);	// 从空闲链表中获取一块缓冲区，并标记为busy
 
 		/*
 		 * check for size inconsistencies for non-VMIO case.
@@ -4035,7 +4125,7 @@ loop:
 		 * 如果 size 跟 VMIO 情形下不能保持一致，我们可以重置 buffer 的大小。这可能会导致 B_CACHE 
 		 * 被设置或者被清除。如果大小没有发生变化，那么 B_CACHE 将维持原有的状态
 		 */
-		allocbuf(bp, size);
+		allocbuf(bp, size);		// 调整缓冲区到所需大小 (size)
 
 		KASSERT(bp->b_offset != NOOFFSET, 
 		    ("getblk: no buffer offset"));
@@ -4073,12 +4163,16 @@ loop:
 		 * B_CACHE in bwrite() except if B_DELWRI is already set,
 		 * so the below call doesn't set B_CACHE, but that gets real
 		 * confusing.  This is much easier.
-		 * 我们也许可以做一些花哨的事情，比如在bwrite 中设置 B_CACHE，除非已经设置了 B_DELWRI，所以
+		 * 我们也许可以做一些花哨的事情，比如在 bwrite 中设置 B_CACHE，除非已经设置了 B_DELWRI，所以
 		 * 下面的调用不会设置 B_CACHE，但是这会让人很困惑。这要容易得多
 		 */
 
 		if ((bp->b_flags & (B_CACHE|B_DELWRI)) == B_DELWRI) {
 			bp->b_flags |= B_NOCACHE;
+			/*
+				如果没有特殊的 flag 设置，通常情况下 bwrite 会带来较大的时间延迟，线程需要等待数据写回磁盘之后
+				才能返回。所以一般都是会指定写回的模式，同步还是异步，是否需要等待等等
+			*/
 			bwrite(bp);
 			goto loop;
 		}
@@ -4327,11 +4421,16 @@ vfs_nonvmio_extend(struct buf *bp, int newbsize)
  * memory (in the case of non-VMIO operations) or from an associated
  * VM object (in the case of VMIO operations).  This code is able to
  * resize a buffer up or down.
+ * 此代码构成来自匿名系统内存（在非VMIO操作的情况下）或来自关联VM对象（在VMIO操作的情况下）
+ * 的缓冲内存。这段代码可以向上或向下调整缓冲区的大小
  *
  * Note that this code is tricky, and has many complications to resolve
- * deadlock or inconsistent data situations.  Tread lightly!!! 
+ * deadlock or inconsistent data situations.  Tread lightly!!!
+ * 请注意，这段代码很复杂，在解决死锁或数据不一致的情况时会有很多复杂问题。轻踩！！！
+ * 
  * There are B_CACHE and B_DELWRI interactions that must be dealt with by 
  * the caller.  Calling this code willy nilly can result in the loss of data.
+ * 调用方必须处理 B_CACHE 和 B_DELWRI 交互。随意调用此代码可能会导致数据丢失
  *
  * allocbuf() only adjusts B_CACHE for VMIO buffers.  getblk() deals with
  * B_CACHE for the non-VMIO case.
@@ -4723,6 +4822,10 @@ vfs_drain_busy_pages(struct buf *bp)
  * Since I/O has not been initiated yet, certain buffer flags
  * such as BIO_ERROR or B_INVAL may be in an inconsistent state
  * and should be ignored.
+ * 
+ * 此例程在设备策略例程之前调用。它用于告诉VM系统正在进行分页 I/O，并将与缓冲区相关联的
+ * 页面视为独占繁忙。此外，还会处理对象 paging_in_progress 标志，以确保对象不会变得不一致。
+ * 由于 I/O 尚未启动，某些缓冲区标志 (如BIO_ERROR或B_INVAL) 可能处于不一致状态，应忽略。
  */
 void
 vfs_busy_pages(struct buf *bp, int clear_modify)
@@ -5164,6 +5267,9 @@ bufobj_wdrop(struct bufobj *bo)
 	BO_UNLOCK(bo);
 }
 
+/*
+	buffer object write wait？
+*/
 int
 bufobj_wwait(struct bufobj *bo, int slpflag, int timeo)
 {

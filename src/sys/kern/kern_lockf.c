@@ -97,12 +97,15 @@ SYSCTL_INT(_debug, OID_AUTO, lockf_debug, CTLFLAG_RW, &lockf_debug, 0, "");
 static MALLOC_DEFINE(M_LOCKF, "lockf", "Byte-range locking structures");
 
 struct owner_edge;
-struct owner_vertex;
+struct owner_vertex;	// vertex: 顶点，制高点
 struct owner_vertex_list;
 struct owner_graph;
 
+// 表示没有发现 blocking lockf
 #define NOLOCKF (struct lockf_entry *)0
+// 表示的应该是当前进程
 #define SELF	0x1
+// 其他进程
 #define OTHERS	0x2
 static void	 lf_init(void *);
 static int	 lf_hash_owner(caddr_t, struct vnode *, struct flock *, int);
@@ -180,10 +183,15 @@ static void	 lf_print_owner(struct lock_owner *);
  * POSIX fcntl locks, local file for BSD flock locks or <pid,sysid>
  * pair for remote locks) is represented by a unique instance of
  * struct lock_owner.
+ * 此结构用于跟踪本地和远程锁所有者。结构 lockf_entry 的 lf_owner 字段指向锁所有者结构.
+ * 每个可能的锁所有者（POSIX fcntl锁的本地proc、BSD群集锁的本地文件或远程锁的 <pid，sysid>对）
+ * 都由一个唯一的 struct lock_owner 实例表示
  *
  * If a lock owner has a lock that blocks some other lock or a lock
  * that is waiting for some other lock, it also has a vertex in the
  * owner_graph below.
+ * 如果锁所有者拥有一个阻止其他锁的锁或一个正在等待其他锁的锁，那么它在下面的所有者图
+ * 中也有一个顶点
  *
  * Locks:
  * (s)		locked by state->ls_lock
@@ -197,6 +205,9 @@ struct lock_owner {
 	LIST_ENTRY(lock_owner) lo_link; /* (l) hash chain */
 	int	lo_refs;	    /* (l) Number of locks referring to this */
 	int	lo_flags;	    /* (c) Flags passwd to lf_advlock */
+	/*
+		lf_advlock 处理过程中利用该字段进行匹配
+	*/
 	caddr_t	lo_id;		    /* (c) Id value passed to lf_advlock */
 	pid_t	lo_pid;		    /* (c) Process Id of the lock owner */
 	int	lo_sysid;	    /* (c) System Id of the lock owner */
@@ -207,16 +218,30 @@ struct lock_owner {
 LIST_HEAD(lock_owner_list, lock_owner);
 
 struct lock_owner_chain {
+	/*
+		hash table 中的元素，应该也是为了解决冲突的问题，把每个元素都设计成链表的格式。
+		当我们向链表中添加或者删除元素的时候，就要利用 lock 进行同步
+	*/
 	struct sx		lock;
 	struct lock_owner_list	list;
 };
 
+/*
+	sx：共享/独占锁，lf_lock_states_lock 对象应该就是管理 lf_lock_states
+*/
 static struct sx		lf_lock_states_lock;
 static struct lockf_list	lf_lock_states; /* (S) */
+/*
+	全局的锁数组，每个元素都已一个锁拥有者链表。从代码实现来看，这个应该也是一个
+	hash table，类似与 vnode 的管理
+*/
 static struct lock_owner_chain	lf_lock_owners[LOCK_OWNER_HASH_SIZE];
 
 /*
  * Structures for deadlock detection.
+		从注释的表述中可以推测一下：lock_owner_list 是所有锁拥有者的链表，可能我们
+		进行查找、插入等操作的时候会用用到这个结构。然后系统又给这些所有者构造了图结构，
+		防止死锁情况的发生
  *
  * We have two types of directed graph, the first is the set of locks,
  * both active and pending on a vnode. Within this graph, active locks
@@ -228,6 +253,12 @@ static struct lock_owner_chain	lf_lock_owners[LOCK_OWNER_HASH_SIZE];
  * added to or from new nodes (either new pending locks which only add
  * out-going edges or new active locks which only add in-coming edges)
  * therefore they cannot create loops in the lock graph.
+ * 
+ * 我们有两种类型的有向图，第一种是锁集，在vnode上处于活动状态和挂起状态。在这个图中，
+ * 活动锁是图中的终端节点（即没有输出边）。挂起的锁对每个阻止该锁被授予的阻止活动的锁，
+ * 以及每个旧的挂起的锁（如果该锁是活动的，则会阻止它们）都有向外的边。每个 vnode 的
+ * 图自然是非循环的；新边只会添加到新节点或从新节点添加（新的挂起锁只会添加向外的边，
+ * 新的活动锁只会添加向内的边），因此它们无法在锁图中创建循环
  *
  * The second graph is a global graph of lock owners. Each lock owner
  * is a vertex in that graph and an edge is added to the graph
@@ -236,6 +267,10 @@ static struct lock_owner_chain	lf_lock_owners[LOCK_OWNER_HASH_SIZE];
  * lock upon which it waits. In order to prevent deadlock, we only add
  * an edge to this graph if the new edge would not create a cycle.
  * 
+ * 第二个图是锁所有者的全局图。每个锁所有者都是该图中的一个顶点，每当向 vnode 图中
+ * 添加一条边时，就会向该图中添加一条边，其端点对应于新挂起锁的所有者及其等待的锁的
+ * 所有者。为了防止死锁，我们只在新边不会创建循环的情况下向该图添加一条边
+ * 
  * The lock owner graph is topologically sorted, i.e. if a node has
  * any outgoing edges, then it has an order strictly less than any
  * node to which it has an outgoing edge. We preserve this ordering
@@ -243,7 +278,15 @@ static struct lock_owner_chain	lf_lock_owners[LOCK_OWNER_HASH_SIZE];
  * paper "A Dynamic Topological Sort Algorithm for Directed Acyclic
  * Graphs" (ACM Journal of Experimental Algorithms, Vol 11, Article
  * No. 1.7)
+ * 
+ * 锁所有者图是按拓扑排序的，即如果一个节点有任何输出边，那么它的顺序严格小于它有
+ * 输出边的任何节点。我们使用“有向无环图的动态拓扑排序算法”（ACM实验算法杂志，
+ * 第11卷，第1.7篇）一文中的算法PK在边插入时保持这种排序（并检测循环）
  */
+/*
+	数据结构与算法中，图包含有顶点(vertex)和边(edge)。顶点不是某一个特定的节点，而是所有的
+	节点都被认为是一个顶点；边就表示两个顶点之间的连线，应该可以认为是指向其他顶点的指针
+*/
 struct owner_vertex;
 
 struct owner_edge {
@@ -273,7 +316,7 @@ struct owner_graph {
 	uint32_t	g_gen;		  /* (g) increment when re-ordering */
 };
 
-static struct sx		lf_owner_graph_lock;
+static struct sx		lf_owner_graph_lock;	// lf_owner_graph 同步管理
 static struct owner_graph	lf_owner_graph;
 
 /*
@@ -287,13 +330,14 @@ lf_init(void *dummy)
 	sx_init(&lf_lock_states_lock, "lock states lock");
 	LIST_INIT(&lf_lock_states);
 
+	// 对全局的 lock owner 数组中的所有元素进行初始化
 	for (i = 0; i < LOCK_OWNER_HASH_SIZE; i++) {
 		sx_init(&lf_lock_owners[i].lock, "lock owners lock");
 		LIST_INIT(&lf_lock_owners[i].list);
 	}
 
 	sx_init(&lf_owner_graph_lock, "owner graph lock");
-	graph_init(&lf_owner_graph);
+	graph_init(&lf_owner_graph);	// 初始化 lockf owner 图
 }
 SYSINIT(lf_init, SI_SUB_LOCK, SI_ORDER_FIRST, lf_init, NULL);
 
@@ -306,6 +350,7 @@ lf_hash_owner(caddr_t id, struct vnode *vp, struct flock *fl, int flags)
 	uint32_t h;
 
 	if (flags & F_REMOTE) {
+		// 处理 lock owner 是 remote NFS client 的情况
 		h = HASHSTEP(0, fl->l_pid);
 		h = HASHSTEP(h, fl->l_sysid);
 	} else if (flags & F_FLOCK) {
@@ -320,6 +365,7 @@ lf_hash_owner(caddr_t id, struct vnode *vp, struct flock *fl, int flags)
 /*
  * Return true if a lock owner matches the details passed to
  * lf_advlock.
+ * 如果锁所有者与传递给 lf_advlock 的详细信息匹配，则返回true
  */
 static int
 lf_owner_matches(struct lock_owner *lo, caddr_t id, struct flock *fl,
@@ -344,16 +390,19 @@ lf_alloc_lock(struct lock_owner *lo)
 	if (lockf_debug & 4)
 		printf("Allocated lock %p\n", lf);
 #endif
+	// 当 lock_owner 不为空的时候，执行 if 代码分支
 	if (lo) {
 		sx_xlock(&lf_lock_owners[lo->lo_hash].lock);
 		lo->lo_refs++;
 		sx_xunlock(&lf_lock_owners[lo->lo_hash].lock);
 		lf->lf_owner = lo;
+		// 一个 owner 可能会对应多个 entry，对应 lo_refs 增删？
 	}
 
 	return (lf);
 }
 
+// 释放掉一个 lockf_entry
 static int
 lf_free_lock(struct lockf_entry *lock)
 {
@@ -366,6 +415,8 @@ lf_free_lock(struct lockf_entry *lock)
 	 * Adjust the lock_owner reference count and
 	 * reclaim the entry if this is the last lock
 	 * for that owner.
+	 * 调整锁所有者引用计数，如果这是该所有者的最后一个锁，则收回该条目。
+	 * 从这里可以看出，每个 owner 是可以对应到多个 lock 的
 	 */
 	struct lock_owner *lo = lock->lf_owner;
 	if (lo) {
@@ -376,8 +427,9 @@ lf_free_lock(struct lockf_entry *lock)
 		chainlock = &lf_lock_owners[lo->lo_hash].lock;
 		sx_xlock(chainlock);
 		KASSERT(lo->lo_refs > 0, ("lock owner refcount"));
-		lo->lo_refs--;
+		lo->lo_refs--;	// 释放掉一个lock的时候，对应的 owner 引用计数减一
 		if (lo->lo_refs == 0) {
+			// 当 owner 引用计数也变成0的时候，owner 也需要被释放
 #ifdef LOCKF_DEBUG
 			if (lockf_debug & 1)
 				printf("lf_free_lock: freeing lock owner %p\n",
@@ -418,10 +470,10 @@ lf_advlockasync(struct vop_advlockasync_args *ap, struct lockf **statep,
     u_quad_t size)
 {
 	struct lockf *state;
-	struct flock *fl = ap->a_fl;
+	struct flock *fl = ap->a_fl;	// 查找或者构造时使用
 	struct lockf_entry *lock;
 	struct vnode *vp = ap->a_vp;
-	caddr_t id = ap->a_id;
+	caddr_t id = ap->a_id;	// id 可能是进程地址
 	int flags = ap->a_flags;
 	int hash;
 	struct lock_owner *lo;
@@ -431,6 +483,7 @@ lf_advlockasync(struct vop_advlockasync_args *ap, struct lockf **statep,
 	/*
 	 * Handle the F_UNLKSYS case first - no need to mess about
 	 * creating a lock owner for this one.
+	 * 不需要为这个创建锁所有者。F_UNLCKSYS 表示的是清除给定系统 id 的锁
 	 */
 	if (ap->a_op == F_UNLCKSYS) {
 		lf_clearremotesys(fl->l_sysid);
@@ -439,14 +492,15 @@ lf_advlockasync(struct vop_advlockasync_args *ap, struct lockf **statep,
 
 	/*
 	 * Convert the flock structure into a start and end.
+	 		将 flock 结构中存储的信息转换成对文件访问的起始和终止位置
 	 */
 	switch (fl->l_whence) {
-
-	case SEEK_SET:
-	case SEEK_CUR:
+	case SEEK_SET:	// 起始位置
+	case SEEK_CUR:	// 当前位置
 		/*
 		 * Caller is responsible for adding any necessary offset
 		 * when SEEK_CUR is used.
+		 * 调用方负责在使用 SEEK_CUR 时添加任何必要的偏移量
 		 */
 		start = fl->l_start;
 		break;
@@ -483,6 +537,7 @@ retry_setlock:
 
 	/*
 	 * Avoid the common case of unlocking when inode has no locks.
+	 		避免在 inode 没有锁时解锁的常见情况
 	 */
 	if (ap->a_op != F_SETLK && (*statep) == NULL) {
 		VI_LOCK(vp);
@@ -497,9 +552,13 @@ retry_setlock:
 	/*
 	 * Map our arguments to an existing lock owner or create one
 	 * if this is the first time we have seen this owner.
+	 * 将我们的参数映射到现有的锁所有者，如果这是我们第一次见到这个所有者，则创建一个
 	 */
 	hash = lf_hash_owner(id, vp, fl, flags);
 	sx_xlock(&lf_lock_owners[hash].lock);
+	/*
+		遍历 lock owner 的哈希表，查找该对象是否已经存在
+	*/
 	LIST_FOREACH(lo, &lf_lock_owners[hash].list, lo_link)
 		if (lf_owner_matches(lo, id, fl, flags))
 			break;
@@ -508,6 +567,7 @@ retry_setlock:
 		 * We initialise the lock with a reference
 		 * count which matches the new lockf_entry
 		 * structure created below.
+		 * 如果 lock owner 在当前的哈希表中不存在，那么就要重新创建一个对象
 		 */
 		lo = malloc(sizeof(struct lock_owner), M_LOCKF,
 		    M_WAITOK|M_ZERO);
@@ -540,13 +600,15 @@ retry_setlock:
 			printf("\n");
 		}
 #endif
-
+		// 并且将重新创建的对象插入到哈希表中
 		LIST_INSERT_HEAD(&lf_lock_owners[hash].list, lo, lo_link);
 	} else {
 		/*
 		 * We have seen this lock owner before, increase its
 		 * reference count to account for the new lockf_entry
 		 * structure we create below.
+		 * 如果该对象已经存在，我们则仅仅是增加 lock owner 的引用计数。说明 lock owner 的引用计数
+		 * 对应的就是它所关联的 lock_entry 的数量
 		 */
 		lo->lo_refs++;
 	}
@@ -556,6 +618,11 @@ retry_setlock:
 	 * Create the lockf structure. We initialise the lf_owner
 	 * field here instead of in lf_alloc_lock() to avoid paying
 	 * the lf_lock_owners_lock tax twice.
+	 * 创建锁结构。我们在这里初始化 lf_owner 字段，而不是在 lf_alloc_lock 中，
+	 * 以避免支付两次 lf_lock_owner_lock 税
+	 * 该函数的其中一个使用场景是在系统 open 一个文件的时候调用的，其中应该会包含打开文件的方式，即共享还是独占。
+	 * 上面判断完 lock_owner 对象之后紧接着就开始创建 lock_entry，说明 lock_entry 是文件锁实现的一个基本
+	 * 数据结构
 	 */
 	lock = lf_alloc_lock(NULL);
 	lock->lf_refs = 1;
@@ -568,6 +635,8 @@ retry_setlock:
 		 * For remote locks, the caller may release its ref to
 		 * the vnode at any time - we have to ref it here to
 		 * prevent it from being recycled unexpectedly.
+		 * 对于远程锁，调用方可以随时释放对vnode的引用 - 我们必须在这里引用它，
+		 * 以防止它意外地被回收
 		 */
 		vref(vp);
 	}
@@ -590,6 +659,8 @@ retry_setlock:
 	 * and create a new one if necessary - the caller's *statep
 	 * variable and the state's ls_threads count is protected by
 	 * the vnode interlock.
+	 * 执行请求的操作。首先找到我们的状态结构，并在必要时创建一个新的结构 - 
+	 * 调用者的 *statep 变量和状态的 ls_threads 受 vnode interlock 保护
 	 */
 	VI_LOCK(vp);
 	if (vp->v_iflag & VI_DOOMED) {
@@ -600,6 +671,9 @@ retry_setlock:
 
 	/*
 	 * Allocate a state structure if necessary.
+	 		前面的代码用于判断我们是否需要创建一个 lockf_entry (根据 flock 结构体中的信息)。
+			感觉 flock 只是用于传递锁对应的信息，而真正用于锁操作的应该是 lockf_entry / lockf;
+			下面的代码应该就是判断是否要新创建一个 lockf 
 	 */
 	state = *statep;
 	if (state == NULL) {
@@ -620,6 +694,7 @@ retry_setlock:
 		/*
 		 * Cope if we lost a race with some other thread while
 		 * trying to allocate memory.
+		 * 如果我们在试图分配内存时与其他线程的竞争中失败了，那么就要处理这个问题
 		 */
 		VI_LOCK(vp);
 		if (vp->v_iflag & VI_DOOMED) {
@@ -846,6 +921,7 @@ out_free:
 
 /*
  * Return non-zero if locks 'x' and 'y' overlap.
+		当 x 和 y 有重叠部分的时候，要返回非零值
  */
 static int
 lf_overlaps(struct lockf_entry *x, struct lockf_entry *y)
@@ -856,11 +932,17 @@ lf_overlaps(struct lockf_entry *x, struct lockf_entry *y)
 
 /*
  * Return non-zero if lock 'x' is blocked by lock 'y' (or vice versa).
+		如果锁 x 被锁 y 阻塞了，那么就要返回非零值
  */
 static int
 lf_blocks(struct lockf_entry *x, struct lockf_entry *y)
 {
-
+	/*
+		同时满足下面三个条件时，我们可以认定 x 是被 y 阻塞了：
+			- 两者的 lockf_owner 不一样
+			- x 和 y 其中有一个锁类型是写锁
+			- x 和 y 的加锁区域有重叠部分
+	*/
 	return x->lf_owner != y->lf_owner
 		&& (x->lf_type == F_WRLCK || y->lf_type == F_WRLCK)
 		&& lf_overlaps(x, y);
@@ -1103,6 +1185,7 @@ lf_insert_lock(struct lockf *state, struct lockf_entry *lock)
 		return;
 	}
 
+	// 需要比较 lf_start 字段的大小判断插入的位置，应该是从小到大排列
 	lfprev = NULL;
 	LIST_FOREACH(lf, &state->ls_active, lf_link) {
 		if (lf->lf_start > lock->lf_start) {
@@ -1146,6 +1229,8 @@ lf_wakeup_lock(struct lockf *state, struct lockf_entry *wakelock)
  * we must remove all the dependencies, otherwise it has simply been
  * reduced but remains active. Any pending locks which have been been
  * unblocked are added to 'granted'
+ * 
+ * 从代码实现来看，应该是更新一下图结构相关字段，保证死锁不会发生
  */
 static void
 lf_update_dependancies(struct lockf *state, struct lockf_entry *lock, int all,
@@ -1171,6 +1256,7 @@ lf_update_dependancies(struct lockf *state, struct lockf_entry *lock, int all,
 /*
  * Set the start of an existing active lock, updating dependencies and
  * adding any newly woken locks to 'granted'.
+ * 设置现有活动锁的开始，更新依赖项，并将任何新唤醒的锁添加到 "granted"
  */
 static void
 lf_set_start(struct lockf *state, struct lockf_entry *lock, off_t new_start,
@@ -1203,15 +1289,22 @@ lf_set_end(struct lockf *state, struct lockf_entry *lock, off_t new_end,
  * locks owned by the same owner and processing any pending locks that
  * become unblocked as a result. This code is also used for unlock
  * since the logic for updating existing locks is identical.
+ * 向活跃锁链表中增加一个锁对象，升级或者移除掉同一个拥有者当前所拥有的任意锁，并且处理
+ * 结果会变成 unblocked 状态的任何正在挂起的锁。此代码也用于解锁，因为更新现有锁的逻辑
+ * 是相同的
  *
  * As a result of processing the new lock, we may unblock existing
  * pending locks as a result of downgrading/unlocking. We simply
  * activate the newly granted locks by looping.
+ * 作为处理新锁的结果，我们可能会由于降级/解锁而取消阻止现有的挂起锁。我们只需通过
+ * 循环激活新授予的锁
  *
  * Since the new lock already has its dependencies set up, we always
  * add it to the list (unless its an unlock request). This may
  * fragment the lock list in some pathological cases but its probably
  * not a real problem.
+ * 因为新锁已经设置了依赖项，所以我们总是将其添加到列表中（除非是解锁请求）。在某些
+ * 病理病例中，这可能会导致锁列表出现碎片，但这可能不是一个真正的问题
  */
 static void
 lf_activate_lock(struct lockf *state, struct lockf_entry *lock)
@@ -1220,6 +1313,7 @@ lf_activate_lock(struct lockf *state, struct lockf_entry *lock)
 	struct lockf_entry_list granted;
 	int ovcase;
 
+	// 创建一个授予锁链表，并将 lock 插入
 	LIST_INIT(&granted);
 	LIST_INSERT_HEAD(&granted, lock, lf_link);
 
@@ -1230,6 +1324,9 @@ lf_activate_lock(struct lockf *state, struct lockf_entry *lock)
 		/*
 		 * Skip over locks owned by other processes.  Handle
 		 * any locks that overlap and are owned by ourselves.
+		 * 跳过其他进程拥有的锁。指出任何重叠并且为我们所有的锁(当前进程管理的锁？)
+		 * 可以看出，lockf 中不仅仅包括当前进程管理的锁，还包括其他进程管理的锁。
+		 * 注意这里处理的是 ls_active 链表中的元素
 		 */
 		overlap = LIST_FIRST(&state->ls_active);
 		for (;;) {
@@ -1260,6 +1357,8 @@ lf_activate_lock(struct lockf *state, struct lockf_entry *lock)
 				 * dependants for the new lock, taking
 				 * into account a possible downgrade
 				 * or unlock. Remove the old lock.
+				 * 考虑到可能的降级或解锁，我们已经为新锁设置了从属项。
+				 * 移除旧锁
 				 */
 				LIST_REMOVE(overlap, lf_link);
 				lf_update_dependancies(state, overlap, TRUE,
@@ -1278,6 +1377,7 @@ lf_activate_lock(struct lockf *state, struct lockf_entry *lock)
 				/*
 				 * Delete the overlap and advance to
 				 * the next entry in the list.
+				 * 删除重叠并前进到列表中的下一个条目
 				 */
 				lf = LIST_NEXT(overlap, lf_link);
 				LIST_REMOVE(overlap, lf_link);
@@ -1393,16 +1493,23 @@ lf_setlock(struct lockf *state, struct lockf_entry *lock, struct vnode *vp,
 	 * Set the priority
 	 */
 	priority = PLOCK;
+	/*
+		当 lockf 的类型是写锁的时候，优先级+4，是否说明当读锁写锁同时存在的时候，写锁将首先执行？
+	*/
 	if (lock->lf_type == F_WRLCK)
 		priority += 4;
 	if (!(lock->lf_flags & F_NOINTR))
 		priority |= PCATCH;
 	/*
 	 * Scan lock list for this file looking for locks that would block us.
+	 		扫描此文件的锁列表，查找会阻止我们的锁。也就是说 lock 在 if 代码分支中不会被
+			立刻执行，而是会被别的锁给阻塞掉。所以我们要判断 lf_flags 是否满足该使用场景
 	 */
 	if (lf_getblock(state, lock)) {
 		/*
 		 * Free the structure and return if nonblocking.
+		 		如果 lockf_entry->lf_flags 设置为不支持等待并且没有设置回调 task，
+				则返回 try again 错误码
 		 */
 		if ((lock->lf_flags & F_WAIT) == 0
 		    && lock->lf_async_task == NULL) {
@@ -1415,6 +1522,8 @@ lf_setlock(struct lockf *state, struct lockf_entry *lock, struct vnode *vp,
 		 * For flock type locks, we must first remove
 		 * any shared locks that we hold before we sleep
 		 * waiting for an exclusive lock.
+		 * 对于 flock 类型，我们必须先移除所有共享的锁，然后再睡觉
+		 * 等待独占锁。需要注意的是这里判断了 lockf 是否为一个独占锁
 		 */
 		if ((lock->lf_flags & F_FLOCK) &&
 		    lock->lf_type == F_WRLCK) {
@@ -1445,6 +1554,7 @@ lf_setlock(struct lockf *state, struct lockf_entry *lock, struct vnode *vp,
 		/*
 		 * We have added edges to everything that blocks
 		 * us. Sleep until they all go away.
+		 * 我们要为所有阻塞我们的东西增加边。一直睡眠到它们都走了
 		 */
 		LIST_INSERT_HEAD(&state->ls_pending, lock, lf_link);
 #ifdef LOCKF_DEBUG
@@ -1463,6 +1573,8 @@ lf_setlock(struct lockf *state, struct lockf_entry *lock, struct vnode *vp,
 			 * this callback happens when the blocking
 			 * lock is released, allowing the caller to
 			 * make another attempt to take the lock.
+			 * 调用者请求的异步通知——此回调在释放阻塞锁时发生，
+			 * 允许调用者再次尝试获取锁
 			 */
 			*cookiep = (void *) lock;
 			error = EINPROGRESS;
@@ -1655,6 +1767,7 @@ lf_cancel(struct lockf *state, struct lockf_entry *lock, void *cookie)
 /*
  * Walk the list of locks for an inode and
  * return the first blocking lock.
+ * 浏览 inode 的锁列表并返回第一个阻塞锁。注意这里的表述是 inode，而不是 vnode
  */
 static struct lockf_entry *
 lf_getblock(struct lockf *state, struct lockf_entry *lock)
@@ -1665,6 +1778,14 @@ lf_getblock(struct lockf *state, struct lockf_entry *lock)
 		/*
 		 * We may assume that the active list is sorted by
 		 * lf_start.
+		 * 从代码实现来看，ls_active 是按照从小到达的方式进行排列的。函数中局部变量的命名页很有讲究，
+		 * overlap 意思就是重叠。也就是说，一个锁会不会阻塞另外一个锁，其中一个判断标准就是两个锁管理
+		 * 的数据区会不会存在重叠。
+		 * 此处逻辑可能是首先判断第一个元素跟给定 entry 是否存在重叠。如果直接 overlap->lf_start > 
+		 * lock->lf_end，那就说明 lock 所管理的区域比第一个区域还要靠前，所以后面 entry 管理的区域
+		 * 跟 lock 更不可能会有重叠部分，所以直接返回(不判断是读锁还是写锁)？
+		 * 如果不是的，再执行 lf_blocks 执行更进一步的判定。
+		 * 
 		 */
 		if (overlap->lf_start > lock->lf_end)
 			break;
@@ -1678,6 +1799,7 @@ lf_getblock(struct lockf *state, struct lockf_entry *lock)
 /*
  * Walk the list of locks for an inode to find an overlapping lock (if
  * any) and return a classification of that overlap.
+ * 浏览inode的锁列表，找到重叠的锁（如果有），并返回该重叠的分类
  *
  * Arguments:
  *	*overlap	The place in the lock list to start looking
@@ -1699,6 +1821,7 @@ lf_getblock(struct lockf *state, struct lockf_entry *lock)
  *
  * NOTE: this returns only the FIRST overlapping lock.  There
  *	 may be more than one.
+		链表中可能存在多个 overlap，该函数貌似只返回第一个
  */
 static int
 lf_findoverlap(struct lockf_entry **overlap, struct lockf_entry *lock, int type)
@@ -1717,6 +1840,9 @@ lf_findoverlap(struct lockf_entry **overlap, struct lockf_entry *lock, int type)
 	start = lock->lf_start;
 	end = lock->lf_end;
 	res = 0;
+	/*
+		while 循环刚好对应注释中列出的6种情况
+	*/
 	while (*overlap) {
 		lf = *overlap;
 		if (lf->lf_start > end)
@@ -1804,6 +1930,7 @@ lf_findoverlap(struct lockf_entry **overlap, struct lockf_entry *lock, int type)
  * Split an the existing 'lock1', based on the extent of the lock
  * described by 'lock2'. The existing lock should cover 'lock2'
  * entirely.
+ * 根据“lock2”描述的锁的范围，拆分现有的“lock1”。现有锁应完全覆盖“锁2”
  *
  * Any pending locks which have been been unblocked are added to
  * 'granted'

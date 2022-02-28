@@ -3147,6 +3147,7 @@ sys_flock(struct thread *td, struct flock_args *uap)
 	struct flock lf;
 	int error;
 
+	// 获取对应文件描述符对应的文件指针
 	error = fget(td, uap->fd, &cap_flock_rights, &fp);
 	if (error != 0)
 		return (error);

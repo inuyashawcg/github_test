@@ -136,7 +136,8 @@ SYSCTL_ULONG(_vm, OID_AUTO, max_kernel_address, CTLFLAG_RD,
  *	no initial mapping to physical memory.  Any mapping from this
  *	range to physical memory must be explicitly created prior to
  *	its use, typically with pmap_qenter().  Any attempt to create
- *	a mapping on demand through vm_fault() will result in a panic. 
+ *	a mapping on demand through vm_fault() will result in a panic.
+ 
  		分配一个虚拟地址范围，该范围没有底层对象，也没有到物理内存的初始映射。从这个
 		范围到物理内存的任何映射必须在使用之前显式创建，通常使用 pmap_qenter。任何
 		通过 vm_fault 按需创建映射的尝试都会导致恐慌

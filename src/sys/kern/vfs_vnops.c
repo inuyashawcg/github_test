@@ -1685,7 +1685,7 @@ unlock:
 }
 
 /*
-	前面调用的一种情况是，mpp直接传进来一个空指针
+	前面调用的一种情况是，mpp 直接传进来一个空指针
 */
 int
 vn_start_write(struct vnode *vp, struct mount **mpp, int flags)
@@ -1700,6 +1700,7 @@ vn_start_write(struct vnode *vp, struct mount **mpp, int flags)
 	/*
 	 * If a vnode is provided, get and return the mount point that
 	 * to which it will write.
+	 * 如果给定了 vp，那就需要获取并且返回它将要写入的 mount 节点指针
 	 */
 	if (vp != NULL) {
 		if ((error = VOP_GETWRITEMOUNT(vp, mpp)) != 0) { // 判断mpp的refcount

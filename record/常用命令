@@ -19,8 +19,69 @@
   umount ./mnt
   mdconfig -d -u ${device_name}
 
+
+远程登录qihai服务器:  
+ssh root@192.168.2.211
+
+服务器qemu启动freebsd
+root@freebsd-x86-1:/work/riscv # 
+
+
+虚拟机:
+ssh root@192.168.2.4
+  
+同步qihai源码:  
+git clone git@git.tpt.com:/git/qihai.git qihai
+
+cmake 版本
+git clone git@git.tpt.com:/git/bsdkernel.git bsdkernel	
+
+平台无关的cpp文件添加: 
+/usr/src/sys/conf/files
+
+平台相关的cpp文件添加:
+/usr/src/sys/conf/files.riscv
+  
+不用每次都重新编代码:
+make TARGET_ARCH=riscv64 buildkernel NO_CLEAN=YES
+
+文件拷贝-本地测试:
+scp /home/mercury/Documents/code/qihai/sys/conf/files root@192.168.2.10:/usr/src/qihai/sys/conf/
+
+scp /home/mercury/Documents/code/qihai/sys/sys/Kobj.h root@192.168.2.10:/usr/src/qihai/sys/sys/
+scp /home/mercury/Documents/code/qihai/sys/sys/Bus.h root@192.168.2.10:/usr/src/qihai/sys/sys/
+
+scp /home/mercury/Documents/code/qihai/sys/kern/subr_bus.c root@192.168.2.10:/usr/src/qihai/sys/kern/
+scp /home/mercury/Documents/code/qihai/sys/kern/SubrBus.cpp root@192.168.2.10:/usr/src/qihai/sys/kern/
+scp /home/mercury/Documents/code/qihai/sys/kern/SubrKobj.cpp root@192.168.2.10:/usr/src/qihai/sys/kern/
+
+
+文件拷贝-服务器测试:
+TPT123456
+scp /home/mercury/Documents/code/qihai/sys/conf/files root@192.168.2.211:/work/test_qihai/sys/conf/
+
+scp /home/mercury/Documents/code/qihai/sys/sys/Kobj.h root@192.168.2.211:/work/test_qihai/sys/sys/
+scp /home/mercury/Documents/code/qihai/sys/sys/kobj.h root@192.168.2.211:/work/test_qihai/sys/sys/
+scp /home/mercury/Documents/code/qihai/sys/sys/Bus.h root@192.168.2.211:/work/test_qihai/sys/sys/
+
+scp /home/mercury/Documents/code/qihai/sys/kern/SubrBus.cpp root@192.168.2.211:/work/test_qihai/sys/kern/
+scp /home/mercury/Documents/code/qihai/sys/kern/subr_bus.c root@192.168.2.211:/work/test_qihai/sys/kern/
+scp /home/mercury/Documents/code/qihai/sys/kern/SubrKobj.cpp root@192.168.2.211:/work/test_qihai/sys/kern/
+scp /home/mercury/Documents/code/qihai/sys/riscv/riscv/timer.cpp root@192.168.2.211:/work/test_qihai/sys/riscv/riscv/
+
+修改点:
+配置文件 files/files.riscv
+宏定义中的裸字符串处理
+extern "C"
+
+awk文件
+makeobjops.awk
+
+/usr/obj/work/test_qihai/riscv.riscv64/sys/GENERIC
+/usr/obj/work/test_qihai/riscv.riscv64/sys/GENERIC/modules/work/test_qihai/sys/modules/
 #! /usr/local/bin/bash
 
   aptitude
 
   chrome://flags/
+  chrome://flags/#enable-force-dark

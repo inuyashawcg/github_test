@@ -394,10 +394,13 @@ struct mtx *mtx_pool_find(struct mtx_pool *pool, void *ptr);
 struct mtx *mtx_pool_alloc(struct mtx_pool *pool);
 #define mtx_pool_lock(pool, ptr)					\
 	mtx_lock(mtx_pool_find((pool), (ptr)))
+
 #define mtx_pool_lock_spin(pool, ptr)					\
 	mtx_lock_spin(mtx_pool_find((pool), (ptr)))
+
 #define mtx_pool_unlock(pool, ptr)					\
 	mtx_unlock(mtx_pool_find((pool), (ptr)))
+
 #define mtx_pool_unlock_spin(pool, ptr)					\
 	mtx_unlock_spin(mtx_pool_find((pool), (ptr)))
 
@@ -479,6 +482,9 @@ extern struct mtx_pool *mtxpool_sleep;
 
 /*
  * Global locks.
+ 		FreeBSD 3.0 中加入了对内核进行保护的巨型锁 Gaint lock。当一个进程进入到内核态执行的时候，只有先获取到 Gaint lock
+		才能继续执行。因此，一次只能有一个处理器在内核态执行，其他处理器只能处理处于用户态的进程。后续增加了 SMP 机制，所以很多
+		不支持 SMP 的子系统才来使用 Gaint
  */
 extern struct mtx Giant;
 extern struct mtx blocked_lock;

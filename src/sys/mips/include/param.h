@@ -177,6 +177,16 @@
 /*
  * Mach derived conversion macros
  */
+/*
+  uint64_t a = 0x1234;
+  uint64_t b = 0x1234;
+
+  a = round_page(a);
+  b = trunc_page(b);
+
+  a = 0x2000 (十进制 8192)
+  b = 0x1000 (十进制 4096)
+*/
 #define	round_page(x)		(((x) + PAGE_MASK) & ~PAGE_MASK)
 #define	trunc_page(x)		((x) & ~PAGE_MASK)
 

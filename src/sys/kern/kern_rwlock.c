@@ -65,6 +65,7 @@ PMC_SOFT_DECLARE( , , lock, failed);
 /*
  * Return the rwlock address when the lock cookie address is provided.
  * This functionality assumes that struct rwlock* have a member named rw_lock.
+ * 提供锁cookie地址时返回rwlock地址。此功能假定struct rwlock*有一个名为rw_lock的成员
  */
 #define	rwlock2rw(c)	(__containerof(c, struct rwlock, rw_lock))
 
@@ -201,6 +202,7 @@ owner_rw(const struct lock_object *lock, struct thread **owner)
 }
 #endif
 
+// opts 表示应该就是该锁支持的一些操作
 void
 _rw_init_flags(volatile uintptr_t *c, const char *name, int opts)
 {
@@ -228,9 +230,9 @@ _rw_init_flags(volatile uintptr_t *c, const char *name, int opts)
 		flags |= LO_QUIET;
 	if (opts & RW_NEW)
 		flags |= LO_NEW;
-
+	// 初始化 lock object，类似于 C++ 类实例化
 	lock_init(&rw->lock_object, &lock_class_rw, name, NULL, flags);
-	rw->rw_lock = RW_UNLOCKED;
+	rw->rw_lock = RW_UNLOCKED;	// 初始化为没有线程等待的读锁
 	rw->rw_recurse = 0;
 }
 

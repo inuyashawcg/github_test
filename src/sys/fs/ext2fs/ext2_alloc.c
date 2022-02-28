@@ -86,7 +86,7 @@ static daddr_t  ext2_mapsearch(struct m_ext2fs *, char *, daddr_t);
  * 	1、分配一个建议的块(inode 结构体中指定的块号？)
  * 	2、同一个块组中的最佳快
  * 	3、同一个块组中的块
- * 	4、跳转到其他的块组查找，知道查找到一个块是可用的
+ * 	4、跳转到其他的块组查找，直到查找到一个块是可用的
  * 
  * 如果优先选择没有给出，那按照下面的登记划分去查找一个数据块:
  * 	1、在包含文件inode的块组中找到一个块
@@ -129,7 +129,10 @@ ext2_alloc(struct inode *ip, daddr_t lbn, e4fs_daddr_t bpref, int size,
 		goto nospace;
 	if (bpref >= fs->e2fs_bcount)
 		bpref = 0;
-	/* 当优先选择的块号为0时，那就执行第二种策略，即在inode所在的块组中查找可用块 */
+	/* 当优先选择的块号为0时，那就执行第二种策略，即在inode所在的块组中查找可用块 
+		cg 表示其快组号。当块组号为 0 时，我们就需要找到 inode 所在的块组，然后从
+		该块组中去找合适的数据块。如果不为0的话，就从 bpref 所在的块组查找空闲数据块
+	*/
 	if (bpref == 0)
 		cg = ino_to_cg(fs, ip->i_number);
 	else
@@ -424,7 +427,7 @@ ext2_valloc(struct vnode *pvp, int mode, struct ucred *cred, struct vnode **vpp)
 	if ((mode & IFMT) == IFDIR) {
 		/* 
 			通过一套策略找到最适合存放该目录的一个块组，但是在 tptfs 中只有一个块组，所以这个操作其实
-			是不需要的
+			是不需要的。对于
 		*/
 		cg = ext2_dirpref(pip);	
 		if (fs->e2fs_contigdirs[cg] < 255)
@@ -1011,7 +1014,9 @@ ext2_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
 	if (e2fs_gd_get_nbfree(&fs->e2fs_gd[cg]) == 0)
 		return (0);
 	EXT2_UNLOCK(ump);
-	/* 定位到数据块位图的第一个块，读取出来 */
+	/* 定位到数据块位图的第一个块，读取出来 
+		ext2 文件系统块组的数据块位图貌似只占用一个数据块
+	*/
 	error = bread(ip->i_devvp, fsbtodb(fs,
 	    e2fs_gd_get_b_bitmap(&fs->e2fs_gd[cg])),
 	    (int)fs->e2fs_bsize, NOCRED, &bp);
@@ -1052,6 +1057,10 @@ ext2_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
 	}
 	bbp = (char *)bp->b_data;
 
+	/*
+		判断我们想要分配的数据块在不在当前的块组中，如果在的话，执行后面的if代码分支；如果不在的话，
+		直接置零，应该是要从当前块组或者其他块组中找一个可用的块
+	*/
 	if (dtog(fs, bpref) != cg)
 		bpref = 0;
 	if (bpref != 0) {
@@ -1060,7 +1069,7 @@ ext2_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
 		 * if the requested block is available, use it
 		 		从这里可以看到，isclr 传入的块号其实是数据块在块组中的相对块号。
 				判断这个块是否已经被占用了。如果没有被占用，直接goto跳转，如果被
-				占用了，指向下面的代码分支
+				占用了，执行下面的代码分支
 		 */
 		if (isclr(bbp, bpref)) {
 			bno = bpref;
@@ -1074,6 +1083,9 @@ ext2_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
 	 * block.
 	 * 在块组中并没有找到对应的块，所以要在当前块组中接着查找下一个可用的块。
 	 * 首先尝试获取8个连续的块，然后再跳转回单个数据块
+	 * dtogd 宏计算出 bpref 块在块组中的偏移，然后除8取模，算出来 bpref 是在 bitmap
+	 * 块中的那个字节当中；e2fs_fpg 表示一个块组中一共包含有多少个片(块)，宏 howmany 
+	 * 计算出这些数据块一共会占用多少个 8 bit，作为 bitmap 遍历的结尾
 	 */
 	if (bpref)
 		start = dtogd(fs, bpref) / NBBY;
@@ -1084,7 +1096,9 @@ retry:
 	runlen = 0;
 	runstart = 0;
 	for (loc = start; loc < end; loc++) {
-		/* 当找到了一个可以块时，指向下面的代码分支 */
+		/*
+			这里处理的情况是优先块是在cg块组中，但是它已经被占用的情况。
+		*/
 		if (bbp[loc] == (char)0xff) {
 			runlen = 0;
 			continue;

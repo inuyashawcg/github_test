@@ -52,6 +52,8 @@ hash_mflags(int flags)
 
 /*
  * General routine to allocate a hash table with control of memory flags.
+		elements 表示的元素的数量。从 vfs 中的使用情况来看，elements 表示的是系统期望分配
+		的 vnode 的总的数量
  */
 void *
 hashinit_flags(int elements, struct malloc_type *type, u_long *hashmask,
@@ -68,12 +70,15 @@ hashinit_flags(int elements, struct malloc_type *type, u_long *hashmask,
 	for (hashsize = 1; hashsize <= elements; hashsize <<= 1)
 		continue;
 	hashsize >>= 1;
-
+	/*
+		hash table 中的每个元素都是一个链表结构，这种方式就是为了处理冲突的情况。
+		hashtbl 就是指向一大块内存的起始位置的指针
+	*/
 	hashtbl = malloc((u_long)hashsize * sizeof(*hashtbl), type,
 	    hash_mflags(flags));
 	if (hashtbl != NULL) {
 		for (i = 0; i < hashsize; i++)
-			LIST_INIT(&hashtbl[i]);
+			LIST_INIT(&hashtbl[i]);	// 初始化 hashtable 中的每一个元素 
 		*hashmask = hashsize - 1;
 	}
 	return (hashtbl);
@@ -111,6 +116,7 @@ static const int primes[] = { 1, 13, 31, 61, 127, 251, 509, 761, 1021, 1531,
 /*
  * General routine to allocate a prime number sized hash table with control of
  * memory flags.
+ * 分配素数大小的哈希表并控制内存标志的常规例程
  */
 void *
 phashinit_flags(int elements, struct malloc_type *type, u_long *nentries, int flags)

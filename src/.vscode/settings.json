@@ -82,6 +82,10 @@
         "rope": "c",
         "inode.h": "c",
         "__hash": "c",
-        "typeindex": "c"
+        "typeindex": "c",
+        "*.ipp": "c",
+        "any": "c",
+        "param.h": "c",
+        "complex": "c"
     }
 }

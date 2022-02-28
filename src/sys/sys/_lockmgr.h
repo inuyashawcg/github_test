@@ -46,7 +46,7 @@ struct lock {
 	struct lock_object	lock_object;
 	volatile uintptr_t	lk_lock;
 	u_int			lk_exslpfail;
-	int			lk_timo;
+	int			lk_timo;	// lock timeout?
 	int			lk_pri;
 	// 如果要调试锁的话，需要为其分配一个堆栈
 #ifdef DEBUG_LOCKS

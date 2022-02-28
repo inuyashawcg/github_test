@@ -105,7 +105,7 @@ struct bufobj {
 	void		*bo_private;	/* private pointer 私有指针，应该是指向一些私有数据 */
 	struct bufv	bo_clean;	/* i Clean buffers 干净缓存，通过基树来管理的一个缓冲区链表 */
 	struct bufv	bo_dirty;	/* i Dirty buffers 脏缓存，同上 */
-	long		bo_numoutput;	/* i Writes in progress */
+	long		bo_numoutput;	/* i Writes in progress 正在写入 */
 	u_int		bo_flag;	/* i Flags */
 	int		bo_domain;	/* - Clean queue affinity 清除队列相关性 */
 	int		bo_bsize;	/* - Block size for i/o 块大小 */

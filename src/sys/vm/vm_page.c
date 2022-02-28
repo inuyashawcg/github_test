@@ -541,6 +541,8 @@ vm_page_init_page(vm_page_t m, vm_paddr_t pa, int segind)
  *	bootstrapping UMA and some data structures that are used to manage
  *	physical pages.  Initializes these structures, and populates the free
  *	page queues.
+ 		初始化驻留内存模块。为引导UMA和一些用于管理物理页的数据结构分配物理内存。
+		初始化这些结构，并填充空闲页队列
  */
 vm_offset_t
 vm_page_startup(vm_offset_t vaddr)
@@ -559,7 +561,7 @@ vm_page_startup(vm_offset_t vaddr)
 
 	biggestsize = 0;
 	biggestone = 0;
-	vaddr = round_page(vaddr);
+	vaddr = round_page(vaddr);	// 向上扩展到页的整数倍
 
 	for (i = 0; phys_avail[i + 1]; i += 2) {
 		phys_avail[i] = round_page(phys_avail[i]);
@@ -588,6 +590,8 @@ vm_page_startup(vm_offset_t vaddr)
 	 * Allocate memory for use when boot strapping the kernel memory
 	 * allocator.  Tell UMA how many zones we are going to create
 	 * before going fully functional.  UMA will add its zones.
+	 * 分配内存，以便在引导内核内存分配器时使用。在全面投入使用之前，告诉 UMA 
+	 * 我们将创建多少区域。UMA将添加其分区。
 	 *
 	 * VM startup zones: vmem, vmem_btag, VM OBJECT, RADIX NODE, MAP,
 	 * KMAP ENTRY, MAP ENTRY, VMSPACE.

@@ -82,7 +82,7 @@ typedef	__useconds_t	useconds_t;
 
 #if __XSI_VISIBLE || __POSIX_VISIBLE >= 200112
 #define	F_ULOCK		0	/* unlock locked section */
-#define	F_LOCK		1	/* lock a section for exclusive use */
+#define	F_LOCK		1	/* lock a section for exclusive use  以独占的方式锁住文件的一部分 */
 #define	F_TLOCK		2	/* test and lock a section for exclusive use */
 #define	F_TEST		3	/* test a section for locks by other procs */
 #endif

@@ -149,7 +149,7 @@ struct buf {
 	int	b_dirtyend;		/* Offset of end of dirty region. 脏区结束地址在缓冲区中的偏移 */
 	caddr_t	b_kvabase;		/* base kva for buffer 缓冲区的内核虚拟地址的基地址 */
 	daddr_t b_lblkno;		/* Logical block number. 逻辑块号 */
-	struct	vnode *b_vp;		/* Device vnode. 设备vnode*/
+	struct	vnode *b_vp;		/* Device vnode. 设备 vnode */
 	struct	ucred *b_rcred;		/* Read credentials reference. 读取凭证引用 */
 	struct	ucred *b_wcred;		/* Write credentials reference. 写入凭证引用 */
 	union {
@@ -252,7 +252,7 @@ struct buf {
 #define	B_ASYNC		0x00000004	/* Start I/O, do not wait. 不等待，直接开启I/O */
 #define	B_DIRECT	0x00000008	/* direct I/O flag (pls free vmio) */
 #define	B_DEFERRED	0x00000010	/* Skipped over for cleaning 跳过数据更新/脏页写回磁盘？ */
-#define	B_CACHE		0x00000020	/* Bread found us in the cache. 才缓存中可以找到？ */
+#define	B_CACHE		0x00000020	/* Bread found us in the cache. 表示该 buffer 已经在缓存区当中了 */
 #define	B_VALIDSUSPWRT	0x00000040	/* Valid write during suspension.暂停期间的有效写入 */
 #define	B_DELWRI	0x00000080	/* Delay I/O until buffer reused. 延迟I/O直到缓冲区被重用 */
 #define	B_CKHASH	0x00000100	/* checksum hash calculated on read 读取时计算的校验和哈希 */
@@ -269,7 +269,7 @@ struct buf {
 #define	B_00080000	0x00080000	/* Available flag. */
 #define	B_00100000	0x00100000	/* Available flag. */
 #define	B_00200000	0x00200000	/* Available flag. */
-#define	B_RELBUF	0x00400000	/* Release VMIO buffer. 释放VMIO buffer */
+#define	B_RELBUF	0x00400000	/* Release VMIO buffer. 释放 VMIO buffer */
 #define	B_FS_FLAG1	0x00800000	/* Available flag for FS use. */
 #define	B_NOCOPY	0x01000000	/* Don't copy-on-write this buf. 别抄袭我写的东西 */
 #define	B_INFREECNT	0x02000000	/* buf is counted in numfreebufs 该buf被计算到了numfreebufs当中 */
@@ -295,7 +295,7 @@ struct buf {
  * BX_FSPRIV 保留了一组八个标志，每个文件系统都可以使用它们来实现自己的目的。
  * 它们的特定定义可以在每个使用它们的文件系统的头文件中找到
  */
-#define	BX_VNDIRTY	0x00000001	/* On vnode dirty list 对应vnode脏页链表 */
+#define	BX_VNDIRTY	0x00000001	/* On vnode dirty list 对应 vnode 脏页链表 */
 #define	BX_VNCLEAN	0x00000002	/* On vnode clean list */
 #define	BX_BKGRDWRITE	0x00000010	/* Do writes in background 后台执行写操作？ */
 #define BX_BKGRDMARKER	0x00000020	/* Mark buffer for splay tree slpay tree(伸展树)标记缓冲区 */
@@ -341,6 +341,7 @@ extern const char *buf_wmesg;		/* Default buffer lock message */
 
 /*
  * Get a lock sleeping with specified interruptably and timeout.
+ 		获取一个以指定的中断和超时休眠的锁
  */
 #define	BUF_TIMELOCK(bp, locktype, interlock, wmesg, catch, timo)	\
 	_lockmgr_args_rw(&(bp)->b_lock, (locktype) | LK_TIMELOCK,	\
@@ -519,6 +520,10 @@ buf_track(struct buf *bp, const char *location)
 #define	GB_LOCK_NOWAIT	0x0001		/* Fail if we block on a buf lock. */
 #define	GB_NOCREAT	0x0002		/* Don't create a buf if not found. */
 #define	GB_NOWAIT_BD	0x0004		/* Do not wait for bufdaemon. */
+/*
+	当两个进程试图共享同一块内存区域的时候，可以调用 mmap 函数。实现方式就是设置 flags 为
+	shared 类型还是 private 类型指明该内存区域的属性
+*/
 #define	GB_UNMAPPED	0x0008		/* Do not mmap buffer pages. */
 #define	GB_KVAALLOC	0x0010		/* But allocate KVA. */
 #define	GB_CKHASH	0x0020		/* If reading, calc checksum hash */

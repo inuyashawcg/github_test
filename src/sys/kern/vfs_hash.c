@@ -40,10 +40,10 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/vfs_hash.c 326271 2017-11-27 15:20:12Z 
 
 static MALLOC_DEFINE(M_VFS_HASH, "vfs_hash", "VFS hash table");
 
-static LIST_HEAD(vfs_hash_head, vnode)	*vfs_hash_tbl;
+static LIST_HEAD(vfs_hash_head, vnode)	*vfs_hash_tbl;	// vnode 链表
 static LIST_HEAD(,vnode)		vfs_hash_side;
 static u_long				vfs_hash_mask;
-static struct rwlock			vfs_hash_lock;
+static struct rwlock			vfs_hash_lock;	// 全局读写锁
 
 static void
 vfs_hashinit(void *dummy __unused)
@@ -51,7 +51,7 @@ vfs_hashinit(void *dummy __unused)
 	// 初始化 hash table，desiredvnodes 表示的是数量
 	vfs_hash_tbl = hashinit(desiredvnodes, M_VFS_HASH, &vfs_hash_mask);
 	rw_init(&vfs_hash_lock, "vfs hash"); // hash table 锁初始化
-	LIST_INIT(&vfs_hash_side);	// hash table中的每一个元素又是一个vnode list？
+	LIST_INIT(&vfs_hash_side);	// hash table 中的每一个元素又是一个 vnode list？
 }
 
 /* Must be SI_ORDER_SECOND so desiredvnodes is available */
@@ -60,16 +60,17 @@ SYSINIT(vfs_hash, SI_SUB_VFS, SI_ORDER_SECOND, vfs_hashinit, NULL);
 u_int
 vfs_hash_index(struct vnode *vp)
 {
-	/* 
+	/*
 		在 struct vnode 的定义的注释中可以看到，vnode hash = mount + inode，v_hash表示
-		的是这个含义？
+		的是这个含义？每个挂载点都会随机生成一个 hashseed，这样就保证即使两个文件系统中的 vnode
+		计算出了相同的 hash 值，通过加上 hashseed 之后仍然能够保证 hash 值是唯一的，不会发生冲突
 	*/
 	return (vp->v_hash + vp->v_mount->mnt_hashseed);
 }
 
 /*
 	返回的应该是一个vnode list，mount->mnt_hashseed + hash 计算出的值表示的是 hash table
-	的下标，然后下标对应的元素是一个指向vnode链表的一个指针
+	的下标，然后下标对应的元素是一个指向 vnode 链表的一个指针
 */
 static struct vfs_hash_head *
 vfs_hash_bucket(const struct mount *mp, u_int hash)
@@ -82,7 +83,7 @@ vfs_hash_bucket(const struct mount *mp, u_int hash)
 	主要逻辑就是通过 hash 值在哈希表中找到某个 vnode，所以可以推断一下，hash table 里边其实就是存放的 vnode，
 	我们要找的时候，就利用 mount 和外部提供的某个 hash 值来确定它位于哪个元素(vnode list)，然后在根据相应的
 	属性进行匹配
-	在 ext2 文件系统中，hash 传入的是 inode number
+	在 ext2 文件系统中，hash 传入的是 inode number。
 */
 int
 vfs_hash_get(const struct mount *mp, u_int hash, int flags, struct thread *td,
@@ -93,8 +94,12 @@ vfs_hash_get(const struct mount *mp, u_int hash, int flags, struct thread *td,
 
 	while (1) {
 		rw_rlock(&vfs_hash_lock);
-
 		LIST_FOREACH(vp, vfs_hash_bucket(mp, hash), v_hashlist) {
+			/*
+				vfs hashtable 中的 hash 索引的计算方式比较简单，可能就是 inode number + mount hashseed。
+				这种的话就很容易造成冲突。这里采用的方式就是遍历整个链表中的元素，对比每个元素中的的 hash 和 mount
+				结构是否一致，最终确定哪个元素是我们要找的目标对象
+			*/
 			if (vp->v_hash != hash)
 				continue;
 			if (vp->v_mount != mp)
@@ -102,30 +107,27 @@ vfs_hash_get(const struct mount *mp, u_int hash, int flags, struct thread *td,
 			if (fn != NULL && fn(vp, arg))
 				continue;
 
-			/* 遍历整个vnode list，找到符合上述条件的vnode */
+			/* 遍历整个 vnode list，找到符合上述条件的 vnode */
 			vhold(vp);
 			rw_runlock(&vfs_hash_lock);
-			error = vget(vp, flags | LK_VNHELD, td);
+			error = vget(vp, flags | LK_VNHELD, td);	// 从 freelist 中移除 vp
 			if (error == ENOENT && (flags & LK_NOWAIT) == 0)
 				break;
 			if (error)
 				return (error);
 			*vpp = vp;
 			return (0);
-		}	// end for each
+		}	// end foreach
 
 		if (vp == NULL) {
 			rw_runlock(&vfs_hash_lock);
 			*vpp = NULL;
 			return (0);
 		}
-	}
+	}	// end while
 }
 
-/*
-	传入的参数每次都会有一个mount和一个hash，说明hash table是可以用来区分不同挂载的文件系统的，
-	要确认一下另外一个hash代表的是什么含义
-*/
+// 貌似只有 nfs client 中才会用到
 void
 vfs_hash_ref(const struct mount *mp, u_int hash, struct thread *td,
     struct vnode **vpp, vfs_hash_cmp_t *fn, void *arg)
@@ -175,6 +177,9 @@ vfs_hash_insert(struct vnode *vp, u_int hash, int flags, struct thread *td,
 	*vpp = NULL;
 	while (1) {
 		rw_wlock(&vfs_hash_lock);
+		/*
+			首先要遍历找到的那个 vnode 链表，判断链表中是否已经存在
+		*/
 		LIST_FOREACH(vp2,
 		    vfs_hash_bucket(vp->v_mount, hash), v_hashlist) {
 			if (vp2->v_hash != hash)
@@ -195,11 +200,11 @@ vfs_hash_insert(struct vnode *vp, u_int hash, int flags, struct thread *td,
 			if (!error)
 				*vpp = vp2;
 			return (error);
-		}
+		}	// end foreach
 		if (vp2 == NULL)
 			break;
 			
-	}
+	}	// end while
 	vp->v_hash = hash;
 	LIST_INSERT_HEAD(vfs_hash_bucket(vp->v_mount, hash), vp, v_hashlist);
 	rw_wunlock(&vfs_hash_lock);

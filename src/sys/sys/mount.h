@@ -392,7 +392,12 @@ void          __mnt_vnode_markerfree_active(struct vnode **mvp, struct mount *);
 #define MNTK_SOFTDEP	0x00000004	/* async disabled by softdep */
 #define MNTK_NOINSMNTQ	0x00000008	/* insmntque is not allowed */
 #define	MNTK_DRAINING	0x00000010	/* lock draining is happening */
-#define	MNTK_REFEXPIRE	0x00000020	/* refcount expiring is happening */
+/*
+	vfs_busy() 中会有对应的应用场景。当用户在跨文件系统访问的时候，vfs 会先判断挂载点是否存在。
+	假设刚好有一个线程正在释放挂载点，完成之后就会在flags中设置该标志位，给用户提醒说该挂载点
+	可能不可用
+*/
+#define	MNTK_REFEXPIRE	0x00000020	/* refcount expiring(过期，消失) is happening */
 #define MNTK_EXTENDED_SHARED	0x00000040 /* Allow shared locking for more ops */
 #define	MNTK_SHARED_WRITES	0x00000080 /* Allow shared locking for writes */
 #define	MNTK_NO_IOPF	0x00000100	/* Disallow page faults during reads
@@ -406,7 +411,7 @@ void          __mnt_vnode_markerfree_active(struct vnode **mvp, struct mount *);
 #define	MNTK_USES_BCACHE	0x00004000 /* FS uses the buffer cache. */
 #define MNTK_NOASYNC	0x00800000	/* disable async */
 #define MNTK_UNMOUNT	0x01000000	/* unmount in progress */
-#define	MNTK_MWAIT	0x02000000	/* waiting for unmount to finish */
+#define	MNTK_MWAIT	0x02000000	/* waiting for unmount to finish 等待umount操作结束 */
 #define	MNTK_SUSPEND	0x08000000	/* request write suspension */
 #define	MNTK_SUSPEND2	0x04000000	/* block secondary writes */
 #define	MNTK_SUSPENDED	0x10000000	/* write operations are suspended 写入操作已挂起 */

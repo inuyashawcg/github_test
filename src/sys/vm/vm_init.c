@@ -112,21 +112,26 @@ SYSINIT(vm_mem, SI_SUB_VM, SI_ORDER_FIRST, vm_mem_init, NULL);
  *	This is done only by the first cpu up.
  *
  *	The start and end address of physical memory is passed in.
+ 		vm_init初始化虚拟内存系统；这仅由第一个cpu启动时完成。传入物理内存的起始地址和结束地址。
  */
 static void
 vm_mem_init(void *dummy)
 {
 
 	/*
-	 * Initialize static domainsets, used by various allocators.
+	 * Initialize static domainsets, used by various allocators. 设置 NUMA
 	 */
 	domainset_init();
 
 	/*
 	 * Initialize resident memory structures.  From here on, all physical
 	 * memory is accounted for, and we use only virtual addresses.
+	 * 初始化驻留内存结构。从现在起，所有物理内存都被占用，我们只使用虚拟地址
 	 */
-	vm_set_page_size();
+	vm_set_page_size();	// 设置内存页大小
+	/*
+		virtual_avail: kernel bss 之后第一个可用 page 的虚拟地址
+	*/
 	virtual_avail = vm_page_startup(virtual_avail);
 
 	/*

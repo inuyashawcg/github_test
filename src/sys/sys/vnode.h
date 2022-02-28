@@ -294,7 +294,7 @@ struct xvnode {
 #define	VV_PROCDEP	0x0100	/* vnode is process dependent vnode依赖于进程 */
 #define	VV_NOKNOTE	0x0200	/* don't activate knotes on this vnode 不要激活该 vnode 上的 knotes*/
 #define	VV_DELETED	0x0400	/* should be removed */
-#define	VV_MD		0x0800	/* vnode backs the md device vnode支持md设备 */
+#define	VV_MD		0x0800	/* vnode backs the md device vnode支持md(machine dependent?)设备 */
 #define	VV_FORCEINSMQ	0x1000	/* force the insmntque to succeed 迫使督察成功 */
 #define	VV_READLINK	0x2000	/* fdescfs linux vnode */
 
@@ -453,9 +453,9 @@ extern int		vttoif_tab[];
 #define	FORCECLOSE	0x0002	/* vflush: force file closure 强制关闭文件 */
 #define	WRITECLOSE	0x0004	/* vflush: only close writable files */
 #define	EARLYFLUSH	0x0008	/* vflush: early call for ffs_flushfiles */
-#define	V_SAVE		0x0001	/* vinvalbuf: sync file first */
+#define	V_SAVE		0x0001	/* vinvalbuf: sync file first 首先要同步文件 */
 #define	V_ALT		0x0002	/* vinvalbuf: invalidate only alternate bufs 仅使备用BUF无效 */
-#define	V_NORMAL	0x0004	/* vinvalbuf: invalidate only regular bufs */
+#define	V_NORMAL	0x0004	/* vinvalbuf: invalidate only regular bufs 仅使常规BUF无效 */
 #define	V_CLEANONLY	0x0008	/* vinvalbuf: invalidate only clean bufs */
 #define	V_VMIO		0x0010	/* vinvalbuf: called during pageout */
 #define	V_ALLOWCLEAN	0x0020	/* vinvalbuf: allow clean buffers after flush */

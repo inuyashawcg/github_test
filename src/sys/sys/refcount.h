@@ -79,6 +79,7 @@ refcount_release(volatile u_int *count)
 /*
  * This functions returns non-zero if the refcount was
  * incremented. Else zero is returned.
+ * 如果refcount增加，此函数将返回非零。否则返回零
  *
  * A temporary hack until refcount_* APIs are sorted out.
  */

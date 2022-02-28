@@ -1389,10 +1389,14 @@ cpuset_setithread(lwpid_t id, int cpu)
 /*
  * Initialize static domainsets after NUMA information is available.  This is
  * called before memory allocators are initialized.
+ * 在NUMA信息可用后初始化静态域集。这是在初始化内存分配器之前调用的
  */
 void
 domainset_init(void)
 {
+	/*
+		应该是为系统启用 NUMA 做一些初始化的设置
+	*/
 	struct domainset *dset;
 	int i;
 

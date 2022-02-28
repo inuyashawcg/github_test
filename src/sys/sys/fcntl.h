@@ -234,6 +234,13 @@ typedef	__pid_t		pid_t;
 #define	F_OSETLKW	9		/* F_SETLK; wait if blocked */
 #define	F_DUP2FD	10		/* duplicate file descriptor to arg */
 #endif
+/*
+	F_GETLK: 确定由 flock 结构描述的锁是否与另外一个进程已获得的某个锁相互冲突。在冲突的情况下，
+			用现有锁的有关信息重写 flock 结构
+	F_SETLK： 设置由 flock 结构描述的锁。如果不能获得该锁，则这个系统调用会返回一个错误码
+	F_SETLKW： 设置由 flock 结构描述的锁。如果不能获得该锁，则这个系统调用会阻塞。也就是说，
+			调用进程进入睡眠状态直到该锁可用时为止
+*/
 #define	F_GETLK		11		/* get record locking information */
 #define	F_SETLK		12		/* set record locking information */
 #define	F_SETLKW	13		/* F_SETLK; wait if blocked */
@@ -257,12 +264,17 @@ typedef	__pid_t		pid_t;
 #define	F_UNLCK		2		/* unlock */
 #define	F_WRLCK		3		/* exclusive or write lock */
 #if __BSD_VISIBLE
-#define	F_UNLCKSYS	4		/* purge locks for a given system ID */ 
+#define	F_UNLCKSYS	4		/* purge locks for a given system ID 清除给定系统ID的锁 */ 
 #define	F_CANCEL	5		/* cancel an async lock request */
 #endif
 #ifdef _KERNEL
-#define	F_WAIT		0x010		/* Wait until lock is granted */
-#define	F_FLOCK		0x020	 	/* Use flock(2) semantics for lock */
+#define	F_WAIT		0x010		/* Wait until lock is granted 等待直到授予锁 */
+/*
+	F_FLOCK: 该类型的锁总是与一个文件对象相关联，因此由一个打开该文件的进程(或共享同一文件的子进程)
+		来维护
+	F_POSIX: 总是与一个进程和一个索引节点相关联
+*/
+#define	F_FLOCK		0x020	 	/* Use flock(2) semantics for lock - 对 lock 使用 flock(2) 语义 */
 #define	F_POSIX		0x040	 	/* Use POSIX semantics for lock */
 #define	F_REMOTE	0x080		/* Lock owner is remote NFS client */
 #define	F_NOINTR	0x100		/* Ignore signals when waiting */
@@ -272,11 +284,18 @@ typedef	__pid_t		pid_t;
  * Advisory file segment locking data type -
  * information passed to system by user
  * 建议文件段锁定数据类型-用户传递给系统的信息
+ * 
+ * whence：从何处，表示的应该是文件指针的其实位置。参考 Linux 中对应结构体的定义：
+ * 	- l_type：F_RDLCK / F_UNLCK / F_WRLCK
+ * 	- l_whence: SEEK_SET(从文件的开始处)，SEEK_CUR(从当前文件指针处)，SEEK_END(从文件结尾处)
+ * 	- l_start: 与 l_whence 的值相关的加锁区域的初始化偏移量
+ * 	- l_len: 加锁区域的长度(0表示该区域包含所有可能写过当前文件末尾的区域)
+ * 	- l_pid: 拥有者的 PID
  */
 struct flock {
 	off_t	l_start;	/* starting offset */
-	off_t	l_len;		/* len = 0 means until end of file */
-	pid_t	l_pid;		/* lock owner */
+	off_t	l_len;		/* len = 0 means until end of file - len=0表示直到文件结束 */
+	pid_t	l_pid;		/* lock owner 进程pid？ */
 	short	l_type;		/* lock type: read/write, etc. */
 	short	l_whence;	/* type of l_start */
 	int	l_sysid;	/* remote system id or zero for local */
@@ -300,7 +319,7 @@ struct __oflock {
 /* lock operations for flock(2) */
 #define	LOCK_SH		0x01		/* shared file lock */
 #define	LOCK_EX		0x02		/* exclusive file lock */
-#define	LOCK_NB		0x04		/* don't block when locking */
+#define	LOCK_NB		0x04		/* don't block when locking 锁定时不要阻塞 */
 #define	LOCK_UN		0x08		/* unlock file */
 #endif
 

@@ -41,10 +41,13 @@
  * use this name for their members.
  * If this rule needs to change, the bits in the reader/writer lock
  * implementation must be modified appropriately.
+ * 
+ * 所有读写器锁实现必须始终有一个名为 rw_lock 的成员。其他锁定原语结构不允许对其成员使用此名称。
+ * 如果需要更改此规则，则必须适当修改读写器锁实现中的位
  */
 struct rwlock {
-	struct lock_object	lock_object;
-	volatile uintptr_t	rw_lock;
+	struct lock_object	lock_object;	// 貌似每种锁都会包含有该结构，类似C++中的继承
+	volatile uintptr_t	rw_lock;	// 是一个32或者64位变量
 };
 
 /*

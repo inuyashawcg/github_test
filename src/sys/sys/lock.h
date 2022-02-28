@@ -81,7 +81,7 @@ struct lock_class {
 #define	LO_QUIET	0x00040000	/* Don't log locking operations. */
 #define	LO_RECURSABLE	0x00080000	/* Lock may recurse. */
 #define	LO_SLEEPABLE	0x00100000	/* Lock may be held while sleeping. */
-#define	LO_UPGRADABLE	0x00200000	/* Lock may be upgraded/downgraded. */
+#define	LO_UPGRADABLE	0x00200000	/* Lock may be upgraded/downgraded. 锁升级或者降级，独占和共享、读和写？ */
 #define	LO_DUPOK	0x00400000	/* Don't check for duplicate acquires */
 #define	LO_IS_VNODE	0x00800000	/* Tell WITNESS about a VNODE lock */
 #define	LO_CLASSMASK	0x0f000000	/* Class index bitmask. */

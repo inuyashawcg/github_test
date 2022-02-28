@@ -82,6 +82,7 @@ struct mtx_pool {
 #define mtx_pool_shift	mtx_pool_header.mtxpool_shift
 #define mtx_pool_next	mtx_pool_header.mtxpool_next
 
+// 全局 mutex pool
 struct mtx_pool *mtxpool_sleep;
 
 #if UINTPTR_MAX == UINT64_MAX	/* 64 bits */
@@ -97,6 +98,10 @@ struct mtx_pool *mtxpool_sleep;
  * The returned mutex is a leaf level mutex, meaning that if you obtain it
  * you cannot obtain any other mutexes until you release it.  You can
  * legally msleep() on the mutex.
+ * 
+ * leaf mutex 意思就是当你获取到一个 mutex 之后，除非将它释放，否则不允许再获取其他的 mutex。
+ * 该函数与 alloc 函数的区别是该函数要根据 ptr 指针获取到特定的 mutex，而 alloc 函数应该是随机
+ * 获取一个可用的 mutex。两者获取到的锁都是 shared 类型
  */
 struct mtx *
 mtx_pool_find(struct mtx_pool *pool, void *ptr)
