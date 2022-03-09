@@ -1,0 +1,133 @@
+ext2_read ------- start!
+ext2_read: uio->uio_iovcnt = 1
+ext2_read: uio->uio_offset = 0
+ext2_read: uio->uio_resid = 4096
+
+--- buildkernel ---
+make[1]: "/usr/src/qihai/Makefile.inc1" line 342: SYSTEM_COMPILER: Determined that CC=cc matches the source tree.  Not bootstrapping a cross-compiler.
+make[1]: "/usr/src/qihai/Makefile.inc1" line 347: SYSTEM_LINKER: Determined that LD=ld matches the source tree.  Not bootstrapping a cross-linker.
+--- buildkernel ---
+
+--------------------------------------------------------------
+>>> Kernel build for GENERIC started on Fri Apr  9 01:57:27 CST 2021
+--------------------------------------------------------------
+===> GENERIC
+mkdir -p /usr/obj/usr/src/qihai/riscv.riscv64/sys
+--------------------------------------------------------------
+>>> stage 1: configuring the kernel
+--------------------------------------------------------------
+cd /usr/src/qihai/sys/riscv/conf;  PATH=/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/usr/sbin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/usr/bin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/bin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/sbin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin:/sbin:/bin:/usr/sbin:/usr/bin  config  -d /usr/obj/usr/src/qihai/riscv.riscv64/sys/GENERIC  -I '/usr/src/qihai/sys/riscv/conf' -I '/usr/src/qihai/sys/riscv/conf'  '/usr/src/qihai/sys/riscv/conf/GENERIC'
+Kernel build directory is /usr/obj/usr/src/qihai/riscv.riscv64/sys/GENERIC
+Don't forget to do ``make cleandepend && make depend''
+cd /usr/src/qihai; MACHINE_ARCH=riscv64  MACHINE=riscv  CPUTYPE= CC="cc -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin" CXX="c++  -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin"  CPP="cpp -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin"  AS="as" AR="ar" LD="ld" LLVM_LINK=""  NM=nm OBJCOPY="objcopy"  RANLIB=ranlib STRINGS=  SIZE="size"  INSTALL="sh /usr/src/qihai/tools/install.sh"  PATH=/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/usr/sbin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/usr/bin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/bin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/sbin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin:/sbin:/bin:/usr/sbin:/usr/bin  SYSROOT=/usr/obj/usr/src/qihai/riscv.riscv64/tmp make  -f Makefile.inc1  BWPHASE=buildkernel  DESTDIR=/usr/obj/usr/src/qihai/riscv.riscv64/tmp _cleankernobj_fast_depend_hack
+--- _cleankernobj_fast_depend_hack ---
+--------------------------------------------------------------
+>>> stage 2.3: build tools
+--------------------------------------------------------------
+cd /usr/src/qihai; TOOLS_PREFIX=/usr/obj/usr/src/qihai/riscv.riscv64/tmp  INSTALL="sh /usr/src/qihai/tools/install.sh"  PATH=/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/usr/sbin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/usr/bin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/bin:/sbin:/bin:/usr/sbin:/usr/bin  WORLDTMP=/usr/obj/usr/src/qihai/riscv.riscv64/tmp make  -f Makefile.inc1  DESTDIR=  OBJTOP='/usr/obj/usr/src/qihai/riscv.riscv64/tmp/obj-kernel-tools'  OBJROOT='${OBJTOP}/'  MAKEOBJDIRPREFIX=  BOOTSTRAPPING=1201523  SSP_CFLAGS=  MK_HTML=no -DNO_LINT MK_MAN=no  -DNO_PIC MK_PROFILE=no -DNO_SHARED  -DNO_CPU_CFLAGS MK_RETPOLINE=no MK_WARNS=no MK_CTF=no kernel-tools
+--- kernel-tools ---
+mkdir -p /usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr
+mtree -deUW -f /usr/src/qihai/etc/mtree/BSD.usr.dist  -p /usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr >/dev/null
+--------------------------------------------------------------
+>>> stage 3.1: building everything
+--------------------------------------------------------------
+cd /usr/obj/usr/src/qihai/riscv.riscv64/sys/GENERIC; MACHINE_ARCH=riscv64 MACHINE=riscv CPUTYPE= CC="cc -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin" CXX="c++  -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/uext2_read ------- start!
+ext2_read: uio->uio_iovcnt = 1
+ext2_read: uio->uio_offset = 4096
+ext2_read: uio->uio_resid = 4096
+
+sr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin" CPP="cpp -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin" AS="as" AR="ar" LD="ld" LLVM_LINK="" NM=nm OBJCOPY="objcopy" RANLIB=ranlib STRINGS= SIZE="size" INSTALL="sh /usr/src/qihai/tools/install.sh" PATH=/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/usr/sbin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/usr/bin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/legacy/bin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/sbin:/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin:/sbin:/bin:/usr/sbin:/usr/bin make  -j 10 -J 15,16 -m /usr/src/qihai/share/mk  KERNEL=kernel all -DNO_MODULES_OBJ
+--- modules-all ---
+--- SubrKobj.cpo ---
+--- SubrBus.cpo ---
+--- subr_disk.o ---
+--- subr_early.o ---
+--- subr_epoch.o ---
+--- subr_eventhandler.o ---
+--- subr_fattime.o ---
+--- subr_firmware.o ---
+--- subr_gtaskqueue.o ---
+--- modules-all ---
+cd /usr/src/qihai/sys/modules; MAKEOBJDIRPREFIX=/usr/obj/usr/src/qihai/riscv.riscv64/sys/GENERIC/modules KMODDIR=/boot/kernel MACHINE_CPUARCH=riscv MACHINE=riscv MACHINE_ARCH=riscv64 MODULES_EXTRA="" WITHOUT_MODULES="" ARCH_FLAGS="" DEBUG_FLAGS="-g" __MPATH="/usr/src/qihai/sys/arm/allwinner/sunxi_dma_if.m /usr/src/qihai/sys/arm/arm/platform_if.m /usr/src/qihai/sys/arm/arm/platform_pl310_if.m /usr/src/qihai/sys/arm/nvidia/drm2/tegra_dc_if.m /usr/src/qihai/sys/arm/nvidia/drm2/tegra_drm_if.m /usr/src/qihai/sys/arm/nvidia/tegra_soctherm_if.m /usr/src/qihai/sys/arm/ti/ti_gpio_if.m /usr/src/qihai/sys/arm64/coresight/coresight_if.m /usr/src/qihai/sys/arm64/rockchip/rk_tsadc_if.m /usr/src/qihai/sys/dev/acpi_support/acpi_wmi_if.m /usr/src/qihai/sys/dev/acpica/acpi_bus_if.m /usr/src/qihai/sys/dev/acpica/acpi_if.m /usr/src/qihai/sys/dev/adb/adb_hb_if.m /usr/src/qihai/sys/dev/adb/adb_if.m /usr/src/qihai/sys/dev/agp/agp_if.m /usr/src/qihai/sys/dev/altera/pio/pio_if.m /usr/src/qihai/sys/dev/ata/ata_if.m /usr/src/qihai/sys/--- SubrKobj.cpo ---
+c++  -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin -c -O -pipe  -g -nostdinc  -I. -I/usr/src/qihai/sys -I/usr/src/qihai/sys/contrib/ck/include -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h -fno-common  -fPIE -MD  -MF.depend.SubrKobj.cpo -MTSubrKobj.cpo -fdebug-prefix-map=./machine=/usr/src/qihai/sys/riscv/include -march=rv64imafdc -mabi=lp64 -mno-relax -ffreestanding -fwrapv -fstack-protector -gdwarf-2 -Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-qual -Wundef -Wno-pointer-sign -Wno-format -Wmissing-include-dirs -fdiagnostics-show-option -Wno-unknown-pragmas -Wno-error-tautological-compare -Wno-error-empty-body -Wno-error-parentheses-equality -Wno-error-unused-function -Wno-error-pointer-sign -Wno-error-shift-negative-value -Wno-address-of-packed-member  -std=c++17 -nostdlib -fno-exceptions -fno-rtti -fno-sized-deallocation -ffunction-sections  
+--- SubrBus.cpo ---
+c++  -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin -c -O -pipe  -g -nostdinc  -I. -I/usr/src/qihai/sys -I/usr/src/qihai/sys/contrib/ck/include -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h -fno-common  -fPIE -MD  -MF.depend.SubrBus.cpo -MTSubrBus.cpo -fdebug-prefix-map=./machine=/usr/src/qihai/sys/riscv/include -march=rv64imafdc -mabi=lp64 -mno-relax -ffreestanding -fwrapv -fstack-protector -gdwarf-2 -Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-qual -Wundef -Wno-pointer-sign -Wno-format -Wmissing-include-dirs -fdiagnostics-show-option -Wno-unknown-pragmas -Wno-error-tautological-compare -Wno-error-empty-body -Wno-error-parentheses-equality -Wno-error-unused-function -Wno-error-pointer-sign -Wno-error-shift-negative-value -Wno-address-of-packed-member  -std=c++17 -nostdlib -fno-exceptions -fno-rtti -fno-sized-deallocation -ffunction-sections  
+--- subr_disk.o ---
+cext2_read ------- start!
+ext2_read: uio->uio_iovcnt = 1
+ext2_read: uio->uio_offset = 8192
+ext2_read: uio->uio_resid = 4096
+
+c -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin -c -O -pipe  -g -nostdinc  -I. -I/usr/src/qihai/sys -I/usr/src/qihai/sys/contrib/ck/include -I/usr/src/qihai/sys/contrib/libfdt -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h -fno-common  -fPIE -MD  -MF.depend.subr_disk.o -MTsubr_disk.o -fdebug-prefix-map=./machine=/usr/src/qihai/sys/riscv/include -march=rv64imafdc -mabi=lp64 -mno-relax -ffreestanding -fwrapv -fstack-protector -gdwarf-2 -Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-qual -Wundef -Wno-pointer-sign -Wno-format -Wmissing-include-dirs -fdiagnostics-show-option -Wno-unknown-pragmas -Wno-error-tautological-compare -Wno-error-empty-body -Wno-error-parentheses-equality -Wno-error-unused-function -Wno-error-pointer-sign -Wno-error-shift-negative-value -Wno-address-of-packed-member  -mcmodel=medium  -std=iso9899:1999 -Werror  /usr/src/qihai/sy--- subr_early.o ---
+cc -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin -c -O -pipe  -g -nostdinc  -I. -I/usr/src/qihai/sys -I/usr/src/qihai/sys/contrib/ck/include -I/usr/src/qihai/sys/contrib/libfdt -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h -fno-common  -fPIE -MD  -MF.depend.subr_early.o -MTsubr_early.o -fdebug-prefix-map=./machine=/usr/src/qihai/sys/riscv/include -march=rv64imafdc -mabi=lp64 -mno-relax -ffreestanding -fwrapv -fstack-protector -gdwarf-2 -Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-qual -Wundef -Wno-pointer-sign -Wno-format -Wmissing-include-dirs -fdiagnostics-show-option -Wno-unknown-pragmas -Wno-error-tautological-compare -Wno-error-empty-body -Wno-error-parentheses-equality -Wno-error-unused-function -Wno-error-pointer-sign -Wno-error-shift-negative-value -Wno-address-of-packed-member  -mcmodel=medium  -std=iso9899:1999 -Werror  /usr/src/qihai/--- subr_epoch.o ---
+cc -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin -c -O -pipe  -g -nostdinc  -I. -I/usr/src/qihai/sys -I/usr/src/qihai/sys/contrib/ck/include -I/usr/src/qihai/sys/contrib/libfdt -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h -fno-common  -fPIE -MD  -MF.depend.subr_epoch.o -MTsubr_epoch.o -fdebug-prefix-map=./machine=/usr/src/qihai/sys/riscv/include -march=rv64imafdc -mabi=lp64 -mno-relax -ffreestanding -fwrapv -fstack-protector -gdwarf-2 -Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-qual -Wundef -Wno-pointer-sign -Wno-format -Wmissing-include-dirs -fdiagnostics-show-option -Wno-unknown-pragmas -Wno-error-tautological-compare -Wno-error-empty-body -Wno-error-parentheses-equality -Wno-error-unused-function -Wno-error-pointer-sign -Wno-error-shift-negative-value -Wno-address-of-packed-member  -mcmodel=medium  -std=iso9899:1999 -Werror  /usr/src/qihai/--- subr_eventhandler.o ---
+cc -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin -c -O -pipe  -g -nostdinc  -I. -I/usr/src/qihai/sys -I/usr/src/qihai/sys/contrib/ck/include -I/usr/src/qihai/sys/contrib/libfdt -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h -fno-common  -fPIE -MD  -MF.depend.subr_eventhandler.o -MTsubr_eventhandler.o -fdebug-prefix-map=./machine=/usr/src/qihai/sys/riscv/include -march=rv64imafdc -mabi=lp64 -mno-relax -ffreestanding -fwrapv -fstack-protector -gdwarf-2 -Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-qual -Wundef -Wno-pointer-sign -Wno-format -Wmissing-include-dirs -fdiagnostics-show-option -Wno-unknown-pragmas -Wno-error-tautological-compare -Wno-error-empty-body -Wno-error-parentheses-equality -Wno-error-unused-function -Wno-error-pointer-sign -Wno-error-shift-negative-value -Wno-adext2_read ------- start!
+ext2_read: uio->uio_iovcnt = 1
+ext2_read: uio->uio_offset = 12288
+ext2_read: uio->uio_resid = 4096
+
+dress-of-packed-member  -mcmodel=medium  -std=iso9899:1999 -Werror  /--- subr_fattime.o ---
+cc -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin -c -O -pipe  -g -nostdinc  -I. -I/usr/src/qihai/sys -I/usr/src/qihai/sys/contrib/ck/include -I/usr/src/qihai/sys/contrib/libfdt -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h -fno-common  -fPIE -MD  -MF.depend.subr_fattime.o -MTsubr_fattime.o -fdebug-prefix-map=./machine=/usr/src/qihai/sys/riscv/include -march=rv64imafdc -mabi=lp64 -mno-relax -ffreestanding -fwrapv -fstack-protector -gdwarf-2 -Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-qual -Wundef -Wno-pointer-sign -Wno-format -Wmissing-include-dirs -fdiagnostics-show-option -Wno-unknown-pragmas -Wno-error-tautological-compare -Wno-error-empty-body -Wno-error-parentheses-equality -Wno-error-unused-function -Wno-error-pointer-sign -Wno-error-shift-negative-value -Wno-address-of-packed-member  -mcmodel=medium  -std=iso9899:1999 -Werror  /usr/src/qi--- subr_firmware.o ---
+cc -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin -c -O -pipe  -g -nostdinc  -I. -I/usr/src/qihai/sys -I/usr/src/qihai/sys/contrib/ck/include -I/usr/src/qihai/sys/contrib/libfdt -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h -fno-common  -fPIE -MD  -MF.depend.subr_firmware.o -MTsubr_firmware.o -fdebug-prefix-map=./machine=/usr/src/qihai/sys/riscv/include -march=rv64imafdc -mabi=lp64 -mno-relax -ffreestanding -fwrapv -fstack-protector -gdwarf-2 -Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-qual -Wundef -Wno-pointer-sign -Wno-format -Wmissing-include-dirs -fdiagnostics-show-option -Wno-unknown-pragmas -Wno-error-tautological-compare -Wno-error-empty-body -Wno-error-parentheses-equality -Wno-error-unused-function -Wno-error-pointer-sign -Wno-error-shift-negative-value -Wno-address-of-packed-member  -mcmodel=medium  -std=iso9899:1999 -Werror  /usr/src/--- modules-all ---
+dev/bhnd/bhnd_bus_if.m /usr/src/qihai/sys/dev/bhnd/bhnd_erom_if.m /usr/src/qihai/sys/dev/bhnd/bhndb/bhndb_bus_if.m /usr/src/qihai/sys/dev/bhnd/bhndb/bhndb_if.m /usr/src/qihai/sys/dev/bhnd/cores/chipc/bhnd_chipc_if.m /usr/src/qihai/sys/dev/bhnd/cores/chipc/pwrctl/bhnd_pwrctl_hostb_if.m /usr/src/qihai/sys/dev/bhnd/cores/chipc/pwrctl/bhnd_pwrctl_if.m /usr/src/qihai/sys/dev/bhnd/cores/pmu/bhnd_pmu_if.m /usr/src/qihai/sys/dev/bhnd/nvram/bhnd_nvram_if.m /usr/src/qihai/sys/dev/cxgbe/t4_if.m /usr/src/qihai/sys/dev/dwc/if_dwc_if.m /usr/src/qihai/sys/dev/etherswitch/etherswitch_if.m /usr/src/qihai/sys/dev/extres/clk/clkdev_if.m /usr/src/qihai/sys/dev/extres/clk/clknode_if.m /usr/src/qihai/sys/dev/extres/hwreset/hwreset_if.m /usr/src/qihai/sys/dev/extres/nvmem/nvmem_if.m /usr/src/qihai/sys/dev/extres/phy/phydev_if.m /usr/src/qihai/sys/dev/extres/phy/phynode_if.m /usr/src/qihai/sys/dev/extres/phy/phynode_usb_if.m /usr/src/qihai/sys/dev/extres/regulator/regdev_if.m /usr/src/qihai/sys/dev/extres/regulator/regnode_if.m /usr--- subr_disk.o ---
+s/kern/subr_disk.c
+--- subr_early.o ---
+sys/kern/subr_early.c
+--- subr_epoch.o ---
+sys/kern/subr_epoch.c
+--- subr_eventhandler.o ---
+usr/src/qihai/sys/kern/subr_eventhandler.c
+--- subr_fattime.o ---
+hai/sys/kern/subr_fattime.c
+--- subr_firmware.o ---
+qihai/sys/kern/subr_firmware.c
+--- modules-all ---
+/src/qihai/sys/dev/extres/syscon/syscon_if.m /usr/src/qihai/sys/dev/fb/fb_if.m /usr/src/qihai/sys/dev/fdt/fdt_clock_if.m /usr/src/qihai/sys/dev/fdt/fdt_pinctrl_if.m /usr/src/qihai/sys/dev/flash/qspi_if.m /usr/src/qihai/sys/dev/gpio/gpio_if.m /usr/src/qihai/sys/dev/gpio/gpiobus_if.m /usr/src/qihai/sys/dev/hdmi/hdmi_if.m /usr/src/qihai/sys/dev/hyperv/vmbus/vmbus_if.m /usr/src/qihai/sys/dev/iicbus/iicbb_if.m /usr/src/qihai/sys/dev/iicbus/iicbus_if.m /usr/src/qihai/sys/dev/iicbus/mux/iicmux_if.m /usr/src/qihai/sys/dev/iscsi/icl_conn_if.m /usr/src/qihai/sys/dev/mboext2_read ------- start!
+ext2_read: uio->uio_iovcnt = 1
+ext2_read: uio->uio_offset = 16384
+ext2_read: uio->uio_resid = 4096
+
+x/mbox_if.m /usr/src/qihai/sys/dev/mdio/mdio_if.m /usr/src/qihai/sys/dev/mii/miibus_if.m /usr/src/qihai/sys/dev/mmc/mmcbr_if.m /usr/src/qihai/sys/dev/mmc/mmcbus_if.m /usr/src/qihai/sys/dev/mvs/mvs_if.m /usr/src/qihai/sys/dev/nand/nand_if.m /usr/src/qihai/sys/dev/nand/nandbus_if.m /usr/src/qihai/sys/dev/nand/nfc_if.m /usr/src/qihai/sys/dev/ntb/ntb_if.m /usr/src/qihai/sys/dev/ofw/ofw_bus_if.m /usr/src/qihai/sys/dev/ofw/ofw_if.m /usr/src/qihai/sys/dev/ow/owll_if.m /usr/src/qihai/sys/dev/ow/own_if.m /usr/src/qihai/sys/dev/pccard/card_if.m /usr/src/qihai/sys/dev/pccard/power_if.m /usr/src/qihai/sys/dev/pci/pci_if.m /usr/src/qihai/sys/dev/pci/pci_iov_if.m /usr/src/qihai/sys/dev/pci/pcib_if.m /usr/src/qihai/sys/dev/ppbus/ppbus_if.m /usr/src/qihai/sys/dev/pwm/pwmbus_if.m /usr/src/qihai/sys/dev/scc/scc_if.m /usr/src/qihai/sys/dev/sdhci/sdhci_if.m /usr/src/qihai/sys/dev/smbus/smbus_if.m /usr/src/qihai/sys/dev/sound/midi/mpu_if.m /usr/src/qihai/sys/dev/sound/midi/mpufoi_if.m /usr/src/qihai/sys/dev/sound/midi/synth_if.m /usr/src/qihai/sys/dev/sound/pci/hda/hdac_if.m /usr/src/qihai/sys/dev/sound/pcm/ac97_if.m /usr/src/qihai/sys/dev/sound/pcm/channel_if.m /usr/src/qihai/sys/dev/sound/pcm/feeder_if.m /usr/src/qihai/sys/dev/sound/pcm/mixer_if.m /usr/src/qihai/sys/dev/spibus/spibus_if.m /usr/src/qihai/sys/dev/uart/uart_if.m /usr/src/qihai/sys/dev/usb/controller/generic_usb_if.m /usr/src/qihai/sys/dev/usb/usb_if.m /usr/src/qihai/sys/dev/virtio/mmio/virtio_mmio_if.m /usr/src/qihai/sys/dev/virtio/virtio_bus_if.m /usr/src/qihai/sys/dev/virtio/virtio_if.m /usr/src/qihai/sys/dev/vnic/lmac_if.m /usr/src/qihai/sys/dev/xdma/xdma_if.m /usr/src/qihai/sys/geom/part/g_part_if.m /usr/src/qihai/sys/geom/raid/g_raid_md_if.m /usr/src/qihai/sys/geom/raid/g_raid_tr_if.m /usr/src/qihai/sys/isa/isa_if.m /usr/src/qihai/sys/kern/bus_if.m /usr/src/qihai/sys/kern/clock_if.m /usr/src/qihai/sys/kern/cpufreq_if.m /usr/src/qihai/sys/kern/device_if.m /usr/src/qihai/sys/kern/linker_if.m /usr/src/qihai/sys/kern/msi_if.m /usr/src/qihai/sys/kern/pic_if.m /usr/src/qihai/sys/kern/serdev_if.m /usr/src/qihai/sys/kgssapi/kgss_if.m /usr/src/qihai/sys/libkern/iconv_converter_if.m /usr/src/qihai/sys/mips/ingenic/jz4780_gpio_if.m /usr/src/qihai/sys/mips/mediatek/fdt_reset_if.m /usr/src/qihai/sys/net/ifdi_if.m /usr/src/qihai/sys/opencrypto/cryptodev_if.m /usr/src/qihai/sys/powerpc/aim/moea64_if.m /usr/src/qihai/sys/powerpc/powerpc/iommu_if.m /usr/src/qihai/sys/powerpc/powerpc/mmu_if.m /usr/src/qihai/sys/powerpc/powerpc/pic_if.m /usr/src/qihai/sys/powerpc/powerpc/platform_if.m /usr/src/qihai/sys/sparc64/pci/ofw_pci_if.m /usr/src/qihai/sys/xen/xenbus/xenbus_if.m /usr/src/qihai/sys/xen/xenbus/xenbusb_if.m /usr/src/qihai/sys/xen/xenmem/xenmem_if.m" KERNBUILDDIR="/usr/obj/usr/src/qihai/riscv.riscv64/sys/GENERIC" SYSDIR="/usr/src/qihai/sys" MODULE_TIED=yes WITH_CTF="1" make  all
+--- subr_gtaskqueue.o ---
+1234567890
+cc -target riscv64-unknown-freebsd12.2 --sysroot=/usr/obj/usr/src/qihai/riscv.riscv64/tmp -B/usr/obj/usr/src/qihai/riscv.riscv64/tmp/usr/bin -c -O -pipe  -g -nostdinc  -I. -I/usr/src/qihai/sys -I/usr/src/qihai/sys/contrib/ck/include -I/usr/src/qihai/sys/contrib/libfdt -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h -fno-common  -fPIE -MD  -MF.depend.subr_gtaskqueue.o -MTsubr_gtaskqueue.o -fdebug-prefix-map=./machine=/usr/src/qihai/sys/riscv/include -march=rv64imafdc -mabi=lp64 -mno-relax -ffreestanding -fwrapv -fstack-protector -gdwarf-2 -Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-qual -Wundef -Wno-pointer-sign -Wno-format -Wmissing-include-dirs -fdiagnostics-show-option -Wno-unknown-pragmas -Wno-error-tautological-compare -Wno-error-empty-body -Wno-error-parentheses-equality -Wno-error-unused-function -Wno-error-pointer-sign -Wno-error-shift-negative-value -Wno-address-of-packed-member  -mcmodel=medium  -std=iso9899:1999 -Werror  /usr/src/qihai/sys/kern/subr_gtaskqueue.c
+--- SubrKobj.cpo ---
+c++: error: no input files
+*** [SubrKobj.cpo] Error code 1
+
+make[2]: stopped in /usr/obj/usr/src/qihai/riscv.risext2_read ------- start!
+ext2_read: uio->uio_iovcnt = 1
+ext2_read: uio->uio_offset = 20480
+ext2_read: uio->uio_resid = 4096
+
+cv64/sys/GENERIC
+--- SubrBus.cpo ---
+c++: error: no input files
+*** [SubrBus.cpo] Error code 1
+
+make[2]: stopped in /usr/obj/usr/src/qihai/riscv.riscv64/sys/GENERIC
+--- subr_early.o ---
+ctfconvert -L VERSION -g subr_early.o
+--- subr_fattime.o ---
+ctfconvert -L VERSION -g subr_fattime.o
+--- subr_disk.o ---
+ctfconvert -L VERSION -g subr_disk.o
+--- modules-all ---
+*** [modules-all] Error code 2
+
+make[2]: stopped in /usr/obj/usr/src/qihai/riscv.riscv64/sys/GENERIC
+--- subr_eventhandler.o ---
+ctfconvert -L VERSION -g subr_eventhandler.o
+--- subr_firmware.o ---
+ctfconvert -L VERSION -g subr_firmware.o
+--- subr_epoch.o ---
+ctfconvert -L VERSION -g subr_epoch.o
+--- subr_gtaskqueue.o ---
+ctfconvert -L VERSION -g subr_gtaskqueue.o
+3 errors
+
+make[2]: stopped in /usr/obj/usr/src/qihai/riscv.riscv64/sys/GENERIC
+ext2_read ------- start!
+ext2_read: uio->uio_iovcnt = 1
+ext2_read: uio->uio_offset = 21290
+ext2_read: uio->uio_resid = 4096

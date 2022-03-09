@@ -1,0 +1,263 @@
+////////////// 20220307 //////////////
+  从代码逻辑上可以看出，tptfs 跟 tmpfs 具体实现还是不太一样的。tptfs 相比于 tmpfs 多了许多其他操作，
+导致我们进行数据同步的时候不能加解锁操作都合并到同一个函数当中，所以还是要根据 tptfs 的特点来实现，也不能
+一味按照 tmpfs 的方法
+
+TptfsVnode::TptAccess:  ok
+  参考 tmpfs 中的做法，没有利用文件锁进行加锁操作，仅仅判断了 vnode 中锁结构的状态
+
+TptfsBmap::Bmap:  ok
+  Bmap 函数只有在计算文件逻辑页号的时候才用到，所以应该只需要加一个读锁就可以
+
+#ifdef _FS_FILE_TREE_LOOKUP_H_
+  FileTreeLookup::Lookup: ok
+  FileTreeLookup::ReadDir:  ok
+  这两个函数都是使用了文件的互斥锁进行保护
+#else
+  TptLookup::TptLookupx:  ok
+  TptLookup::TptReadDir:  ok
+#endif
+
+TptfsVnode::TptClose: ok
+  可能需要对文件的时间和属性信息进行更新，加写锁
+
+TptfsVnode::TptCreate:  ok
+  该函数中会调用 TptMakeInode() 函数。该函数是在文件系统中查找可用的 inode，所以该函数的数据控制权是在文件系统手里。
+  对该函数进行数据同步时要加文件系统写锁，并且从其被调用的情况来看，锁操作可以在函数内存完成，但是需要修改一下代码实现
+  逻辑
+
+TptfsVnode::TptFsync: ok
+  调用了 TptUpdate 函数，文件数据同步直接加写锁
+
+TptfsVnode::TptGetPages:  ok
+
+TptfsVnode::TptPutPages:  ok
+
+TptfsVnode::TptGetattr:   ok
+  该函数首先会有一个时间同步函数，所以要先加一个写锁。然后文件属性封装到一个结构体当中，只需要用到读，可以将写锁降级为读锁
+
+TptInodeOps::TptInactive:   ok
+  该函数中读写属性有交叉，所以就干脆直接加写锁，忽略读锁操作。修改了一下函数的实现逻辑(增加 goto 语句可是适当简化加锁逻辑)
+
+TptfsVnode::TptIoctl:   ok
+  调用 BmapSeekData() 函数，该函数中已经添加了文件读锁，所以 ioctl 就不需要再次添加
+
+
+TptfsVnode::TptLink:  ok
+  该函数中也是读写交叉，所以直接加写锁
+
+TptfsVnode::TptMkdir: 
+  函数涉及目标文件和其所在的目录两个对象，首先对目录项进行写加锁，因为要创建新的子文件；其次是在 inode 分配完成之后，对目标文件
+进行加锁。释放的时候最好是先释放目标文件锁，然后再释放目录文件锁
+
+TptfsVnode::TptMknod: ok
+  函数中会调用 vfs_vget 函数，传入的参数中有一个是 inode number，这个的话是应该是通过读取 inode bitmap 获取到的。所以不会
+存在 inode number 冲突的问题，各自对应的 inode table entry 地址也不相同，感觉 vfs_vget 注册函数应该是不需要加锁的
+
+TptfsVnode::TptOpen:  ok
+  函数只是判断了一些属性信息，并未对数据进行修改，所以只加文件读锁
+
+TptfsVnode::TptPathconf:  ok
+  参考 tmpfs 和 ext2 中的函数实现，没有加锁
+
+TptfsVnode::TptPrint: ok
+  函数很少会被调用到，只有在需要打印 vnode 信息的时候才会被调用，所以参考 ext2 和 tmpfs 中相关函数的实现，不需要加锁
+
+TptfsVnode::TptRead:  ok
+  必须要加读锁，不要去管 readlink
+
+TptfsVnode::TptReadPageCache:
+
+TptfsVnode::TptReadLink:  ok
+  该函数会调用 vop_read 函数。参考 tmpfs 中对应函数的实现，如果读取的是链接文件，就是分两种情况：索引数组可以容下链接路径或者放不下。
+但是大部分情况还是可以放下的，一般也不会存一个特别长的路径信息。所以，加锁可以分成两部分，一个是在 readlink 中，而另外一个是在 read 中。
+不能在 read 中使用 try_rlock 函数，它是用作判断不同线程或者进程是否持有该锁，而不是在上下级函数中间。read 毕竟也是一个系统调用，还是
+会被其他外部模块调用，所以其本身要做好数据同步工作，而不能因为 readlink 的原因使用 try_lock
+
+TptfsVnode::TptReallocBlks:   ok
+  该函数是 ext2 中将多个数据块重新分配到一组连续的块中。tptfs 目前暂时还没有这方面的应用，所以先不考虑
+
+TptInodeOps::TptReclaim:  ok
+  reclaim 函数中本来是有对 inode table entry 置零操作的，后来把他转移到了 valloc 函数中进行。原来函数实现逻辑中包含了一个 LAZY_MOD 
+这么一个属性判断，该属性其实是磁盘文件系统中才会出现的，功能是内存 inode 应被改变了，但是当时没有直接更新到磁盘，而是延迟一些、等条件成熟了
+再写入。tptfs 没有延迟，都是直接操作的内存，所以这个标志应该不再需要了
+
+TptfsVnode::TptRemove:  ok
+
+TptfsVnode::TptRename:
+
+TptfsVnode::TptRmdir: ok
+  该函数也是包含目标文件和目录项两个对象，但是删除目录中目标文件 entry 时用的是 componentname，并没有改变目标文件中的一些属性信息，不需要
+对目标文件进行加锁，而要对目录文件加锁(DirRemove 函数加互斥锁)
+
+TptfsVnode::TptSetAttr: ok
+
+TptfsVnode::TptStrategy:  ok
+  这个函数在 ext2 中是利用通过一些策略将磁盘块最大限度按照顺序排列方式进行读写，但是在 tptfs 中是用不到
+
+TptfsVnode::TptSymlink: ok
+  这个函数也是包含两个代码分支：索引数据可以容纳和不能容纳的情况。当不能容纳的时候使用的是 vn_rdwr 函数。现在 tptfs 应该已经用不到 bufobj，
+所以后续要把 bufobj 相关的逻辑给剔除掉
+
+TptfsVnode::TptWrite: ok
+  加写锁
+
+TptfsVnode::TptDeleteExtAttr: ok
+TptfsVnode::TptGetExtAttr:  ok
+TptfsVnode::TptListExtAttr: ok
+TptfsVnode::TptSetExtAttr:  ok
+TptAcl::GetAcl: ok
+TptAcl::SetAcl: ok
+TptAcl::AclCheck: ok
+TptfsVnode::TptVptofh:  ok
+
+
+
+#0  TptInodeOps::TptTruncate (vp=0xffffffd0096c7b70, length=0, flags=0, 
+    cred=0xffffffd00978fc00, td=0xffffffc0cc407100)
+    at /home/mercury/Documents/code/qihai/master/qihai/fs/tptfs/tptfs_inode.cpp:49
+#1  0xffffffc0007a727c in TptfsVnode::TptSetAttr (ap=0xffffffc098d66778)
+    at /home/mercury/Documents/code/qihai/master/qihai/fs/tptfs/tptfs_vnops.cpp:1308
+#2  0xffffffc00053a214 in VOP_SETATTR_APV (
+    vop=0xffffffc00090c088 <tpt_vnodeops>, a=0xffffffc098d66778)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/vnode_if.c:927
+#3  0xffffffc000532fda in VOP_SETATTR (vp=0xffffffd0096c7b70, 
+    vap=0xffffffc098d667d0, cred=0xffffffd00978fc00)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/vnode_if.h:485
+#4  0xffffffc000532f6e in vn_truncate_locked (vp=0xffffffd0096c7b70, 
+    length=0, sync=false, cred=0xffffffd00978fc00)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/vfs_vnops.c:1593
+#5  0xffffffc00052f068 in vn_truncate (fp=0xffffffd0054edeb0, length=0, 
+    active_cred=0xffffffd00978fc00, td=0xffffffc0cc407100)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/vfs_vnops.c:1565
+#6  0xffffffc000525d88 in fo_truncate (fp=0xffffffd0054edeb0, length=0, 
+    active_cred=0xffffffd00978fc00, td=0xffffffc0cc407100)
+    at /home/mercury/Documents/code/qihai/master/qihai/sys/file.h:346
+#7  0xffffffc0005259f4 in kern_openat (td=0xffffffc0cc407100, fd=-100, 
+--Type <RET> for more, q to quit, c to continue without paging--
+    path=0x40808018 <error: Cannot access memory at address 0x40808018>, 
+    pathseg=UIO_USERSPACE, flags=1026, mode=438)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/vfs_syscalls.c:1191
+#8  0xffffffc0005255fe in sys_open (td=0xffffffc0cc407100, 
+    uap=0xffffffc0cc4074e8)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/vfs_syscalls.c:1073
+#9  0xffffffc00077b0a8 in syscallenter (td=0xffffffc0cc407100)
+    at /home/mercury/Documents/code/qihai/master/qihai/riscv/riscv/../../kernel/subr_syscall:189
+#10 0xffffffc00077a9c2 in ecall_handler ()
+    at /home/mercury/Documents/code/qihai/master/qihai/riscv/riscv/trap.c:167
+#11 0xffffffc00077a80e in do_trap_user (frame=0xffffffc098d66c50)
+    at /home/mercury/Documents/code/qihai/master/qihai/riscv/riscv/trap.c:371
+#12 0xffffffc00075db26 in cpu_exception_handler_user ()
+    at /home/mercury/Documents/code/qihai/master/qihai/riscv/riscv/exception.S:229
+
+
+#0  TptfsVnode::TptWrite (ap=0xffffffc098d667f8)
+    at /home/mercury/Documents/code/qihai/master/qihai/fs/tptfs/tptfs_vnops.cpp:1471
+#1  0xffffffc00053a864 in VOP_WRITE_APV (
+    vop=0xffffffc00090c088 <tpt_vnodeops>, a=0xffffffc098d667f8)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/vnode_if.c:1169
+#2  0xffffffc000531f88 in VOP_WRITE (vp=0xffffffd0096c7b70, 
+    uio=0xffffffc098d66aa8, ioflag=131073, cred=0xffffffd00978fc00)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/vnode_if.h:600
+#3  0xffffffc0005383ea in vn_write (fp=0xffffffd0054edeb0, 
+    uio=0xffffffc098d66aa8, active_cred=0xffffffd00978fc00, flags=1, 
+    td=0xffffffc0cc407100)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/vfs_vnops.c:1111
+#4  0xffffffc00052ef02 in vn_io_fault (fp=0xffffffd0054edeb0, 
+    uio=0xffffffc098d66aa8, active_cred=0xffffffd00978fc00, flags=0, 
+    td=0xffffffc0cc407100)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/vfs_vnops.c:1419
+#5  0xffffffc0004743d0 in fo_write (fp=0xffffffd0054edeb0, 
+    uio=0xffffffc098d66aa8, active_cred=0xffffffd00978fc00, flags=0, 
+    td=0xffffffc0cc407100)
+    at /home/mercury/Documents/code/qihai/master/qihai/sys/file.h:338
+#6  0xffffffc0004702a8 in dofilewrite (td=0xffffffc0cc407100, fd=5, 
+    fp=0xffffffd0054edeb0, auio=0xffffffc098d66aa8, offset=-1, flags=0)
+--Type <RET> for more, q to quit, c to continue without paging--
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/sys_generic.c:565
+#7  0xffffffc00046fee8 in kern_writev (td=0xffffffc0cc407100, fd=5, 
+    auio=0xffffffc098d66aa8)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/sys_generic.c:492
+#8  0xffffffc00046fe5e in sys_write (td=0xffffffc0cc407100, 
+    uap=0xffffffc0cc4074e8)
+    at /home/mercury/Documents/code/qihai/master/qihai/kernel/sys_generic.c:407
+#9  0xffffffc00077b0a8 in syscallenter (td=0xffffffc0cc407100)
+    at /home/mercury/Documents/code/qihai/master/qihai/riscv/riscv/../../kernel/subr_syscall:189
+#10 0xffffffc00077a9c2 in ecall_handler ()
+    at /home/mercury/Documents/code/qihai/master/qihai/riscv/riscv/trap.c:167
+#11 0xffffffc00077a80e in do_trap_user (frame=0xffffffc098d66c50)
+    at /home/mercury/Documents/code/qihai/master/qihai/riscv/riscv/trap.c:371
+#12 0xffffffc00075db26 in cpu_exception_handler_user ()
+    at /home/mercury/Documents/code/qihai/master/qihai/riscv/riscv/exception.S:229
+
+
+////////////// 20220308 //////////////
+  vim / ee 这些文件编辑器目前还是作为应用程序存在，用户空间地址和内核空间地址还是分离的。所以，在我们读写数据的时候会用到 uiomove
+函数，把数据从内核空间拷贝到用户空间的某个地址，操作完成之后再拷贝回内核空间
+  
+  编辑器中对文件的插入操作，目前来看应该是在应用程序的缓存中实现的。应用程序把数据修改完成之后，再一个一个整页的拷贝回内核空间，中间
+是没有任何数据移动的操作的，只有拷贝，这点要注意，也就说明处理逻辑目前是没有在内核代码中的
+
+  未来奇海系统其实就没有内核和用户的概念了，所有的进程都变成了线程，都是共享所有的数据(除了TLS)。这时其实我们就不再需要对数据进行拷贝了，
+直接在内核空间对文件数据进行增删查。就是说文件编辑器原来在用户空间缓存中的处理逻辑，我们要移动到内核空间来做，更准确一点是要由文件系统
+自己来处理，那就需要添加新的系统调用函数，用于替代应用程序中缓存处理函数
+
+  tptfs 中的 VFree() 和 BlkFree() 两个函数功能类似，但是使用的场景不太一样。在 tptfs 代码实现中 VFree 函数只在 inactive 函数中
+被调用了一次，所以我们可以直接在 VFree 函数中加文件系统锁
+  BlkFree 则是在多个函数中都会被调用，主要是 TptTruncate 和 extattr 相关函数。并且 TptTruncate 和其下级函数存在递归，会多次调用 
+BlkFree，如果在 BlkFree 中加锁的话，会使得加锁解锁操作比较频繁，因此打算把锁加到偏上层函数中 (可以放到 TptTruncate 中)
+
+
+////////////// 20220309 //////////////
+  上述 TptTruncate 的处理方式不太行，因为该函数中会调用 Ballocx 函数，再底层则会调用 allocg 函数，其中存在加解文件系统锁的操作。所以
+还是在 BlkFree 函数中添加文件系统锁
+
+
+  root@qemu:/tpt # touch a.c
+  TptAccess
+  TptCreate
+  TptMakeInode
+  Valloc
+  HashAlloc
+  NodeAlloc
+  GetNiFree
+  GetNiFree
+  GetNiFree
+  SetNiFree
+  TptVinit
+  TptUpdate
+  TptItimes
+  TptItimesLocked
+  TptOpen
+  TptGetattr
+
+  Thread 4 hit Breakpoint 1, TptfsVnode::TptGetattr (ap=0xffffffc076ffb5f0)
+      at /home/mercury/Documents/code/qihai/master/qihai/fs/tptfs/tptfs_vnops.cpp:240
+  240	  tptfs_log(VNOPS_DEBUG, "TptGetattr\n");
+  (gdb) n
+  241	  struct vnode* vp = ap->a_vp;
+  (gdb) 
+  242	  struct tpt_inode* ip = TPT_VTOI(vp);
+  (gdb) 
+  243	  struct vattr* vap = ap->a_vap;
+  (gdb) p ip
+  $1 = (tpt_inode *) 0xffffffc640003200
+  (gdb) n
+  244		VFileNode *vfnp = TPT_ITOVF(ip);
+  (gdb) 
+  246		FL_WLOCK(vfnp);
+  (gdb) 
+
+  新创建的文件获取写锁时阻塞，应该是前面某个位置没有解锁导致的，需要排查一下。看着像是文件锁，不是元数据锁
+
+  vnode_create_vobject 函数会调用 vop_getattr 函数，导致文件锁出现了递归，进而导致了上述阻塞问题。目前 tptfs 已经剔除了
+bufobj 结构体数据，所以在 tptfs 层级应该不用再去创建该对象，感觉应该可以慢慢将相关函数逻辑移除掉。但是实际测试的时候，利用 clang
+编译生成 hello，world 可执行文件，执行时候会报错 Permission denied. 可能编译的时候还是要用到 bufobj
+
+  在添加锁操作之后，调试过程中经常出现 segment fault 错误，这其实是 inode 与 VFileNode 分配不同步导致的。因为是继承自磁盘文件
+系统，所以目录项跟 inode 两者目前还是独立的两个对象 (正常来说应该是融合在一起的)。按照磁盘文件系统的逻辑，两者是独立存在的。但是
+tptfs 却是利用文件类将两者进行了一定程度的融合，如果仍然按照原有的处理逻辑来做的话，就会出现 inode 已经分配好了，但是 VFileNode
+却没有实例化，导致加锁操作不得不进行延后；
+  目前的解决方式是在 inode 分配之后紧接着就实例化 VFileNode，这就可以保证只要 inode 在，文件锁就在。删除的时候则刚好相反，首先
+把 VFileNode 释放掉，这样别的进程就无法查找到该文件，防止进程访问一个不存在的文件。然后在文件系统锁的保护下，清除文件原来占用的数据
+块和更新元数据
