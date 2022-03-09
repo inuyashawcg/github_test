@@ -165,8 +165,8 @@ RB_HEAD(tmpfs_dir, tmpfs_dirent);
  * (vi) vnode lock in exclusive mode, or vnode lock in shared vnode and
  *	tn_interlock
  * (i)  tn_interlock
- * (m)  tmpfs_mount tm_allnode_lock
- * (c)  stable after creation
+ * (m)  tmpfs_mount tm_allnode_lock - 用于保护 tmpfs_mount 整个结构？
+ * (c)  stable after creation	- 结构体中有些数据才初始化之后就是确定的，不需要加锁
  * 
  * 从注释中可以看到一个简单的文件系统是如何管理结点的，其中有一种方式就是利用双链表。
  * 这样做的好处就是对于查找、增删等操作会比较方便高效

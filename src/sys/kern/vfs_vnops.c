@@ -1358,6 +1358,8 @@ vn_truncate(struct file *fp, off_t length, struct ucred *active_cred,
 	/*
 	 * Lock the whole range for truncation.  Otherwise split i/o
 	 * might happen partly before and partly after the truncation.
+	 * 锁定整个范围以进行截断。否则，拆分i/o可能部分在截断之前发生，部分在
+	 * 截断之后发生
 	 */
 	rl_cookie = vn_rangelock_wlock(vp, 0, OFF_MAX);
 	error = vn_start_write(vp, &mp, V_WAIT | PCATCH);
@@ -1713,6 +1715,7 @@ vn_start_write(struct vnode *vp, struct mount **mpp, int flags)
 	if ((mp = *mpp) == NULL)
 		return (0);
 
+	// suspendable: 可暂停的
 	if (!vn_suspendable(mp)) {
 		if (vp != NULL || (flags & V_MNTREF) != 0)
 			vfs_rel(mp);	// mp引用计数--操作

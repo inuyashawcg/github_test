@@ -149,10 +149,12 @@ vnode_create_vobject(struct vnode *vp, off_t isize, struct thread *td)
 		}
 	}
 
+	// 调用 vop_access 函数获取 vnode size，然后利用 pager_alloc 申请页
 	object = vnode_pager_alloc(vp, size, 0, 0, td->td_ucred);
 	/*
 	 * Dereference the reference we just created.  This assumes
 	 * that the object is associated with the vp.
+	 * 取消引用我们刚刚创建的引用。这假定对象与vp关联
 	 */
 	VM_OBJECT_WLOCK(object);
 	object->ref_count--;
@@ -229,6 +231,7 @@ vnode_pager_alloc(void *handle, vm_ooffset_t size, vm_prot_t prot,
 	/*
 	 * If the object is being terminated, wait for it to
 	 * go away.
+	 * 如果对象正在终止，请等待它消失
 	 */
 retry:
 	while ((object = vp->v_object) != NULL) {
@@ -256,6 +259,7 @@ retry:
 		if (vp->v_object != NULL) {
 			/*
 			 * Object has been created while we were sleeping
+			 		当我们睡眠的时候，object 恰好被创建了，那么就把当前创建的对象删除掉
 			 */
 			VI_UNLOCK(vp);
 			VM_OBJECT_WLOCK(object);
@@ -268,7 +272,7 @@ retry:
 			goto retry;
 		}
 		vp->v_object = object;
-		VI_UNLOCK(vp);
+		VI_UNLOCK(vp);	// 对 interlock 成员加锁
 	} else {
 		object->ref_count++;
 #if VM_NRESERVLEVEL > 0
@@ -276,6 +280,10 @@ retry:
 #endif
 		VM_OBJECT_WUNLOCK(object);
 	}
+	/*
+		增加 vp 的引用计数，应该是为了防止 vp 被意外释放，确保该对象存在。等到后面真正要使用的时候，
+		可能就得将引用计数-1？
+	*/
 	vrefact(vp);
 	return (object);
 }

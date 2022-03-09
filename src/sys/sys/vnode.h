@@ -736,6 +736,10 @@ void	vn_finished_write(struct mount *mp);
 void	vn_finished_secondary_write(struct mount *mp);
 int	vn_isdisk(struct vnode *vp, int *errp);
 int	_vn_lock(struct vnode *vp, int flags, char *file, int line);
+/*
+	内核代码应该使用 vn_lock 来锁定 vnode，而不是直接调用 VOP_LOCK。vn_lock 也不希望将
+	线程指定为参数，但它假定使用 curthread
+*/
 #define vn_lock(vp, flags) _vn_lock(vp, flags, __FILE__, __LINE__)
 int	vn_open(struct nameidata *ndp, int *flagp, int cmode, struct file *fp);
 int	vn_open_cred(struct nameidata *ndp, int *flagp, int cmode,

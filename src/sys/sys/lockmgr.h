@@ -162,6 +162,8 @@ _lockmgr_args_rw(struct lock *lk, u_int flags, struct rwlock *ilk,
 #define	LK_EATTR_MASK	0x00FF00
 /*
 	Unlock the interlock (which	should be locked already).
+	也就是说一个 interlock 已经被锁定了，其他地方需要对这个所进行解锁，
+	然后就传入了这么一个 flag。其他地方如果检测到的话，就要解锁后使用数据
 */
 #define	LK_INTERLOCK	0x000100
 /*

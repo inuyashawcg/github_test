@@ -264,7 +264,7 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	int offset, size, level;
 	e4fs_daddr_t count, nblocks, blocksreleased = 0;	/* 释放掉的数据块的个数 */
 	int error, i, allerror;
-	off_t osize;	// old size?
+	off_t osize;	// old file size?
 #ifdef INVARIANTS
 	struct bufobj *bo;
 #endif
@@ -282,7 +282,8 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	 * value of osize is 0, length will be at least 1.
 	 * 延长文件的大小。我们必须确保文件的最后一个字节已分配。由于 osize 的最小值
 	 * 为0，因此长度至少为1
-	 * osize 表示的是 inode 对应文件的原有数据量大小，length 表示的应该是
+	 * osize 表示的是 inode 对应文件的原有数据量大小，length 表示的应该是数据截取
+	 * 其实位置？
 	 */
 	if (osize < length) {
 		if (length > oip->i_e2fs->e2fs_maxfilesize)
@@ -332,14 +333,14 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 		oip->i_size = length;	/* 当截取位置恰好为一个完整的数据块的边界值，i_size 直接赋值 */
 	} else {
 		lbn = lblkno(fs, length);	/* 计算 length 对应的逻辑块号 */
-		flags |= BA_CLRBUF;
+		flags |= BA_CLRBUF;	// 清空 buffer 中的无效区域
 		error = ext2_balloc(oip, lbn, offset, cred, &bp, flags);	/* 读取逻辑块对应磁盘块中的数据 */
 		if (error)
 			return (error);
 		oip->i_size = length;
 		size = blksize(fs, oip, lbn);
 		/*
-			把数据块中 offset 之后的数据置零
+			把数据块中 offset 之后的数据置零，这里只是读取了一个数据块中的内容
 		*/
 		bzero((char *)bp->b_data + offset, (u_int)(size - offset));
 		allocbuf(bp, size);
@@ -352,6 +353,7 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 		else
 			bawrite(bp);
 	}
+	// 上面的代码貌似只是处理了 length 所在的那一个数据块
 	/*
 	 * Calculate index into inode's block list of
 	 * last direct and indirect blocks (if any)
@@ -364,17 +366,20 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	lastblock = lblkno(fs, length + fs->e2fs_bsize - 1) - 1;
 	/* 
 		减去直接块个数之后，剩余的数据块个数。可以用作判断被截取后文件大小的一个标志，当数组的第一个元素小于 0 的时候，
-		就意味着变化后的文件用直接块就可以完全表示，不再需要间接索引，下面同理
+		就意味着变化后的文件用直接块就可以完全表示，不再需要间接索引，下面同理。
+		NINDIR 宏表示一个数据块中能够存放多少个指针
 	*/
-	lastiblock[SINGLE] = lastblock - EXT2_NDADDR;	// 一级间接索引的起始块号
-	lastiblock[DOUBLE] = lastiblock[SINGLE] - NINDIR(fs);	/* 二级间接索引的其实块号 */
-	lastiblock[TRIPLE] = lastiblock[DOUBLE] - NINDIR(fs) * NINDIR(fs);	/* 三级间接索引的起始块号 */
+	lastiblock[SINGLE] = lastblock - EXT2_NDADDR;	// 一级间接索引的起始逻辑块号
+	lastiblock[DOUBLE] = lastiblock[SINGLE] - NINDIR(fs);	/* 二级间接索引的起始逻辑块号 */
+	lastiblock[TRIPLE] = lastiblock[DOUBLE] - NINDIR(fs) * NINDIR(fs);	/* 三级间接索引的起始逻辑块号 */
 	nblocks = btodb(fs->e2fs_bsize);	/* 文件系统块号与磁盘块号的转换，tptfs 中是 1 */
 	/*
 	 * Update file and block pointers on disk before we start freeing
 	 * blocks.  If we crash before free'ing blocks below, the blocks
 	 * will be returned to the free list.  lastiblock values are also
 	 * normalized to -1 for calls to ext2_indirtrunc below.
+	 * 首先将截取后的文件的直接索引和间接索引数据中的值更新到 inode 字段，要注意
+	 * 此时还没有开始释放原有文件申请的、阶段之后不再使用的数据块
 	 */
 	for (level = TRIPLE; level >= SINGLE; level--) {
 		/* 把间接索引信息更新到 oldblks 数组当中 */
@@ -641,8 +646,8 @@ ext2_ext_truncate(struct vnode *vp, off_t length, int flags,
  * 文件截断可以理解为删除那些我们不需要的数据块；
  * 所谓的截断文件指的是：一个特定长度的文件，我们从某个位置开始丢弃后面的数据，之前的数据依然保留。
  * 对具体文件系统来说，截断数据主要意味着两件事情：1. 文件大小发生变化；2. 文件被截断部分之前占用
- * 的数据块（对ext2和minix来说可能还包含间接块）释放，让其他文件可以使用。由于ext2和minix特殊的
- * 映射方式，我们不仅需要截断数据块，还可能包括映射这些数据块的间接索引块
+ * 的数据块（对 ext2 和 minix 来说可能还包含间接块）释放，让其他文件可以使用。由于 ext2 和 minix 
+ * 特殊的映射方式，我们不仅需要截断数据块，还可能包括映射这些数据块的间接索引块
  */
 int
 ext2_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
@@ -656,7 +661,9 @@ ext2_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	if (length < 0)
 		return (EINVAL);
 	/*
-		如果 vnode 对应的是链接文件，则需要判断一下 symlink length 是否符合要求
+		如果 vnode 对应的是链接文件，则需要判断一下 symlink length 是否符合要求。链接文件存储的是
+		目标文件的路径信息，存放的位置是在 inode 结构中 i_db 索引块所在的地方，所以对长度是有要求的。
+		如果目标文件路径长度过长的话，可能就要分配新的数据块来存放
 	*/
 	ip = VTOI(vp);
 	if (vp->v_type == VLNK &&

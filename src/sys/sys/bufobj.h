@@ -94,7 +94,7 @@ struct buf_ops {
 /*
  * Locking notes:
  * 'S' is sync_mtx
- * 'v' is the vnode lock which embeds the bufobj. 嵌入bufobj的vnode锁
+ * 'v' is the vnode lock which embeds the bufobj. 嵌入 bufobj 的 vnode 锁
  * '-' Constant and unchanging after initialization. 初始化后不变
  */
 struct bufobj {

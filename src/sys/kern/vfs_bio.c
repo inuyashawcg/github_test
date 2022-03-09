@@ -4036,7 +4036,7 @@ loop:
 		lockflags = LK_EXCLUSIVE | LK_SLEEPFAIL | LK_INTERLOCK;
 
 		if ((flags & GB_LOCK_NOWAIT) != 0)
-			lockflags |= LK_NOWAIT;
+			lockflags |= LK_NOWAIT;	// 数据获取不允许等待，直接执行
 
 		/*
 			给 buffer 加锁，并且要指定 timeout
@@ -4448,6 +4448,7 @@ allocbuf(struct buf *bp, int size)
 	if (bp->b_kvasize != 0 && bp->b_kvasize < size)
 		panic("allocbuf: buffer too small");
 
+	// 将 newsize 扩展成 512 字节的整数倍
 	newbsize = roundup2(size, DEV_BSIZE);
 	if ((bp->b_flags & B_VMIO) == 0) {
 		if ((bp->b_flags & B_MALLOC) == 0)
@@ -4455,6 +4456,7 @@ allocbuf(struct buf *bp, int size)
 		/*
 		 * Just get anonymous memory from the kernel.  Don't
 		 * mess with B_CACHE.
+		 * 只需从内核获取匿名内存。不要弄乱 B_CACHE
 		 */
 		if (newbsize < bp->b_bufsize)
 			vfs_nonvmio_truncate(bp, newbsize);
