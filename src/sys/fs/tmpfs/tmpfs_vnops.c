@@ -533,7 +533,7 @@ tmpfs_write(struct vop_write_args *v)
 		return (EINVAL);
 	if (uio->uio_resid == 0)	/* 剩余传输字节数为0，返回 */
 		return (0);
-	/* 
+	/*
 		如果是追加写入到结尾，那么就指定 uio_offset = tn_size，也就是说 uio_offset 
 		表示的是数据写入的起始位置？
 	*/

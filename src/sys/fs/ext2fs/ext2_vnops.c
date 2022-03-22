@@ -811,7 +811,8 @@ ext2_dec_nlink(struct inode *ip)
  * but ``atomically''.  Can't do full commit without saving state in the
  * inode on disk which isn't feasible at this time.  Best we can do is
  * always guarantee the target exists.
- * 如果不将状态保存在磁盘上的inode中，则无法执行完全提交，这在此时是不可行的。我们所能做的就是保证目标的存在
+ * 如果不将状态保存在磁盘上的inode中，则无法执行完全提交，这在此时是不可行的。
+ * 我们所能做的就是保证目标的存在
  *
  * Basic algorithm is:
  *
@@ -857,13 +858,20 @@ ext2_rename(struct vop_rename_args *ap)
 	 * 从注释来看，tdvp 表示的应该是重命名目标文件的 vnode，这里判断的是
 	 * 源文件和目标文件的挂载点是否一致
 	 * 
-	 * 链接不能跨分区或者跨文件系统进行，用户态貌似不支持目录项硬链接。下面的判断逻辑应该就是
+	 * 重命名不能跨分区或者跨文件系统进行，用户态貌似不支持目录项硬链接。下面的判断逻辑应该就是
 	 * 对这个进行的判断
 	 */
 	if ((fvp->v_mount != tdvp->v_mount) ||
 	    (tvp && (fvp->v_mount != tvp->v_mount))) {
 		error = EXDEV;
 abortit:
+		/*
+			vput 输出的 vnode 是加锁的；vrele 输出的 vnode 是不加锁的。当目标文件就是目标目录的时候，
+			tdvp 是不加锁的；如果不一样，加锁。tvp 只要存在，就要加锁。也就是目标文件 vnode 如果存在
+			就要加锁，而目标目录一般情况下也是要加锁。
+			源文件和对应目录都不加锁。是不是说明通过系统调用生成的新文件关联的 vnode 都需要加锁(返回 vfs
+			层级时还会被用到)，而源文件和目录后面就用不到了，所以解锁？
+		*/
 		if (tdvp == tvp)
 			vrele(tdvp);
 		else
@@ -899,12 +907,14 @@ abortit:
 		goto abortit;
 	}
 	/* 
-		现在要开始对fvp进行操作了，所以要加锁进行保护。这里处理的是 fvp 对应的专用锁
+		现在要开始对fvp进行操作了，所以要加锁进行保护。注意源文件对应的锁要是独占类型的
 	*/
 	if ((error = vn_lock(fvp, LK_EXCLUSIVE)) != 0)
 		goto abortit;
-	dp = VTOI(fdvp);
-	ip = VTOI(fvp);
+	dp = VTOI(fdvp);	// 此时的 dp 是源文件目录项
+	ip = VTOI(fvp);		// 从下面代码实现来看，ip 貌似一直表示的就是源文件
+	// 如果是在 tptfs 中对访问 ip 数据加锁保护的话，应该从这里就可以开始了。可以先加读锁，
+	// 后面修改属性信息的时候加写锁
 	/* 
 		判断最大链接数是否超过了限制，并且判断文件系统是否具有只读属性 
 	*/
@@ -924,7 +934,8 @@ abortit:
 	if ((ip->i_mode & IFMT) == IFDIR) {
 		/*
 		 * Avoid ".", "..", and aliases of "." for obvious reasons.
-		 * 出于明显的原因，请避免使用“.”、“..”和“.”的别名
+		 * 出于明显的原因，请避免使用“.”、“..”和“.”的别名。
+		 * 当源文件是一个目录的时候，只要满足下面任意一个条件，就表示我们的操作是错误的
 		 */
 		if ((fcnp->cn_namelen == 1 && fcnp->cn_nameptr[0] == '.') ||
 		    dp == ip || (fcnp->cn_flags | tcnp->cn_flags) & ISDOTDOT ||
@@ -935,19 +946,23 @@ abortit:
 		}
 		ip->i_flag |= IN_RENAME;
 		/*
-			指定文件移动之前的所在目录项的 inode number
+			指定文件移动之前的所在目录项的 inode number。doingdirectory 可能是表示我们当前操作的
+			源文件是一个目录文件。dp 目前还是源文件所在目录
 		*/
 		oldparent = dp->i_number;
 		doingdirectory++;
 	}
-
-	/* 返回一个未被锁定的对象，并且减少对象的引用计数 */
+	/* 
+		返回一个未被锁定的对象，并且减少对象的引用计数。到这里好像源目录已经不会被再使用了，
+		后面 dp 直接被赋值为了目标目录
+	*/
 	vrele(fdvp);
-
 	/*
 	 * When the target exists, both the directory
 	 * and target vnodes are returned locked.
-	 * 当目标存在时，目录和目标 vnode 都将返回并锁定
+	 * 当目标存在时，目录和目标 vnode 都将返回并锁定。这个时候 dp 变成了目标目录，感觉可以直接加写锁，
+	 * 因为后面代码中有挺多属性更新操作。前面对 dp 的访问应该是不用加锁的，i_flags 和 i_number 基本
+	 * 不会被修改，都是文件创建的时候差不多就固定下来了。
 	 */
 	dp = VTOI(tdvp);
 	xp = NULL;
@@ -960,7 +975,9 @@ abortit:
 	 *    completing our work, the link count
 	 *    may be wrong, but correctable.
 	 * 当我们移动东西时，碰撞链接计数。如果我们在完成工作之前在某个地方崩溃，
-	 * 链接计数可能是错误的，但可以纠正
+	 * 链接计数可能是错误的，但可以纠正。
+	 * 这里是增加源文件的引用计数，可能是怕在后续的操作中该文件对应的 inode 会被删除。
+	 * 修改参数之后立马执行 update()，将更新后的数据同步到磁盘当中
 	 */
 	ext2_inc_nlink(ip);
 	ip->i_flag |= IN_CHANGE;
@@ -981,12 +998,19 @@ abortit:
 	 * 
 	 * 如果必须更改“..”（即目录获得新的父目录），则源目录不得位于目标目录之上的目录层次结构中，
 	 * 因为这将孤立源目录之下的所有内容。此外，用户必须在源中具有写入权限，才能更改“..”。我们
-	 * 必须重复调用 namei，因为调用 checkpath 会解锁父目录
+	 * 必须重复调用 namei，因为调用 checkpath 会解锁父目录。
+	 * 注意 vop_access 检查的还是源文件的写权限，不过对应的 cred 和 thread 参数与却是 target
 	 */
 	error = VOP_ACCESS(fvp, VWRITE, tcnp->cn_cred, tcnp->cn_thread);
 	VOP_UNLOCK(fvp, 0);
+	/*
+		当目标目录不是当前目录的时候，把目标目录的 inode number 赋值给 newparent。ext2fs ino
+		是从 2 开始的，所以不可能小于或者等于 0 的。注意，此时的 dp 已经表示的是目标目录
+	*/
 	if (oldparent != dp->i_number)
-		newparent = dp->i_number;
+		newparent = dp->i_number;	// newparent 初次赋值，说明当前目录与目标目录不一致
+
+	// 当我们处理的是一个目录项并且目标目录是一个新目录时，执行 if 分支代码
 	if (doingdirectory && newparent) {
 		if (error)	/* write access check above */
 			goto bad;
@@ -1005,6 +1029,7 @@ abortit:
 		if (tvp)
 			xp = VTOI(tvp);
 	}
+	// 在此之前，目标文件到底存不存在还不确定，也没有做任何操作
 	/*
 	 * 2) If target doesn't exist, link the target
 	 *    to the source and unlink the source.
@@ -1030,6 +1055,7 @@ abortit:
 			if (error)
 				goto bad;
 		}
+		// 为 ip 在目标目录文件下添加一个 directory entry
 		error = ext2_direnter(ip, tdvp, tcnp);
 		if (error) {
 			if (doingdirectory && newparent) {
@@ -1039,7 +1065,7 @@ abortit:
 			}
 			goto bad;
 		}
-		vput(tdvp);
+		vput(tdvp);	// 此时 tdvp 仍是加锁
 	} else {
 		if (xp->i_devvp != dp->i_devvp || xp->i_devvp != ip->i_devvp)
 			panic("ext2_rename: EXDEV");
@@ -1064,8 +1090,15 @@ abortit:
 		 * Target must be empty if a directory and have no links
 		 * to it. Also, ensure source and target are compatible
 		 * (both directories, or both not directories).
+		 * 当目标文件是一个目录的时候，我们要保证该文件一定要是空的。并且只有目录才能和
+		 * 目录
 		 */
 		if ((xp->i_mode & IFMT) == IFDIR) {
+			/*
+				如果目标文件也是一个目录项的话，那这个目标目录项必须要保证是一个空的目录。从 mv 命令的
+				实际操作情况来看，当目标文件是一个目录并且不为空的时候，其实是将源目录移动到了目标文件
+				目录之下，而不是重名民操作
+			*/
 			if (!ext2_dirempty(xp, dp->i_number, tcnp->cn_cred)) {
 				error = ENOTEMPTY;
 				goto bad;
@@ -1076,6 +1109,9 @@ abortit:
 			}
 			cache_purge(tdvp);
 		} else if (doingdirectory) {
+			/*
+				如果目标文件是目录，但是源文件不是目录。重命名的时候就会报错
+			*/
 			error = EISDIR;
 			goto bad;
 		}
@@ -1105,13 +1141,18 @@ abortit:
 		 */
 		ext2_dec_nlink(xp);
 		if (doingdirectory) {
+			/*
+				当我们处理的源文件是一个目录，并且该目录是空目录的时候(其实就是对应上述判断条件)，
+				那么我们就可以释放目标目录对应的磁盘块数据(tptfs 中实际上是没有的，只有链表中的
+				entry，没有给目录文件分配具体的数据页)。
+			*/
 			if (--xp->i_nlink != 0)
 				panic("ext2_rename: linked directory");
 			error = ext2_truncate(tvp, (off_t)0, IO_SYNC,
 			    tcnp->cn_cred, tcnp->cn_thread);
 		}
 		xp->i_flag |= IN_CHANGE;
-		vput(tvp);
+		vput(tvp);	// 注意这里，tvp 也是加锁状态
 		xp = NULL;
 	}
 
@@ -1119,11 +1160,18 @@ abortit:
 	 * 3) Unlink the source.
 	 */
 	fcnp->cn_flags &= ~MODMASK;
+	/* 应该就是源文件和对应的目录项都要被锁住 */
 	fcnp->cn_flags |= LOCKPARENT | LOCKLEAF;
-	VREF(fdvp);
+	VREF(fdvp);	// 对 fdvp 加锁
 	error = relookup(fdvp, &fvp, fcnp);
 	if (error == 0)
 		vrele(fdvp);
+	/*
+		执行 relookup 函数之前对 fdvp 加锁，完成之后如果没有出错，执行解锁操作。
+		这里还出现了 fvp == null 的判断情况。也就是说 fvp 此时也不是一定会存在的。
+		前面执行了 relookup 函数，猜测有可能是在 rename 的过程中，有别的线程把
+		源文件给删除了，可能对应的 vnode 也就被释放，导致 fvp 为空的情况？
+	*/
 	if (fvp != NULL) {
 		xp = VTOI(fvp);
 		dp = VTOI(fdvp);
@@ -1145,6 +1193,15 @@ abortit:
 	 * count of three would cause a rmdir to fail with ENOTEMPTY.
 	 * The IN_RENAME flag ensures that it cannot be moved by another
 	 * rename.
+	 * 确保在输入新名称时目录条目仍然存在且未更改。如果源文件是文件，则该条目可能已被取消
+	 * 链接或重命名。在这两种情况下，都没有进一步的工作要做。如果源是一个目录，那么它不能
+	 * 被rmdir'ed；它的链接计数为3会导致rmdir因Enotery而失败。IN_RENAME 标志确保它
+	 * 不能被其他重命名移动
+	 * 
+	 * 此时 xp 又设置成了源文件的 inode，ip 也是表示的是源文件。从注释可以看到，我们要
+	 * 保证 directory entry 依然存在并且在创建新的名称的时候不会被改变。tptfs 的处理
+	 * 方式应该是直接把源目录给锁住，再把源文件锁住，防止它们被修改。等到重命名操作执行
+	 * 完毕之后再解锁
 	 */
 	if (xp != ip) {
 		/*
@@ -1158,6 +1215,9 @@ abortit:
 		 * new parent, the link count of the old
 		 * parent directory must be decremented
 		 * and ".." set to point to the new parent.
+		 * 假如源文件是一个目录文件，并且要移动到一个新的目录的时候，源目录的引用计数要自减并且
+		 * 保证源文件的 .. 指向的是新目录。tptfs 中对应需要将 VFileNode 父指针指向新的目录
+		 * 对应的文件类实例
 		 */
 		if (doingdirectory && newparent) {
 			ext2_dec_nlink(dp);
@@ -1201,6 +1261,7 @@ abortit:
 			}
 			free(dirbuf, M_TEMP);
 		}
+		// 把源文件对应的目录 entry 移除掉
 		error = ext2_dirremove(fdvp, fcnp);
 		if (!error) {
 			ext2_dec_nlink(xp);

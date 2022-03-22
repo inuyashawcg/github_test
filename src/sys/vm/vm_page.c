@@ -1739,6 +1739,9 @@ vm_page_alloc_domain(vm_object_t object, vm_pindex_t pindex, int domain,
  * optimize insertion of the page into the object, the caller must also specifiy
  * the resident page in the object with largest index smaller than the given
  * page index, or NULL if no such page exists.
+ * 
+ * 在指定对象中分配具有给定页面索引的页面。为了优化页面插入对象的过程，调用者还必须指定对象中最大
+ * 索引小于给定页面索引的常驻页面，如果不存在此类页面，则必须指定NULL
  */
 vm_page_t
 vm_page_alloc_after(vm_object_t object, vm_pindex_t pindex,

@@ -1435,7 +1435,6 @@ ext2_dirempty(struct inode *ip, ino_t parentino, struct ucred *cred)
  * Check if source directory is in the path of the target directory.
  * Target is supplied locked, source is unlocked.
  * The target is always vput before returning.
- * 在检查在目标目录中是否存在我们想要找的目录项
  */
 int
 ext2_checkpath(struct inode *source, struct inode *target, struct ucred *cred)

@@ -86,6 +86,10 @@
         "*.ipp": "c",
         "any": "c",
         "param.h": "c",
-        "complex": "c"
+        "complex": "c",
+        "dnode.h": "c",
+        "zfs.h": "c",
+        "lock.h": "c",
+        "malloc.h": "c"
     }
 }

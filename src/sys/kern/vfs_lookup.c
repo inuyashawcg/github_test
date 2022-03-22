@@ -1161,7 +1161,7 @@ unionlookup:
 	cnp->cn_lkflags = compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags,
 	    cnp->cn_flags);
 	error = VOP_LOOKUP(dp, &ndp->ni_vp, cnp);
-	cnp->cn_lkflags = lkflags_save;	// 现根据 vnode 属性计算 lock flags，执行完 vop_lookup 之后再还原
+	cnp->cn_lkflags = lkflags_save;	// 先根据 vnode 属性计算 lock flags，执行完 vop_lookup 之后再还原
 	/*
 		当调用文件系统底层查找函数出现错误的时候，执行下面的代码分支
 	*/

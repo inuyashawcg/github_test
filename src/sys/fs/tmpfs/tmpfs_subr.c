@@ -794,6 +794,7 @@ tmpfs_free_vp(struct vnode *vp)
  * If successful, *vpp holds a vnode to the newly created file and zero
  * is returned.  Otherwise *vpp is NULL and the function returns an
  * appropriate error code.
+ * 
  * 创建一个新的'type'类型的文件并添加到它的父目录'dvp'当中；这个添加通过利用'cnp'给定的组件名称
  * 来完成。新文件的所有权根据调用者的凭据（通过“cnp”）自动分配，组根据父目录设置，模式由“vap”参数
  * 确定。如果成功的话，*vpp将持有新创建的文档对应的vnode并且返回0；否则，*vpp 将会是 NULL并且函数
@@ -1498,6 +1499,7 @@ tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
 	 * store them.  It may happen that we do not need to do anything
 	 * because the last allocated page can accommodate the change on
 	 * its own.
+	 * 
 	 * 将新旧大小转换为存储它们所需的页数。可能发生的是，我们不需要做任何事情，
 	 * 因为最后分配的页面可以自己适应更改。考虑如果一个文件连一个 page 都没占满的情况，
 	 * 这个时候如果除4096然后取整，得到的结果应该是0，而实际上这个文件占用的 page 

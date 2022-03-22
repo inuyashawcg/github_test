@@ -2220,6 +2220,7 @@ breadn_flags(struct vnode *vp, daddr_t blkno, int size, daddr_t *rablkno,
 	 */
 	readwait = 0;
 	if ((bp->b_flags & B_CACHE) == 0) {
+		// 处理数据不在缓冲区的情况
 		if (!TD_IS_IDLETHREAD(td)) {
 #ifdef RACCT
 			if (racct_enable) {
