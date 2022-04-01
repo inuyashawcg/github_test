@@ -133,7 +133,7 @@ struct vm_object {
 	vm_ooffset_t backing_object_offset;/* Offset in backing object */
 	TAILQ_ENTRY(vm_object) pager_object_list; /* list of all objects of this pager type */
 	LIST_HEAD(, vm_reserv) rvq;	/* list of reservations 驻留页的链表 */
-	void *handle;
+	void *handle;	// 指向的是 vnode*
 	/*
 		这里边包含的是表示 bm_object 所代表的类型，更确切一点是说用途，对应的是 
 		vnode / device / swap 等等这些

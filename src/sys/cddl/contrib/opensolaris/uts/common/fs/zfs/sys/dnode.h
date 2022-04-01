@@ -145,19 +145,36 @@ enum dnode_dirtycontext {
 
 typedef struct dnode_phys {
 	uint8_t dn_type;		/* dmu_object_type_t */
+	/*
+		8-bit numeric value containing the log (base 2) of the size
+		(in bytes) of an indirect block for this object.
+		间接块大小的 shift 值
+	*/
 	uint8_t dn_indblkshift;		/* ln2(indirect block size) */
-	uint8_t dn_nlevels;		/* 1=dn_blkptr->data blocks */
+	uint8_t dn_nlevels;		/* 1=dn_blkptr->data blocks 块索引级别 */
+	/*
+		8 bit numeric value containing the number of block pointers in
+		this dnode - 该节点中一共包含有多少个块指针
+	*/
 	uint8_t dn_nblkptr;		/* length of dn_blkptr */
 	uint8_t dn_bonustype;		/* type of data in bonus buffer */
-	uint8_t	dn_checksum;		/* ZIO_CHECKSUM type */
-	uint8_t	dn_compress;		/* ZIO_COMPRESS type */
+	uint8_t	dn_checksum;		/* ZIO_CHECKSUM type - checksum 类型 */
+	uint8_t	dn_compress;		/* ZIO_COMPRESS type - 数据压缩类型 */
 	uint8_t dn_flags;		/* DNODE_FLAG_* */
+	/*
+		16-bit numeric value containing the data block size (in bytes) 
+		divided by 512 (size of a disk sector). This value can range 
+		between 1 (for a 512 byte block) and 256 (for a 128 Kbyte block).
+	*/
 	uint16_t dn_datablkszsec;	/* data block size in 512b sectors */
 	uint16_t dn_bonuslen;		/* length of dn_bonus */
 	uint8_t dn_extra_slots;		/* # of subsequent slots consumed */
 	uint8_t dn_pad2[3];
 
-	/* accounting is protected by dn_dirty_mtx */
+	/* accounting is protected by dn_dirty_mtx 
+		一个 object 中的块是通过 id 辨别的，每个层级的 id 都是从0到N。这个成员就是
+		设置每个层级 id 的最大值
+	*/
 	uint64_t dn_maxblkid;		/* largest allocated block ID */
 	uint64_t dn_used;		/* bytes (or sectors) of disk space */
 
@@ -186,6 +203,7 @@ typedef struct dnode_phys {
 	 * +---------------+-----------------------+---------------+
 	 */
 	union {
+		/* block pointer array containing dn_nblkptr block pointers */
 		blkptr_t dn_blkptr[1+DN_OLD_MAX_BONUSLEN/sizeof (blkptr_t)];
 		struct {
 			blkptr_t __dn_ignore1;
@@ -213,7 +231,7 @@ struct dnode {
 	/* Our link on dn_objset->os_dnodes list; protected by os_lock.  */
 	list_node_t dn_link;
 
-	/* immutable: */
+	/* immutable: 不可改变的 */
 	struct objset *dn_objset;
 	uint64_t dn_object;
 	struct dmu_buf_impl *dn_dbuf;

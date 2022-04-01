@@ -62,21 +62,53 @@ typedef enum dd_used {
 
 typedef struct dsl_dir_phys {
 	uint64_t dd_creation_time; /* not actually used */
+	/* 64 bit object number of the active dataset object */
 	uint64_t dd_head_dataset_obj;
+	/* 64 bit object number of the parent DSL directory */
 	uint64_t dd_parent_obj;
+	/*
+		For cloned object sets, this field contains the object number of
+		snapshot used to create this clone？ 不太确定是不是起这个作用，FreeBSD
+		zfs 的实现貌似跟 OpenZFS 的标准实现不太一样
+	*/
 	uint64_t dd_origin_obj;
+	/*
+		Object number of a ZAP object containing name-value pairs 
+		for each child of this DSL directory
+	*/
 	uint64_t dd_child_dir_zapobj;
 	/*
 	 * how much space our children are accounting for; for leaf
 	 * datasets, == physical space used by fs + snaps
+	 * 
+	 * Number of bytes used by all datasets within this
+			directory: includes any snapshot and child dataset used bytes.
 	 */
 	uint64_t dd_used_bytes;
+	/*
+		 Number of compressed bytes for all datasets within this DSL directory.
+	*/
 	uint64_t dd_compressed_bytes;
+	/*
+		Number of uncompressed bytes for all datasets within this DSL directory.
+	*/
 	uint64_t dd_uncompressed_bytes;
-	/* Administrative quota setting */
+	/* Administrative quota setting 
+		Designated quota, if any, which can not be exceeded by the
+		datasets within this DSL directory.
+	*/
 	uint64_t dd_quota;
-	/* Administrative reservation setting */
+	/* Administrative reservation setting
+		The amount of space reserved for consumption by the
+		datasets within this DSL directory
+	*/
 	uint64_t dd_reserved;
+	/*
+		64 bit object number of a ZAP object containing the properties for
+		all datasets within this DSL directory. Only the non-inherited /
+		locally set values are represented in this ZAP object. Default,
+		inherited values are inferred when there is an absence of an entry.
+	*/
 	uint64_t dd_props_zapobj;
 	uint64_t dd_deleg_zapobj; /* dataset delegation permissions */
 	uint64_t dd_flags;

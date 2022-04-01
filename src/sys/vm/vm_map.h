@@ -87,6 +87,10 @@ typedef u_int vm_eflags_t;
  *	another map (called a "sharing map") which denotes read-write
  *	sharing with other maps.
  		存在于映射中的对象可以是VM对象，也可以是表示与其他映射进行读写共享的另一个映射（称为“共享映射”）
+
+		Normally, the sub_map member is only used by system maps to indicate that
+    a memory range is managed by a subordinate system map. Within a user
+    process map, each struct vm_map_entry is backed by a struct vm_object.
  */
 union vm_map_object {
 	struct vm_object *vm_object;	/* object object */
@@ -98,7 +102,6 @@ union vm_map_object {
  *	a VM object (or sharing map) and offset into that object,
  *	and user-exported inheritance and protection information.
  *	Also included is control information for virtual copy operations.
-
 	- 地址映射条目包括起始地址和结束地址、VM对象（或共享映射）和该对象的偏移量，
 	以及用户导出的继承和保护信息。还包括虚拟复制操作的控制信息。
 	- 表示一段连续的虚拟地址范围，这些地址共享保护权限和继承属性，并且使用相同的
@@ -108,46 +111,125 @@ union vm_map_object {
 	vm_map 管理的是一大块虚拟内存地址空间，然后有拆分成了许多小块，每个小块用一个 entry 来表示
  */
 struct vm_map_entry {
+	/*
+		Pointer to the previous node in a doubly-linked, circular list.
+	*/
 	struct vm_map_entry *prev;	/* previous entry */
+	/*
+		Pointer to the next node in a	doubly-linked, circular	list.
+		注意，下面的两个成员跟这两个表示的意义是不同的。这里表示的是链表结构成员指针，
+		下面两个表示的二叉搜索树节点指针
+	*/
 	struct vm_map_entry *next;	/* next entry */
 	struct vm_map_entry *left;	/* left child in binary search tree */
 	struct vm_map_entry *right;	/* right child in binary search tree */
-	vm_offset_t start;		/* start address 指定了entry所表示的虚拟内存空间的大小 */
-	vm_offset_t end;		/* end address 结束地址 */
-	vm_offset_t next_read;		/* vaddr of the next sequential read 下一次顺序读取的vaddr */
-	vm_size_t adj_free;		/* amount of adjacent free space 相邻可用空间量 */
-	vm_size_t max_free;		/* max free space in subtree 子树中的最大可用空间 */
+	/*
+		Lower	address	bound of this entry's region.
+	*/
+	vm_offset_t start;		/* start address */
+	/*
+		Upper	address	bound of this entry's region.
+	*/
+	vm_offset_t end;		/* end address */
+	vm_offset_t next_read;		/* vaddr of the next sequential read 下一次顺序读取的 vaddr */
+	/*
+		The amount of	free, unmapped address space adjacent to and immediately
+		following	this map entry.
+	*/
+	vm_size_t adj_free;		/* amount of adjacent free space */
+	/*
+		The maximum amount of	contiguous free	space in this map entry's	subtree.
+	*/
+	vm_size_t max_free;		/* max free space in subtree */
 	/*
 		每个 entry 会对应一个 object，这个貌似跟虚拟文件系统有很大的关联，需要看一下
 	*/
 	union vm_map_object object;	/* object I point to 所关联的object */
-	vm_ooffset_t offset;		/* offset into object 在object中的偏移量 */
+	/*
+		Offset within	the object which is mapped from	start onwards.
+	*/
+	vm_ooffset_t offset;		/* offset into object */
 	vm_eflags_t eflags;		/* map entry flags 标志符 */
+	/*
+		Memory protection bits applied to this region.
+		- user process's address space
+	*/
 	vm_prot_t protection;		/* protection code 保护代码 */
+	/*
+		Mask for the memory protection bits which may be actually
+		be applied to this region. - user process's address space
+	*/
 	vm_prot_t max_protection;	/* maximum protection */
+	/*
+		Contains flags which specify how this entry should be treated 
+		during fork processing. - user process's address space
+	*/
 	vm_inherit_t inheritance;	/* inheritance 继承 */
-	uint8_t read_ahead;		/* pages in the read-ahead window 预读窗口中的页面 */
-	int wired_count;		/* can be paged if = 0 如果=0，则可以分页 */
+	uint8_t read_ahead;		/* pages in the read-ahead window */
+	/*
+		Count of how many times this entry has been wired into physical memory.
+	*/
+	int wired_count;		/* can be paged if = 0 */
 	struct ucred *cred;		/* tmp storage for creator ref */
 	struct thread *wiring_thread;	/* 对应的线程 */
 };
 
+/*
+	The system should not flush the data associated with this	map periodically,
+	but only when it needs to.
+*/
 #define MAP_ENTRY_NOSYNC		0x0001
+/*
+	If set, then the object member specifies a subordinate (下级，下属的) map
+*/
 #define MAP_ENTRY_IS_SUB_MAP		0x0002
+/*
+	Indicate that this is a copy-on-write region.
+*/
 #define MAP_ENTRY_COW			0x0004
+/*
+	Indicate that a copy-on-write region needs to be copied.
+*/
 #define MAP_ENTRY_NEEDS_COPY		0x0008
+/*
+	Specifies that accesses within this region should never cause a page fault. 
+	If a page fault occurs within this region, the system will panic.
+*/
 #define MAP_ENTRY_NOFAULT		0x0010
+/*
+	Indicate that this region was wired on behalf of a user process.
+*/
 #define MAP_ENTRY_USER_WIRED		0x0020
-
+/*
+	The system should use the default paging behaviour for this region.
+*/
 #define MAP_ENTRY_BEHAV_NORMAL		0x0000	/* default behavior */
+/*
+	The system should depress(降低) the priority of pages immediately
+	preceding each page within this region when faulted in.
+*/
 #define MAP_ENTRY_BEHAV_SEQUENTIAL	0x0040	/* expect sequential access */
+/*
+	Is a hint that pages within this region will be accessed randomly,
+	and that prefetching is likely not advantageous.
+	这意味着该区域内的页面将被随机访问，而预取可能并不有利
+*/
 #define MAP_ENTRY_BEHAV_RANDOM		0x0080	/* expect random access */
 #define MAP_ENTRY_BEHAV_RESERVED	0x00C0	/* future use */
 
 #define MAP_ENTRY_BEHAV_MASK		0x00C0
-
+/*
+	Indicate that wiring or unwiring of an entry is in progress, and that
+	other	kernel threads should	not attempt to modify fields in	the structure.
+*/
 #define MAP_ENTRY_IN_TRANSITION		0x0100	/* entry being changed */
+/*
+	Indicate that there are kernel threads waiting for this region to	become available.
+*/
 #define MAP_ENTRY_NEEDS_WAKEUP		0x0200	/* waiters in transition */
+/*
+	The region should not be included in a core dump.
+*/
 #define MAP_ENTRY_NOCOREDUMP		0x0400	/* don't include in a core */
 
 #define	MAP_ENTRY_GROWS_DOWN		0x1000	/* Top-down stacks */
@@ -206,30 +288,57 @@ vm_map_entry_system_wired_count(vm_map_entry_t entry)
  */
 struct vm_map {
 	/* 
+		Head node of a circular, doubly linked list of struct vm_map_entry objects.
+		Each object defines a	particular region	within this map's address space.
 		entry 才是真正对应虚拟地址空间的结构体，这里用一个链表来统一管理。entry中包含有起始地址，结束地址等信息
 	*/
 	struct vm_map_entry header;	/* List of entries */
-/*
-	map min_offset	header.end	(c)
-	map max_offset	header.start	(c)
-*/
+	/*
+		map min_offset	header.end	(c)
+		map max_offset	header.start	(c)
+		Used to serialize(序列化) access to the structure.
+	*/
 	struct sx lock;			/* Lock for map data 共享锁 */
-	struct mtx system_mtx;	/* 系统锁 */
+	/*
+		A mutex which is used if the	map is a system	map.
+	*/
+	struct mtx system_mtx;
 	int nentries;			/* Number of entries 应该是 map_entry 的数量 */
 	vm_size_t size;			/* virtual size 该结构体所管理的总的虚拟地址空间的大小 */
+	/*
+		Used to determine if	the map	has changed since its last access.
+	*/
 	u_int timestamp;		/* Version number */
+	/*
+		Indicates if a thread is waiting for an allsocation within the map.
+		Used only by system maps.
+	*/
 	u_char needs_wakeup;
+	/*
+		Set to TRUE to indicate that map is a system map; 
+		otherwise, it belongs to a user process.
+	*/
 	u_char system_map;		/* (c) Am I a system map? */
 	vm_flags_t flags;		/* flags for this vm_map */
-	vm_map_entry_t root;		/* Root of a binary search tree 应该是用于搜索page */
-	pmap_t pmap;			/* (c) Physical map 指向对应的 pmap 结构？*/
-	int busy;	/* 是否正在被占用？ */
+	/*
+		Root node of	a binary search	tree used for fast lookup of map entries
+	*/
+	vm_map_entry_t root;		/* Root of a binary search tree */
+	/*
+		Pointer to the underlying physical map with which this virtual map is associated.
+	*/
+	pmap_t pmap;			/* (c) Physical map */
+	/*
+		Map busy counter, prevents forks.
+	*/
+	int busy;
 };
 
 /*
  * vm_flags_t values
  */
 #define MAP_WIREFUTURE		0x01	/* wire all future pages 连接所有未来页面 */
+/* There are waiters for the map busy status. */
 #define	MAP_BUSY_WAKEUP		0x02
 
 #ifdef	_KERNEL
@@ -359,19 +468,48 @@ long vmspace_resident_count(struct vmspace *vmspace);
  * Copy-on-write flags for vm_map operations
  */
 #define MAP_INHERIT_SHARE	0x0001
+/*
+	The mapping is copy-on-write.
+*/
 #define MAP_COPY_ON_WRITE	0x0002
+/*
+	The mapping should not generate page faults.
+*/
 #define MAP_NOFAULT		0x0004
+/*
+	The mapping should be prefaulted into physical memory.
+*/
 #define MAP_PREFAULT		0x0008
+/*
+	The mapping should be partially (部分的，不完全的) prefaulted into
+	physical memory.
+*/
 #define MAP_PREFAULT_PARTIAL	0x0010
+/*
+	Do not periodically (周期性的，定期的) flush dirty pages; only flush them 
+	when absolutely necessary.
+*/
 #define MAP_DISABLE_SYNCER	0x0020
 #define	MAP_CHECK_EXCL		0x0040
 #define	MAP_CREATE_GUARD	0x0080
+/*
+	Do not include the mapping in a core dump.
+*/
 #define MAP_DISABLE_COREDUMP	0x0100
+/*
+	Specify that the request is from a user process calling madvise(2).
+*/
 #define MAP_PREFAULT_MADVISE	0x0200	/* from (user) madvise request */
 #define	MAP_VN_WRITECOUNT	0x0400
 #define	MAP_STACK_GROWS_DOWN	0x1000
 #define	MAP_STACK_GROWS_UP	0x2000
+/*
+	Region is already charged to the requestor by some means.
+*/
 #define	MAP_ACC_CHARGED		0x4000
+/*
+	Do not charge for allocated region.
+*/
 #define	MAP_ACC_NO_CHARGE	0x8000
 #define	MAP_CREATE_STACK_GAP_UP	0x10000
 #define	MAP_CREATE_STACK_GAP_DN	0x20000

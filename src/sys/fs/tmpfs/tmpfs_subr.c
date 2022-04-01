@@ -306,6 +306,7 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 		obj = nnode->tn_reg.tn_aobj =
 		    vm_pager_allocate(OBJT_SWAP, NULL, 0, VM_PROT_DEFAULT, 0,
 			NULL /* XXXKIB - tmpfs needs swap reservation */);
+		/* 新生成的 vm_object 应该是处在不加锁的状态 */
 		VM_OBJECT_WLOCK(obj);
 		/* OBJ_TMPFS is set together with the setting of vp->v_object */
 		vm_object_set_flag(obj, OBJ_NOSPLIT | OBJ_TMPFS_NODE);
@@ -494,7 +495,12 @@ tmpfs_alloc_dirent(struct tmpfs_mount *tmp, struct tmpfs_node *node,
 {
 	struct tmpfs_dirent *nde;
 
-	/* tmpfs 对于目录项和文件项，都是通过 UMA 机制来分配内存 */
+	/* 
+		tmpfs 对于目录项和文件项，都是通过 UMA 机制来分配内存。tmpfs 在这里其实是跟磁盘文件系统的设计
+		思路是一致的。目录项其实也是单独的一个对象，而不是之前认为的是一个 tmpfs_node 的不同类型。
+		磁盘文件系统目录项也是存储在数据块中，通过 inode number 查找对应文件节点。这里的 node 就可以
+		看作是 inode，dirent 就是目录项，然后利用一个指针直接指向文件节点
+	*/
 	nde = uma_zalloc(tmp->tm_dirent_pool, M_WAITOK);
 	nde->td_node = node;
 	if (name != NULL) {
@@ -593,7 +599,10 @@ tmpfs_alloc_vp(struct mount *mp, struct tmpfs_node *node, int lkflag,
 		的强制类型转换，所以如果以后要改成C++，还是注意分析要分析它们之间的关系，思考如何来设计 
 	*/
 	tm = VFS_TO_TMPFS(mp);
-	TMPFS_NODE_LOCK(node);	/* 首先锁住 tmpfs_node 结点 */
+	TMPFS_NODE_LOCK(node);	/* 首先锁住 tmpfs_node 结点，td_interlock */
+	/*
+		从函数命名就可以看出，增加节点的引用计数需要节点处在加锁状态下
+	*/
 	tmpfs_ref_node_locked(node);	/* tmpfs_node 应用计数++，而不是 vnode */
 loop:
 	TMPFS_NODE_ASSERT_LOCKED(node);

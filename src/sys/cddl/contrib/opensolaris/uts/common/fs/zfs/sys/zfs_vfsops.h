@@ -41,12 +41,18 @@ extern "C" {
 typedef struct zfsvfs zfsvfs_t;
 struct znode;
 
+/*
+	该结构体感觉类似于 tptfs_mount / ufs_mount
+*/
 struct zfsvfs {
 	vfs_t		*z_vfs;		/* generic fs struct */
 	zfsvfs_t	*z_parent;	/* parent fs */
 	objset_t	*z_os;		/* objset reference */
 	uint64_t	z_root;		/* id of root znode */
 	struct vnode	*z_rootvnode;	/* root vnode */
+	/*
+		注意，这个锁保护的是 root vnode 而不是 root znode
+	*/
 	struct rmlock	z_rootvnodelock;/* protection for root vnode */
 	uint64_t	z_unlinkedobj;	/* id of unlinked zapobj */
 	uint64_t	z_max_blksz;	/* maximum block size for files */
@@ -63,7 +69,7 @@ struct zfsvfs {
 	uint_t		z_acl_inherit;	/* acl inheritance behavior */
 	zfs_case_t	z_case;		/* case-sense */
 	boolean_t	z_utf8;		/* utf8-only */
-	int		z_norm;		/* normalization flags */
+	int		z_norm;		/* normalization flags 字母大小写？ */
 	boolean_t	z_atime;	/* enable atimes mount option */
 	boolean_t	z_unmounted;	/* unmounted */
 	rrmlock_t	z_teardown_lock;
@@ -73,7 +79,7 @@ struct zfsvfs {
 	struct zfsctl_root	*z_ctldir;	/* .zfs directory pointer */
 	boolean_t	z_show_ctldir;	/* expose .zfs in the root dir */
 	boolean_t	z_issnap;	/* true if this is a snapshot */
-	boolean_t	z_vscan;	/* virus scan on/off */
+	boolean_t	z_vscan;	/* virus scan on/off 打开/关闭病毒扫描? */
 	boolean_t	z_use_fuids;	/* version allows fuids */
 	boolean_t	z_replay;	/* set during ZIL replay */
 	boolean_t	z_use_sa;	/* version allow system attributes */

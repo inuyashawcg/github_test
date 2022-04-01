@@ -288,7 +288,10 @@ static vdev_ops_t *
 vdev_getops(const char *type)
 {
 	vdev_ops_t *ops, **opspp;
-
+	/*
+		vdev_ops_table 是一个全局静态操作函数表，表中包含有多种操作类型。
+		该函数就是根据传入的操作类型找到对应的操作函数表
+	*/
 	for (opspp = vdev_ops_table; (ops = *opspp) != NULL; opspp++)
 		if (strcmp(ops->vdev_op_type, type) == 0)
 			break;

@@ -65,12 +65,28 @@
 
 #include <machine/vm.h>
 
+/*
+	vm_map_entry -> inheritance 会包含有下列 inherit_type
+*/
 typedef char vm_inherit_t;	/* inheritance codes */
 
+/*
+	The object associated with the entry should be cloned and shared with
+	the new map. A new struct vm_object will be created if necessary.
+*/
 #define	VM_INHERIT_SHARE	((vm_inherit_t) 0)
+/*
+	The object associated with the entry should be copied to the new map.
+*/
 #define	VM_INHERIT_COPY		((vm_inherit_t) 1)
+/*
+	The entry should not be copied to the new map.
+*/
 #define	VM_INHERIT_NONE		((vm_inherit_t) 2)
 #define	VM_INHERIT_ZERO		((vm_inherit_t) 3)
+/*
+	Specifies the default behaviour, VM_INHERIT_COPY.
+*/
 #define	VM_INHERIT_DEFAULT	VM_INHERIT_COPY
 
 typedef u_char vm_prot_t;	/* protection codes */

@@ -1768,7 +1768,10 @@ static int
 getpoolname(const char *osname, char *poolname)
 {
 	char *p;
-
+	/*
+		strchr: 在字符串str中寻找字符第一次出现的位置，并返回其位置（地址指针），
+			若失败则返回NULL
+	*/
 	p = strchr(osname, '/');
 	if (p == NULL) {
 		if (strlen(osname) >= MAXNAMELEN)
@@ -1830,6 +1833,8 @@ zfs_mount(vfs_t *vfsp)
 	/*
 	 * If full-owner-access is enabled and delegated administration is
 	 * turned on, we must set nosuid.
+	 * 如果启用了完全所有者访问权限，并且启用了委托管理，则必须设置 nosuid
+	 * vfs_t 其实就是 struct mount pointer
 	 */
 	if (zfs_super_owner &&
 	    dsl_deleg_access(osname, ZFS_DELEG_PERM_MOUNT, cr) != ECANCELED) {
@@ -1842,6 +1847,7 @@ zfs_mount(vfs_t *vfsp)
 	 *
 	 * If we don't have privilege then see if
 	 * we have local permission to allow it
+	 * 如果我们没有特权，那么看看我们是否有本地许可
 	 */
 	error = secpolicy_fs_mount(cr, mvp, vfsp);
 	if (error) {
@@ -1878,6 +1884,7 @@ zfs_mount(vfs_t *vfsp)
 	/*
 	 * Refuse to mount a filesystem if we are in a local zone and the
 	 * dataset is not visible.
+	 * 如果我们在本地区域且数据集不可见，则拒绝装载文件系统
 	 */
 	if (!INGLOBALZONE(curthread) &&
 	    (!zone_dataset_visible(osname, &canwrite) || !canwrite)) {
@@ -1898,14 +1905,18 @@ zfs_mount(vfs_t *vfsp)
 	 * according to those options set in the current VFS options.
 	 */
 	if (vfsp->vfs_flag & MS_REMOUNT) {
-		zfsvfs_t *zfsvfs = vfsp->vfs_data;
+		zfsvfs_t *zfsvfs = vfsp->vfs_data;	// vfs_data 其实就是 mnt_data
 
 		/*
 		 * Refresh mount options with z_teardown_lock blocking I/O while
 		 * the filesystem is in an inconsistent state.
+		 * 当文件系统处于不一致状态时，使用 z_teardown_lock 阻塞 I/O 刷新装载选项
+		 * 
 		 * The lock also serializes this code with filesystem
 		 * manipulations between entry to zfs_suspend_fs() and return
 		 * from zfs_resume_fs().
+		 * 锁还通过在 zfs_suspend_fs() 的入口和从 zfs_resume_fs() 返回之间的文件系统
+		 * 操作来序列化此代码
 		 */
 		rrm_enter(&zfsvfs->z_teardown_lock, RW_WRITER, FTAG);
 		zfs_unregister_callbacks(zfsvfs);
@@ -1914,11 +1925,16 @@ zfs_mount(vfs_t *vfsp)
 		goto out;
 	}
 
-	/* Initial root mount: try hard to import the requested root pool. */
+	/* Initial root mount: try hard to import the requested root pool. 
+			处理把 zfs 作为根文件系统的情况，同时排除是 update 操作
+	*/
 	if ((vfsp->vfs_flag & MNT_ROOTFS) != 0 &&
 	    (vfsp->vfs_flag & MNT_UPDATE) == 0) {
 		char pname[MAXNAMELEN];
-
+		/*
+			获取 pool name 并将其作为 root pool。从这里我们也可以看出，pool 就是通过
+			spa layer 去管理的
+		*/
 		error = getpoolname(osname, pname);
 		if (error == 0)
 			error = spa_import_rootpool(pname);

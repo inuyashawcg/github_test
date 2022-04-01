@@ -1176,6 +1176,15 @@ vm_map_lookup_entry(
  *
  *	If object is non-NULL, ref count must be bumped by caller
  *	prior to making call to account for the new entry.
+		
+		从上文注释中我们可以了解到的信息：vm_map 表示的应该是一段虚拟地址空间，这一个大的虚拟地址空间
+		中又可以分成不同类型的区域，每个区域则是由一个 vm_map_entry 来表示的。所以，在一个大的 vm_map
+		中会包含有多个 entry。
+		每个 entry 也是一整段地址空间，所以还可以继续拆分成更小粒度的结构，对应的应该就是 vm_page。但是
+		entry 在具体的实现中并没有直接包含页成员，而是又封装了一层，利用 vm_object 来管理内存页。所以整体
+		设计大致为：
+			vm_map -> vm_map_entry -> vm_object -> vm_page
+		cow： copy on write
  */
 int
 vm_map_insert(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
@@ -1196,7 +1205,11 @@ vm_map_insert(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 	    ("prot %#x is not subset of max_prot %#x", prot, max));
 
 	/*
-	 * Check that the start and end points are not bogus.
+	 * Check that the start and end points are not bogus(虚假).
+	 		首先判断一下我们插入的地址空间是不是在 vm_map 所管理的空间范围之内。
+			可以看一下 min/max 这两个宏定义的实现，它们对应的就是 vm_map->header
+			的 start 和 end 两个成员。也就是说 header 反映整个 vm_map 锁管理的
+			整个地址空间的范围
 	 */
 	if (start < vm_map_min(map) || end > vm_map_max(map) ||
 	    start >= end)
@@ -1205,6 +1218,11 @@ vm_map_insert(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 	/*
 	 * Find the entry prior to the proposed starting address; if it's part
 	 * of an existing entry, this range is bogus.
+	 * 在提议的起始地址之前找到条目；如果它是现有条目的一部分，则该范围是伪造的
+	 * 
+	 * 也就是说我们首先要判断查找的地址是不是被包含在了某个 entry 当中。如果是的话，说明
+	 * 这块地址已经被占用了，我们不能在执行插入操作。推测一下，vm_map_entry 之间应该是
+	 * 不能有地址空间重叠的
 	 */
 	if (vm_map_lookup_entry(map, start, &temp_entry))
 		return (KERN_NO_SPACE);
@@ -1262,7 +1280,11 @@ vm_map_insert(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 	}
 
 charged:
-	/* Expand the kernel pmap, if necessary. */
+	/* Expand the kernel pmap, if necessary.
+		当我们插入的地址空间区域比现在内核虚拟地址空间终止区域还要大的时候，
+		就要适当扩展内核地址空间区域。pmap_growkernel() 会增加 kernel
+		page table entry 的数量
+	*/
 	if (map == kernel_map && end > kernel_vm_end)
 		pmap_growkernel(end);
 	if (object != NULL) {
@@ -1329,6 +1351,7 @@ charged:
 
 	/*
 	 * Create a new entry
+	 		对新的内存区域增加一个 entry
 	 */
 	new_entry = vm_map_entry_create(map);
 	new_entry->start = start;
@@ -1353,6 +1376,7 @@ charged:
 
 	/*
 	 * Insert the new entry into the list
+	 		将上述创建的新 entry 插入到管理队列当中
 	 */
 	vm_map_entry_link(map, prev_entry, new_entry);
 	if ((new_entry->eflags & MAP_ENTRY_GUARD) == 0)
@@ -1363,6 +1387,11 @@ charged:
 	 * entries in the list.  Previously, we only attempted to coalesce
 	 * with the previous entry when object is NULL.  Here, we handle the
 	 * other cases, which are less common.
+	 * 尝试将新条目与列表中的上一个条目和下一个条目合并。之前，我们只尝试在对象为 NULL 时
+	 * 与前一个条目合并。在这里，我们处理其他不太常见的情况。
+	 * 
+	 * 推测一下：如果两个 entry 管理的区域头尾重合，那就将这两个 entry 合并成一个，管理
+	 * 原有两个 entry 对应的地址空间
 	 */
 	vm_map_simplify_entry(map, new_entry);
 

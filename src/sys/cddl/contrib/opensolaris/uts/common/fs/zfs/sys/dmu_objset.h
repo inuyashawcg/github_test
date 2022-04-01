@@ -59,9 +59,22 @@ struct dmu_tx;
 
 #define	OBJSET_FLAG_USERACCOUNTING_COMPLETE	(1ULL<<0)
 
+/*
+	The DMU organizes objects into groups called object sets. 
+	Object sets are used in ZFS to group related objects, 
+	such as objects in a filesystem,snapshot, clone, or volume.
+	Object sets are represented by a 1K byte objset_phys_t structure.
+
+	整个数据结构的大小是 2048，旧版本是 1024，os_pad 的大小就是 2048 - 结构体中
+	其他所有成员后剩余空间的大小。
+*/
 typedef struct objset_phys {
 	dnode_phys_t os_meta_dnode;
-	zil_header_t os_zil_header;
+	zil_header_t os_zil_header;	// zfs intent log
+	/*
+		The DMU supports several types of object sets, where each object
+		set type has it's own well defined format/layout for its objects.
+	*/
 	uint64_t os_type;
 	uint64_t os_flags;
 	char os_pad[OBJSET_PHYS_SIZE - sizeof (dnode_phys_t)*3 -
@@ -71,6 +84,11 @@ typedef struct objset_phys {
 } objset_phys_t;
 
 #define	OBJSET_PROP_UNINITIALIZED	((uint64_t)-1)
+/*
+	我们可以全局搜索一下 objset 的定义，只有这里会存在，别的地方都是引用自此处。参考 FreeBSD
+	设计与实现英文版中相关内容，DSL 层级是 metaobject set，也就是说 dsl 处理的应该元数据对象。
+	os_dsl_dataset 成员指向的应该就是该 objset 关联的元数据？
+*/
 struct objset {
 	/* Immutable: */
 	struct dsl_dataset *os_dsl_dataset;
@@ -82,13 +100,17 @@ struct objset {
 	 * from dnode_move(), and are not recorded in os_dnodes, but they
 	 * root their descendents in this objset using handles anyway, so
 	 * that all access to dnodes from dbufs consistently uses handles.
+	 * 
+	 * 以下“特殊”数据节点没有父节点，不受 dnode_move() 的约束，也不记录在os_dnodes 节点中，
+	 * 但它们仍然使用句柄在该对象集中生成其子节点，因此所有从 dbufs 访问数据节点的权限都一致
+	 * 使用句柄
 	 */
 	dnode_handle_t os_meta_dnode;
 	dnode_handle_t os_userused_dnode;
 	dnode_handle_t os_groupused_dnode;
 	zilog_t *os_zil;
 
-	list_node_t os_evicting_node;
+	list_node_t os_evicting_node;	// 链表 entry(其实就是 prev 和 next 指针)
 
 	/* can change, under dsl_dir's locks: */
 	uint64_t os_dnodesize; /* default dnode size for new objects */
@@ -101,13 +123,16 @@ struct objset {
 	zfs_cache_type_t os_primary_cache;
 	zfs_cache_type_t os_secondary_cache;
 	zfs_sync_type_t os_sync;
-	zfs_redundant_metadata_type_t os_redundant_metadata;
+	zfs_redundant_metadata_type_t os_redundant_metadata;	// metadata 类型信息？
 	int os_recordsize;
 	/*
 	 * The next four values are used as a cache of whatever's on disk, and
 	 * are initialized the first time these properties are queried. Before
 	 * being initialized with their real values, their values are
 	 * OBJSET_PROP_UNINITIALIZED.
+	 * 
+	 * 接下来的四个值用作磁盘上任何内容的缓存，并在第一次查询这些属性时初始化。在用它们的实际值
+	 * 初始化之前，它们的值是未初始化的 OBJSET_PROP_UNINITIALIZED
 	 */
 	uint64_t os_version;
 	uint64_t os_normalization;

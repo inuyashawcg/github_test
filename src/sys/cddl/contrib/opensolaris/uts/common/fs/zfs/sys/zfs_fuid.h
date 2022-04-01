@@ -69,6 +69,8 @@ typedef enum {
  * The FUIDs in the log will index into
  * domain string table and the bottom half will be the rid.
  * Used for mapping ephemeral uid/gid during ACL setting to FUIDs
+ * 
+ * fuid: file unique identify?
  */
 typedef struct zfs_fuid {
 	list_node_t 	z_next;

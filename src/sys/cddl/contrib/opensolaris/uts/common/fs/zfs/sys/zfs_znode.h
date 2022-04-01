@@ -47,6 +47,8 @@ extern "C" {
 /*
  * Additional file level attributes, that are stored
  * in the upper half of zp_flags
+ * 
+ * immutable: 不变的，不可改变的
  */
 #define	ZFS_READONLY		0x0000000100000000
 #define	ZFS_HIDDEN		0x0000000200000000
@@ -168,6 +170,9 @@ typedef struct zfs_dirlock {
 } zfs_dirlock_t;
 
 typedef struct znode {
+	/*
+		类似于指向 mount 结构体的指针
+	*/
 	struct zfsvfs	*z_zfsvfs;
 	vnode_t		*z_vnode;
 	uint64_t	z_id;		/* object ID for this znode */
@@ -195,10 +200,10 @@ typedef struct znode {
 	uint64_t	z_uid;		/* uid fuid (cached) */
 	uint64_t	z_gid;		/* gid fuid (cached) */
 	mode_t		z_mode;		/* mode (cached) */
-	uint32_t	z_sync_cnt;	/* synchronous open count */
+	uint32_t	z_sync_cnt;	/* synchronous open count 被同步打开的计数 */
 	kmutex_t	z_acl_lock;	/* acl data lock */
 	zfs_acl_t	*z_acl_cached;	/* cached acl */
-	list_node_t	z_link_node;	/* all znodes in fs link */
+	list_node_t	z_link_node;	/* all znodes in fs link - 所有 znode 在 fs 中以链表形式关联 */
 	sa_handle_t	*z_sa_hdl;	/* handle to sa data */
 	boolean_t	z_is_sa;	/* are we native sa? */
 } znode_t;
@@ -211,7 +216,7 @@ typedef struct znode {
  * 1. When truncating a file (zfs_create, zfs_setattr, zfs_space) the whole
  *    file range needs to be locked as RL_WRITER. Only then can the pages be
  *    freed etc and zp_size reset. zp_size must be set within range lock.
- * 2. For writes and punching holes (zfs_write & zfs_space) just the range
+ * 2. For writes and punching holes(打孔) (zfs_write & zfs_space) just the range
  *    being written or freed needs to be locked as RL_WRITER.
  *    Multiple writes at the end of the file must coordinate zp_size updates
  *    to ensure data isn't lost. A compare and swap loop is currently used

@@ -107,6 +107,8 @@ __FBSDID("$FreeBSD: releng/12.0/sys/riscv/riscv/pmap.c 339423 2018-10-18 15:25:0
  *	mappings at almost any time.  However, invalidations
  *	of virtual-to-physical mappings must be done as
  *	requested.
+ 		由于该模块管理的信息也由逻辑地址映射模块存储，因此该模块几乎在任何时候都可能丢弃有效的
+		虚拟到物理映射。然而，虚拟到物理映射的失效必须按要求进行
  *
  *	In order to cope with hardware architectures which
  *	make virtual-to-physical map invalidates expensive,

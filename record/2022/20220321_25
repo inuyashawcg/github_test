@@ -1,0 +1,157 @@
+////////////// 20220321 //////////////
+  未来 tptfs 希望可以添加为可执行文件分配连续数据块的能力，这样就可以简化 loader 的工作流程，不用像现在磁盘文件系统这样
+还需要首先解析可执行文件，然后再执行。理想情况是直接给 loader 文件起始地址并执行
+
+  tmpfs 其实可以看做是 vm 模块的一部分，其中对于文件的操作是通过 vm_object 来实现的。tptfs 其实也是可以作为 vm_object
+的一部分存在，但是对于文件的处理还是随机分配虚拟页，并不是连续的，所以还是不能解决上述问题。解决方法的话还是要在 tptfs 中实现
+连续分配虚拟内存页的函数，提供给上层程序来使用
+
+  root@qemu:/tpt # mkdir a
+    root@qemu:/tpt # ls
+    a       b
+    root@qemu:/tpt # mv a c
+    root@qemu:/tpt # ls
+    b       c
+    root@qemu:/tpt # file *
+    b: empty
+    c: directory
+    root@qemu:/tpt # rm *
+    rm: c: is a directory
+    root@qemu:/tpt # rmdir c
+    ......
+
+  首先在 tptfs 中创建一个目录，然后执行 mv 命令对该目录进行重命名 (注意目标目录要是一个空目录，否则就是移动到该目录下)。最后执行
+删除命令，然后系统就会被阻塞。猜测是目录对应的锁没有被释放，删除该目录结点的时候造成 rmdir 函数拿不到文件锁，阻塞
+
+
+////////////// 20220322 //////////////
+  上述现象初步原因判断是 rename 过程中源文件原来所在目录与新目录是否一致导致的问题。在 Rename() - P2423：relookup 出传入的是
+源文件原来所在的目录项对应的文件类，此时目标目录跟源目录很大可能是同一个目录，所以它们对应的文件类也是一致的。上面的加锁逻辑是按照
+源目录与目标目录不是同一个文件的情况实现的，所以就造成了后续调用 TptAccess() 检查目录属性的时候该目录项对应的文件类还是处在加锁
+状态，阻塞了进程的执行
+  修改的方法是在执行 relookup() 函数的时候把源目录和目标目录都解锁，这样就可以避免上述情况的发生
+
+
+  如果以 tmpfs 为蓝本重构文件系统的一些思考：
+    - 现在文件系统区域由 tptfs 相对独立的去管理。如果以 tmpfs 的设计重构的话，tptfs 其实就是 VM 模块的一部分，
+      page 的申请释放等都由 VM 模块来管理
+    - 需要 VM 模块提供一些接口，比如 tptfs_alloc_page()，随机分配某段地址空间内的一个 page；tptfs_alloc_pages_contig()：分配连续 page
+    - tmpfs 目前是通过 SwapPager 来进行数据同步，tptfs 则需要利用 PersistentPager 来管理
+    - 未来我们希望可执行文件能够保存在一组连续的 page，简化加载和执行的步骤。目前 FreeBSD/Linux 是将可执行文件划归 regular file，
+      所以文件系统是不知道当前新创建的文件到底是普通的文本文件，还是一个可执行文件
+    - 生成新文件的时候是通过一个一个页写入数据的，所以文件系统不能够预知生成的可执行文件到底有多大，也就不能提前分配对应的连续虚拟页
+        解决方法：
+          - 将可执行文件从 regular file 中独立出来，给系统新添加一个 VEXE 文件类型
+          - 编译生成可执行文件之前，应该是会先生成一个临时文件，然后再调用 rename() 函数生成最终的可执行文件。这里可能需要编译器
+            协助一下，把生成的临时文件类型设置成 VEXE，并且这个过程还是按照原有的方式申请 page(不连续的)
+          - 然后在 rename 的过程中增加一步对文件类型的判断。如果是 VEXE，就调用 tptfs_alloc_pages_contig() 函数分配连续 page
+            (此时我们已经知道该文件的大小了) 并进行一次拷贝
+
+  tmpfs 优缺点：
+    - 它仍然是利用 uiomove，并没有解决数据在用户空间和内核空间来回拷贝的问题，也就表示之前讨论的数据插入问题也是依然存在的
+    - 没有元数据，所以可以省下这部分的存储空间
+    - tmpfs 功能不够全面，比如不支持 ACL 文件扩展属性
+    - 设计不够灵活，可扩展性不高。tmpfs 数据管理方式受限于 vm 模块的设计，未来想要进一步更新的话就要修改 vm 的相关结构体和函数，可能会对
+      其他部分造成影响
+    - 目前只是作为临时文件系统，管理较大规模数据时的稳定性、可靠性并没有得到实际验证
+
+
+ZFS 相关术语：
+  Filesystem namespace management: the ZFS POSIX Layer (ZPL) and ZFS Attribute Processor (ZAP)
+  Filesystem storage management: the Data Management Unit (DMU) and ZFS Intent Log (ZIL)
+  Meta-Object Set (MOS)
+  Dataset and Snapshot Layer (DSL)
+  Volume management: The Storage Pool Allocator (SPA) module manages block placement
+  ZFS I/O (ZIO) module orchestrates I/O
+  Virtual Device (VDEV)
+  ZFS volumes (ZVOLs)
+  Cache management: The Adaptive Replacement Cache (ARC)
+  Level 2 Adaptive Replacement Cache (L2ARC)
+  transaction group(TXG) 事务组
+
+
+////////////// 20220323 //////////////
+  zfs metadata 跟其他文件系统的 metadata 不太一样。zfs metadata 表示的是 snapshot 或者 filesystem 层次的对象，但是在其他文件系统
+中的元数据表示的仅仅是一个文件对应的相关信息。当我们创建一个新的文件系统或者 snapshot 的时候，首先要申请一个 metadata object
+
+  当文件系统需要申请存储空间时，需要向 SPA 提出申请，由 SPA 给文件系统分配指定大小的空间 (space map)。当文件系统不再需要存储空间的时候，
+需要把数据再还给 SPA
+
+  在 zfs 中文件系统是一个 metadata object，目录、文件、链接文件等是用 object 来表示的。metadata 会包含一个数组成员存放数据块信息，
+文件系统对应的 object 应该是放到这些数据块当中 (好像不是文件的数据内容？)
+
+  zfs dnode 用于表示文件系统中可变大小的一个 object，其中的一个作用就是用于表示文件、目录等等对象(也就说明 dnode 不仅只有这种功能，还会
+包含有其他功能)。如果是用于这种用途的话，它还会内嵌一个 znode(继承？) 用于处理 ZPL(POSIX)相关语义，也会包含有 MOS 层级的 object 关联
+文件系统、snapshot的相关操作。
+  dnode 另外一个用途就是会引用一个 ZAP object，ZAP object 会存储一个存储一个哈希表，用于关联名称和 object numbers。目录项其实要求能够
+被快速查找、增删和遍历，所以在设计文件系统的时候一定要对目录项管理做优化。ZAP 其实就担负这样的功能，因为其他 DSL 和 SPA 都有这样的需求，所以
+ZAP 应该也是可以为它们提供相应服务的
+
+  zfs 文件数据的管理类似于 ufs 中的 inode，也是“直接索引+间接索引”的模式，其中间接索引块的大小貌似是 16k，直接索引指向的块大小好像也不是 4k。
+难道是 zfs 中数据块大小并不是都是 4k？ 数据块指针大小是 128 byte (不是一个指针，而是一个结构体)，所以一个间接块中所能存放的指针数量是128个。
+默认情况下，每个间接块指针对应的数据块的大小是 128k，但是这个是可配置的。如果系统页大小是 4k，也可以将间接指针对应数据块的大小设置成 4k
+
+  默认情况下，zfs 会对每个块进行校验和。由于多核处理器是通用的，所以与执行IO的成本相比，执行校验和对 CPU 的成本微不足道
+
+  zfs 利用 vdev 结构来表示存储设备，整个 vdev 是树状结构，顶点是 root vdev，但他只是一个虚拟设备(中间节点也是)，只有树的叶节点才表示一个
+真实设备。每个设备的首部和尾部都包含有两个 vdev label，每个 label 为 256k，前后共四个，一种占用 1024k 空间。里面存放貌似是同级 vdev 和
+其所属的父 vdev 信息(同级 vdev 组成链表？)
+
+  zfs 具有分配连续磁盘块的能力。block pointer 结构体中包含有一个 gang-block，当文件系统无法满足分配连续数据块请求时，会将一些小的数据块指针
+放到 gang-block 当中，组成一个较大的非连续数据块提供给用户使用
+
+  zfs 中的 metadata 也是一个 object，这个跟 ufs/ext2fs 这些文件系统都是不一样的，所以才会说 zfs 不会因为文件系统容量增加而使得元数据
+变得越来越大
+
+
+////////////// 20220324 //////////////
+  OpenSBI 出问题时会在kernel运行时被卡住，共享服务器中包含有对应文件：
+    /home/earth/work/share/rd/os/qihai/development/run
+
+  OpenSBI v0.9
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name             : riscv-virtio,qemu
+Platform Features         : timer,mfdeleg
+Platform HART Count       : 8
+Firmware Base             : 0x80000000
+Firmware Size             : 156 KB
+Runtime SBI Version       : 0.2
+
+Domain0 Name              : root
+Domain0 Boot HART         : 3
+Domain0 HARTs             : 0*,1*,2*,3*,4*,5*,6*,7*
+Domain0 Region00          : 0x0000000080000000-0x000000008003ffff ()
+Domain0 Region01          : 0x0000000000000000-0xffffffffffffffff (R,W,X)
+Domain0 Next Address      : 0x0000000080200000
+Domain0 Next Arg1         : 0x0000000082200000
+Domain0 Next Mode         : S-mode
+Domain0 SysReset          : yes
+
+Boot HART ID              : 3
+Boot HART Domain          : root
+Boot HART ISA             : rv64imafdcsu
+Boot HART Features        : scounteren,mcounteren,time
+Boot HART PMP Count       : 16
+Boot HART PMP Granularity : 4
+Boot HART PMP Address Bits: 54
+Boot HART MHPM Count      : 0
+Boot HART MHPM Count      : 0
+Boot HART MIDELEG         : 0x0000000000000222
+Boot HART MEDELEG         : 0x000000000000b109
+QEMU: Terminated
+
+FreeBSD 中的 vm_page 和 vm_map 之间的关系：
+  vm_page 用于描述一个虚拟页，但是该结构体中并没有成员表示该页所对应的虚拟地址，而只有一个表示该页物理地址的成员。
+vm_map 表示的是一段虚拟地址空间，vm_map 由多个 vm_map_entry 组成，每个 entry 中又包含有 vm_object，最终由
+vm_object 管理具体的 vm_page。总体上是一个 包含关系。
+  那我们要如何找到某个虚拟地址对应的 vm_page 呢？方法的话是通过 PTE (Page Table Entry) 来进行关联(具体实现方式
+还不太清楚)。找到 vm_page 之后就又可以找到对应的物理地址
+  

@@ -193,6 +193,10 @@ typedef enum spa_config_source {
 	SPA_CONFIG_SRC_MOS		/* MOS, but not always from right txg */
 } spa_config_source_t;
 
+/*
+	SPA: storage pool allocator
+	AVL: 自平衡二叉查找树
+*/
 struct spa {
 	/*
 	 * Fields protected by spa_namespace_lock.
@@ -202,13 +206,13 @@ struct spa {
 	avl_node_t	spa_avl;		/* node in spa_namespace_avl */
 	nvlist_t	*spa_config;		/* last synced config */
 	nvlist_t	*spa_config_syncing;	/* currently syncing config */
-	nvlist_t	*spa_config_splitting;	/* config for splitting */
+	nvlist_t	*spa_config_splitting;	/* config for splitting 用于拆分的配置 */
 	nvlist_t	*spa_load_info;		/* info and errors from load */
 	uint64_t	spa_config_txg;		/* txg of last config change */
-	int		spa_sync_pass;		/* iterate-to-convergence */
-	pool_state_t	spa_state;		/* pool state */
-	int		spa_inject_ref;		/* injection references */
-	uint8_t		spa_sync_on;		/* sync threads are running */
+	int		spa_sync_pass;		/* iterate-to-convergence 迭代收敛 */
+	pool_state_t	spa_state;		/* pool state 数据池状态 */
+	int		spa_inject_ref;		/* injection(注入、注射) references */
+	uint8_t		spa_sync_on;		/* sync threads are running 正在执行的同步线程数量 */
 	spa_load_state_t spa_load_state;	/* current load operation */
 	boolean_t	spa_indirect_vdevs_loaded; /* mappings loaded? */
 	boolean_t	spa_trust_config;	/* do we trust vdev tree? */

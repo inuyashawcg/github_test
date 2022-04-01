@@ -74,6 +74,11 @@ typedef enum {
 #endif
 } data_type_t;
 
+/*
+	从代码实现来看，nvlist 表示的应该就是一个属性键值对链表。当我们挂载或者加入 storage pool 时，
+	会从磁盘中读取相应的属性信息，这些信息应该就是利用键值对链表进行存放。当我们判断某些对象是否具有
+	某些属性的时候，查找这个键值对链表就可以了
+*/
 typedef struct nvpair {
 	int32_t nvp_size;	/* size of this nvpair */
 	int16_t	nvp_name_sz;	/* length of name string */

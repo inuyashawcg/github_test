@@ -140,27 +140,48 @@ typedef enum dmu_object_byteswap {
 	((ot) & DMU_OT_BYTESWAP_MASK) : \
 	dmu_ot[(ot)].ot_byteswap)
 
+/*
+	The following table lists existing ZFS object types.
+	注意，这里的表述是 zfs 中所有的 object 类型。更进一步说明，dmu 管理的不仅仅是
+	这一层级的东西，很多内容都是面向整个文件系统的
+	OT: object?
+*/
 typedef enum dmu_object_type {
-	DMU_OT_NONE,
+	DMU_OT_NONE,	// Unallocated object
 	/* general: */
-	DMU_OT_OBJECT_DIRECTORY,	/* ZAP */
+	DMU_OT_OBJECT_DIRECTORY,	/* ZAP - DSL object directory ZAP object */
+	/*
+		Object used to store an array of object numbers.
+	*/
 	DMU_OT_OBJECT_ARRAY,		/* UINT64 */
+	/*
+		Packed nvlist object.
+	*/
 	DMU_OT_PACKED_NVLIST,		/* UINT8 (XDR by nvlist_pack/unpack) */
 	DMU_OT_PACKED_NVLIST_SIZE,	/* UINT64 */
 	DMU_OT_BPOBJ,			/* UINT64 */
 	DMU_OT_BPOBJ_HDR,		/* UINT64 */
 	/* spa: */
 	DMU_OT_SPACE_MAP_HEADER,	/* UINT64 */
-	DMU_OT_SPACE_MAP,		/* UINT64 */
+	DMU_OT_SPACE_MAP,		/* UINT64 - SPA disk block usage list */
 	/* zil: */
-	DMU_OT_INTENT_LOG,		/* UINT64 */
+	DMU_OT_INTENT_LOG,		/* UINT64 - Intent Log */
 	/* dmu: */
-	DMU_OT_DNODE,			/* DNODE */
-	DMU_OT_OBJSET,			/* OBJSET */
+	DMU_OT_DNODE,			/* DNODE - Object of dnodes (metadnode) */
+	DMU_OT_OBJSET,			/* OBJSET - Collection of objects */
 	/* dsl: */
 	DMU_OT_DSL_DIR,			/* UINT64 */
+	/*
+		DSL ZAP object containing child DSL directory information
+	*/
 	DMU_OT_DSL_DIR_CHILD_MAP,	/* ZAP */
+	/*
+		DSL ZAP object containing snapshot information for a dataset
+	*/
 	DMU_OT_DSL_DS_SNAP_MAP,		/* ZAP */
+	/*
+		DSL ZAP properties object containing properties for a DSL dir object
+	*/
 	DMU_OT_DSL_PROPS,		/* ZAP */
 	DMU_OT_DSL_DATASET,		/* UINT64 */
 	/* zpl: */

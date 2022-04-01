@@ -195,11 +195,15 @@ struct vdev {
 	/*
 	 * Common to all vdev types.
 	 */
+	/*
+		一个父设备应该可以包含多个子设备，父设备应该会给每个子设备分配一个 id。
+		这个参数很可能是表示该设备在父设备中的 id
+	*/
 	uint64_t	vdev_id;	/* child number in vdev parent	*/
 	uint64_t	vdev_guid;	/* unique ID for this vdev	*/
 	uint64_t	vdev_guid_sum;	/* self guid + all child guids	*/
 	uint64_t	vdev_orig_guid;	/* orig. guid prior to remove	*/
-	uint64_t	vdev_asize;	/* allocatable device capacity	*/
+	uint64_t	vdev_asize;	/* allocatable device capacity 可分配设备容量 */
 	uint64_t	vdev_min_asize;	/* min acceptable asize		*/
 	uint64_t	vdev_max_asize;	/* max acceptable asize		*/
 	uint64_t	vdev_ashift;	/* block alignment shift	*/
@@ -219,13 +223,21 @@ struct vdev {
 	 * operations.
 	 *
 	 * May be 0 to indicate no preference (i.e. use vdev_logical_ashift).
+	 * 这两个成员表示的应该就是逻辑块大小(比如4096)和物理块大小(比如512)，就类似于现有文件系统中
+	 * 内存页和磁盘扇区的区别
          */
 	uint64_t        vdev_physical_ashift;
 	uint64_t	vdev_state;	/* see VDEV_STATE_* #defines	*/
+	/*
+		意思是一个 vdev 可以被同时打开多次？
+	*/
 	uint64_t	vdev_prevstate;	/* used when reopening a vdev	*/
 	vdev_ops_t	*vdev_ops;	/* vdev operations		*/
 	spa_t		*vdev_spa;	/* spa for this vdev		*/
 	void		*vdev_tsd;	/* type-specific data		*/
+	/* 
+		pathname 也单独对一个 vnode？
+	*/
 	vnode_t		*vdev_name_vp;	/* vnode for pathname		*/
 	vnode_t		*vdev_devid_vp;	/* vnode for devid		*/
 	vdev_t		*vdev_top;	/* top-level vdev		*/
@@ -237,10 +249,9 @@ struct vdev {
 	boolean_t	vdev_reopening;	/* reopen in progress?		*/
 	int		vdev_open_error; /* error on last open		*/
 	kthread_t	*vdev_open_thread; /* thread opening children	*/
-	uint64_t	vdev_crtxg;	/* txg when top-level was added */
-
+	uint64_t	vdev_crtxg;	/* txg when top-level was added - txg: transaction group, 事务组 */
 	/*
-	 * Top-level vdev state.
+	 * Top-level vdev state. 下面还包含有叶节点状态信息的成员
 	 */
 	uint64_t	vdev_ms_array;	/* metaslab array object	*/
 	uint64_t	vdev_ms_shift;	/* metaslab size shift		*/
@@ -284,6 +295,7 @@ struct vdev {
 
 	/*
 	 * Values stored in the config for an indirect or removing vdev.
+	 	 存储在配置中的间接或删除vdev的值
 	 */
 	vdev_indirect_config_t	vdev_indirect_config;
 
@@ -293,6 +305,10 @@ struct vdev {
 	 * Note that removing (not yet indirect) vdevs have different
 	 * access patterns (the mapping is not accessed from open context,
 	 * e.g. from zio_read) and locking strategy (e.g. svr_lock).
+	 * 
+	 * vdev_indirect_rwlock 保护 vdev_indirect_mapping 指针不在间接 vdev上更改（压缩时）。
+	 * 请注意，删除（尚未间接删除）VDEV具有不同的访问模式（映射不是从开放上下文访问的，例如从 
+	 * zio_read）和锁定策略（例如svr_lock）
 	 */
 	krwlock_t vdev_indirect_rwlock;
 	vdev_indirect_mapping_t *vdev_indirect_mapping;
@@ -300,7 +316,7 @@ struct vdev {
 
 	/*
 	 * In memory data structures used to manage the obsolete sm, for
-	 * indirect or removing vdevs.
+	 * indirect or removing vdevs. 用于管理过时sm的内存中数据结构，用于间接或删除 VDEV
 	 *
 	 * The vdev_obsolete_segments is the in-core record of the segments
 	 * that are no longer referenced anywhere in the pool (due to
@@ -334,7 +350,7 @@ struct vdev {
 	struct dsl_scan_io_queue	*vdev_scan_io_queue;
 
 	/*
-	 * Leaf vdev state.
+	 * Leaf vdev state. 下面表示的都是叶节点的状态信息
 	 */
 	range_tree_t	*vdev_dtl[DTL_TYPES]; /* dirty time logs	*/
 	space_map_t	*vdev_dtl_sm;	/* dirty time log space map	*/
@@ -413,11 +429,17 @@ typedef struct vdev_phys {
 	zio_eck_t	vp_zbt;
 } vdev_phys_t;
 
+/*
+	zfs 支持 VTOC(Volume Table of Contents) 和 EFI 磁盘 label。EFI 要求磁盘
+	前 8k 作为 slice0。所以 vdev 前 8k 数据不作处理，防止覆盖 EFI label 数据。
+	boot header 暂时保留
+	vl_vdev_phys：描述与这个 vdev 相关的其他 vdevs
+*/
 typedef struct vdev_label {
-	char		vl_pad1[VDEV_PAD_SIZE];			/*  8K */
-	char		vl_pad2[VDEV_PAD_SIZE];			/*  8K */
-	vdev_phys_t	vl_vdev_phys;				/* 112K	*/
-	char		vl_uberblock[VDEV_UBERBLOCK_RING];	/* 128K	*/
+	char		vl_pad1[VDEV_PAD_SIZE];			/*  8K - blank space*/
+	char		vl_pad2[VDEV_PAD_SIZE];			/*  8K - boot header */
+	vdev_phys_t	vl_vdev_phys;				/* 112K	- name/value pairs */
+	char		vl_uberblock[VDEV_UBERBLOCK_RING];	/* 128K	- uberblock array*/
 } vdev_label_t;							/* 256K total */
 
 /*

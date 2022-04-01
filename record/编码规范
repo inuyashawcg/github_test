@@ -29,4 +29,20 @@
 /////////////// tptfs: 函数返回值
   /fs/tptfs/tptfs_extattr.cpp:34
     Don't use useless `(` `)` around non expression.
-  - 如果函数返回值不是表达式的时候，不需要添加 ()，直接 return 返回值 应该就好了 
+  - 如果函数返回值不是表达式的时候，不需要添加 ()，直接 return 返回值 应该就好了
+
+
+
+/////////////// 代码简洁之道 ///////////////
+案例1：
+    FN_LOCK(fnp);
+    if (fnp->nEntryTally != 2)
+      error = 0;
+    else
+      error = 1;
+    FN_UNLOCK(fnp);
+    return error;
+  
+  这里的代码其实就是 if 结果二选一，那就可以采用更为简洁的实现方法：
+    error = if (fnp->nEntryTally == 2)
+

@@ -5321,6 +5321,7 @@ spa_import_rootpool(const char *name)
 
 	/*
 	 * Read the label from the boot device and generate a configuration.
+	 		从根设备中读取 label 并生成相应的配置信息
 	 */
 	config = spa_generate_rootconf(name);
 
@@ -5335,6 +5336,8 @@ spa_import_rootpool(const char *name)
 			/*
 			 * The pool could already be imported,
 			 * e.g., after reboot -r.
+			 * 当我们匹配到 pool 对象之后，还要进一步判定这个 pool 是不是已经被
+			 * 添加并且处于活跃状态。如果是的话，可能就需要执行 reboot 操作
 			 */
 			if (spa->spa_state == POOL_STATE_ACTIVE) {
 				mutex_exit(&spa_namespace_lock);
@@ -5346,6 +5349,8 @@ spa_import_rootpool(const char *name)
 			 * Remove the existing root pool from the namespace so
 			 * that we can replace it with the correct config
 			 * we just read in.
+			 * 如果 pool 不是处在活跃状态，那就先把它从 spa 中移除，然后将新获取到的
+			 * 数据池对它进行替换
 			 */
 			spa_remove(spa);
 		}

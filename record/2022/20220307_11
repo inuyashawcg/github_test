@@ -261,3 +261,25 @@ tptfs 却是利用文件类将两者进行了一定程度的融合，如果仍�
   目前的解决方式是在 inode 分配之后紧接着就实例化 VFileNode，这就可以保证只要 inode 在，文件锁就在。删除的时候则刚好相反，首先
 把 VFileNode 释放掉，这样别的进程就无法查找到该文件，防止进程访问一个不存在的文件。然后在文件系统锁的保护下，清除文件原来占用的数据
 块和更新元数据
+
+
+  root@qemu:/tpt # rmdir a
+    TptAccess
+    TptRmdir
+    TptInactive
+    rmdir: a: Directory not empty
+    root@qemu:/tpt # TptSync
+    TptSync
+    TptSync
+    TptSync
+
+    root@qemu:/tpt # 
+    root@qemu:/tpt # TptSync
+
+    root@qemu:/tpt # 
+    root@qemu:/tpt # ls
+    TptGetattr
+    ls -al
+  
+  当我们创建一个空目录 a 之后，执行 rmdir a，提示上述错误，并且再执行 ls 命令的时候文件系统会被阻塞。大概率还是功能函数逻辑错误导致
+文件锁不能被正确释放。然后就是创建目录之后进入执行 ls，不显示 . 和 .. 两个子目录

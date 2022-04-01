@@ -423,6 +423,7 @@ vm_object_pip_wait(vm_object_t object, char *waitid)
  *	vm_object_allocate:
  *
  *	Returns a new object with the given size.
+		利用 uma 机制申请一个固定大小的区域给 vm_object
  */
 vm_object_t
 vm_object_allocate(objtype_t type, vm_pindex_t size)

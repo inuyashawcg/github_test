@@ -1,0 +1,372 @@
+////////////// 20220328 //////////////
+panic: Fatal page fault at 0x10c285950: 0x00000000000158
+
+#define	VM_MIN_KERNEL_ADDRESS	  (0x0000000100000000UL)
+#define	GR_AREA_LEN             (0x0000000004000000UL)
+
+0x100000000
+0x10c285950
+
+0x004000000
+
+0x1000000000 = 1G
+
+mercury@mercury:~/Documents/code/qihai/work/riscv$ addr2line 0x10c285950 -e ./kernel.elf 
+/home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/uma_core.cpp:3222
+
+  可以利用 addr2line 函数根据断点地址找到对应的源码位置。从地址分布来看，该断点出错的位置是在 code 区域。
+应该就是代码执行时调用了 code 区域中的函数导致的错误，初步判定是 vm_map_insert 导致
+
+  Thread 8 hit Breakpoint 2, uma_zalloc_arg (zone=0x0, udata=0x0, flags=2)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/uma_core.cpp:3193
+  3193	    random_harvest_fast_uma(&zone, sizeof(zone), RANDOM_UMA);
+  (gdb) bt
+  #0  uma_zalloc_arg (zone=0x0, udata=0x0, flags=2) at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/uma_core.cpp:3193
+  #1  0x000000010c0d0ff2 in uma_zalloc (zone=0x0, flags=2) at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/uma.h:358
+  #2  0x000000010c0d0e38 in kc_malloc (size=32, mtp=0x110028b50 <M_PM>, flags=2)
+      at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/kern_malloc.cpp:619
+  #3  0x000000010c26b07c in RiscvPmap::pmap_enter (this=0x110111e40 <riscvPmap>, pmap=0x110111ac0 <kernel_pmap_store>, va=4632608768, 
+      m=0xffffffd1fffac628, prot=3 '\003', flags=515, psind=0 '\000')
+      at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/RiscvPmap.cpp:2924
+  #4  0x000000010c274894 in pmap_enter (pmap=0x110111ac0 <kernel_pmap_store>, va=4632608768, m=0xffffffd1fffac628, prot=3 '\003', 
+      flags=515, psind=0 '\000') at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/RiscvPmapWrapper.cpp:597
+  #5  0x000000010c297200 in kmem_back_domain (domain=0, object=0x1101122b8 <kernel_object_store>, addr=4632608768, size=122880, 
+      flags=258) at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/vm_kern.cpp:472
+  #6  0x000000010c296efa in kmem_malloc_domain (domain=0, size=122880, flags=258)
+      at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/vm_kern.cpp:392
+  #7  0x000000010c296dee in kmem_malloc_domainset (ds=0x110085cf8 <domainset_roundrobin>, size=122880, flags=258)
+      at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/vm_kern.cpp:413
+  #8  0x000000010c296da2 in kmem_malloc (size=122880, flags=258)
+      at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/vm_kern.cpp:402
+  #9  0x000000010c266ab8 in RiscvPmap::pmap_init (this=0x110111e40 <riscvPmap>)
+      at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/RiscvPmap.cpp:1988
+  #10 0x000000010c273dda in pmap_init () at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/RiscvPmapWrapper.cpp:182
+  #11 0x000000010c29625a in vm_mem_init (dummy=0x0) at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/vm/vm_init.cpp:145
+  #12 0x000000010c066322 in mi_startup () at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/init_main.cpp:311
+  #13 0x000000010c0001be in va () at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/riscv/riscv/locore.S:268
+  Backtrace stopped: frame did not save the PC
+  (gdb) c
+  Continuing.
+
+  暂时的解决方法是将持久化内存区域后移 1G 的虚拟地址，这样就可以正常运行。应该还是地址空间划分相关操作存在问题
+
+
+  panic: Fatal page fault at 0x10c38a92c: 0000000000000000
+  cpuid = 4
+  time = 1648445179
+  KDB: stack backtrace:
+  #0 0x10c17469e at kdb_backtrace+0x7c
+  #1 0x10c10f6b6 at vpanic+0x202
+  #2 0x10c10f4b0 at panic+0x32
+  #3 0x10c019094 at do_trap_supervisor+0x5da
+  #4 0x10c018b90 at do_trap_supervisor+0xd6
+  #5 0x10c004508 at cpu_exception_handler_supervisor+0x68
+  #6 0x10c221e86 at resume_all_fs+0xd06
+  #7 0x10c21ceb6 at vfs_getopt_pos+0x44a
+  #8 0x10c21bb94 at vfs_donmount+0xa74
+  #9 0x10c21b0d0 at sys_nmount+0xce
+  #10 0x10c124a9c at systemcall+0x100
+  #11 0x10c004fb0 at system_call+0x60
+  Uptime: 53s
+
+
+  panic: Fatal page fault at 0x10c02f5cc: 0000000000000000
+  cpuid = 0
+  time = 1648447582
+  KDB: stack backtrace:
+  #0 0x10c1746b6 at kdb_backtrace+0x7c
+  #1 0x10c10f6ce at vpanic+0x202
+  #2 0x10c10f4c8 at panic+0x32
+  #3 0x10c019094 at do_trap_supervisor+0x5da
+  #4 0x10c018b90 at do_trap_supervisor+0xd6
+  #5 0x10c004508 at cpu_exception_handler_supervisor+0x68
+  #6 0x10c030306 at msgbuf_addstr+0x34
+  #7 0x10c17e9ee at log_console+0x248
+  #8 0x10c17fa6a at sbuf_putbuf+0x5e
+  #9 0x10c17fccc at sbuf_printf_drain+0x1be
+  #10 0x10c17e1d4 at kvprintf+0x157c
+  #11 0x10c17cdb2 at kvprintf+0x15a
+  #12 0x10c17e70c at vlog+0xcc
+  #13 0x10c17cbac at kc_vprintf+0x20
+  #14 0x10c17ea30 at kc_printf+0x32
+  #15 0x10c10f61a at vpanic+0x14e
+  #16 0x10c10f4c8 at panic+0x32
+  #17 0x10c018e42 at do_trap_supervisor+0x388
+  Uptime: 1s
+
+
+  goldfish_rtc0: providing initial system time
+  t[0] == 0x000000000000000d
+  t[0] == 0x0000000000000005
+  t[1] == 0x0000000000000120
+  t[2] == 0x0000000000006000
+  t[3] == 0x0000000000000000
+  t[4] == 0x0000000000000000
+  t[5] == 0x0000000000000000
+  t[6] == 0x0000000000000000
+  s[0] == 0x0000000000735049
+  s[1] == 0x0000000000000000
+  s[2] == 0x0000000000000000
+  s[3] == 0x0000000000000000
+  s[4] == 0x0000000000000000
+  s[5] == 0x0000000000000000
+  s[6] == 0x0000000000000000
+  s[7] == 0x0000000000000000
+  s[8] == 0x0000000000000000
+  s[9] == 0x0000000000000000
+  s[10] == 0x0000000000000000
+  s[11] == 0x0000000000000000
+  a[0] == 0x000000000000001b
+  a[1] == 0x00000001100d3ed8
+  a[2] == 0x0000000000000001
+  a[3] == 0x0000000000000000
+  a[4] == 0x0000000000000003
+  a[5] == 0x000000010c00ca30
+  a[6] == 0x000000011414b291
+  a[7] == 0x000000011414b29c
+  ra == 0x0000000000000000
+  sp == 0x00000001141491b0
+  gp == 0xffffffff00000005
+  tp == 0x0000000000000000
+  sepc == 0x0000000000000000
+  sstatus == 0x8000000000006100
+  timeout stopping cpus
+  panic: stack overflow detected; backtrace may be corrupted
+  cpuid = 0
+  time = 1648448654
+  KDB: stack backtrace:
+  t[0] == 0x000000000000000c
+  t[1] == 0x000000010c415e08
+  t[2] == 0x00000001112339f0
+  t[3] == 0x0000000a00000001
+  t[4] == 0x0000000110119e90
+  t[5] == 0x00000001112339f0
+  t[6] == 0x0000000114148e10
+  s[0] == 0x000000010c0229f4
+  s[1] == 0x00000001100d35b8
+  s[2] == 0x0000000115aafb80
+  s[3] == 0x0000000114148e10
+  s[4] == 0x000000010c012ada
+  s[5] == 0x0000000000000002
+  s[6] == 0x0000000115aafb80
+  s[7] == 0x0000000114148e80
+  s[8] == 0x000000010c022d84
+  s[9] == 0x0000000a0003d090
+  s[10] == 0x0000000000000000
+  s[11] == 0x0000000000000001
+  a[0] == 0x0000000115ab0100
+  a[1] == 0x00000001100d35b8
+  a[2] == 0x0000000115ab0100
+  a[3] == 0x0000000115aafb80
+  a[4] == 0x0000000164626071
+  a[5] == 0x0000000000000016
+  a[6] == 0x0000000000000016
+  a[7] == 0x0000000114149168
+  ra == 0x0000000114148da0
+  sp == 0x000000010c415e4c
+  gp == 0x0000000a00735049
+  tp == 0x0000000110119fb0
+  sepc == 0x00000001100d35b8
+  sstatus == 0x0000000114148eb0
+  panic: Fatal page fault at 0x40024000000ff: 0x00000114148d40
+  cpuid = 7
+  time = 1648448654
+  KDB: stack backtrace:
+  #0 0x10c1746ae at kdb_backtrace+0x7c
+  #1 0x10c10f6c6 at vpanic+0x202
+  #2 0x10c10f4c0 at panic+0x32
+  #3 0x10c14ffd8 at __stack_chk_fail+0x14
+  #4 0x10c17e0f0 at kvprintf+0x14a0
+  #5 0x10c17e704 at vlog+0xcc
+  Uptime: #6 0x10c17cba4 at kc_vprintf+0x20
+  7s
+  #7 0x10c17ea28 at kc_printf+0x32
+  #8 0x10c018c7a at do_trap_supervisor+0x1c0
+  #9 0x10c018b90 at do_trap_supervisor+0xd6
+  #10 0x10c004508 at cpu_exception_handler_supervisor+0x68
+  Uptime: 7s
+
+  上诉错误定位到了是 new Snapshot 的时候产生的。现在内核中的 new 已经被重构，所以需要将类继承自 KernelObject 类，
+然后使用其重载后的 new 才能在内核堆栈中实例化对象，否则是在用户空间，产生了上述错误(随机的，每次错误类型都报告的不同)
+
+
+  mercury@mercury:~/Documents/code/qihai/work/riscv$ readelf -s kernel.elf |grep pSprblk
+  1615: 00000001100d4720     8 OBJECT  GLOBAL DEFAULT   49 _ZN10TptfsMount7pSprblkE
+  3032549: 00000001100d4720     8 OBJECT  GLOBAL DEFAULT   49 _ZN10TptfsMount7pSprblkE
+
+  3032549: 00000001100d4718     8 OBJECT  GLOBAL DEFAULT   49 _ZN10TptfsMount4pDirE
+  3032550: 00000001100d4710     8 OBJECT  GLOBAL DEFAULT   49 _ZN10TptfsMount6pInodeE
+  initialize
+
+
+////////////// 20220329 //////////////
+  root@:/sbin # cd /work/
+  root@:/work # clang hello.c -o a
+  /sbin/clang: Too many references: can't splice.
+  root@:/work # clang hello.c -o a
+
+  编译过程中报上述错误： sys/sys/errno.h
+    #define	ETOOMANYREFS	59		/* Too many references: can't splice */
+
+  在 strerror() 函数打断点，bt 得到一下信息：
+    Thread 5 hit Breakpoint 9, strerror (num=59)
+      at /home/mercury/Documents/code/qihai/rebuild/qihai/lib/libc/string/strerror.c:143
+      143		if (strerror_rl(num, ebuf, sizeof(ebuf), __get_locale()) != 0)
+      (gdb) bt
+      #0  strerror (num=59) at /home/mercury/Documents/code/qihai/rebuild/qihai/lib/libc/string/strerror.c:143
+      #1  0x000000010ccd1092 in texec (sf=0x40220fb0 L"/sbin/clang", st=0x40220f80)
+          at /home/mercury/Documents/code/qihai/rebuild/qihai/contrib/tcsh/sh.exec.c:512
+      #2  0x000000010ccd0a5e in doexec (t=0x40220f50, do_glob=1)
+          at /home/mercury/Documents/code/qihai/rebuild/qihai/contrib/tcsh/sh.exec.c:297
+      #3  0x000000010ccf0692 in execute (t=0x40220f50, wanttty=26, pipein=0x0, pipeout=0x0, do_glob=1)
+          at /home/mercury/Documents/code/qihai/rebuild/qihai/contrib/tcsh/sh.sem.c:666
+      #4  0x000000010ccf097c in execute (t=0x40220d70, wanttty=26, pipein=0x0, pipeout=0x0, do_glob=1)
+          at /home/mercury/Documents/code/qihai/rebuild/qihai/contrib/tcsh/sh.sem.c:729
+      #5  0x000000010ccc620a in process (catch=1)
+          at /home/mercury/Documents/code/qihai/rebuild/qihai/contrib/tcsh/sh.c:2158
+      #6  0x000000010ccc4fa2 in tcsh_main (argc=1, argv=0xffffecd8)
+          at /home/mercury/Documents/code/qihai/rebuild/qihai/contrib/tcsh/sh.c:1430
+      #7  0x000000010cb4566e in main (argc=3, argv=0xffffecd8, env=0xffffecf8)
+          at /home/mercury/Documents/code/qihai/rebuild/qihai/lib/csu/riscv/crt1_c.c:82
+
+    tcsh_main() 是在奇海中变成线程的 shell
+
+    原系统中没有 clang，所以要在 ldscript.riscv 中添加 clang 的相关信息；还需要在 cmake 中将 clang 链接进来
+
+
+////////////// 20220330 //////////////
+  以 tptfs 作为根文件系统挂载时出现一下提示信息：
+
+  superblock1 magic is: 2020
+    Trying to mount root from tptfs:/dev/vtbd1 []...
+    mountroot: unable to remount devfs under /dev (error 2)
+    mountroot: unable to unlink /dev/dev (error 2)
+    goldfish_rtc0: providing initial system time
+    start init
+    ......
+  
+  然后整个系统就卡住了，根据提示信息查看，vfs shuffle 函数应该还是存在一些问题，需要调研根文件系统挂载时的具体逻辑，
+看看到底有哪些地方需要注意。
+
+
+Thread 6 hit Breakpoint 4, TptLookup::TptLookupx (ap=0x11414e530)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/fs/tptfs/tptfs_lookup.cpp:187
+187	  return (TptLookupIno(ap->a_dvp, ap->a_vpp, ap->a_cnp, NULL));
+(gdb) s
+TptLookup::TptLookupIno (vdp=0xffffffd0097657a0, vpp=0x11414e9b8, cnp=0x11414e9e0, dd_ino=0x0)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/fs/tptfs/tptfs_lookup.cpp:615
+615		struct ucred *cred = cnp->cn_cred;
+(gdb) n
+616		int flags = cnp->cn_flags;
+(gdb) p cnp
+$1 = (componentname *) 0x11414e9e0
+(gdb) p* cnp
+$2 = {
+cn_origflags = 18446743867709939632,
+cn_flags = 335544388,
+cn_thread = 0x115ab0100,
+cn_cred = 0xffffffd006494900,
+cn_nameiop = LOOKUP,
+cn_lkflags = 532480,
+cn_pnbuf = 0xffffffd009763c00 "/dev",
+cn_nameptr = 0xffffffd009763c01 "dev",
+cn_namelen = 3
+}
+(gdb) bt
+#0  TptLookup::TptLookupIno (vdp=0xffffffd0097657a0, vpp=0x11414e9b8, cnp=0x11414e9e0, dd_ino=0x0)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/fs/tptfs/tptfs_lookup.cpp:616
+#1  0x000000010c3884dc in TptLookup::TptLookupx (ap=0x11414e530)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/fs/tptfs/tptfs_lookup.cpp:187
+#2  0x000000010c202bc6 in VOP_CACHEDLOOKUP (dvp=0xffffffd0097657a0, vpp=0x11414e9b8, cnp=0x11414e9e0)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vnode_if.h:99
+#3  0x000000010c202b30 in vfs_cache_lookup (ap=0x11414e5d0)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vfs_cache.cpp:2810
+#4  0x000000010c2199a4 in VOP_LOOKUP (dvp=0xffffffd0097657a0, vpp=0x11414e9b8, cnp=0x11414e9e0)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vnode_if.h:65
+#5  0x000000010c218968 in lookup (ndp=0x11414e960)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vfs_lookup.cpp:1048
+#6  0x000000010c2173fe in namei (ndp=0x11414e960)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vfs_lookup.cpp:601
+#7  0x000000010c2259ca in vfs_mountroot_shuffle (td=0x115ab0100, mpdevfs=0x1bcadd040)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vfs_mountroot.cpp:382
+#8  0x000000010c2242ce in vfs_mountroot ()
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vfs_mountroot.cpp:1072
+#9  0x000000010c0684ac in start_init (dummy=0x0)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/init_main.cpp:671
+#10 0x000000010c0aba46 in fork_exit (callout=0x10c068482 <start_init(void*)>, arg=0x0, frame=0x11414ec50)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/kern_fork.cpp:1039
+#11 0x000000010c004d8e in fork_trampoline ()
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/riscv/riscv/swtch.S:385
+Backtrace stopped: frame did not save the PC
+......
+710	  while (i_offset < endsearch) {
+(gdb) 
+744		if (bp != nullptr) {
+(gdb) 
+753	  if (numdirpasses == 2) {
+(gdb) 
+764	  if ((nameiop == CREATE || nameiop == RENAME) &&
+(gdb) 
+808	  if ((cnp->cn_flags & MAKEENTRY) != 0)
+(gdb) 
+809			cache_enter(vdp, NULL, cnp);
+(gdb) 
+810		return (ENOENT);
+(gdb) 
+985	}
+
+从上面调试信息我们可以推测一下 FreeBSD devfs 的逻辑处理：
+  首先，系统会创建一个 "虚拟的根文件系统"，其实就是一个根节点，目前来看感觉就是 rootvnode。然后系统会将 devfs 文件系统
+挂载到"虚拟根节点"下面。为什么要这样做？因为加载磁盘文件系统的时候需要读取磁盘上的内容，这样就需要能够访问设备，因此需要利用
+设备文件节点，所以我们才需要首先将 devfs 挂载；
+
+  然后，根据 qemu (debug.sh) 中设置的根文件系统类型，调用对应的 mount 函数。此时可能就要求对应类型的根文件系统中需要包含
+/dev 目录。参考上述 debug 信息，当把 tptfs 作为根文件系统挂载的时候，系统会调用 lookup() 函数查找其中的 /dev 目录项。
+因为目前 tptfs 中没有包含该目录项，所以导致返回的结果是 ENOENT = 2。
+
+  为什么要查找 /dev 目录？因为之前的 devfs 是挂载在"虚拟根文件系统"下，当我们将 tptfs 作为根文件系统之后，我们需要将 devfs
+挂载到 tptfs 下的路径当中，也就是 /dev 当中。所以，如果要避免上述错误，应该还要添加一个 dev 目录项
+
+
+在 tptfs 初始化的时候增加 dev 目录项，启动系统之后提示信息如下：
+    Trying to mount root from tptfs:/dev/vtbd1 []...
+    superblock1 magic is: 2020
+    goldfish_rtc0: providing initial system time
+    start init
+    2022-03-30T07:01:46.446690+00:00 - init 1 - - Cannot unmount /dev/reroot: Operation not permitted
+    2022-03-30T07:01:46.863136+00:00 - init 26 - - login_getclass: unknown class 'daemon'
+    2022-03-30T07:01:46.899693+00:00 - init 26 - - can't access /etc/rc: Operation not permitted
+    sh: The terminal database could not be opened.
+    sh: using dumb terminal settings.
+    # 
+    #
+    #
+    ......
+  给人的感觉是已经进入到了系统当中，但是没有打开 shell，应该是根文件系统中没有可执行文件、配置文件导致的
+
+
+////////////// 20220331 //////////////
+  Persistent Memory 测试的时候提示说需要利用 page fault 机制去映射数据到具体的虚拟地址，但是实际调试过程中发现貌似
+这些页都是 nofault 类型的，也就是说这些页不支持 page fault，有点奇怪
+
+  操作系统中会提供一些链表、树等数据结构给开发者来使用(例如 AVL - 自平衡二叉查找树)，其实就是非常好的学习素材
+
+
+////////////// 20220401 //////////////
+  目前 persistent memory 利用的是一个 vm_object 来管理整个虚拟内存地址空间。如果改成 tmpfs 类似的方法，就是说每个文件对应一个
+vm_object，那整个持久化内存区域就要改成利用 vm_map_entry 来管理
+  pager 其实是管理物理内存与其他存储介质之间的数据转移。比如我们要将数据写入磁盘的时候，才需要借助 pager 来进行。所以才会给持久化
+内存专门做一个 pager。但是 pager 都是关联到 vm_object，而不是关联到 vm_map_entry。如果以 vm_map_entry 去管理整个虚拟地址
+空间，可能这个 pager 的行为要改变。VM 模块要判断目前是否能够提供这样的支持
+
+  vmem_alloc() 函数分配的连续的虚拟地址
+  
+  vm 模块中目前包含有一个 vmem 结构，对应有 kernel arena / buffer_arena/ transient_arena 这些实例。kernel arena 等可以
+理解为管理除了那些 data、text 段之外、可动态分配的剩余空间的一种对象。vmem_alloc() 其实就是在这些区域中分配连续的虚拟地址空间。
+如果我们要用 VM 模块中的数据结构和接口来管理文件，那么我们就不能采用现在这种方式 (用一个 vm_object 管理整个持久化区域)
+  还是要看 persistent 的实现机制。如果目前只能用 vm_object 管理的话，貌似就不能使用 vmem_alloc() 接口分配连续的虚拟地址空间。
+
+
+////////////// 周会记录 //////////////
+  奇海操作系统虽然还是基于现有操作系统来开发，但是要根据新的特性和需求引入新的设计。不要拘泥于现有的机制，有新的想法就大胆去实现，
+因为我们可能就是未来新标准的制定者，就像是中国5G那样  --王总

@@ -120,7 +120,8 @@ typedef struct qcache qcache_t;
 
 #define	VMEM_NAME_MAX	16
 
-/* vmem arena */
+/* vmem arena
+*/
 struct vmem {
 	struct mtx_padalign	vm_lock;
 	struct cv		vm_cv;

@@ -1117,8 +1117,12 @@ swap_pager_unswapped(vm_page_t m)
  *	succeeding the specified range be paged in.  The number of such pages
  *	is returned in the "rbehind" and "rahead" parameters, and they will
  *	be in the inactive queue upon return.
+ 		尝试在长度为“count”的数组“ma”中分页。调用者可以选择性地指定在指定范围之前和之后
+		的附加页面被分页。此类页面的数量在“rbehind”和“rahead”参数中返回，返回时它们将
+		处于非活动队列中
  *
  *	The pages in "ma" must be busied and will remain busied upon return.
+ 		“ma”中的页面必须繁忙，返回后仍将繁忙
  */
 static int
 swap_pager_getpages(vm_object_t object, vm_page_t *ma, int count, int *rbehind,

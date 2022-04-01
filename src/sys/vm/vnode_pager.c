@@ -116,7 +116,9 @@ SYSCTL_PROC(_debug, OID_AUTO, vnode_domainset, CTLTYPE_STRING | CTLFLAG_RW,
     &vnode_domainset, 0, sysctl_handle_domainset, "A",
     "Default vnode NUMA policy");
 
-/* Create the VM system backing object for this vnode */
+/* Create the VM system backing object for this vnode 
+	isize： inode size
+*/
 int
 vnode_create_vobject(struct vnode *vp, off_t isize, struct thread *td)
 {
@@ -124,6 +126,9 @@ vnode_create_vobject(struct vnode *vp, off_t isize, struct thread *td)
 	vm_ooffset_t size = isize;
 	struct vattr va;
 
+	/*
+		判断 vnode 是否代表一个磁盘设备
+	*/
 	if (!vn_isdisk(vp, NULL) && vn_canvmio(vp) == FALSE)
 		return (0);
 
@@ -211,7 +216,9 @@ vnode_destroy_vobject(struct vnode *vp)
  * Allocate (or lookup) pager for a vnode.
  * Handle is a vnode pointer.
  *
- * MPSAFE
+ * MPSAFE、
+ * 
+ * 从代码实现来看，pager 并不是一个实例，感觉也跟文件系统一样，提供的是一套方法
  */
 vm_object_t
 vnode_pager_alloc(void *handle, vm_ooffset_t size, vm_prot_t prot,
@@ -274,6 +281,11 @@ retry:
 		vp->v_object = object;
 		VI_UNLOCK(vp);	// 对 interlock 成员加锁
 	} else {
+		/*
+			这里会对 object 引用计数执行 ++ 操作，应该就是防止该对象会被意外释放。但是这么做就需要
+			在适当的时候把引用计数再减回去。vnode_create_vobject() 函数会调用到这个函数，代码中
+			就包含对 object 引用计数 -- 操作
+		*/
 		object->ref_count++;
 #if VM_NRESERVLEVEL > 0
 		vm_object_color(object, 0);
@@ -326,6 +338,9 @@ vnode_pager_dealloc(vm_object_t object)
 	VM_OBJECT_WLOCK(object);
 }
 
+/*
+	其实就是判断在 pindex 处是否存在页与之对应
+*/
 static boolean_t
 vnode_pager_haspage(vm_object_t object, vm_pindex_t pindex, int *before,
     int *after)
@@ -348,6 +363,8 @@ vnode_pager_haspage(vm_object_t object, vm_pindex_t pindex, int *before,
 	/*
 	 * If the offset is beyond end of file we do
 	 * not have the page.
+	 * 如果说 offset 已经大于文件实际大小了，那就说明目前没有 page 能够对应到该位置
+	 * 将 index 转换成 offset
 	 */
 	if (IDX_TO_OFF(pindex) >= object->un_pager.vnp.vnp_size)
 		return FALSE;
@@ -779,9 +796,9 @@ vnode_pager_generic_getpages(struct vnode *vp, vm_page_t *m, int count,
 		return (VM_PAGER_BAD);
 
 	object = vp->v_object;
-	foff = IDX_TO_OFF(m[0]->pindex);
-	bsize = vp->v_mount->mnt_stat.f_iosize;
-	pagesperblock = bsize / PAGE_SIZE;
+	foff = IDX_TO_OFF(m[0]->pindex);	// 计算第一个 page offset
+	bsize = vp->v_mount->mnt_stat.f_iosize; // 获取 block size
+	pagesperblock = bsize / PAGE_SIZE;	// 每个 block 包含多少 page，正常是1个
 
 	KASSERT(foff < object->un_pager.vnp.vnp_size,
 	    ("%s: page %p offset beyond vp %p size", __func__, m[0], vp));
@@ -792,6 +809,9 @@ vnode_pager_generic_getpages(struct vnode *vp, vm_page_t *m, int count,
 	 * The last page has valid blocks.  Invalid part can only
 	 * exist at the end of file, and the page is made fully valid
 	 * by zeroing in vm_pager_get_pages().
+	 * 
+	 * 最后一页有有效的块。无效部分只能存在于文件的末尾，通过在 vm_pager_get_pages()
+	 * 中归零，该页面将完全有效
 	 */
 	if (m[count - 1]->valid != 0 && --count == 0) {
 		if (iodone != NULL)
@@ -803,18 +823,26 @@ vnode_pager_generic_getpages(struct vnode *vp, vm_page_t *m, int count,
 	 * Synchronous and asynchronous paging operations use different
 	 * free pbuf counters.  This is done to avoid asynchronous requests
 	 * to consume all pbufs.
+	 * 同步和异步分页操作使用不同的空闲pbuf计数器。这样做是为了避免使用所有PBUF的异步请求
+	 * 
 	 * Allocate the pbuf at the very beginning of the function, so that
 	 * if we are low on certain kind of pbufs don't even proceed to BMAP,
 	 * but sleep.
+	 * 在函数的一开始就分配 pbuf，这样，如果我们缺少某种pbuf，就不会进入BMAP，而是睡眠
+	 * 
+	 * pbuf： pointer buffer？ 这两个参数表示可以用于 vnode 同步和一步操作的缓存区数量？
 	 */
 	freecnt = iodone != NULL ?
 	    &vnode_async_pbuf_freecnt : &vnode_pbuf_freecnt;
-	bp = getpbuf(freecnt);
+	bp = getpbuf(freecnt);	// 获取一个物理缓存区
 
 	/*
 	 * Get the underlying device blocks for the file with VOP_BMAP().
 	 * If the file system doesn't support VOP_BMAP, use old way of
 	 * getting pages via VOP_READ.
+	 * 
+	 * 获取后备磁盘设备上的文件对应位置数据到 buffer 当中。如果有的文件系统不支持
+	 * vop_bmap 操作，那么就用 vop_read 替代
 	 */
 	error = VOP_BMAP(vp, foff / bsize, &bo, &bp->b_blkno, &after, &before);
 	if (error == EOPNOTSUPP) {

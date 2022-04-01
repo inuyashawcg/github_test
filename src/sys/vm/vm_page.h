@@ -236,9 +236,13 @@ struct vm_page {
  * 	 under PV management cannot be paged out via the
  * 	 object/vm_page_t because there is no knowledge of their pte
  * 	 mappings, and such pages are also not on any PQ queue.
+ * 
+ * VPO_UNMANAGED（由 OBJT_DEVICE、OBJT_PHYS 和 OBJT_SG 使用）表示该页面不在 PV 管理之下，
+ * 但在其他情况下应视为正常页面。不在PV管理下的页面无法通过 object/vm_page_t 调出， 因为不知道
+ * 它们的 pte 映射，而且这些页面也不在任何 PQ 队列中
  *
  */
-#define	VPO_KMEM_EXEC	0x01		/* kmem mapping allows execution */
+#define	VPO_KMEM_EXEC	0x01		/* kmem mapping allows execution kmem映射允许执行 */
 #define	VPO_SWAPSLEEP	0x02		/* waiting for swap to finish */
 #define	VPO_UNMANAGED	0x04		/* no PV management for page */
 #define	VPO_SWAPINPROG	0x08		/* swap I/O in progress on page */

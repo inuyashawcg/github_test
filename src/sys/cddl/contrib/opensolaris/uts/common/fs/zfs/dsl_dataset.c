@@ -73,6 +73,11 @@ SYSCTL_DECL(_vfs_zfs);
  * (default 1MB).  Larger blocks can be created by changing this tunable,
  * and pools with larger blocks can always be imported and used, regardless
  * of this setting.
+ * 
+ * SPA 支持高达 16MB 的块大小。然而，非常大的数据块可能会对i/o延迟产生影响（例如，将一个旋转的
+ * 磁盘占用约 300ms），也可能会对内存分配器产生影响。因此，我们不允许将 recordsize 设置为大于
+ * zfs_max_recordsize（默认1MB）。通过更改此可调参数可以创建更大的块，无论此设置如何，都可以
+ * 导入和使用具有更大块的池
  */
 int zfs_max_recordsize = 1 * 1024 * 1024;
 SYSCTL_INT(_vfs_zfs, OID_AUTO, max_recordsize, CTLFLAG_RWTUN,

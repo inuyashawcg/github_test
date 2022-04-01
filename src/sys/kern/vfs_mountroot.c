@@ -225,12 +225,23 @@ root_mounted(void)
 	return (root_mount_complete);
 }
 
-// 设置root_vnode的属性
+/*
+	该函数其实就是设置哪个文件系统的根节点作为系统根节点。可以看一下该函数的调用情况，就可以发现是在两个地方。
+	第一个是 devfs 挂载的时候，此时调用是为了将 devfs 的根节点设置成系统根节点，因为此时我们首先要获取设备
+	文件，然后才能挂载真正的根文件系统。
+	第二处就是 shuffle() 函数中。这个函数的功能其实就是处理系统 mount list 和挂载真正的根文件系统。shuffle
+	函数会调整所要挂载的根文件系统和 devfs 在链表中的位置关系(根文件系统在头部)，然后调用该函数。注意，最开始
+	链表中只有 devfs，所以此时的链表头部是 devfs mount pointer，所以系统根节点设置成了 devfs 根节点。
+	刷新之后将根文件系统的挂载点放到了链表头部，所以再调用该函数就会将所要挂载的根文件系统的根节点设置成系统根节点
+*/
 static void
 set_rootvnode(void)
 {
 	struct proc *p;
-
+	/*
+		这里取的是链表头部的 mount 结构。之前是 devfs，刷新之后会变成所要挂载的根文件系统。所以每次调用就会
+		根据 mountlist 头部文件系统类型刷新的系统根节点的指向
+	*/
 	if (VFS_ROOT(TAILQ_FIRST(&mountlist), LK_EXCLUSIVE, &rootvnode))
 		panic("Cannot find root vnode");
 
@@ -334,19 +345,42 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 	char *fspath;
 	int error;
 
+	/*
+		表示的是 mpdevfs 的下一个 mount 结构体。从代码逻辑来看，第一个 mount 结构就是
+		devfs 的，后面的那个元素应该是空的。
+		mpnroot： mount pointer new root
+		mporoot: mount pointer old root
+		也就是收新的根文件系统是在 devfs 后面的一个 mount 结构
+	*/
 	mpnroot = TAILQ_NEXT(mpdevfs, mnt_list); // mpdevfs下一个文件系统就是rootfs
 
 	/* Shuffle the mountlist. */
 	mtx_lock(&mountlist_mtx);
+	/*
+		旧的根文件系统是在 mountlist 的起始位置
+	*/
 	mporoot = TAILQ_FIRST(&mountlist);
-	TAILQ_REMOVE(&mountlist, mpdevfs, mnt_list); // 移除mpdevfs
+	TAILQ_REMOVE(&mountlist, mpdevfs, mnt_list);
+	/*
+		移除 devfs 挂载点，然后判断旧文件系统挂载点和 devfs 挂载点是否一致。
+		如果不一致的话，那就把新根文件系统挂载点从链表现在的位置上移除，然后
+		插入到链表头部。也就是说链表头部位置应该就是新根文件系统挂载点结构
+	*/
 	if (mporoot != mpdevfs) {
 		TAILQ_REMOVE(&mountlist, mpnroot, mnt_list);
 		TAILQ_INSERT_HEAD(&mountlist, mpnroot, mnt_list);
 	}
-	TAILQ_INSERT_TAIL(&mountlist, mpdevfs, mnt_list); // 队列头部插入mpdevfs
+	/*
+		如果旧根文件系统挂载点跟 devfs 是一样的，那也就是说 devfs mount 其实就是在链表头部，
+		那么直接就把 devfs mount 移动到链表尾部。此时链表头部位置刚好就是新根文件挂载点
+	*/
+	TAILQ_INSERT_TAIL(&mountlist, mpdevfs, mnt_list); // 队列尾部插入 mpdevfs
 	mtx_unlock(&mountlist_mtx);
 
+	/*
+		mount 结构在 vfs 中貌似也是会存在一个 namecache 的。所以在我们更新了 mountlist 的同时，
+		我们也要刷新一下 namecache
+	*/
 	cache_purgevfs(mporoot, true);
 	if (mporoot != mpdevfs)
 		cache_purgevfs(mpdevfs, true);

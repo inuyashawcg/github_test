@@ -56,6 +56,7 @@ struct dsl_pool;
 
 /*
  * Do not allow this dataset to be promoted.
+ 		不允许升级此数据集
  */
 #define	DS_FLAG_NOPROMOTE	(1ULL<<1)
 
@@ -121,14 +122,54 @@ struct dsl_pool;
 #define	DS_CREATE_FLAG_NODIRTY	(1ULL<<24)
 
 typedef struct dsl_dataset_phys {
+	/*
+		object number of the DSL directory referencing this dataset.
+	*/
 	uint64_t ds_dir_obj;		/* DMU_OT_DSL_DIR */
+	/*
+		If this dataset represents a filesystem, volume, or clone, this field
+		contains the 64 bit object number for the most recent snapshot taken;
+		this field is zero if no snapshots have been taken.
+
+		If this dataset represents a snapshot, this field contains the 64 bit
+		object number for the snapshot taken prior to this snapshot. This field
+		is zero if there are no previous snapshots.
+	*/
 	uint64_t ds_prev_snap_obj;	/* DMU_OT_DSL_DATASET */
+	/*
+		The transaction group number when the previous snapshot (pointed to by 
+		ds_prev_snap_obj) was taken.
+	*/
 	uint64_t ds_prev_snap_txg;
+	/*
+		This field is only used for datasets representing snapshots. It contains
+		the object number of the dataset which is the most recent snapshot. 
+		This field is always zero for datasets representing clones, volumes, or
+		filesystems.
+	*/
 	uint64_t ds_next_snap_obj;	/* DMU_OT_DSL_DATASET */
+	/*
+		Object number of a ZAP object (see Chapter 5) containing name value pairs
+		for each snapshot of this dataset. Each pair contains the name of the snapshot 
+		and the object number associated with it's DSL dataset structure.
+	*/
 	uint64_t ds_snapnames_zapobj;	/* DMU_OT_DSL_DS_SNAP_MAP 0 for snaps */
+	/*
+		Always zero if not a snapshot. For snapshots, this is the number of references
+		to this snapshot: 1 (from the next snapshot taken, or from the active dataset 
+		if no snapshots have been taken) + the number of clones originating from this
+		snapshot
+	*/
 	uint64_t ds_num_children;	/* clone/snap children; ==0 for head */
 	uint64_t ds_creation_time;	/* seconds since 1970 */
+	/*
+		The transaction group number in which this dataset was created.
+	*/
 	uint64_t ds_creation_txg;
+	/*
+		 The object number of the deadlist (an array of blkptr's deleted since the
+		 last snapshot).
+	*/
 	uint64_t ds_deadlist_obj;	/* DMU_OT_DEADLIST */
 	/*
 	 * ds_referenced_bytes, ds_compressed_bytes, and ds_uncompressed_bytes
@@ -138,6 +179,14 @@ typedef struct dsl_dataset_phys {
 	uint64_t ds_referenced_bytes;
 	uint64_t ds_compressed_bytes;
 	uint64_t ds_uncompressed_bytes;
+	/*
+		When a snapshot is taken, its initial contents are identical to that
+		of the active copy of the data. As the data changes in the active copy,
+		more and more data becomes unique to the snapshot (the data diverges 
+		from the snapshot). As that happens, the amount of data unique to the 
+		snapshot increases. The amount of unique snapshot data is stored in this
+		field: it is zero for clones, volumes, and filesystems.
+	*/
 	uint64_t ds_unique_bytes;	/* only relevant to snapshots */
 	/*
 	 * The ds_fsid_guid is a 56-bit ID that can change to avoid
@@ -145,8 +194,16 @@ typedef struct dsl_dataset_phys {
 	 * change, so there is a small probability that it will collide.
 	 */
 	uint64_t ds_fsid_guid;
+	/*
+		 64 bit global id for this dataset. This value never changes d
+		 uring the lifetime of the object set.
+	*/
 	uint64_t ds_guid;
 	uint64_t ds_flags;		/* DS_FLAG_* */
+	/* 
+		Block pointer containing the location of the object set that this
+		dataset represents.
+	*/
 	blkptr_t ds_bp;
 	uint64_t ds_next_clones_obj;	/* DMU_OT_DSL_CLONES */
 	uint64_t ds_props_obj;		/* DMU_OT_DSL_PROPS for snaps */
@@ -154,7 +211,7 @@ typedef struct dsl_dataset_phys {
 	uint64_t ds_pad[5]; /* pad out to 320 bytes for good measure */
 } dsl_dataset_phys_t;
 
-typedef struct dsl_dataset {
+typedef struct  dsl_dataset {
 	dmu_buf_user_t ds_dbu;
 	rrwlock_t ds_bp_rwlock; /* Protects ds_phys->ds_bp */
 

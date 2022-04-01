@@ -84,6 +84,8 @@
  *	reference objects (files or zvols) in other pools, but by
  *	definition they must have an existing reference, and will never need
  *	to lookup a spa_t by name.
+ 		它不需要处理递归。create 或 destroy 可以引用其他池中的对象（文件或zvol），但根据定义，
+		它们必须有一个现有的引用，并且永远不需要按名称查找 spa_t
  *
  * spa_refcount (per-spa refcount_t protected by mutex)
  *
@@ -92,6 +94,8 @@
  *	the refcount is never really 'zero' - opening a pool implicitly keeps
  *	some references in the DMU.  Internally we check against spa_minref, but
  *	present the image of a zero/non-zero value to consumers.
+ 		在内部，refcount从来都不是真正的“零”——打开池会隐式地在DMU中保留一些引用。在内部，
+		我们对照 spa_minref 进行检查，但向消费者展示零/非零价值的形象。
  *
  * spa_config_lock[] (per-spa array of rwlocks)
  *
@@ -102,6 +106,7 @@
  *		- RW_WRITER to change the vdev config
  *
  * The locking order is fairly straightforward:
+ * 锁定顺序相当直接
  *
  *		spa_namespace_lock	->	spa_refcount
  *
@@ -116,7 +121,7 @@
  *		spa_namespace_lock	->	spa_config_lock[]
  *
  *	The namespace lock must always be taken before the config lock.
- *
+		namespace lock 必须要 config lock 之前获取到
  *
  * The spa_namespace_lock can be acquired directly and is globally visible.
  *
@@ -611,6 +616,8 @@ spa_config_held(spa_t *spa, int locks, krw_t rw)
 /*
  * Lookup the named spa_t in the AVL tree.  The spa_namespace_lock must be held.
  * Returns NULL if no matching spa_t is found.
+ * 在 AVL 树中查找已知命名的 spa 对象。此时一定要持有 spa_namespace_lock 锁。如果没有
+ * 匹配到，则返回 null
  */
 spa_t *
 spa_lookup(const char *name)
@@ -631,7 +638,7 @@ spa_lookup(const char *name)
 	cp = strpbrk(search.spa_name, "/@#");
 	if (cp != NULL)
 		*cp = '\0';
-
+	/* 直接调用 avl 接口即可 */
 	spa = avl_find(&spa_namespace_avl, &search, &where);
 
 	return (spa);
@@ -713,7 +720,9 @@ spa_add(const char *name, nvlist_t *config, const char *altroot)
 	mutex_init(&spa->spa_suspend_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&spa->spa_vdev_top_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&spa->spa_feat_stats_lock, NULL, MUTEX_DEFAULT, NULL);
-
+	/*
+		cv: Conditional variable，进程/线程数据同步使用
+	*/
 	cv_init(&spa->spa_async_cv, NULL, CV_DEFAULT, NULL);
 	cv_init(&spa->spa_evicting_os_cv, NULL, CV_DEFAULT, NULL);
 	cv_init(&spa->spa_proc_cv, NULL, CV_DEFAULT, NULL);

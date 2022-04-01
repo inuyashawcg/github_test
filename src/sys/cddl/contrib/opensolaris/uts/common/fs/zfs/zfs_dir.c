@@ -62,6 +62,9 @@
 /*
  * zfs_match_find() is used by zfs_dirent_lookup() to peform zap lookups
  * of names after deciding which is the appropriate lookup interface.
+ * 
+ * zfs_match_find() 由 zfs_dirent_lookup() 在决定哪个是合适的查找接口后，
+ * 用于对名称进行 zap 查找
  */
 static int
 zfs_match_find(zfsvfs_t *zfsvfs, znode_t *dzp, const char *name,
@@ -74,6 +77,7 @@ zfs_match_find(zfsvfs_t *zfsvfs, znode_t *dzp, const char *name,
 		/*
 		 * In the non-mixed case we only expect there would ever
 		 * be one match, but we need to use the normalizing lookup.
+		 * 在非混合情况下，我们只希望有一个匹配，但我们需要使用规范化查找
 		 */
 		error = zap_lookup_norm(zfsvfs->z_os, dzp->z_id, name, 8, 1,
 		    zoid, mt, NULL, 0, NULL);
@@ -90,6 +94,8 @@ zfs_match_find(zfsvfs_t *zfsvfs, znode_t *dzp, const char *name,
  * dvp being locked gives us a guarantee that there are no concurrent
  * modification of the directory and, thus, if a node can be found in
  * the directory, then it must not be unlinked.
+ * dvp被锁定为我们提供了一个保证，即不会同时修改目录，因此，如果可以在目录中找到一个
+ * 节点，那么它就不能被解除链接
  *
  * Input arguments:
  *	dzp	- znode for directory
@@ -131,6 +137,8 @@ zfs_dirent_lookup(znode_t *dzp, const char *name, znode_t **zpp, int flag)
 	 * the file system is created.  These are stored in the
 	 * zfsvfs->z_case and zfsvfs->z_norm fields.  These choices
 	 * affect how we perform zap lookups.
+	 * 创建文件系统时，会设置区分大小写和规范化首选项。它们存储在 zfsvfs->z_case 和
+	 * zfsvfs->z_norm 字段中。这些选择会影响我们执行zap查找的方式
 	 *
 	 * When matching we may need to normalize & change case according to
 	 * FS settings.
@@ -168,6 +176,10 @@ zfs_dirent_lookup(znode_t *dzp, const char *name, znode_t **zpp, int flag)
 
 	if (dzp->z_unlinked && !(flag & ZXATTR))
 		return (ENOENT);
+	/*
+		ZXATTR 宏定义表示我们想要的是一个 xattr dir，此时我们要调用的是 sa_lookup。
+		所以说 sa 处理的是文件 attribute？ 
+	*/
 	if (flag & ZXATTR) {
 		error = sa_lookup(dzp->z_sa_hdl, SA_ZPL_XATTR(zfsvfs), &zoid,
 		    sizeof (zoid));
@@ -176,6 +188,7 @@ zfs_dirent_lookup(znode_t *dzp, const char *name, znode_t **zpp, int flag)
 	} else {
 		error = zfs_match_find(zfsvfs, dzp, name, mt, &zoid);
 	}
+
 	if (error) {
 		if (error != ENOENT || (flag & ZEXISTS)) {
 			return (error);
