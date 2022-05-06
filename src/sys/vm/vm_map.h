@@ -91,6 +91,8 @@ typedef u_int vm_eflags_t;
 		Normally, the sub_map member is only used by system maps to indicate that
     a memory range is managed by a subordinate system map. Within a user
     process map, each struct vm_map_entry is backed by a struct vm_object.
+		通常，sub_map 成员仅由系统映射使用，以指示内存范围由从属系统映射管理。在用户进程映射中，
+		每个struct vm_map_entry 都由 struct vm_object 支持 (只在用户进程中才是一个 vm_object?)
  */
 union vm_map_object {
 	struct vm_object *vm_object;	/* object object */
@@ -102,6 +104,7 @@ union vm_map_object {
  *	a VM object (or sharing map) and offset into that object,
  *	and user-exported inheritance and protection information.
  *	Also included is control information for virtual copy operations.
+
 	- 地址映射条目包括起始地址和结束地址、VM对象（或共享映射）和该对象的偏移量，
 	以及用户导出的继承和保护信息。还包括虚拟复制操作的控制信息。
 	- 表示一段连续的虚拟地址范围，这些地址共享保护权限和继承属性，并且使用相同的
@@ -135,8 +138,9 @@ struct vm_map_entry {
 	/*
 		The amount of	free, unmapped address space adjacent to and immediately
 		following	this map entry.
+		与此映射条目相邻并紧随其后的可用未映射地址空间量
 	*/
-	vm_size_t adj_free;		/* amount of adjacent free space */
+	vm_size_t adj_free;		/* amount of adjacent free space 相邻可用空间的数量 */
 	/*
 		The maximum amount of	contiguous free	space in this map entry's	subtree.
 	*/
@@ -147,6 +151,7 @@ struct vm_map_entry {
 	union vm_map_object object;	/* object I point to 所关联的object */
 	/*
 		Offset within	the object which is mapped from	start onwards.
+		从起点开始映射的对象内的偏移
 	*/
 	vm_ooffset_t offset;		/* offset into object */
 	vm_eflags_t eflags;		/* map entry flags 标志符 */
@@ -306,7 +311,7 @@ struct vm_map {
 	int nentries;			/* Number of entries 应该是 map_entry 的数量 */
 	vm_size_t size;			/* virtual size 该结构体所管理的总的虚拟地址空间的大小 */
 	/*
-		Used to determine if	the map	has changed since its last access.
+		Used to determine if the map has changed since its last access.
 	*/
 	u_int timestamp;		/* Version number */
 	/*
@@ -461,7 +466,9 @@ long vmspace_resident_count(struct vmspace *vmspace);
 #endif	/* _KERNEL */
 
 
-/* XXX: number of kernel maps to statically allocate */
+/* XXX: number of kernel maps to statically allocate
+	要静态分配的内核映射数
+*/
 #define MAX_KMAP	10
 
 /*

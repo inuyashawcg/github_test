@@ -103,12 +103,16 @@ __FBSDID("$FreeBSD: releng/12.0/sys/vm/vm_map.c 338370 2018-08-29 12:24:19Z kib 
  *	and sharing of virtual memory objects.  In addition,
  *	this module provides for an efficient virtual copy of
  *	memory from one map to another.
+ 		虚拟内存映射提供虚拟内存对象的映射、保护和共享。此外，该模块还提供了
+		从一个映射到另一个映射的高效虚拟内存拷贝
  *
  *	Synchronization is required prior to most operations.
+ 		大多数操作之前都需要同步
  *
  *	Maps consist of an ordered doubly-linked list of simple
  *	entries; a self-adjusting binary search tree of these
  *	entries is used to speed up lookups.
+ 		maps 由简单条目的有序双链接列表组成；这些条目的自调整二叉搜索树用于加快查找速度
  *
  *	Since portions of maps are specified by start/end addresses,
  *	which may not align with existing map entries, all
@@ -117,15 +121,26 @@ __FBSDID("$FreeBSD: releng/12.0/sys/vm/vm_map.c 338370 2018-08-29 12:24:19Z kib 
  *	start or end value.]  Note that these clippings may not
  *	always be necessary (as the two resulting entries are then
  *	not changed); however, the clipping is done for convenience.
+ 		由于映射的部分由开始/结束地址指定，这些地址可能与现有的映射条目不一致，所以所有例程
+		仅将条目“剪辑”到这些开始/结束值。[也就是说，一个条目被分成两部分，以起始值或结束值为边界]
+		请注意，这些剪辑可能并不总是必要的（因为两个结果条目随后不会更改）；然而，剪辑是为了方便
  *
  *	As mentioned above, virtual copy operations are performed
  *	by copying VM object references from one map to
  *	another, and then marking both regions as copy-on-write.
+    如上所述，虚拟复制操作是通过将 VM 对象引用从一个映射复制到另一个映射，然后将这两个区域标记为
+		写时复制来执行的
  */
 
 static struct mtx map_sleep_mtx;
+/*
+	map entry zone
+*/
 static uma_zone_t mapentzone;
 static uma_zone_t kmapentzone;
+/*
+	map zone
+*/
 static uma_zone_t mapzone;
 static uma_zone_t vmspace_zone;
 static int vmspace_zinit(void *mem, int size, int flags);
@@ -184,15 +199,20 @@ static void vm_map_wire_entry_failure(vm_map_t map, vm_map_entry_t entry,
  *
  *	Initialize the vm_map module.  Must be called before
  *	any other vm_map routines.
+ 		初始化 vm_map 模块。必须在任何其他 vm_map 例程之前调用
  *
  *	Map and entry structures are allocated from the general
  *	purpose memory pool with some exceptions:
+ 		映射和条目结构是从通用内存池分配的，但有一些例外:
  *
  *	- The kernel map and kmem submap are allocated statically.
  *	- Kernel map entries are allocated out of a static pool.
+			内核映射和kmem子映射是静态分配的
+			内核映射项是从静态池中分配出来的
  *
  *	These restrictions are necessary since malloc() uses the
  *	maps and requires map entries.
+ 		这些限制是必要的，因为 malloc() 使用映射并需要映射条目
  */
 
 void
@@ -206,6 +226,10 @@ vm_map_startup(void)
 	    NULL,
 #endif
 	    vm_map_zinit, NULL, UMA_ALIGN_PTR, UMA_ZONE_NOFREE);
+	/*
+		创建了 mapzone，应该就是为了存放 vm_map 结构体。MAX_KMAP 表示的是要静态分配
+		的内核映射数，这里会提前给这些需要静态分配的映射创建 zone
+	*/
 	uma_prealloc(mapzone, MAX_KMAP);
 	kmapentzone = uma_zcreate("KMAP ENTRY", sizeof(struct vm_map_entry),
 	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR,
@@ -241,6 +265,9 @@ vm_map_zinit(void *mem, int size, int flags)
 
 	map = (vm_map_t)mem;
 	memset(map, 0, sizeof(*map));
+	/*
+		一个是 system lock，一个是 user lock
+	*/
 	mtx_init(&map->system_mtx, "vm map (system)", NULL, MTX_DEF | MTX_DUPOK);
 	sx_init(&map->lock, "vm map (user)");
 	return (0);
@@ -274,8 +301,11 @@ vm_map_zdtor(void *mem, int size, void *arg)
 /*
  * Allocate a vmspace structure, including a vm_map and pmap,
  * and initialize those structures.  The refcnt is set to 1.
+ * 申请一个 vmspace 结构，包括一个 vm_map 和 pmap，并且初始化这些结构体。
+ * 引用计数设置为1
  *
  * If 'pinit' is NULL then the embedded pmap is initialized via pmap_pinit().
+ * 如果 pinit 为空，则通过 pmap_pinit() 初始化嵌入式 pmap
  */
 struct vmspace *
 vmspace_alloc(vm_offset_t min, vm_offset_t max, pmap_pinit_t pinit)
@@ -775,6 +805,7 @@ vmspace_resident_count(struct vmspace *vmspace)
  *	Creates and returns a new empty VM map with
  *	the given physical map structure, and having
  *	the given lower and upper address bounds.
+		创建并返回一个空的 vm_map。注意此时已经给定了 pmap，并且限定了地址范围
  */
 vm_map_t
 vm_map_create(pmap_t pmap, vm_offset_t min, vm_offset_t max)
@@ -790,6 +821,7 @@ vm_map_create(pmap_t pmap, vm_offset_t min, vm_offset_t max)
 /*
  * Initialize an existing vm_map structure
  * such as that in the vmspace structure.
+ * 初始化现有的 vm_map 结构，例如 vmspace 中的结构
  */
 static void
 _vm_map_init(vm_map_t map, pmap_t pmap, vm_offset_t min, vm_offset_t max)
@@ -817,9 +849,10 @@ vm_map_init(vm_map_t map, pmap_t pmap, vm_offset_t min, vm_offset_t max)
 }
 
 /*
- *	vm_map_entry_dispose:	[ internal use only ]
+ *	vm_map_entry_dispose(处置，处理):	[ internal use only ]
  *
  *	Inverse of vm_map_entry_create.
+		create 函数的逆操作
  */
 static void
 vm_map_entry_dispose(vm_map_t map, vm_map_entry_t entry)
@@ -843,7 +876,7 @@ vm_map_entry_create(vm_map_t map)
 	else
 		new_entry = uma_zalloc(mapentzone, M_WAITOK);
 	if (new_entry == NULL)
-		panic("vm_map_entry_create: kernel resources exhausted");
+		panic("vm_map_entry_create: kernel resources exhausted (枯竭的，耗尽的)");
 	return (new_entry);
 }
 
@@ -852,6 +885,7 @@ vm_map_entry_create(vm_map_t map)
  *
  *	Set the expected access behavior, either normal, random, or
  *	sequential.
+		设置期望的访问行为，normal、random 或者 sequential(顺序的，时序的)
  */
 static inline void
 vm_map_entry_set_behavior(vm_map_entry_t entry, u_char behavior)
@@ -892,6 +926,9 @@ vm_map_entry_set_max_free(vm_map_entry_t entry)
  *	The map must be locked, and leaves it so.
  *
  *	Returns: the new root.
+
+		splay tree： 伸展树
+			https://www.cnblogs.com/vamei/archive/2013/03/24/2976545.html
  */
 static vm_map_entry_t
 vm_map_entry_splay(vm_offset_t addr, vm_map_entry_t root)
@@ -992,6 +1029,7 @@ vm_map_entry_splay(vm_offset_t addr, vm_map_entry_t root)
  *	vm_map_entry_{un,}link:
  *
  *	Insert/remove entries from maps.
+		link 表示的应该是插入操作，unlink 表示的应该是删除操作
  */
 static void
 vm_map_entry_link(vm_map_t map,
@@ -1068,6 +1106,8 @@ vm_map_entry_unlink(vm_map_t map,
  *	and propagate that value up the tree.  Call this function after
  *	resizing a map entry in-place, that is, without a call to
  *	vm_map_entry_link() or _unlink().
+		重新计算 vm_map_entry 之后的可用空闲空间大小，并且将该值传播到树中。在适当调整
+		map entry 大小之后调用此函数。即不调用 entry link 和 unlink 函数
  *
  *	The map must be locked, and leaves it so.
  */
@@ -1079,6 +1119,8 @@ vm_map_entry_resize_free(vm_map_t map, vm_map_entry_t entry)
 	 * Using splay trees without parent pointers, propagating
 	 * max_free up the tree is done by moving the entry to the
 	 * root and making the change there.
+	 * 使用没有父指针的 splay 树，通过将条目移动到根并在那里进行更改来传播
+	 * max_free
 	 */
 	if (entry != map->root)
 		map->root = vm_map_entry_splay(entry->start, map->root);
@@ -1096,6 +1138,10 @@ vm_map_entry_resize_free(vm_map_t map, vm_map_entry_t entry)
  *	in the "entry" parameter.  The boolean
  *	result indicates whether the address is
  *	actually contained in the map.
+
+ 		查找包含给定地图中指定地址（或紧靠其前）的地图条目；
+		条目在“entry”参数中返回。布尔结果指示地址是否实际
+		包含在映射中
  */
 boolean_t
 vm_map_lookup_entry(
@@ -1109,8 +1155,16 @@ vm_map_lookup_entry(
 	/*
 	 * If the map is empty, then the map entry immediately preceding
 	 * "address" is the map's header.
+	 * 如果地图为空，则紧靠“地址”前面的地图条目是地图的标题
 	 */
 	cur = map->root;
+	/*
+		cur 首先指定为搜索树根节点。map 中的设计也是链表+搜索树的形式，当我们要快速
+		查找的时候，可以利用树来进行；当 entry 数量比较少的时候，不需要构造树结构，
+		通过链表就可以实现快速查找
+		下面就是当 root == null 时，说明 entry 没有构造成树结构，所以跳转到链表结构
+		中查找
+	*/
 	if (cur == NULL)
 		*entry = &map->header;
 	else if (address >= cur->start && cur->end > address) {
@@ -1123,6 +1177,8 @@ vm_map_lookup_entry(
 		 * restructures the binary search tree; it does not otherwise
 		 * change the map.  Thus, the map's timestamp need not change
 		 * on a temporary upgrade.
+		 * Splay需要在地图上设置写锁。然而，它只重构了二叉搜索树；否则它不会改变地图。
+		 * 因此，地图的时间戳不需要在临时升级时更改
 		 */
 		map->root = cur = vm_map_entry_splay(address, cur);
 		if (!locked)
@@ -1132,6 +1188,8 @@ vm_map_lookup_entry(
 		 * If "address" is contained within a map entry, the new root
 		 * is that map entry.  Otherwise, the new root is a map entry
 		 * immediately before or after "address".
+		 * 如果“地址”包含在映射条目中，则新根就是该映射条目。否则，新根目录就是“地址”
+		 * 之前或之后的映射条目
 		 */
 		if (address >= cur->start) {
 			*entry = cur;
@@ -1171,6 +1229,8 @@ vm_map_lookup_entry(
  *	Inserts the given whole VM object into the target
  *	map at the specified address range.  The object's
  *	size should match that of the address range.
+ 		将给定的整个VM对象插入到指定地址范围的目标映射中，对象的大小应与
+		地址范围的大小匹配
  *
  *	Requires that the map be locked, and leaves it so.
  *
@@ -1231,6 +1291,9 @@ vm_map_insert(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 
 	/*
 	 * Assert that the next entry doesn't overlap the end point.
+	 	 断言下一个条目不与终点重叠。当前 entry 的起始地址小于 start，如果下一个 entry 的
+		 起始地址大小于 end，说明我们希望得到的这块空间横跨了两个 entry，这种情况肯定是不被
+		 允许的
 	 */
 	if (prev_entry->next->start < end)
 		return (KERN_NO_SPACE);
@@ -1314,6 +1377,7 @@ charged:
 		 * We were able to extend the object.  Determine if we
 		 * can extend the previous map entry to include the
 		 * new range as well.
+		 * 我们能够扩展这个 object。确定是否可以扩展上一个 map_entry 以包括新范围
 		 */
 		if (prev_entry->inheritance == inheritance &&
 		    prev_entry->protection == prot &&
@@ -1335,6 +1399,8 @@ charged:
 		 * map entry, we have to create a new map entry.  We
 		 * must bump the ref count on the extended object to
 		 * account for it.  object may be NULL.
+		 * 如果我们可以扩展对象，但不能扩展地图条目，我们必须创建一个新的地图条目。
+		 * 我们必须在扩展对象上增加ref计数来解释它。对象可能为空
 		 */
 		object = prev_entry->object.vm_object;
 		offset = prev_entry->offset +

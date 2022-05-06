@@ -1494,7 +1494,7 @@ tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
 	vm_page_t m;	/* struct vm_page* */
 	vm_pindex_t idx, newpages, oldpages;	/* unsigned long */
 	off_t oldsize;
-	int base, rv;
+	int base, rv;	// rv: return value?
 
 	MPASS(vp->v_type == VREG);
 	MPASS(newsize >= 0);
@@ -1541,10 +1541,23 @@ tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
 retry:
 			m = vm_page_lookup(uobj, idx);
 			if (m != NULL) {
+				/*
+					如果找到了对应的 vm_page，首先要判断它是否处于繁忙状态。如果是的话，
+					我们要将该进程进行睡眠，等待该页面可用
+				*/
 				if (vm_page_sleep_if_busy(m, "tmfssz"))
 					goto retry;
 				MPASS(m->valid == VM_PAGE_BITS_ALL);
 			} else if (vm_pager_has_page(uobj, idx, NULL, NULL)) {
+				/*
+					pager 中的 radix tree 包含有 idx 页面对应的磁盘块号？推测是表明该 idx
+					包含有对应的磁盘块，但是目前的话还没有将数据从磁盘读入到内存当中，所以也就
+					没有相应的 vm_page。但是此时我们要修改这个 page，所以就需要利用 getpages
+					将这部分数据读入到磁盘当中。
+					getpages 应该也是支持一次读入多少个 page (函数第三个参数是 count，应该
+					就是表示我们要读取多少个页面进来)。这里是读取1个页，因为我们所要修改的数据
+					就是这一个页
+				*/
 				m = vm_page_alloc(uobj, idx, VM_ALLOC_NORMAL |
 				    VM_ALLOC_WAITFAIL);
 				if (m == NULL)
@@ -1560,6 +1573,9 @@ retry:
 					 * for asynchronous laundering.  The
 					 * current operation is not regarded
 					 * as an access.
+					 * 由于该页面不是常驻页面，因此最近未被访问，
+					 * 因此立即将其排队进行异步清洗。当前操作不被
+					 * 视为访问
 					 */
 					vm_page_launder(m);
 					vm_page_unlock(m);
@@ -1576,6 +1592,11 @@ retry:
 				}
 			}
 			if (m != NULL) {
+				/*
+					从这里可以看出，base 表示的是 newsize 在最后一个数据块中的 offset，处理的
+					应该是 newsize 不是刚好是一个 page 边界的情况。那么我们就要将页剩余部分大小
+					的空间数据全部置零；然后标记这个页是脏页；最后标记这个页是不能 swap out？
+				*/
 				pmap_zero_page_area(m, base, PAGE_SIZE - base);
 				vm_page_dirty(m);
 				vm_pager_page_unswapped(m);

@@ -69,9 +69,11 @@ static void dev_pager_free_page(vm_object_t object, vm_page_t m);
 static int dev_pager_populate(vm_object_t object, vm_pindex_t pidx,
     int fault_type, vm_prot_t, vm_pindex_t *first, vm_pindex_t *last);
 
-/* list of device pager objects */
+/* list of device pager objects 
+	pagerlist 其实就是一个 vm_object 类型的链表
+*/
 static struct pagerlst dev_pager_object_list;
-/* protect list manipulation */
+/* protect list manipulation 保护列表操作 */
 static struct mtx dev_pager_mtx;
 
 struct pagerops devicepagerops = {
@@ -107,7 +109,7 @@ static struct cdev_pager_ops old_dev_pager_ops = {
 static void
 dev_pager_init(void)
 {
-
+	// 初始化链表和保护锁
 	TAILQ_INIT(&dev_pager_object_list);
 	mtx_init(&dev_pager_mtx, "dev_pager list", NULL, MTX_DEF);
 }
@@ -116,13 +118,18 @@ vm_object_t
 cdev_pager_lookup(void *handle)
 {
 	vm_object_t object;
-
+	/*
+		handle 应该就是 vnode pointer
+	*/
 	mtx_lock(&dev_pager_mtx);
 	object = vm_pager_object_lookup(&dev_pager_object_list, handle);
 	mtx_unlock(&dev_pager_mtx);
 	return (object);
 }
 
+/*
+	注意，这里传入的是 old operations
+*/
 vm_object_t
 cdev_pager_allocate(void *handle, enum obj_type tp, struct cdev_pager_ops *ops,
     vm_ooffset_t size, vm_prot_t prot, vm_ooffset_t foff, struct ucred *cred)
@@ -138,6 +145,7 @@ cdev_pager_allocate(void *handle, enum obj_type tp, struct cdev_pager_ops *ops,
 
 	/*
 	 * Offset should be page aligned.
+	 		偏移量应与页面对齐
 	 */
 	if (foff & PAGE_MASK)
 		return (NULL);
@@ -148,6 +156,10 @@ cdev_pager_allocate(void *handle, enum obj_type tp, struct cdev_pager_ops *ops,
 	 * possible off_t values as the mapping cookie to the driver.  At
 	 * this point, we know that both foff and size are a multiple
 	 * of the page size.  Do a check to avoid wrap.
+	 * 
+	 * 将mmap（2）文件偏移量视为设备映射的无符号值。这实际上允许用户将所有可能的 off_t 值
+	 * 作为映射 cookie 传递给驱动程序。此时，我们知道 foff 和 size 都是页面大小的倍数。
+	 * 做一个检查以避免包裹
 	 */
 	size = round_page(size);
 	pindex = UOFF_TO_IDX(foff) + UOFF_TO_IDX(size);
@@ -436,9 +448,10 @@ old_dev_pager_ctor(void *handle, vm_ooffset_t size, vm_prot_t prot,
 
 	/*
 	 * Make sure this device can be mapped.
+	 		首先要确保该设备是可以被映射的
 	 */
 	dev = handle;
-	csw = dev_refthread(dev, &ref);
+	csw = dev_refthread(dev, &ref);	// 增加设备的引用计数
 	if (csw == NULL)
 		return (ENXIO);
 
@@ -451,8 +464,11 @@ old_dev_pager_ctor(void *handle, vm_ooffset_t size, vm_prot_t prot,
 	npages = OFF_TO_IDX(size);
 	paddr = 0; /* Make paddr initialized for the case of size == 0. */
 	for (off = foff; npages--; off += PAGE_SIZE) {
+		/*
+			调用具体设备对应的 mmap() 函数
+		*/
 		if (csw->d_mmap(dev, off, &paddr, (int)prot, &dummy) != 0) {
-			dev_relthread(dev, ref);
+			dev_relthread(dev, ref);	// 对应上述操作，减少设备引用计数
 			return (EINVAL);
 		}
 	}

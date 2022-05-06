@@ -562,6 +562,7 @@ descend:
 
 /*
  * Look up the nearest entry at a position less than or equal to index.
+ 		在小于或等于索引的位置查找最近的条目
  */
 vm_page_t
 vm_radix_lookup_le(struct vm_radix *rtree, vm_pindex_t index)

@@ -1,0 +1,72 @@
+////////////// 202204012 //////////////
+  当我们想要访问某段数据、但是它目前没有在内存中时，VM 模块会申请一个 page(本质上是分配一块物理内存)，将磁盘上的数据
+读取到这块物理内存当中，然后将物理地址和虚拟地址建立映射关系，这样我们就可以访问某块数据了。所以，vm_page 跟 vnode 
+是非常类似的，都是有需要的时候才会被分配，用完了可能就直接释放或者放到空闲链表当中，也就是动态生成的。
+
+  对应到文件系统，当文件系统相对较小、内存相对较大的时候，其实是可以实现所有的文件都放到内存当中，此时所有文件对应的页
+也都是在内存中，所以 tmpfs 才不用通过 vm_fault 去动态申请 vm_page，而是直接利用 vm_object 直接找。因为这些页本来
+就都在内存里，或者 swapin 到内存当中。
+
+  但是当文件系统规模非常大的时候，内存肯定是不够用的，不可能将所有文件都放到内存当中，那就不能利用类似 tmpfs 这种机制
+来管理文件系统。还是要利用 vm_fault 机制，这样我们就可以只把需要用到的数据保留在内存当中，所以也就只需要给这部分数据
+分配 vm_page
+
+
+用 tmpfs 机制实现持久化内存文件系统的状态： (个人理解，仅供参考)
+  1、文件类中包含有 vm_object 成员，其中包含有文件对应的 vm_page 链表，此时每个 vm_page 都会对应一个物理页。
+    vm_page 中包含有物理地址成员，所以对应的物理地址也是有的
+  2、物理地址会映射一段虚拟地址，应该是在 kernel_map 下。kernel_map 许多模块都会使用到，所以文件关联的虚拟地址
+    就是在区间范围内随机产生的
+  3、当系统关机时，就需要把物理内存中的数据同步到磁盘，包括文件的元数据 (vm_object / vm_page 等)，否则下次系统
+    启动后想要读写文件是就找不到对应的数据
+  4、启动后访问文件，把磁盘块上的元数据和文件数据读取到对应的物理页 (vm_page 中包含物理地址)
+
+存在的问题：
+  1、vm_page 本来是动态分配的结构，结果现在变成了静态的
+  2、文件数据块会独占一部分物理内存
+  3、文件对应的虚拟地址是随机的，导致我们丧失了通过虚拟地址管理文件系统的能力  
+  4、文件系统大小受物理内存和 swap 分区大小的限制
+
+
+////////////// 202204013 //////////////
+  tmpfs 文件节点中的 vm_object 拿到的应该直接就是可用的物理页，是没有对应虚拟地址的(虚拟地址需要跟物理地址建立映射关系，
+但是在 tmpfs 函数中没有发现相应操作。再说当一个程序可以直接使用物理地址的时候，就没有必要在费时费力在映射到虚拟地址，然后
+在用虚拟地址找物理地址)。所以 tmpfs 操作的始终都是物理页，没有虚拟页。只有当物理地址和虚拟地址完全一一对应的时候，可以考虑
+使用这种方式
+
+
+////////////// 202204014 //////////////
+  vmem 是通过构建多个链表管理 vmem_btag (boundary tag)，它表示的其实就是一个 address+size，我们申请的时候就可以利用
+btag 来分配一块满足要求的地址空间。里边会涉及到一个 import 函数，它是利用 vm_map / vm_map_entry 找一块地址空间中的可用
+空间，然后给 vmem 使用。
+  目前持久化内存的设计是一个 object 管理一整块地址空间，它其实是会关联一个 vm_map_entry，所以 vmem 如果以现有的方式去申请
+空间的话，就必须从 object 管理的整个地址空间去拿。这就会导致文件系统使用的地址与 vmem 使用的地址混杂在一起，这样其实是不可行
+的。因为它们连个对地址的管理方式不一样，一个文件系统自己管理，另外一个是利用 vm_map 的机制管理，两者不是互通的。
+
+解决方法：
+  1、在文件系统中添加类似 vm_map 中的地址管理方式 (splay tree，伸展树)，应该要划出一块完整的子区域专门处理可执行文件连续存放。
+    剩下区域仍然按照原有的管理方式 (以为并不需要所有的文件都要连续存放)
+  2、在地址空间中额外添加一个 vm_map 管理可执行文件。在文件系统超级块中添加相应的成员单独存放这块地址的相关信息(可以认为是 vmem
+    结构部分成员在文件系统中的体现)。每个可执行文件仍然会对应一个文件节点，但是不再包含有数据块索引，而是利用内部指针直接直到某块
+    连续地址空间的起始地址
+
+
+  在 tptfs 中引入 std::string 需要修改 cmake 文件，而且顺序一定不能被改变。原系统中就包含有 string.h 等头文件，所以 clang
+编译时搜索路径很可能会混在一起，导致编译出错
+
+  系统原有 systm.h 中会包含有一些宏 malloc memcpy 等，所以编译的时候要将 #include<string> 等放在最前面，否则就会使得处理
+malloc 的时候进行宏展开，这样又会导致编译出错，如下：
+  /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/sys/systm.h:380:50: note: expanded from macro 'memcmp'
+  #define memcmp(b1, b2, len) __builtin_memcmp((b1), (b2), (len))
+                                                  ^
+  In file included from /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/VFile.cpp:2:
+  In file included from /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/VFile.h:12:
+  In file included from /home/mercury/Documents/code/qihai/rebuild_new/qihai/contrib/llvm-project/libcxx/include/string:522:
+  In file included from /home/mercury/Documents/code/qihai/rebuild_new/qihai/contrib/llvm-project/libcxx/include/algorithm:652:
+  In file included from /home/mercury/Documents/code/qihai/rebuild_new/qihai/contrib/llvm-project/libcxx/include/cstring:60:
+  In file included from /home/mercury/Documents/code/qihai/rebuild_new/qihai/contrib/llvm-project/libcxx/include/string.h:60:
+  /home/mercury/Documents/code/qihai/rebuild_new/qihai/include/string.h:63:6: error: expected expression
+  /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/sys/systm.h:380:56: note: expanded from macro 'memcmp'
+  #define memcmp(b1, b2, len) __builtin_memcmp((b1), (b2), (len))
+
+  将系统中定义的宏在库中定义的同名函数处进行了展开，所以后续库中使用这些函数的时候肯定参数就不对了(原函数只需要传入两个参数，结果宏展开之后要三个参数)

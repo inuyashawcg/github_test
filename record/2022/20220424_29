@@ -1,0 +1,252 @@
+////////////// 202204024 //////////////
+  mount -t tptfs tptfs /tpt
+
+  当不使用 class TptLib 中的静态成员函数时，错误如下：
+    root@:~ # mount -t tptfs tptfs /tpt
+      t[0] == 0x0000000000000001
+      t[1] == 0x0000000000000000
+      t[2] == 0x0000000000000008
+      t[3] == 0x00000000ffff66e8
+      t[4] == 0x0000000000000000
+      t[5] == 0x0000000000000001
+      t[6] == 0x0000000000000000
+      s[0] == 0x00000001def82640
+      s[1] == 0x000000000000000e
+      s[2] == 0x000000000000001e
+      s[3] == 0x000000000000001f
+      s[4] == 0x000000000000001c
+      s[5] == 0x0000000000000000
+      s[6] == 0x0000000000000000
+      s[7] == 0x0000000000000000
+      s[8] == 0x0000000000000000
+      s[9] == 0x0000000000000000
+      s[10] == 0x0000000000000000
+      s[11] == 0x0000000000000000
+      a[0] == 0x00000001101136f0
+      a[1] == 0x00000001bcad5ac0
+      a[2] == 0x0000000000000000
+      a[3] == 0x00000001def82818
+      a[4] == 0x0000000000020000
+      a[5] == 0xffffffd0096d52c0
+      a[6] == 0x0000000000000000
+      a[7] == 0x00000001def82d68
+      ra == 0x000000010c381b90
+      sp == 0x00000001def825f0
+      gp == 0x0000000000000000
+      tp == 0x000000010cf69954
+      sepc == 0x000000010c381654
+      sstatus == 0x0000000000004120
+      panic: Fatal page fault at 0x10c381654: 0x00000000000050
+      cpuid = 3
+      time = 1650788376
+      KDB: stack backtrace:
+      #0 0x10c1746d6 at kdb_backtrace+0x7c
+      #1 0x10c10f6ee at vpanic+0x202
+      #2 0x10c10f4e8 at panic+0x32
+      #3 0x10c019094 at do_trap_supervisor+0x5da
+      #4 0x10c018b90 at do_trap_supervisor+0xd6
+      #5 0x10c004508 at cpu_exception_handler_supervisor+0x68
+      #6 0x10c381b8c at _Z10tptfs_rootP5mountiPP5vnode+0x2c
+      #7 0x10c221f1e at resume_all_fs+0xd66
+      #8 0x10c21ceee at vfs_getopt_pos+0x44a
+      #9 0x10c21bbcc at vfs_donmount+0xa74
+      #10 0x10c21b108 at sys_nmount+0xce
+      #11 0x10c124ad4 at systemcall+0x100
+      #12 0x10c004fb0 at system_call+0x60
+      Uptime: 8s
+
+
+  当添加 class TptLib 静态函数的时候，报错如下：
+  root@:~ # mount -t tptfs tptfs /tpt
+    panic: vm_fault_lookup: fault on nofault entry, addr: 0x1def51000
+    cpuid = 3
+    time = 1650788602
+    KDB: stack backtrace:
+    Uptime: 12s
+
+  root@:~ # mount -t tptfs tptfs /tpt
+    random: unblocking device.
+    panic: vm_fault_lookup: fault on nofault entry, addr: 0x1def71000
+
+  root@:~ # mount -t tptfs tptfs /tpt
+    random: unblocking device.
+    panic: vm_fault_lookup: fault on nofault entry, addr: 0x1def8f000
+
+  Thread 1 hit Breakpoint 2, TptFileSystem::root (this=0x1101136f0 <tptFileSystem>, mp=0x1bcadf080, flags=524288, 
+      vpp=0x1def87818) at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptFileSystem.cpp:138
+  138	  struct vnode *vnode = nullptr;
+  (gdb) n
+  139	  int error = 0;
+  (gdb) 
+  142	  error = getVnode(mp, TPT_ROOTINO, LK_EXCLUSIVE, &vnode);
+  (gdb) p/x getVnode
+  $1 = 0x0
+
+
+  Thread 2 hit Breakpoint 2, TptFileSystem::root (this=0x1101136f0 <tptFileSystem>, mp=0x1bcad9080, flags=524288, 
+    vpp=0x1def6e818) at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptFileSystem.cpp:138
+  138	  struct vnode *vnode = nullptr;
+  (gdb) p this
+  $1 = (TptFileSystem *) 0x1101136f0 <tptFileSystem>
+  (gdb) p * this
+  $2 = {
+    <FileSystem> = {
+      <KernelObject> = {<No data fields>}, 
+      members of FileSystem:
+      _vptr$FileSystem = 0x0
+    }, 
+    members of TptFileSystem:
+    FsLock = 0xffffffd00a836380
+  }
+  (gdb) p/x this->getVnode
+  $3 = 0x0
+  (gdb) p/x & this->getVnode
+  $4 = 0x10c381776
+  (gdb) p/x this->getVnode  
+  $5 = 0x0
+
+  虚函数表指针 vptr 为空
+
+  修改 ldscript.riscv 脚本
+    ._kernel_ctors :
+    {
+      *libvm.a:*(.init_array)
+      *libkernel.a:*(.init_array)
+      *libpm.a:*(.init_array)
+      *libfs.a:*(.init_array)     // 额外增加
+      *libtptfs.a:*(.init_array)  // 额外增加
+    }
+
+
+////////////// 202204025 //////////////
+  TptFileSystem::getVnode (this=0x1101136f0 <tptFileSystem>, mp=0x1bcae2080, ino=2, flags=524288, vpp=0x1def96600)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptFileSystem.cpp:181
+  181	  ino_t offset = 0;
+  (gdb) n
+  182	  int error = 0;
+  (gdb) 
+  184	  thread = curthread;
+  (gdb) 
+  185	  error = vfs_hash_get(mp, ino, flags, thread, vpp, nullptr, nullptr);
+  (gdb) 
+  186	  if (error || *vpp != nullptr)
+  (gdb) 
+  189	  tpt_mount = TptLib::vfsMountToTptMount(mp);
+  (gdb) 
+  190	  offset = TptLib::inodeNumToPageOffset(superblock, ino);
+  (gdb) 
+  192	    TptLib::pageNumToVaddr(superblock, 
+  (gdb) 
+  193	      TptLib::inodeNumToPageNum(superblock, ino))))[offset];
+  (gdb) 
+  192	    TptLib::pageNumToVaddr(superblock, 
+  (gdb) 
+  193	      TptLib::inodeNumToPageNum(superblock, ino))))[offset];
+  (gdb) 
+  191	  inode = &(reinterpret_cast<struct tpt_inode*>(
+  (gdb) 
+  194	  if ((error = getnewvnode("tptfs", mp, &tpt_vnops, &vnode)) != 0) {
+  (gdb) p inode
+  $1 = (tpt_inode *) 0x1038f5461f2848
+
+  inode 应该是 256(0x100) 字节对齐的，正常来说16进制地址最后的两位应该是00，明显是不对的。要判断是超级块中的初始地址错误，
+还是 TptLib 中的函数出现错误(大概率是对方法宏的封装出现了问题)
+
+  (gdb) p tpt_mount->superblock 
+    $7 = (superblock *) 0x234000000
+    (gdb) p/x * tpt_mount->superblock 
+    $8 = {
+      page_size = 0x1000,
+      fragment_size = 0x1000,
+      superblock_size = 0x1000,
+      inode_size = 0x100,
+      start_virtual_page = 0x20000,
+      start_virtual_address = 0x234000000,
+      page_bitmap_vaddr = 0x234001000,
+      page_bitmap_offset = 0x20001,
+      page_bitmap_size = 0x1,
+      inode_bitmap_vaddr = 0x234002000,
+      inode_bitmap_offset = 0x20002,
+      inode_bitmap_size = 0x1,
+      inode_table_vaddr = 0x234003000,
+      inode_table_offset = 0x20003,
+      inode_table_size = 0x1f8,
+      page_data_vaddr = 0x2341fb000,
+      page_data_offset = 0x201fb,
+      page_data_size = 0x7e05,
+      inodes_count = 0x1f81,
+      inodes_free = 0x1f7e,
+      inodes_unused = 0x0,
+      pages_count = 0x8000,
+      pages_free = 0x7e05,
+      page_bitmap_flag = 0x0,
+      dir_count = 0x2,
+      inodes_per_page = 0x10,
+      write_time = 0x0,
+      magic_number = 0x2020,
+      read_only = 0x0,
+      modified_flag = 0x0,
+      default_hash_version = 0x0,
+      max_filesize = 0xffffffff,
+      hash_seed = {0x0, 0x0, 0x0, 0x0},
+      mount_point = {0x2f, 0x74, 0x70, 0x74, 0x0 <repeats 508 times>},
+      qbmask = 0xfff,
+      page_shift = 0xc,
+      fragment_shift = 0x0,
+      fsbtodb = 0x0,
+      fragments_per_page = 0x1,
+      is_format = 0x1,
+      features_incompat = 0x0,
+      features_compat = 0x0,
+      uhash = 0x0
+    }
+
+  从打印结果来看，superblock 的地址信息是对的，那基本可以确定是方法宏的修改出现了问题
+
+
+////////////// 202204026 //////////////
+  FreeBSD vfs 和文件系统的代码都存在的一个问题，就是有些功能函数过长，阅读起来非常难以理解。我个人经常出现的情况
+就是当时我把这段代码读懂了，过了一阵子回头再看，又忘记了具体的实现细节。即使已经对代码进行了重构，这种情况仍然无法
+避免。
+  这个其实就是大家经常说的代码可维护性的问题。对于我个人这种已经把源码详细阅读过一遍的尚且如此，那对于以后可能接手
+我目前工作的新员工来讲，更是灾难了。所以，这一次一定要把编码风格和注释写明白，提高代码可维护性
+
+  ext2 中有一个蜜汁操作： inode_opts 中裁剪文件的时候，逻辑块号传入的是一个负值，然后在 bmap 中又把这个负值多
+一步转换成正值，不知道是不是为了规避函数调用过程中的某些操作
+
+
+////////////// 202204027 //////////////
+ext2 中处理文件截断的基本操作流程：
+  1、首先判断文件当前长度和目标长度的大小关系。如果目标长度要大于当前文件长度，处理起来是比较方便的，直接给文件额外
+    申请内存空间即可
+  2、目标长度小于当前文件长度，这个时候就要对文件进行截断，也分成两种情况：第一种是只包含直接索引块，第二种是包含间接
+    索引块。如果涉及到间接索引块，那我们就要进一步处理，将间接块中的包含的所有块都释放掉
+  3、代码逻辑：首先根据目标长度计算索引块的使用情况，将计算后的结果保存到磁盘(ext2_update)。此时需要注意，这个状态
+    就是磁盘 inode 的最终状态，因为后面不会在对 inode 进行更新，仅仅刷新索引指针指向的数据块中的 entry 数据
+  4、文件系统会将数据原有的索引块号保存在一个临时的数组当中，当 inode 把新数据同步到磁盘之后，在将原有的数据从临时
+    数组中恢复到 inode 结构体 (这样做是为了后续能够更加方便的释放间接索引块)
+
+  tptfs 如何处理上述逻辑？
+    tptfs 所有的数据都是存放在内存当中，所以需要对上述逻辑进行微调。计算出的新索引我们存放到一个临时数组当中，让 inode
+    中原有的索引数组不变，然后就按照上述逻辑进行操作。等上述动作都完成之后，再去更新 inode 状态，保证最终的结果跟同步到
+    磁盘上是一样的
+
+
+////////////// 202204028 //////////////
+对于 ext2_getlbn() 函数算法实现的验证：
+  logical_block_number = 370000
+  addrs_per_page = 512
+  direct_index = 12
+  single_index = 512
+  double_index = 512*512 = 262144
+  triple_index = 512*512*512 = 134217728
+
+  所以， 370000 已经用到了第三级间接索引。第一轮循环是对数组中的第一个元素赋值
+    (gdb) p* ap
+    $4 = {in_lbn = -262670, in_off = 2}
+
+  ext2 逻辑块号设置的比较奇怪，都是设置成负数。然后分析一下逻辑块号的组成：
+    262670 - 262144 = 526
+    526 - 512 = 14
+    14 - 12 = 2
+  所以，它其实是包含了12个直接索引块，512个一级间接索引块，262144个二级间接索引块。最后还剩下2个块，因为

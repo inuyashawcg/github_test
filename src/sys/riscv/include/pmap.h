@@ -67,11 +67,12 @@ struct md_page {
 /*
  * This structure is used to hold a virtual<->physical address
  * association and is used mostly by bootstrap code
+ * 此结构用于保存虚拟<->物理地址关联，主要由引导代码使用
  */
 struct pv_addr {
-	SLIST_ENTRY(pv_addr) pv_list;
-	vm_offset_t	pv_va;
-	vm_paddr_t	pv_pa;
+	SLIST_ENTRY(pv_addr) pv_list;	// 通过链表统一管理
+	vm_offset_t	pv_va;	// 虚拟地址
+	vm_paddr_t	pv_pa;	// 物理地址
 };
 
 struct pmap {
@@ -90,6 +91,7 @@ typedef struct pv_entry {
 /*
  * pv_entries are allocated in chunks per-process.  This avoids the
  * need to track per-pmap assignments.
+ * pv_entries 在每个进程中分块分配。这避免了跟踪每个 pmap 分配的需要
  */
 #define	_NPCM	3
 #define	_NPCPV	168

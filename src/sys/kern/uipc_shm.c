@@ -162,7 +162,10 @@ uiomove_object_page(vm_object_t obj, size_t len, struct uio *uio)
 	vm_pindex_t idx;
 	size_t tlen;
 	int error, offset, rv;
-
+	/*
+		计算 offset 所在页的 index，然后计算 offset 在页中的偏移量，获取目标长度
+		与目标页剩余数据长度的较小值
+	*/
 	idx = OFF_TO_IDX(uio->uio_offset);
 	offset = uio->uio_offset & PAGE_MASK;
 	tlen = MIN(PAGE_SIZE - offset, len);
@@ -173,22 +176,31 @@ uiomove_object_page(vm_object_t obj, size_t len, struct uio *uio)
 	 * Read I/O without either a corresponding resident page or swap
 	 * page: use zero_region.  This is intended to avoid instantiating
 	 * pages on read from a sparse region.
+	 * 读取I/O时没有相应的常驻页或交换页：使用 zero_region。这是为了避免在从稀疏
+	 * 区域读取时实例化页面
 	 */
 	if (uio->uio_rw == UIO_READ && vm_page_lookup(obj, idx) == NULL &&
 	    !vm_pager_has_page(obj, idx, NULL, NULL)) {
+		/*
+			当 uio 执行的 read 操纵，并且 object 中没有对应 idx 的，并且 pager 也没有
+			找到对应页面的磁盘数据，那么就从 zero_region 中返回一个空的页面
+		*/
 		VM_OBJECT_WUNLOCK(obj);
 		return (uiomove(__DECONST(void *, zero_region), tlen, uio));
 	}
 
 	/*
-	 * Parallel reads of the page content from disk are prevented
-	 * by exclusive busy.
+	 * Parallel (平行的，同时发生的) reads of the page content from disk 
+	 	 are prevented by exclusive busy.
 	 *
 	 * Although the tmpfs vnode lock is held here, it is
-	 * nonetheless safe to sleep waiting for a free page.  The
+	 * nonetheless(尽管如此) safe to sleep waiting for a free page.  The
 	 * pageout daemon does not need to acquire the tmpfs vnode
 	 * lock to page out tobj's pages because tobj is a OBJT_SWAP
 	 * type object.
+	 * 尽管 tmpfs vnode 锁在这里，但在等待空闲页面时睡觉是安全的。pageout 守护进程
+	 * 不需要获取 tmpfs vnode 锁来分页 tobj 的页面，因为 tobj 是一个 OBJT_SWAP 
+	 * 类型对象
 	 */
 	m = vm_page_grab(obj, idx, VM_ALLOC_NORMAL | VM_ALLOC_NOBUSY);
 	if (m->valid != VM_PAGE_BITS_ALL) {

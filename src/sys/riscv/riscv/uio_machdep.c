@@ -54,6 +54,7 @@ __FBSDID("$FreeBSD: releng/12.0/sys/riscv/riscv/uio_machdep.c 295041 2016-01-29 
 /*
  * Implement uiomove(9) from physical memory using the direct map to
  * avoid the creation and destruction of ephemeral mappings.
+ * 使用直接映射从物理内存实现 uiomove()，以避免创建和销毁临时映射
  */
 int
 uiomove_fromphys(vm_page_t ma[], vm_offset_t offset, int n, struct uio *uio)

@@ -1217,7 +1217,7 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 			goto done;
 		}
 		if (obj->type == OBJT_VNODE && obj->handle != vp) {
-			vput(vp);
+			vput(vp);	// 减少 vnode 引用计数
 			vp = (struct vnode *)obj->handle;
 			/*
 			 * Bypass filesystems obey the mpsafety of the
@@ -1320,6 +1320,7 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize, vm_prot_t prot,
 	}
 	/*
 	 * cdevs do not provide private mappings of any kind.
+	 		cdevs 不提供任何类型的私有映射
 	 */
 	if ((*maxprotp & VM_PROT_WRITE) == 0 &&
 	    (prot & VM_PROT_WRITE) != 0)
@@ -1362,6 +1363,8 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize, vm_prot_t prot,
  * Internal version of mmap used by exec, sys5 shared memory, and
  * various device drivers.  Handle is either a vnode pointer, a
  * character device, or NULL for MAP_ANON.
+ * exec、sys5 共享内存和各种设备驱动程序使用的 mmap 的内部版本。handle 可以是
+ * vnode 指针、字符设备，也可以是 MAP_ANON 的 NULL
  */
 int
 vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
@@ -1433,6 +1436,9 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 /*
  * Internal version of mmap that maps a specific VM object into an
  * map.  Called by mmap for MAP_ANON, vm_mmap, shm_mmap, and vn_mmap.
+ * 
+ * 将特定 VM 对象映射到映射的 mmap 的内部版本。由 mmap 为 MAP_ANON、vm_mmap、
+ * shm_mmap 和 vn_mmap 调用。
  */
 int
 vm_mmap_object(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
@@ -1481,6 +1487,9 @@ vm_mmap_object(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	 * catches errors in device drivers (e.g. d_single_mmap()
 	 * callbacks) and other internal mapping requests (such as in
 	 * exec).
+	 * 我们目前只能处理页面对齐的文件偏移。mmap() 系统调用已经通过从文件偏移量中
+	 * 减去页面偏移量来实现这一点，但是这里的检查会捕获设备驱动程序 (例如d_single_mmap()回调)
+	 * 和其他内部映射请求(例如exec)中的错误。
 	 */
 	if (foff & PAGE_MASK)
 		return (EINVAL);

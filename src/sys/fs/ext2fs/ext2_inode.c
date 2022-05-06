@@ -247,7 +247,9 @@ ext2_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
 /*
  * Truncate the inode oip to at most length size, freeing the
  * disk blocks. 
- * 将 inode oip 截断为最大长度大小，释放磁盘块
+ * 将 inode oip 截断为最大长度大小，释放磁盘块。这个函数是函数截断最上层的接口，面向的是
+ * inode，后面才会进一步处理包含直接块和间接块的情况。C++ 中的一个很重要的设计就是要尽量
+ * 缩小类和函数的规模
  */
 static int
 ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
@@ -328,6 +330,12 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 	 * 于是增加了文件的长度；当分割的位置比文件本身长度要小的时候，则执行下面的代码分支
 	 */
 	/* I don't understand the comment above */
+	/*
+		首先我们要处理当 length 恰好是在 page_size 整数倍位置，也就是说我们不需要处理把一个页拆成
+		两部分的情况。如果 length 是在一个页的中间位置，那我们就需要把后面的部分清空 (因为这部分数据
+		已经不属于该文件了)。
+		另外要注意，此时我们只处理了文件存储的真实数据，还没有对文件的 metadata 处理，在下面
+	*/
 	offset = blkoff(fs, length);
 	if (offset == 0) {
 		oip->i_size = length;	/* 当截取位置恰好为一个完整的数据块的边界值，i_size 直接赋值 */
@@ -369,9 +377,9 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 		就意味着变化后的文件用直接块就可以完全表示，不再需要间接索引，下面同理。
 		NINDIR 宏表示一个数据块中能够存放多少个指针
 	*/
-	lastiblock[SINGLE] = lastblock - EXT2_NDADDR;	// 一级间接索引的起始逻辑块号
-	lastiblock[DOUBLE] = lastiblock[SINGLE] - NINDIR(fs);	/* 二级间接索引的起始逻辑块号 */
-	lastiblock[TRIPLE] = lastiblock[DOUBLE] - NINDIR(fs) * NINDIR(fs);	/* 三级间接索引的起始逻辑块号 */
+	lastiblock[SINGLE] = lastblock - EXT2_NDADDR;
+	lastiblock[DOUBLE] = lastiblock[SINGLE] - NINDIR(fs);	
+	lastiblock[TRIPLE] = lastiblock[DOUBLE] - NINDIR(fs) * NINDIR(fs);
 	nblocks = btodb(fs->e2fs_bsize);	/* 文件系统块号与磁盘块号的转换，tptfs 中是 1 */
 	/*
 	 * Update file and block pointers on disk before we start freeing
@@ -458,6 +466,13 @@ ext2_ind_truncate(struct vnode *vp, off_t length, int flags, struct ucred *cred,
 		bn = oip->i_ib[level];	/* 每个等级间接索引对应的块号，真实的物理块号(不是扇区号)，对应 tptfs 中的虚拟页号 */
 		/* 当间接索引对应块号不为0的时候 */
 		if (bn != 0) {
+			/*
+				注意这里传入的参数， indir_lbn[level] 保存的其实其实就是间接索引的逻辑块号。fsbtodb(fs, bn) 计算的就是
+				逻辑块号对应的实际块号。观察 ext2_indirtrunc() 的实现逻辑，调用 getblock() 从磁盘读取索引块数据到内存，
+				传入的参数是逻辑块号，最后调用 bmap 找对实际块号，然后 read()
+				其实我们已经知道了间接索引块的实际块号了，只是需要利用逻辑块号将数据读入内存。tptfs 就不用这么麻烦，直接将指针
+				指向实际块号对应的虚拟地址就可以了，所以这里边也不需要用到 tpt_buf 结构体
+			*/
 			error = ext2_indirtrunc(oip, indir_lbn[level],
 			    fsbtodb(fs, bn), lastiblock[level], level, &count);
 			if (error)

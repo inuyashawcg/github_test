@@ -77,19 +77,24 @@
  *	A small structure is kept for each resident
  *	page, indexed by page number.  Each structure
  *	is an element of several collections:
+		对于驻留页面，会有一个小的结构体通过索引来管理它们
  *
  *		A radix tree used to quickly
  *		perform object/offset lookups
+			radix tree 用于在 object 中利用 offset 快速查找
  *
  *		A list of all pages for a given object,
  *		so they can be quickly deactivated at
  *		time of deallocation.
+			所有的页面通过链表管理起来，这样它们就可以快速进行失活处理
  *
  *		An ordered list of pages due for pageout.
+			一个有序链表用于 pageout 例程
  *
  *	In addition, the structure contains the object
  *	and offset to which this page belongs (for pageout),
  *	and sundry status bits.
+ 		此外，该结构还包含该页所属的对象和偏移量（用于pageout）以及各种状态位
  *
  *	In general, operations on this structure's mutable fields are
  *	synchronized using either one of or a combination of the lock on the
@@ -101,6 +106,12 @@
  *	annotated below with two of these locks, then holding either lock is
  *	sufficient for read access, but both locks are required for write
  *	access.  An annotation of (C) indicates that the field is immutable.
+
+		该结构体中的许多字段通过锁或者锁的组合来进行同步，包括 object lock、page lock、
+		free queues lock 和 pager's queue lock 等等。page 中的物理地址用于从池中
+		选择它的 page lock。一个页面的 queue lock 依赖于它的 queue value。如果一个
+		字段处在其中任意两个锁管理下，持有任意一个锁就可以获取读权限，两个锁都获取之后才会
+		有写权限
  *
  *	In contrast, the synchronization of accesses to the page's
  *	dirty field is machine dependent (M).  In the
@@ -114,6 +125,12 @@
  *	contains the dirty field.  In the machine-independent layer,
  *	the implementation of read-modify-write operations on the
  *	field is encapsulated in vm_page_clear_dirty_mask().
+
+ 		作为对比，对于一个页面的脏字段的同步访问是依赖与平台的。在独立于机器的层中，
+		必须持有页面所属对象的锁，才能在现场进行操作。然而，pmap 层允许在不保持锁定
+		的情况下设置字段内的所有位。如果基础架构不支持对字段类型的原子读-修改-写操作，
+		那么机器无关层在包含脏字段的对齐32位字上使用32位原子。在独立于机器的层中，
+		字段上读修改写操作的实现封装在 vm_page_clear_dirty_mask() 中
  *
  *	The page structure contains two counters which prevent page reuse.
  *	Both counters are protected by the page lock (P).  The hold
@@ -130,9 +147,18 @@
  *	from its object and page queue, and the page is released to the
  *	allocator once the last hold reference is dropped.  In contrast,
  *	wired pages may not be freed.
+
+		page 结构体中包含有两个计算器用于方式页面重用。每一个计数器都是由 page lock 保护。
+		hold 计数器对通过 pmap 查找获得的瞬时引用进行计数，还用于在不希望阻止对页面的其他访问
+		的情况下防止页面回收。wire 计数器用于实现 mlock(2)，对于包含内核内存的页面，它不是零。
+		页面守护进程不会回收或清洗已连接或保留的页面，但在页面队列扫描期间会以不同的方式处理：
+		保留的页面保留在其在队列中的位置，而已连接的页面将从队列中删除，随后必须由解环线程适当地
+		重新排队。在保留页面上调用 vm_page_free() 是合法的；这样做会导致将其从对象和页面队列中删除，
+		一旦删除最后一个保持引用，页面就会被释放到分配器。相比之下，有线页面可能不会被释放。
  *
  *	In some pmap implementations, the wire count of a page table page is
  *	used to track the number of populated entries.
+ 		在一些 pmap 实现中，页表页的连线计数用于跟踪填充的条目数
  *
  *	The busy lock is an embedded reader-writer lock which protects the
  *	page's contents and identity (i.e., its <object, pindex> tuple) and
@@ -189,6 +215,9 @@ typedef uint64_t vm_page_bits_t;
 	virtual memory page 物理内存跟虚拟内存的对应
 */
 struct vm_page {
+	/*
+		定义了 vm_page 的组织结构，或者是用队列，或者使用链表
+	*/
 	union {
 		TAILQ_ENTRY(vm_page) q; /* page queue or free list (Q) */
 		struct {
@@ -216,16 +245,23 @@ struct vm_page {
 	int8_t psind;			/* pagesizes[] index (O) 系统会对支持 page_size 组成的数组，该字段应该表示的是数组索引 */
 	int8_t segind;			/* vm_phys segment index (C) */
 	uint8_t	order;			/* index of the buddy queue (F) 伙伴队列的索引？ */
+	/*
+		vm_page 可能存在于某个池中，作用的话应该类似于缓存，可以减小系统开支
+	*/
 	uint8_t pool;			/* vm_phys freepool index (F) */
 	u_char	act_count;		/* page usage count (P) */
 	/* NOTE that these must support one bit per DEV_BSIZE in a page */
-	/* so, on normal X86 kernels, they must be at least 8 bits wide */
+	/* so, on normal X86 kernels, they must be at least 8 bits wide 
+		表示的应该是一个 page 对应的磁盘扇区。一般磁盘扇区的大小是 512 个字节，假设一个 page
+		是 4096 字字节，那么应该是对应 8 个扇区，则 valid 和 dirty 就是一个 uint8_t 类型
+		的数据。其他情况同理，默认应该是 uint8_t 类型
+	*/
 	vm_page_bits_t valid;		/* map of valid DEV_BSIZE chunks (O) */
 	vm_page_bits_t dirty;		/* map of dirty DEV_BSIZE chunks (M) */
 };
 
 /*
- * Page flags stored in oflags:
+ * Page flags stored in oflags (object lock 相关？):
  *
  * Access to these page flags is synchronized by the lock on the object
  * containing the page (O).
@@ -239,10 +275,10 @@ struct vm_page {
  * 
  * VPO_UNMANAGED（由 OBJT_DEVICE、OBJT_PHYS 和 OBJT_SG 使用）表示该页面不在 PV 管理之下，
  * 但在其他情况下应视为正常页面。不在PV管理下的页面无法通过 object/vm_page_t 调出， 因为不知道
- * 它们的 pte 映射，而且这些页面也不在任何 PQ 队列中
- *
+ * 它们的 pte 映射，而且这些页面也不在任何 PQ 队列中。
+ * PV: physical <-> virtual?
  */
-#define	VPO_KMEM_EXEC	0x01		/* kmem mapping allows execution kmem映射允许执行 */
+#define	VPO_KMEM_EXEC	0x01		/* kmem mapping allows execution - kmem 映射允许执行 */
 #define	VPO_SWAPSLEEP	0x02		/* waiting for swap to finish */
 #define	VPO_UNMANAGED	0x04		/* no PV management for page */
 #define	VPO_SWAPINPROG	0x08		/* swap I/O in progress on page */
@@ -254,6 +290,8 @@ struct vm_page {
  * even if the support for owner identity is removed because of size
  * constraints.  Checks on lock recursion are then not possible, while the
  * lock assertions effectiveness is someway reduced.
+ * 该算法主要由 rwlock 和 sx 锁实现，即使由于大小限制而取消了对所有者身份的支持。这样就不可能
+ * 对锁递归进行检查，而锁断言的有效性在某种程度上会降低
  */
 #define	VPB_BIT_SHARED		0x01
 #define	VPB_BIT_EXCLUSIVE	0x02
@@ -270,7 +308,10 @@ struct vm_page {
 #define	VPB_SINGLE_EXCLUSIVER	VPB_BIT_EXCLUSIVE
 
 #define	VPB_UNBUSIED		VPB_SHARERS_WORD(0)
-
+/*
+	PQ: page queue
+	提示某个 page 隶属于哪一个 page queue，比如 active / inactive / laundry
+*/
 #define	PQ_NONE		255
 #define	PQ_INACTIVE	0
 #define	PQ_ACTIVE	1
@@ -336,24 +377,42 @@ extern struct mtx_padalign pa_lock[];
  * The vm_page's aflags are updated using atomic operations.  To set or clear
  * these flags, the functions vm_page_aflag_set() and vm_page_aflag_clear()
  * must be used.  Neither these flags nor these functions are part of the KBI.
+ * 
+ * vm_page 的 aflags (access flags) 通过原子的方式进行更新。为了设置或者清除这些 flags，
+ * 函数 vm_page_aflag_set() 和 vm_page_aflag_clear() 必须被使用。上述这些都不是 KBI
+ * 的一部分
  *
  * PGA_REFERENCED may be cleared only if the page is locked.  It is set by
  * both the MI and MD VM layers.  However, kernel loadable modules should not
  * directly set this flag.  They should call vm_page_reference() instead.
+ * 
+ * PGA_REFERENCED 只有在 page 加锁的状态下才能被清除掉。它同时被 MI 和 MD 层级 VM 代码设置。
+ * 然而，内核可加载模块不应该直接设置这个 flag，而是要用 vm_page_reference() 替代
  *
  * PGA_WRITEABLE is set exclusively on managed pages by pmap_enter().
  * When it does so, the object must be locked, or the page must be
  * exclusive busied.  The MI VM layer must never access this flag
  * directly.  Instead, it should call pmap_page_is_write_mapped().
+ * 
+ * PGA_WRITEABLE 只能在被 pmap_enter() 管理的 pages 独占性的设置。当它这样做之后，object
+ * 必须是处在加锁的状态，或者 page 处于独占繁忙状态。MI VM 层级代码不能直接访问这个属性。需要
+ * 使用 pmap_page_is_write_mapped() 函数替代
  *
  * PGA_EXECUTABLE may be set by pmap routines, and indicates that a page has
  * at least one executable mapping.  It is not consumed by the MI VM layer.
+ * 
+ * PGA_EXECUTABLE 可以被 pmap 例程设置，并且表明这个 page 有最少一个可执行的映射。它不能被
+ * MI VM 层级的代码使用
  *
  * PGA_ENQUEUED is set and cleared when a page is inserted into or removed
  * from a page queue, respectively.  It determines whether the plinks.q field
  * of the page is valid.  To set or clear this flag, the queue lock for the
  * page must be held: the page queue lock corresponding to the page's "queue"
  * field if its value is not PQ_NONE, and the page lock otherwise.
+ * 
+ * PGA_ENQUEUED 会在 page 插入或者移除的时候进行受保护的设置。它决定 page 的 plinks.q
+ * 字段是不是可用的。为了清除或者设置这个 flag，queue lock 必须被持有：当该字段的值不是
+ * PQ_NONE 的时候，表示 queue lock。其他情况下表示的是 page lock
  *
  * PGA_DEQUEUE is set when the page is scheduled to be dequeued from a page
  * queue, and cleared when the dequeue request is processed.  A page may
@@ -384,6 +443,7 @@ extern struct mtx_padalign pa_lock[];
 /*
  * Page flags.  If changed at any other time than page allocation or
  * freeing, the modification must be protected by the vm_page lock.
+ * 页面标志。如果在页面分配或释放以外的任何时间更改，修改必须受到 vm_page 锁的保护
  */
 #define	PG_FICTITIOUS	0x0004		/* physical page doesn't exist */
 #define	PG_ZERO		0x0008		/* page is zeroed */
@@ -412,33 +472,41 @@ extern struct mtx_padalign pa_lock[];
  *		Available for allocation now.
  *
  *	inactive
- *		Low activity, candidates for reclamation.
- *		This list is approximately LRU ordered.
+ *		Low activity, candidates(候选人) for reclamation.
+ *		This list is approximately LRU(最近最少访问) ordered.
  *
  *	laundry
  *		This is the list of pages that should be
  *		paged out next.
+			需要被 pageout 的页面
  *
  *	unswappable
  *		Dirty anonymous pages that cannot be paged
  *		out because no swap device is configured.
+			脏的、匿名的页面并且不能被 pageout，因为它没有执行任何 swap pager
  *
  *	active
  *		Pages that are "active", i.e., they have been
  *		recently referenced.
- *
+			很快将会被引用的页面
  */
 
 extern vm_page_t vm_page_array;		/* First resident page in table */
 extern long vm_page_array_size;		/* number of vm_page_t's */
 extern long first_page;			/* first physical page number */
 
+/*
+	将 page 转换成物理地址
+*/
 #define VM_PAGE_TO_PHYS(entry)	((entry)->phys_addr)
 
 /*
  * PHYS_TO_VM_PAGE() returns the vm_page_t object that represents a memory
  * page to which the given physical address belongs. The correct vm_page_t
  * object is returned for addresses that are not page-aligned.
+ * 
+ * PHYS_TO_VM_PAGE() 返回 vm_page_t 对象，该对象表示给定物理地址所属的内存页。
+ * 对于未对齐的地址，将返回正确的 vm_page_t 对象。
  */
 vm_page_t PHYS_TO_VM_PAGE(vm_paddr_t pa);
 
@@ -462,18 +530,52 @@ vm_page_t PHYS_TO_VM_PAGE(vm_paddr_t pa);
  * Bits above 15 define the count of additional pages that the caller
  * intends to allocate.
  */
+/*
+	The page should be allocated with no special treatment.
+*/
 #define VM_ALLOC_NORMAL		0
+/*
+	vm_page_alloc() is being called during an interrupt. A page will be returned 
+	successfully if the free page	count is greater than zero.
+*/
 #define VM_ALLOC_INTERRUPT	1
+/*
+	The page can be allocated if the cache is empty and the free page count 
+	is above the interrupt reserved water mark. This flag should be used	
+	only when the system really needs the page.
+*/
 #define VM_ALLOC_SYSTEM		2
 #define	VM_ALLOC_CLASS_MASK	3
 #define	VM_ALLOC_WAITOK		0x0008	/* (acf) Sleep and retry */
 #define	VM_ALLOC_WAITFAIL	0x0010	/* (acf) Sleep and return error */
+/*
+	The returned page	will be	wired.
+*/
 #define	VM_ALLOC_WIRED		0x0020	/* (acfgp) Allocate a wired page */
+/*
+	Indicate a preference for	a pre-zeroed page. There is no guarantee that
+ 	the returned page will be zeroed, but it will have the PG_ZERO flag set
+	if it is zeroed.
+*/
 #define	VM_ALLOC_ZERO		0x0040	/* (acfgp) Allocate a prezeroed page */
+/*
+	Do not associate the allocated page with a vm object. 
+	The object argument is ignored.
+*/
 #define	VM_ALLOC_NOOBJ		0x0100	/* (acg) No associated object */
+/*
+	The returned page	will not be exclusive busy.
+*/
 #define	VM_ALLOC_NOBUSY		0x0200	/* (acgp) Do not excl busy the page */
 #define	VM_ALLOC_IGN_SBUSY	0x1000	/* (gp) Ignore shared busy flag */
+/*
+	The returned page	will not be included in	any kernel core dumps
+	regardless of whether or not it is mapped in to KVA.
+*/
 #define	VM_ALLOC_NODUMP		0x2000	/* (ag) don't include in dump */
+/*
+	The returned page	will be	shared busy.
+*/
 #define	VM_ALLOC_SBUSY		0x4000	/* (acgp) Shared busy the page */
 #define	VM_ALLOC_NOWAIT		0x8000	/* (acfgp) Do not sleep */
 #define	VM_ALLOC_COUNT_SHIFT	16
@@ -668,6 +770,8 @@ void vm_page_assert_pga_writeable(vm_page_t m, uint8_t bits);
  * However, not all architectures support atomic operations on 8-bit
  * destinations.  In order that we can easily use a 32-bit operation, we
  * require that the aflags field be 32-bit aligned.
+ * 我们希望使用原子操作更新 aflags 字段(8 bit)。然而，并不是所有的原子操作都支持 8-bit。
+ * 为此我们可以简单采用 32-bit 操作，并且要求 aflags 字段要是 32-bit 对齐
  */
 CTASSERT(offsetof(struct vm_page, aflags) % sizeof(uint32_t) == 0);
 
@@ -714,6 +818,8 @@ vm_page_aflag_set(vm_page_t m, uint8_t bits)
 	 * Access the whole 32-bit word containing the aflags field with an
 	 * atomic update.  Parallel non-atomic updates to the other fields
 	 * within this word are handled properly by the atomic update.
+	 * 通过原子更新访问包含 aflags 字段的整个32位字。原子更新会正确处理对该单词中
+	 * 其他字段的并行非原子更新
 	 */
 	addr = (void *)&m->aflags;
 	KASSERT(((uintptr_t)addr & (sizeof(uint32_t) - 1)) == 0,
@@ -780,6 +886,7 @@ vm_page_replace_checked(vm_page_t mnew, vm_object_t object, vm_pindex_t pindex,
  *
  *	Return the index of the queue containing m.  This index is guaranteed
  *	not to change while the page lock is held.
+ 		返回包含 m 的队列的索引。在保持页面锁定时，该索引保证不会更改
  */
 static inline uint8_t
 vm_page_queue(vm_page_t m)

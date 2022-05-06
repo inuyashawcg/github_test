@@ -546,12 +546,18 @@ tmpfs_write(struct vop_write_args *v)
 	if (vn_rlimit_fsize(vp, uio, uio->uio_td))
 		return (EFBIG);
 	if (uio->uio_offset + uio->uio_resid > node->tn_size) {
+		/*
+			如果 uio_offset + uio_resid > tn_size，说明我们所要传输的数据量
+			是要超过整个 tmpfs_node 大小的，那么就需要重新调整节点大小
+		*/
 		error = tmpfs_reg_resize(vp, uio->uio_offset + uio->uio_resid,
 		    FALSE);
 		if (error != 0)
 			goto out;
 	}
-
+	/*
+		注意，这里传入的参数是 tn_size，而不是 uio_offset + uio_resid
+	*/
 	error = uiomove_object(node->tn_reg.tn_aobj, node->tn_size, uio);
 	node->tn_status |= TMPFS_NODE_ACCESSED | TMPFS_NODE_MODIFIED |
 	    TMPFS_NODE_CHANGED;
@@ -559,6 +565,7 @@ tmpfs_write(struct vop_write_args *v)
 		if (priv_check_cred(v->a_cred, PRIV_VFS_RETAINSUGID, 0))
 			node->tn_mode &= ~(S_ISUID | S_ISGID);
 	}
+
 	if (error != 0)
 		(void)tmpfs_reg_resize(vp, oldsize, TRUE);
 

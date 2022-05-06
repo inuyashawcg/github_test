@@ -121,18 +121,23 @@ static void	vm_object_vndeallocate(vm_object_t object);
  *	Virtual memory objects maintain the actual data
  *	associated with allocated virtual memory.  A given
  *	page of memory exists within exactly one object.
+ 		虚拟内存对象维护与分配的虚拟内存关联的实际数据。给定的内存页正好存在于一个对象中
  *
  *	An object is only deallocated when all "references"
  *	are given up.  Only one "reference" to a given
  *	region of an object should be writeable.
+ 		只有在放弃所有“引用”时，对象才会被解除分配。一个对象的给定区域只有一个“引用”应该是可写的。
+		说明 vm_object 中 page 也是多读一写？
  *
  *	Associated with each object is a list of all resident
  *	memory pages belonging to that object; this list is
  *	maintained by the "vm_page" module, and locked by the object's
  *	lock.
+		与每个对象关联的是属于该对象的所有驻留内存页的列表；该列表由 vm_page 模块维护，
+		并且由 object lock 锁定
  *
  *	Each object also records a "pager" routine which is
- *	used to retrieve (and store) pages to the proper backing
+ *	used to retrieve(检索) (and store) pages to the proper backing
  *	storage.  In addition, objects may be backed by other
  *	objects from which they were virtual-copied.
  *
@@ -143,6 +148,9 @@ static void	vm_object_vndeallocate(vm_object_t object);
  *
  */
 
+/*
+	管理的应该是所有的 vm_object 的链表，下面的锁对象应该就是为了保护该链表
+*/
 struct object_q vm_object_list;
 struct mtx vm_object_list_mtx;	/* lock for object list and count */
 
@@ -151,6 +159,9 @@ struct vm_object kernel_object_store;
 static SYSCTL_NODE(_vm_stats, OID_AUTO, object, CTLFLAG_RD, 0,
     "VM object stats");
 
+/*
+	collapses: 崩溃，坍塌，崩塌
+*/
 static counter_u64_t object_collapses = EARLY_COUNTER;
 SYSCTL_COUNTER_U64(_vm_stats_object, OID_AUTO, collapses, CTLFLAG_RD,
     &object_collapses,
@@ -220,6 +231,10 @@ vm_object_zinit(void *mem, int size, int flags)
 	/* These are true for any object that has been freed */
 	object->type = OBJT_DEAD;
 	object->ref_count = 0;
+	/*
+		在一个结构体中可以保存多个数据结构 entry，采用这样的方式可以将该对象映射到一个链表中，也可以同时存在
+		一个树中。这样我们就可以在不同的应用场景中利用不同的结构进行检索
+	*/
 	vm_radix_init(&object->rtree);
 	object->paging_in_progress = 0;
 	object->resident_page_count = 0;
@@ -247,6 +262,8 @@ _vm_object_allocate(objtype_t type, vm_pindex_t size, vm_object_t object)
 	 * Ensure that swap_pager_swapoff() iteration over object_list
 	 * sees up to date type and pctrie head if it observed
 	 * non-dead object.
+	 * 确保在对象列表上的 swap_pager_swapoff() 迭代可以看到最新的类型和 pctrie header
+	 * (如果它观察到的是 non_dead 对象)
 	 */
 	atomic_thread_fence_rel();
 
@@ -312,6 +329,8 @@ vm_object_init(void)
 	 * The lock portion of struct vm_object must be type stable due
 	 * to vm_pageout_fallback_object_lock locking a vm object
 	 * without holding any references to it.
+	 * struct vm_object 的锁部分必须是类型稳定的，因为 vm_pageout_fallback_object_lock 
+	 * 在不保留对它的任何引用的情况下锁定了一个 vm 对象
 	 */
 	obj_zone = uma_zcreate("VM OBJECT", sizeof (struct vm_object), NULL,
 #ifdef INVARIANTS
@@ -336,6 +355,7 @@ vm_object_clear_flag(vm_object_t object, u_short bits)
  *	Sets the default memory attribute for the specified object.  Pages
  *	that are allocated to this object are by default assigned this memory
  *	attribute.
+ 		设置指定对象的默认内存属性。默认情况下，分配给该对象的页面会被分配此内存属性
  *
  *	Presently, this function must be called before any pages are allocated
  *	to the object.  In the future, this requirement may be relaxed for
@@ -408,6 +428,9 @@ vm_object_pip_wakeupn(vm_object_t object, short i)
 	}
 }
 
+/*
+	pip: pageing in progress
+*/
 void
 vm_object_pip_wait(vm_object_t object, char *waitid)
 {
@@ -441,6 +464,7 @@ vm_object_allocate(objtype_t type, vm_pindex_t size)
  *
  *	Gets another reference to the given object.  Note: OBJ_DEAD
  *	objects can be referenced during final cleaning.
+ 		OBJ_DEAD 类型的 object 在最后一次清除之前仍然是可以被引用的
  */
 void
 vm_object_reference(vm_object_t object)
@@ -531,15 +555,21 @@ vm_object_vndeallocate(vm_object_t object)
  *	or a vm_object_reference call.  When all references
  *	are gone, storage associated with this object
  *	may be relinquished.
+ 		释放对指定对象的引用，该引用可以通过 vm_object_allocate 或 vm_object_reference
+		调用获得。当所有引用都消失时，可能会放弃与此对象关联的存储
  *
  *	No object may be locked.
+		不能锁定任何对象。也就是说涉及到的 object 都不会被锁定？
  */
 void
 vm_object_deallocate(vm_object_t object)
 {
 	vm_object_t temp;
 	struct vnode *vp;
-
+	/*
+		该函数其实是一个通用的释放 object 的接口，首先会去判断 object 类型是不是 vnode object。
+		如果是的话，调用另外一个专门用于处理 vnode object 的函数
+	*/
 	while (object != NULL) {
 		VM_OBJECT_WLOCK(object);
 		if (object->type == OBJT_VNODE) {
@@ -555,6 +585,13 @@ vm_object_deallocate(vm_object_t object)
 		 * vm_object_terminate() on the object chain.
 		 * A ref count of 1 may be a special case depending on the
 		 * shadow count being 0 or 1.
+		 * 如果引用计数变为0，我们开始在对象链上调用 vm_object_terminate()。
+		 * 参考计数为1可能是一种特殊情况，具体取决于阴影计数为0或1
+		 * 
+		 * 意思就是说对于 object 的处理，大致可以分为三种情况：
+		 * 	如果是引用计数 > 1，那就直接引用计数--；
+		 * 	如果等于1，需要考虑 swap object 的情况；
+		 * 	如果为0，调用 terminate 函数，释放 object
 		 */
 		object->ref_count--;
 		if (object->ref_count > 1) {
@@ -564,6 +601,12 @@ vm_object_deallocate(vm_object_t object)
 			if (object->type == OBJT_SWAP &&
 			    (object->flags & OBJ_TMPFS) != 0) {
 				vp = object->un_pager.swp.swp_tmpfs;
+				/*
+					这里调用了 vhold，增加 vp 引用计数的同时，给 vnode 加锁；下面对应调用 vdrop，
+					减少 vnode 引用计数，并且给 vnode 解锁。
+					类似的，还有一对接口配合使用，vholdl 和 vdropl。前面两个是 vnode 没有获取 interlock 的情况下
+					加解锁并加减引用计数，这两个是在 vnode 已经获取 interlock 的情况下加减引用计数
+				*/
 				vhold(vp);
 				VM_OBJECT_WUNLOCK(object);
 				vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
@@ -693,6 +736,7 @@ doterm:
 /*
  *	vm_object_destroy removes the object from the global object list
  *      and frees the space for the object.
+ *  vm_object_destroy 从全局对象列表中删除该对象，并释放该对象的空间
  */
 void
 vm_object_destroy(vm_object_t object)
@@ -717,6 +761,7 @@ vm_object_destroy(vm_object_t object)
 /*
  *	vm_object_terminate_pages removes any remaining pageable pages
  *	from the object and resets the object to an empty state.
+ 		vm_object_terminate_pages 从对象中删除所有剩余的可分页页面，并将对象重置为空状态
  */
 static void
 vm_object_terminate_pages(vm_object_t object)
@@ -733,6 +778,9 @@ vm_object_terminate_pages(vm_object_t object)
 	 * paging queues.  However, don't free wired pages, just remove them
 	 * from the object.  Rather than incrementally removing each page from
 	 * the object, the page and object are reset to any empty state. 
+	 * 
+	 * wired page 表示的貌似是不可调页(unpageable)。不可调页的地址范围，也叫做固定的(wired)地址范围，
+	 * 在调用时就会给它分配物理内存，pageout 守护进程不会替换这段内存
 	 */
 	TAILQ_FOREACH_SAFE(p, &object->memq, listq, p_next) {
 		vm_page_assert_unbusied(p);
@@ -755,6 +803,7 @@ vm_object_terminate_pages(vm_object_t object)
 	 * If the object contained any pages, then reset it to an empty state.
 	 * None of the object's fields, including "resident_page_count", were
 	 * modified by the preceding loop.
+	 * 如果对象包含任何页面，则将其重置为空状态。前一个循环没有修改对象的任何字段，包括“常驻页面计数”
 	 */
 	if (object->resident_page_count != 0) {
 		vm_radix_reclaim_allnodes(&object->rtree);
@@ -768,9 +817,11 @@ vm_object_terminate_pages(vm_object_t object)
 /*
  *	vm_object_terminate actually destroys the specified object, freeing
  *	up all previously used resources.
+		该函数会真正破坏掉特定的 object，释放它之前用到的所有资源
  *
  *	The object must be locked.
  *	This routine may block.
+		该对象必须是被锁定的，并且这个例程有可能会被阻塞
  */
 void
 vm_object_terminate(vm_object_t object)
@@ -780,11 +831,13 @@ vm_object_terminate(vm_object_t object)
 
 	/*
 	 * Make sure no one uses us.
+	 		确保没有其他人会用到我们
 	 */
 	vm_object_set_flag(object, OBJ_DEAD);
 
 	/*
 	 * wait for the pageout daemon to be done with the object
+	 		等待 pageout 守护进程完成该对象的 page 操作
 	 */
 	vm_object_pip_wait(object, "objtrm");
 
@@ -794,12 +847,15 @@ vm_object_terminate(vm_object_t object)
 	/*
 	 * Clean and free the pages, as appropriate. All references to the
 	 * object are gone, so we don't need to lock it.
+	 * 清除并释放掉所有的页。因为对于该 object 的引用计数都已经消失，所以我们不需要
+	 * 锁定该对象。对 vnode object 进行特殊处理
 	 */
 	if (object->type == OBJT_VNODE) {
 		struct vnode *vp = (struct vnode *)object->handle;
 
 		/*
 		 * Clean pages and flush buffers.
+		 		以同步的方式清理 page 和缓存
 		 */
 		vm_object_page_clean(object, 0, 0, OBJPC_SYNC);
 		VM_OBJECT_WUNLOCK(object);

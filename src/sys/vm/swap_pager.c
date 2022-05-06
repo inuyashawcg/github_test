@@ -137,6 +137,12 @@ __FBSDID("$FreeBSD: releng/12.0/sys/vm/swap_pager.c 340333 2018-11-10 20:36:48Z 
  * SWAP_META_PAGES-aligned and sized range to the address of an
  * on-disk swap block (or SWAPBLK_NONE). The collection of these
  * mappings for an entire vm object is implemented as a pc-trie.
+ * 
+ * swblk 结构将 SWAP_META_PAGES-aligned 和大小范围内的每个页面索引映射到
+ * 磁盘上交换块（或 SWAPBLK_NONE）的地址。整个 vm 对象的这些映射的集合被实现
+ * 为 pctrie
+ * 
+ * daddr_t 表示的很可能是磁盘数据块块号
  */
 struct swblk {
 	vm_pindex_t	p;
@@ -144,13 +150,27 @@ struct swblk {
 };
 
 static MALLOC_DEFINE(M_VMPGDATA, "vm_pgdata", "swap pager private data");
+/*
+	应该是管理 swap device 的全局队列和对应的保护锁
+*/
 static struct mtx sw_dev_mtx;
 static TAILQ_HEAD(, swdevt) swtailq = TAILQ_HEAD_INITIALIZER(swtailq);
+/*
+	swdevhd: swap device header？
+	下一步从这里开始分配
+*/
 static struct swdevt *swdevhd;	/* Allocate from here next */
 static int nswapdev;		/* Number of swap devices */
 int swap_pager_avail;
+/*
+	syscall lock
+*/
 static struct sx swdev_syscall_lock;	/* serialize swap(on|off) */
 
+/*
+	swap_reserved： 备份所有分配的匿名内存所需的交换存储量
+	swap_total: 可用交换存储的总量
+*/
 static u_long swap_reserved;
 static u_long swap_total;
 static int sysctl_page_shift(SYSCTL_HANDLER_ARGS);
@@ -194,9 +214,18 @@ swap_reserve(vm_ooffset_t incr)
 	return (swap_reserve_by_cred(incr, curthread->td_ucred));
 }
 
+/*
+	在上层的调用函数中，incr 传入的是 size，表示的应该是当我们新创建
+	一个 swap object 的时候，根据 object size 给 swap 区域预留的
+	空间
+*/
 int
 swap_reserve_by_cred(vm_ooffset_t incr, struct ucred *cred)
 {
+	/*
+		prev: page reserved or previous？
+		pincr: page increase?
+	*/
 	u_long r, s, prev, pincr;
 	int res, error;
 	static int curfail;
@@ -217,7 +246,10 @@ swap_reserve_by_cred(vm_ooffset_t incr, struct ucred *cred)
 			return (0);
 	}
 #endif
-
+	/*
+		atop: size to pages，计算 prev 的时候可以看出，swap_reserved 表示的应该是
+		页的数量，而不是真正的地址空间大小。
+	*/
 	pincr = atop(incr);
 	res = 0;
 	prev = atomic_fetchadd_long(&swap_reserved, pincr);
@@ -227,6 +259,9 @@ swap_reserve_by_cred(vm_ooffset_t incr, struct ucred *cred)
 		    vm_wire_count();
 	} else
 		s = 0;
+	/*
+		swap_total 表示的也是页的数量？
+	*/
 	s += swap_total;
 	if ((overcommit & SWAP_RESERVE_FORCE_ON) == 0 || r <= s ||
 	    (error = priv_check(curthread, PRIV_VM_SWAP_NOQUOTA)) == 0) {
@@ -263,6 +298,10 @@ swap_reserve_by_cred(vm_ooffset_t incr, struct ucred *cred)
 	return (res);
 }
 
+/*
+	swap 其实不仅仅是 tmpfs 在使用，其他模块也是会用到的。所以，在考虑 swap 实现机制的时候
+	不能仅仅局限于 tmpfs，而应该着眼于整个操作系统
+*/
 void
 swap_reserve_force(vm_ooffset_t incr)
 {
@@ -272,18 +311,19 @@ swap_reserve_force(vm_ooffset_t incr)
 	KASSERT((incr & PAGE_MASK) == 0, ("%s: incr: %ju & PAGE_MASK", __func__,
 	    (uintmax_t)incr));
 
-	PROC_LOCK(curproc);
+	PROC_LOCK(curproc);	// 进程加锁
 #ifdef RACCT
 	if (racct_enable)
 		racct_add_force(curproc, RACCT_SWAP, incr);
 #endif
-	pincr = atop(incr);
+	pincr = atop(incr);	// page increase
 	atomic_add_long(&swap_reserved, pincr);
 	uip = curproc->p_ucred->cr_ruidinfo;
 	atomic_add_long(&uip->ui_vmsize, pincr);
 	PROC_UNLOCK(curproc);
 }
 
+// 上述函数的反向操作
 void
 swap_release(vm_ooffset_t decr)
 {
@@ -322,7 +362,7 @@ swap_release_by_cred(vm_ooffset_t decr, struct ucred *cred)
 
 #define SWM_POP		0x01	/* pop out			*/
 
-static int swap_pager_full = 2;	/* swap space exhaustion (task killing) */
+static int swap_pager_full = 2;	/* swap space exhaustion(疲惫，衰竭，枯竭) (task killing) */
 static int swap_pager_almost_full = 1; /* swap space exhaustion (w/hysteresis)*/
 static int nsw_rcount;		/* free read buffers			*/
 static int nsw_wcount_sync;	/* limit write buffers / synchronous	*/
@@ -339,11 +379,21 @@ SYSCTL_PROC(_vm, OID_AUTO, swap_fragmentation, CTLTYPE_STRING | CTLFLAG_RD |
     CTLFLAG_MPSAFE, NULL, 0, sysctl_swap_fragmentation, "A",
     "Swap Fragmentation Info");
 
+/*
+	shared/exclusive lock，用于管理数据页分配？
+*/
 static struct sx sw_alloc_sx;
 
 /*
  * "named" and "unnamed" anon region objects.  Try to reduce the overhead
  * of searching a named list by hashing it just a little.
+ * “已命名”和“未命名”的非区域对象。尝试通过对命名列表进行一点散列来减少搜索该列表的开销。
+ * 
+ * 大概意思就是，如果我们按照传统的方法在一个链表中将所有的 swap object 全部管理起来，
+ * 那么查找的时候应该就是从头开始遍历。
+ * 这里的话就是做了一点点散列设计，把本应该在一个链表中的数据分开到8个链表当中，查找之前
+ * 首先计算一下目标元素所在的链表是哪个，然后在去找。这样就可以大致认为是每次查找数量都
+ * 变成了原来的 1/8，提高了查找效率
  */
 
 #define NOBJLISTS		8
@@ -351,6 +401,9 @@ static struct sx sw_alloc_sx;
 #define NOBJLIST(handle)	\
 	(&swap_pager_object_list[((int)(intptr_t)handle >> 4) & (NOBJLISTS-1)])
 
+/*
+	每一个元素都是 pagerlist (其实就是 vm_object 链表)。总共有8个，并且是全局静态成员
+*/
 static struct pagerlst	swap_pager_object_list[NOBJLISTS];
 static uma_zone_t swblk_zone;
 static uma_zone_t swpctrie_zone;
@@ -359,6 +412,9 @@ static uma_zone_t swpctrie_zone;
  * pagerops for OBJT_SWAP - "swap pager".  Some ops are also global procedure
  * calls hooked from other parts of the VM system and do not appear here.
  * (see vm/swap_pager.h).
+ * 
+ * 用于 OBJT_SWAP 的 pagerops——“swap pager”。有些操作也是从VM系统的其他部分钩住的全局过程
+ * 调用，此处不显示
  */
 static vm_object_t
 		swap_pager_alloc(void *handle, vm_ooffset_t size,
@@ -389,6 +445,9 @@ struct pagerops swappagerops = {
 /*
  * swap_*() routines are externally accessible.  swp_*() routines are
  * internal.
+ * 
+ * 当 swap 区域可用数据页数量小于 128 的时候，swap_pager_almost_full() 函数可能会提示
+ * swap 区域马上要用完了；当可用页大于 512 的时候，可能就会解除上述提醒
  */
 static int nswap_lowat = 128;	/* in pages, swap_pager_almost_full warn */
 static int nswap_hiwat = 512;	/* in pages, swap_pager_almost_full warn */
@@ -405,12 +464,13 @@ static int	swapoff_one(struct swdevt *sp, struct ucred *cred);
 
 /*
  * Swap bitmap functions
+		swap 机制还会用到位图？
  */
 static void	swp_pager_freeswapspace(daddr_t blk, daddr_t npages);
 static daddr_t	swp_pager_getswapspace(int npages);
 
 /*
- * Metadata functions
+ * Metadata functions - 元数据
  */
 static daddr_t swp_pager_meta_build(vm_object_t, vm_pindex_t, daddr_t);
 static void swp_pager_meta_free(vm_object_t, vm_pindex_t, vm_pindex_t);
@@ -453,6 +513,9 @@ swblk_trie_free(struct pctrie *ptree, void *node)
 	uma_zfree(swpctrie_zone, node);
 }
 
+/*
+	定义一个树状结构来管理虚拟页与磁盘块的映射？
+*/
 PCTRIE_DEFINE(SWAP, swblk, p, swblk_trie_alloc, swblk_trie_free);
 
 /*
@@ -460,8 +523,10 @@ PCTRIE_DEFINE(SWAP, swblk, p, swblk_trie_alloc, swblk_trie_free);
  *
  *	update the swap_pager_almost_full indication and warn when we are
  *	about to run out of swap space, using lowat/hiwat hysteresis.
+		当我们使用的空间快要超出范围的时候，系统会给我们提示
  *
  *	Clear swap_pager_full ( task killing ) indication when lowat is met.
+		当使用量满足 lowat 时，解除相关提示(杀死任务)
  *
  *	No restrictions on call
  *	This routine may not block.
@@ -469,7 +534,10 @@ PCTRIE_DEFINE(SWAP, swblk, p, swblk_trie_alloc, swblk_trie_free);
 static void
 swp_sizecheck(void)
 {
-
+	/*
+		当 swap 区域可用页数量小于 nswap_lowat，系统就会提示 swap 区马上要用完了。
+		当大于 nswap_hiwat 的时候，就会解除提醒。跟上述猜测的逻辑是一致的
+	*/
 	if (swap_pager_avail < nswap_lowat) {
 		if (swap_pager_almost_full == 0) {
 			printf("swap_pager: out of swap space\n");
@@ -488,6 +556,8 @@ swp_sizecheck(void)
  *	Expected to be started from system init.  NOTE:  This code is run
  *	before much else so be careful what you depend on.  Most of the VM
  *	system has yet to be initialized at this point.
+ 		预计将从系统初始化开始。注意：这段代码比其他代码运行得早，所以要小心你所依赖的东西。
+		目前，大多数虚拟机系统尚未初始化
  */
 static void
 swap_pager_init(void)
@@ -499,6 +569,7 @@ swap_pager_init(void)
 
 	for (i = 0; i < NOBJLISTS; ++i)
 		TAILQ_INIT(&swap_pager_object_list[i]);
+
 	mtx_init(&sw_dev_mtx, "swapdev", NULL, MTX_DEF);
 	sx_init(&sw_alloc_sx, "swspsx");
 	sx_init(&swdev_syscall_lock, "swsysc");
@@ -509,6 +580,7 @@ swap_pager_init(void)
  *
  *	Expected to be started from pageout process once, prior to entering
  *	its main loop.
+ 		预计在进入主循环之前，从分页过程开始一次
  */
 void
 swap_pager_swap_init(void)
@@ -516,12 +588,12 @@ swap_pager_swap_init(void)
 	unsigned long n, n2;
 
 	/*
-	 * Number of in-transit swap bp operations.  Don't
+	 * Number of in-transit(运输) swap bp operations.  Don't
 	 * exhaust the pbufs completely.  Make sure we
-	 * initialize workable values (0 will work for hysteresis
+	 * initialize workable values (0 will work for hysteresis(滞后，迟滞)
 	 * but it isn't very efficient).
 	 *
-	 * The nsw_cluster_max is constrained by the bp->b_pages[]
+	 * The nsw_cluster_max is constrained(受限于) by the bp->b_pages[]
 	 * array (MAXPHYS/PAGE_SIZE) and our locally defined
 	 * MAX_PAGEOUT_CLUSTER.   Also be aware that swap ops are
 	 * constrained by the swap device interleave stripe size.
@@ -536,11 +608,20 @@ swap_pager_swap_init(void)
 	 * at least 2 per swap devices, and 4 is a pretty good value if you
 	 * have one NFS swap device due to the command/ack latency over NFS.
 	 * So it all works out pretty well.
+	 * 
+	 * 目前，我们将 nsw_wcount_async 连接到4。此限制旨在防止其他 I/O 由于我们的分页 I/O 
+	 * 而具有高延迟。值4对于一个或两个活动交换设备很好地工作，但如果有更多设备，则可能
+	 * 有点低。即便如此，由于系统通常不必在极端带宽下调出页面，因此使用三个或四个活动交换
+	 * 设备，较高的值可能只会产生有限的改进。我们希望每个交换至少有2台设备，如果您有一台
+	 * NFS交换设备，那么由于NFS上的命令/确认延迟，4台设备是一个很好的值。所以一切都很顺利
 	 */
 	nsw_cluster_max = min((MAXPHYS/PAGE_SIZE), MAX_PAGEOUT_CLUSTER);
 
 	mtx_lock(&pbuf_mtx);
-	nsw_rcount = (nswbuf + 1) / 2;
+	/*
+		nswbuf 表示的应该是系统分配给 swap 区域的 buffers
+	*/
+	nsw_rcount = (nswbuf + 1) / 2;	// free read buffer
 	nsw_wcount_sync = (nswbuf + 3) / 4;
 	nsw_wcount_async = 4;
 	nsw_wcount_async_max = nsw_wcount_async;
@@ -549,10 +630,20 @@ swap_pager_swap_init(void)
 	/*
 	 * Initialize our zone, guessing on the number we need based
 	 * on the number of pages in the system.
+	 * 初始化我们的区域，根据系统中的页数猜测我们需要的页数
+	 * v_page_count: 表示的貌似是系统中页总数
 	 */
 	n = vm_cnt.v_page_count / 2;
+	/*
+		maxswzone: max swmeta KVA storage
+		感觉应该是表示 swap metadata 存储相关。所以 n 应该表示的是系统中最多能够存储多少个
+		swblk 结构体？
+	*/
 	if (maxswzone && n > maxswzone / sizeof(struct swblk))
 		n = maxswzone / sizeof(struct swblk);
+	/*
+		创建 swpctrie 和 swblk 的 uma zone
+	*/
 	swpctrie_zone = uma_zcreate("swpctrie", pctrie_node_size(), NULL, NULL,
 	    pctrie_zone_init, NULL, UMA_ALIGN_PTR, UMA_ZONE_VM);
 	if (swpctrie_zone == NULL)
@@ -562,12 +653,16 @@ swap_pager_swap_init(void)
 	if (swblk_zone == NULL)
 		panic("failed to create swap blk zone.");
 	n2 = n;
+	/*
+		在 kva 中预留出 n 个 swblk_zone 锁占用的空间大小
+	*/
 	do {
 		if (uma_zone_reserve_kva(swblk_zone, n))
 			break;
 		/*
 		 * if the allocation failed, try a zone two thirds the
 		 * size of the previous attempt.
+		 * 如果分配失败，请尝试前一次尝试大小三分之二的区域
 		 */
 		n -= ((n + 2) / 3);
 	} while (n > 0);
@@ -576,12 +671,19 @@ swap_pager_swap_init(void)
 	 * Often uma_zone_reserve_kva() cannot reserve exactly the
 	 * requested size.  Account for the difference when
 	 * calculating swap_maxpages.
+	 * 
+	 * 通常情况下，uma_zone_reserve_kva() 无法准确保留请求的大小。
+	 * 计算 swap_maxpages 时考虑差异
 	 */
 	n = uma_zone_get_max(swblk_zone);
 
 	if (n < n2)
 		printf("Swap blk zone entries reduced from %lu to %lu.\n",
 		    n2, n);
+	/*
+		从上文可知，n 表示的是在系统中最多可以存储的 swblk 结构体的数量。每个结构体中又包含有
+		一个存放页指针的数组，每个数组包含 SWAP_META_PAGES 个元素，所以才有下面计算 swap_maxpages？
+	*/
 	swap_maxpages = n * SWAP_META_PAGES;
 	swzone = n * sizeof(struct swblk);
 	if (!uma_zone_reserve_kva(swpctrie_zone, n))
@@ -640,8 +742,14 @@ swap_pager_alloc(void *handle, vm_ooffset_t size, vm_prot_t prot,
 		 * should not be a race here against swp_pager_meta_build()
 		 * as called from vm_page_remove() in regards to the lookup
 		 * of the handle.
+		 * 引用现有命名区域或分配新区域。这里不应该与 vm_page_remove() 中调用的
+		 * swp_pager_meta_build() 在句柄查找方面展开竞争
 		 */
 		sx_xlock(&sw_alloc_sx);
+		/*
+			NOBJLIST 宏定义其实就是做了一步简单的 hash，帮助用户找到目标对象在全局链表
+			中的索引值，然后遍历该链表查找对应元素即可
+		*/
 		object = vm_pager_object_lookup(NOBJLIST(handle), handle);
 		if (object == NULL) {
 			object = swap_pager_alloc_init(handle, cred, size,
@@ -665,6 +773,8 @@ swap_pager_alloc(void *handle, vm_ooffset_t size, vm_prot_t prot,
  *	designed such that we can reinstantiate it later, but this
  *	routine is typically called only when the entire object is
  *	about to be destroyed.
+ 		对象的交换备份被销毁。代码的设计使我们可以在以后重新实例化它，但通常只有
+		在整个对象即将销毁时才会调用此例程
  *
  *	The object must be locked.
  */
@@ -695,6 +805,8 @@ swap_pager_dealloc(vm_object_t object)
 	 * the swap meta data.  We do not attempt to free swapblk's still
 	 * associated with vm_page_t's for this object.  We do not care
 	 * if paging is still in progress on some objects.
+	 * 释放所有剩余的元数据。我们只想把它从交换元数据中解放出来。我们不会尝试释放仍与
+	 * 此对象的vm_page_t关联的swapblk。我们不在乎某些对象上是否仍在进行分页
 	 */
 	swp_pager_meta_free_all(object);
 	object->handle = NULL;
@@ -706,18 +818,21 @@ swap_pager_dealloc(vm_object_t object)
  ************************************************************************/
 
 /*
- * SWP_PAGER_GETSWAPSPACE() -	allocate raw swap space
+ * SWP_PAGER_GETSWAPSPACE() -	allocate raw swap space 分配原始交换空间
  *
  *	Allocate swap for the requested number of pages.  The starting
  *	swap block number (a page index) is returned or SWAPBLK_NONE
  *	if the allocation failed.
+ 		为请求的页数分配交换。如果分配失败，则返回起始交换块号(页索引)或 SWAPBLK_NONE
  *
  *	Also has the side effect of advising that somebody made a mistake
  *	when they configured swap and didn't configure enough.
+ 		还有一个副作用，就是建议某人在配置交换时出错，并且配置得不够
  *
- *	This routine may not sleep.
+ *	This routine may not sleep. 该例程不会处在睡眠状态
  *
  *	We allocate in round-robin fashion from the configured devices.
+ 		我们以循环方式从配置的设备中分配
  */
 static daddr_t
 swp_pager_getswapspace(int npages)
@@ -733,6 +848,11 @@ swp_pager_getswapspace(int npages)
 		if (sp == NULL)
 			sp = TAILQ_FIRST(&swtailq);
 		if (!(sp->sw_flags & SW_CLOSING)) {
+			/*
+				blist_alloc() 获取到的应该是在该 swap device 中的连续数据块，
+				所以起始位置其实是相对于该设备的偏移。但对于整个系统来说，总的偏移
+				应该是“设备偏移+内部偏移”，设备偏移就是 sw_first，内部偏移就是 blk
+			*/
 			blk = blist_alloc(sp->sw_blist, npages);
 			if (blk != SWAPBLK_NONE) {
 				blk += sp->sw_first;
@@ -889,6 +1009,10 @@ swap_pager_reserve(vm_object_t object, vm_pindex_t start, vm_size_t size)
 	int n = 0;
 	daddr_t blk = SWAPBLK_NONE;
 	vm_pindex_t beg = start;	/* save start index */
+	/*
+		s_free: start free
+		n_free: number free
+	*/
 	daddr_t addr, n_free, s_free;
 
 	swp_pager_init_freerange(&s_free, &n_free);
@@ -1023,13 +1147,15 @@ swap_pager_copy(vm_object_t srcobject, vm_object_t dstobject,
 
 /*
  * SWAP_PAGER_HASPAGE() -	determine if we have good backing store for
- *				the requested page.
+ *				the requested page. 确定请求的页面是否有良好的备份存储
  *
  *	We determine whether good backing store exists for the requested
  *	page and return TRUE if it does, FALSE if it doesn't.
+ 		我们确定请求的页面是否存在良好的备份存储，如果存在，则返回 TRUE，如果不存在，则返回 FALSE
  *
  *	If TRUE, we also try to determine how much valid, contiguous backing
  *	store exists before and after the requested page.
+ 		如果为 TRUE，我们还会尝试确定在请求的页面前后存在多少有效的连续备份存储
  */
 static boolean_t
 swap_pager_haspage(vm_object_t object, vm_pindex_t pindex, int *before,
@@ -1792,10 +1918,12 @@ next_obj:
  *
  *	These routines manipulate the swap metadata stored in the
  *	OBJT_SWAP object.
+ 		这些例程操作存储在 OBJT_SWAP 对象中的交换元数据
  *
  *	Swap metadata is implemented with a global hash and not directly
  *	linked into the object.  Instead the object simply contains
  *	appropriate tracking counters.
+ 		交换元数据使用全局哈希实现，而不是直接链接到对象。相反，该对象只包含适当的跟踪计数器
  */
 
 /*
@@ -1816,13 +1944,17 @@ swp_pager_swblk_empty(struct swblk *sb, int start, int limit)
    
 /*
  * SWP_PAGER_META_BUILD() -	add swap block to swap meta data for object
+		为 object 添加一个 swap block 用于存储其关联的 swap metadata
  *
  *	We first convert the object to a swap object if it is a default
  *	object.
+		如果它是一个 default object，那我们首先将其转换成一个 swap object
  *
  *	The specified swapblk is added to the object's swap metadata.  If
  *	the swapblk is not valid, it is freed instead.  Any previously
  *	assigned swapblk is returned.
+ 		指定的交换块将添加到对象的交换元数据中。如果 swapblk 无效，则会将其释放。返回之前
+		分配的任何 swapblk
  */
 static daddr_t
 swp_pager_meta_build(vm_object_t object, vm_pindex_t pindex, daddr_t swapblk)
@@ -1839,21 +1971,28 @@ swp_pager_meta_build(vm_object_t object, vm_pindex_t pindex, daddr_t swapblk)
 	 * Convert default object to swap object if necessary
 	 */
 	if (object->type != OBJT_SWAP) {
+		// 初始化 pctrie 树
 		pctrie_init(&object->un_pager.swp.swp_blks);
-
 		/*
 		 * Ensure that swap_pager_swapoff()'s iteration over
 		 * object_list does not see a garbage pctrie.
+		 * 确保swap_pager_swapoff() 在 object_list 上的迭代没有看到垃圾 pctrie
 		 */
 		atomic_thread_fence_rel();
 
 		object->type = OBJT_SWAP;
 		KASSERT(object->handle == NULL, ("default pager with handle"));
 	}
-
+	/*
+		rdpi: round down page index，通过 rdpi 查找在 pctrie 中是否存在目标 swblk
+	*/
 	rdpi = rounddown(pindex, SWAP_META_PAGES);
 	sb = SWAP_PCTRIE_LOOKUP(&object->un_pager.swp.swp_blks, rdpi);
 	if (sb == NULL) {
+		/*
+			实际应用中，swapblk 传入的是一个块号。这里处理的是当我们在 pctrie 中没有找到
+			目标 object 的情况
+		*/
 		if (swapblk == SWAPBLK_NONE)
 			return (SWAPBLK_NONE);
 		for (;;) {
@@ -1861,8 +2000,14 @@ swp_pager_meta_build(vm_object_t object, vm_pindex_t pindex, daddr_t swapblk)
 			    pageproc ? M_USE_RESERVE : 0));
 			if (sb != NULL) {
 				sb->p = rdpi;
+				/* 
+					将 block 数组中的所有元素置为 -1
+				*/
 				for (i = 0; i < SWAP_META_PAGES; i++)
 					sb->d[i] = SWAPBLK_NONE;
+				/*
+					判断 swap 区域是否还存在剩余空间
+				*/
 				if (atomic_cmpset_int(&swblk_zone_exhausted,
 				    1, 0))
 					printf("swblk zone ok\n");
@@ -1992,6 +2137,7 @@ swp_pager_meta_free(vm_object_t object, vm_pindex_t pindex, vm_pindex_t count)
  *
  *	This routine locates and destroys all swap metadata associated with
  *	an object.
+ 		此例程查找并销毁与对象关联的所有交换元数据
  */
 static void
 swp_pager_meta_free_all(vm_object_t object)
@@ -2026,12 +2172,17 @@ swp_pager_meta_free_all(vm_object_t object)
  *	This routine is capable of looking up, or removing swapblk
  *	assignments in the swap meta data.  It returns the swapblk being
  *	looked-up, popped, or SWAPBLK_NONE if the block was invalid.
+ 		该例程能够在交换元数据中查找或删除交换分配。它返回正在查找、弹出的 swapblk，
+		如果块无效，则返回 swapblk_NONE。
  *
  *	When acting on a busy resident page and paging is in progress, we
  *	have to wait until paging is complete but otherwise can act on the
  *	busy page.
+ 		当在繁忙的常驻页面上执行操作并且正在进行分页时，我们必须等待分页完成，否则可以在
+		繁忙页面上执行操作
  *
  *	SWM_POP		remove from meta data but do not free it
+ 		pindex 表示的应该是页在当前 object 中的偏移，而不是整个 swap region
  */
 static daddr_t
 swp_pager_meta_ctl(vm_object_t object, vm_pindex_t pindex, int flags)
@@ -2047,6 +2198,7 @@ swp_pager_meta_ctl(vm_object_t object, vm_pindex_t pindex, int flags)
 	/*
 	 * The meta data only exists if the object is OBJT_SWAP
 	 * and even then might not be allocated yet.
+	 * 只有当对象是 OBJT_SWAP 时，元数据才存在，甚至可能还没有分配
 	 */
 	if (object->type != OBJT_SWAP)
 		return (SWAPBLK_NONE);
@@ -2145,12 +2297,13 @@ sys_swapon(struct thread *td, struct swapon_args *uap)
 	/*
 	 * Swap metadata may not fit in the KVM if we have physical
 	 * memory of >1GB.
+	 * 如果物理内存大于1GB，交换元数据可能不适合 KVM
 	 */
 	if (swblk_zone == NULL) {
 		error = ENOMEM;
 		goto done;
 	}
-
+	/* 设备节点查找 */
 	NDINIT(&nd, LOOKUP, ISOPEN | FOLLOW | AUDITVNODE1, UIO_USERSPACE,
 	    uap->name, td);
 	error = namei(&nd);
@@ -2168,6 +2321,8 @@ sys_swapon(struct thread *td, struct swapon_args *uap)
 		/*
 		 * Allow direct swapping to NFS regular files in the same
 		 * way that nfs_mountroot() sets up diskless swapping.
+		 * 允许直接交换到 NFS 常规文件，就像 NFS_mountroot 设置无盘交换一样。
+		 * 这里处理的是 nfs 的情况
 		 */
 		error = swaponvp(td, vp, attr.va_size / DEV_BSIZE);
 	}
@@ -2223,6 +2378,7 @@ swaponsomething(struct vnode *vp, void *id, u_long nblks,
 	/*
 	 * If we go beyond this, we get overflows in the radix
 	 * tree bitmap code.
+	 * 如果超出这个范围，基数树位图代码就会溢出
 	 */
 	mblocks = 0x40000000 / BLIST_META_RADIX;
 	if (nblks > mblocks) {
@@ -2247,6 +2403,7 @@ swaponsomething(struct vnode *vp, void *id, u_long nblks,
 	/*
 	 * Do not free the first two block in order to avoid overwriting
 	 * any bsd label at the front of the partition
+	 * 不要释放前两个块，以免覆盖分区前面的任何 bsd 标签
 	 */
 	blist_free(sp->sw_blist, 2, nblks - 2);
 
@@ -2258,6 +2415,7 @@ swaponsomething(struct vnode *vp, void *id, u_long nblks,
 			 * We put one uncovered page between the devices
 			 * in order to definitively prevent any cross-device
 			 * I/O requests
+			 * 我们在设备之间放置一个未覆盖的页面，以明确防止任何跨设备I/O请求
 			 */
 			dvbase = tsp->sw_end + 1;
 		}
@@ -2751,6 +2909,10 @@ swapongeom_locked(struct cdev *dev, struct vnode *vp)
 		return (ENODEV);
 	mtx_lock(&sw_dev_mtx);
 	TAILQ_FOREACH(sp, &swtailq, sw_list) {
+		/*
+			sw_id 表示的是一个 g_consumer 对象指针，
+			并且其对应的 g_provider 得是对应的 dev
+		*/
 		cp = sp->sw_id;
 		if (cp != NULL && cp->provider == pp) {
 			mtx_unlock(&sw_dev_mtx);
@@ -2788,9 +2950,9 @@ swapongeom(struct vnode *vp)
 {
 	int error;
 
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);	// vnode 加独占锁
 	if (vp->v_type != VCHR || (vp->v_iflag & VI_DOOMED) != 0) {
-		error = ENOENT;
+		error = ENOENT;	// vnode 要表示一个磁盘设备并且不能被回收
 	} else {
 		g_topology_lock();
 		error = swapongeom_locked(vp->v_rdev, vp);

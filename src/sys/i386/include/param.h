@@ -131,6 +131,9 @@
  * swblock holds metadata for 32 pages, so in theory, this is enough for
  * 16 GB of swap.  In practice, however, the usable amount is considerably
  * lower due to fragmentation.
+ * 276 是 sizeof（struct swblock），但我们并不总是在 struct swblock 的范围内有一个定义，
+ * 所以我们必须硬编码它。每个 struct swblock 保存32页的元数据，因此理论上，这足以进行16 GB的交换。
+ * 然而，在实践中，由于碎片化，可用量要低得多
  */
 #ifndef VM_SWZONE_SIZE_MAX
 #define VM_SWZONE_SIZE_MAX	(276 * 128 * 1024)

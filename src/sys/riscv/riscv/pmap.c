@@ -3320,6 +3320,8 @@ pmap_align_superpage(vm_object_t object, vm_ooffset_t offset,
  * Get the kernel virtual address of a set of physical pages. If there are
  * physical addresses not covered by the DMAP perform a transient mapping
  * that will be removed when calling pmap_unmap_io_transient.
+ * 获取一组物理页的内核虚拟地址。如果 DMAP 未覆盖物理地址，则执行瞬态映射，该映射将在调用
+ * pmap_unmap_io_transient 时删除
  *
  * \param page        The pages the caller wishes to obtain the virtual
  *                    address on the kernel memory map.

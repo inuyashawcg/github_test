@@ -163,6 +163,12 @@ vm_mem_init(void *dummy)
 	vm_pager_init();
 }
 
+/*
+	kernel submap initialize？
+	kva_md_info: kernel virtual address machine dependent information?
+
+	这个应该是 machine dependent，初始化 CPU 的时候会调用这个函数，初始化 buffer 区域 
+*/
 void
 vm_ksubmap_init(struct kva_md_info *kmi)
 {
@@ -185,6 +191,7 @@ vm_ksubmap_init(struct kva_md_info *kmi)
 	 * Make two passes.  The first pass calculates how much memory is
 	 * needed and allocates it.  The second pass assigns virtual
 	 * addresses to the various data structures.
+	 * 两次传球。第一步计算需要多少内存并进行分配。第二步将虚拟地址分配给各种数据结构
 	 */
 	firstaddr = 0;
 again:
@@ -193,6 +200,7 @@ again:
 	/*
 	 * Discount the physical memory larger than the size of kernel_map
 	 * to avoid eating up all of KVA space.
+	 * 对大于内核映射大小的物理内存进行折扣，以避免占用所有空间
 	 */
 	physmem_est = lmin(physmem, btoc(vm_map_max(kernel_map) -
 	    vm_map_min(kernel_map)));

@@ -263,7 +263,12 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 	 */
 	pref = 0;
 	/*
-		ext2_getlbns 函数将间接寻址的信息放到 indirs 数组当中，num 表示的是查找等级
+		ext2_getlbns 函数将间接寻址的信息放到 indirs 数组当中，num 表示的是查找等级。
+		这里关注一个细节，就是 indirs 的大小是 5，为什么不是6、7，或者3、4，而偏偏是5？
+		个人理解：我们可以想象一下，一个文件要找某一个数据块，最多会用到访问几次间接索引。
+		应该是5次，一级二级索引占满，三级用到了一些。但是三级间接指针指向的是二级间接块，
+		二级间接块执行的一级间接块，一级间接块指向某个具体的块。把这些块串起来，可能会用到
+		5个元素进行管理？
 	*/
 	if ((error = ext2_getlbns(vp, lbn, indirs, &num)) != 0)
 		return (error);

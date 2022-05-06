@@ -110,7 +110,9 @@ struct vm_object {
 	TAILQ_ENTRY(vm_object) object_list; /* list of all objects 对象链表 */
 	LIST_HEAD(, vm_object) shadow_head; /* objects that this is a shadow for 作为 shadow 的对象 */
 	/*
-		类比一个场景: 系统中有多个进程同时访问一个对象，每一个进程都会对这个
+		类比一个场景: 系统中有多个进程同时访问一个对象，每一个进程都会对这个 object 进行数据修改。但是我们要保证该对象
+		的数据一致性，采用影子链表的方法应该就是每个进程修改的部分都对应一个 shadow object，相互之间不会影响。当对这个
+		object 修改完成之后，再利用一些机制将 shadow object 同步到唯一的对象
 	*/
 	LIST_ENTRY(vm_object) shadow_list; /* chain of shadow objects - shadow 对象链表*/
 	struct pglist memq;		/* list of resident pages 常驻页列表 */
@@ -119,21 +121,24 @@ struct vm_object {
 	*/
 	struct vm_radix rtree;		/* root of the resident page radix trie 常驻页的根 */
 	vm_pindex_t size;		/* Object size 对象大小 */
-	struct domainset_ref domain;	/* NUMA policy. NUMA机制 */
+	struct domainset_ref domain;	/* NUMA policy. NUMA 机制 */
 	int generation;			/* generation ID 应该是用于区分不同的object */
 	int ref_count;			/* How many refs?? 引用计数，可能会存在多个 entry 引用同一个 object 的情况 */
 	int shadow_count;		/* how many objects that this is a shadow for - shadow 对象数量计数 */
 	vm_memattr_t memattr;		/* default memory attribute for pages 页的默认内存属性 */
-	objtype_t type;			/* type of pager - pager类型 */
+	objtype_t type;			/* type of pager - pager 类型 */
 	u_short flags;			/* see below */
 	u_short pg_color;		/* (c) color of first page in obj */
-	u_int paging_in_progress;	/* Paging (in or out) so don't collapse or destroy */
+	u_int paging_in_progress;	/* Paging (in or out) so don't collapse(崩溃) or destroy */
 	int resident_page_count;	/* number of resident pages 常驻页数 */
 	struct vm_object *backing_object; /* object that I'm a shadow of */
 	vm_ooffset_t backing_object_offset;/* Offset in backing object */
+	/*
+		同一种 pager 类型的 vm_object 会通过一个链表统一管理起来，方便管理和查找
+	*/
 	TAILQ_ENTRY(vm_object) pager_object_list; /* list of all objects of this pager type */
 	LIST_HEAD(, vm_reserv) rvq;	/* list of reservations 驻留页的链表 */
-	void *handle;	// 指向的是 vnode*
+	void *handle;	// 一般情况下指向的是 vnode
 	/*
 		这里边包含的是表示 bm_object 所代表的类型，更确切一点是说用途，对应的是 
 		vnode / device / swap 等等这些
@@ -187,7 +192,7 @@ struct vm_object {
 		 *
 		 */
 		struct {
-			void *swp_tmpfs;
+			void *swp_tmpfs;	// 貌似是指向一个 vnode 结构
 			struct pctrie swp_blks;
 		} swp;
 	} un_pager;
@@ -199,7 +204,7 @@ struct vm_object {
 /*
  * Flags
  */
-#define	OBJ_FICTITIOUS	0x0001		/* (c) contains fictitious pages */
+#define	OBJ_FICTITIOUS	0x0001		/* (c) contains fictitious(虚拟的) pages */
 #define	OBJ_UNMANAGED	0x0002		/* (c) contains unmanaged pages */
 #define	OBJ_POPULATE	0x0004		/* pager implements populate() */
 #define	OBJ_DEAD	0x0008		/* dead objects (during rundown) */
@@ -217,14 +222,21 @@ struct vm_object {
 
 /*
  * Helpers to perform conversion between vm_object page indexes and offsets.
+		下面的宏定义是为了辅助用户将 page index(pindex) 转换成 offset
+
  * IDX_TO_OFF() converts an index into an offset.
  * OFF_TO_IDX() converts an offset into an index.  Since offsets are signed
  *   by default, the sign propagation in OFF_TO_IDX(), when applied to
  *   negative offsets, is intentional and returns a vm_object page index
  *   that cannot be created by a userspace mapping.
+ *	offset 值默认情况下是有符号的变量。所以说如果是一个负数，表情其不能被用户空间地址创建？
+ * 
  * UOFF_TO_IDX() treats the offset as an unsigned value and converts it
  *   into an index accordingly.  Use it only when the full range of offset
  *   values are allowed.  Currently, this only applies to device mappings.
+ *	将偏移量视为无符号值，并相应地将其转换为索引。仅在允许偏移值的完整范围时使用。
+ 		目前，这只适用于设备映射
+ * 
  * OBJ_MAX_SIZE specifies the maximum page index corresponding to the
  *   maximum unsigned offset.
  */
@@ -288,6 +300,7 @@ extern struct vm_object kernel_object_store;
 
 /*
  *	The object must be locked or thread private.
+ 		对象必须是锁定的或线程专用的
  */
 static __inline void
 vm_object_set_flag(vm_object_t object, u_short bits)
@@ -307,6 +320,10 @@ vm_object_set_flag(vm_object_t object, u_short bits)
  *	before a virtual address is selected for the mapping.  In contrast,
  *	for anonymous objects, the color may be set after the virtual address
  *	is selected.
+ 		有条件地设置对象的颜色，这（1）允许为匿名对象和大于超级页面大小的命名对象分配物理内存保留，
+		 以及（2）确定对象内可分配保留的第一页偏移量。换句话说，颜色决定了对象相对于最大超级页面
+		 边界的对齐方式。映射命名对象（如文件或POSIX共享内存对象）时，在为映射选择虚拟地址之前，
+		 颜色应设置为零。相比之下，对于匿名对象，可以在选择虚拟地址后设置颜色
  *
  *	The object must be locked.
  */

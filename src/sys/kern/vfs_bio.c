@@ -1064,6 +1064,8 @@ bd_speedup(void)
  * headers.  This is called during low level kernel initialization and
  * may be called more then once.  We CANNOT write to the memory area
  * being reserved at this time.
+ * 计算缓冲区缓存缩放值并为缓冲区标头保留空间。这是在低级别内核初始化期间调用的，
+ * 可以多次调用。此时无法写入保留的内存区域
  */
 caddr_t
 kern_vfs_bio_buffer_alloc(caddr_t v, long physmem_est)

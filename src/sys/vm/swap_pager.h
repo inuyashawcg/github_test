@@ -54,6 +54,9 @@ typedef void sw_close_t(struct thread *, struct swdevt *);
 
 /*
  * Swap device table
+		通常情况下表示的是一个字符设备，操作系统的 swap 区域并不一定只在同一个设备上，
+		应该也是可以分布在不同的设备之上的。每个设备就利用下面的结构体来抽象，所有设备
+		共同组成操作系统的 swap region
  */
 struct swdevt {
 	int	sw_flags;
@@ -61,10 +64,18 @@ struct swdevt {
 	int     sw_used;
 	dev_t	sw_dev;
 	struct vnode *sw_vp;
-	void	*sw_id;
+	void	*sw_id;	// 表示的可能是一个 g_consumer 对象指针
+	/*
+		每个 swap device 组成了操作系统整个 swap region，所以每个设备都应该对应其中的
+		一段区域。sw_first 表示的可能就是该 swap device 所代表区域的起始位置，end 的话
+		表示的是结束位置
+	*/
 	swblk_t	sw_first;
 	swblk_t	sw_end;
 	struct blist *sw_blist;
+	/*
+		所有的 swap device 应该也是通过一个全局链表来管理的
+	*/
 	TAILQ_ENTRY(swdevt)	sw_list;
 	sw_strategy_t		*sw_strategy;
 	sw_close_t		*sw_close;

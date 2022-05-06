@@ -61,6 +61,7 @@ static int vm_domainset_default_stride = 64;
 
 /*
  * Determine which policy is to be used for this allocation.
+		判断此次分配的过程中，哪种策略会被使用
  */
 static void
 vm_domainset_iter_init(struct vm_domainset_iter *di, struct domainset *ds,
@@ -205,6 +206,7 @@ vm_domainset_iter_page_init(struct vm_domainset_iter *di, struct vm_object *obj,
 	 * Object policy takes precedence over thread policy.  The policies
 	 * are immutable and unsynchronized.  Updates can race but pointer
 	 * loads are assumed to be atomic.
+	 * 对象策略优先于线程策略。这些策略是不可变且不同步的。更新可以竞争，但指针加载被认为是原子的
 	 */
 	if (obj != NULL && obj->domain.dr_policy != NULL)
 		dr = &obj->domain;

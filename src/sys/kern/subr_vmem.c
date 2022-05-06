@@ -88,7 +88,9 @@ int	vmem_startup_count(void);
 #define	VMEM_HASHSIZE_MAX	131072
 
 #define	VMEM_QCACHE_IDX_MAX	16
-
+/*
+	应该表示的是我们找最合适的区域才用，还是找到第一个合适的就直接拿来用的区别
+*/
 #define	VMEM_FITMASK	(M_BESTFIT | M_FIRSTFIT)
 
 #define	VMEM_FLAGS						\
@@ -111,7 +113,7 @@ LIST_HEAD(vmem_hashlist, vmem_btag);
 
 struct qcache {
 	uma_zone_t	qc_cache;
-	vmem_t 		*qc_vmem;
+	vmem_t 		*qc_vmem;	// 所属的 vmem
 	vmem_size_t	qc_size;
 	char		qc_name[QC_NAME_MAX];
 };
@@ -120,11 +122,13 @@ typedef struct qcache qcache_t;
 
 #define	VMEM_NAME_MAX	16
 
-/* vmem arena
+/* 
+	vmem arena
+	总的管理某个地址空间的结构体，作用类似于文件系统中的超级块
 */
 struct vmem {
 	struct mtx_padalign	vm_lock;
-	struct cv		vm_cv;
+	struct cv		vm_cv;	// cv: conditional variable
 	char			vm_name[VMEM_NAME_MAX+1];
 	LIST_ENTRY(vmem)	vm_alllist;
 	struct vmem_hashlist	vm_hash0[VMEM_HASHSIZE_MIN];
@@ -139,12 +143,15 @@ struct vmem {
 	vmem_size_t		vm_import_quantum;
 	int			vm_quantum_shift;
 
-	/* Written on alloc/free */
+	/* Written on alloc/free 
+		vmem_btag 结构成员包含起始地址和 size，它应该是地址分配和释放操作的行为主体。
+		vmem 下管理的所有可用 btag 通过链表统一管理起来
+	*/
 	LIST_HEAD(, vmem_btag)	vm_freetags;
-	int			vm_nfreetags;
-	int			vm_nbusytag;
-	vmem_size_t		vm_inuse;
-	vmem_size_t		vm_size;
+	int			vm_nfreetags;	// 可用 btag 数量
+	int			vm_nbusytag;	// 已经被占用的 btag 数量
+	vmem_size_t		vm_inuse;	// vmem 正在使用的地址空间大小
+	vmem_size_t		vm_size;	// 总的地址空间大小？
 	vmem_size_t		vm_limit;
 
 	/* Used on import. */
@@ -152,7 +159,9 @@ struct vmem {
 	vmem_release_t		*vm_releasefn;
 	void			*vm_arg;
 
-	/* Space exhaustion callback. */
+	/* Space exhaustion callback. 
+		当地址空间被耗尽时的回调函数
+	*/
 	vmem_reclaim_t		*vm_reclaimfn;
 
 	/* quantum cache */
@@ -175,8 +184,8 @@ struct vmem_btag {
 
 #define	BT_TYPE_SPAN		1	/* Allocated from importfn */
 #define	BT_TYPE_SPAN_STATIC	2	/* vmem_add() or create. */
-#define	BT_TYPE_FREE		3	/* Available space. */
-#define	BT_TYPE_BUSY		4	/* Used space. */
+#define	BT_TYPE_FREE		3	/* Available space. 可用空间使用链表管理 */
+#define	BT_TYPE_BUSY		4	/* Used space. 已经被使用的空间使用哈希表管理 */
 #define	BT_ISSPAN_P(bt)	((bt)->bt_type <= BT_TYPE_SPAN_STATIC)
 
 #define	BT_END(bt)	((bt)->bt_start + (bt)->bt_size - 1)
@@ -192,6 +201,9 @@ static struct callout	vmem_periodic_ch;
 static int		vmem_periodic_interval;
 static struct task	vmem_periodic_wk;
 
+/*
+	应该是管理系统全局 vmem 链表的锁对象
+*/
 static struct mtx_padalign __exclusive_cache_line vmem_list_lock;
 static LIST_HEAD(, vmem) vmem_list = LIST_HEAD_INITIALIZER(vmem_list);
 static uma_zone_t vmem_zone;
@@ -224,12 +236,14 @@ static uma_zone_t vmem_zone;
  * Maximum number of boundary tags that may be required to satisfy an
  * allocation.  Two may be required to import.  Another two may be
  * required to clip edges.
+ * 满足一次分配可能需要的最大 btags 数量。其中两个用于 import，另外两个用于裁剪边界
  */
 #define	BT_MAXALLOC	4
 
 /*
  * Max free limits the number of locally cached boundary tags.  We
  * just want to avoid hitting the zone allocator for every call.
+ * Max free 限制本地缓存的边界标记的数量。我们只是想避免每次通话都打到区域分配器
  */
 #define BT_MAXFREE	(BT_MAXALLOC * 8)
 
@@ -255,6 +269,9 @@ vmem_t *memguard_arena = &memguard_arena_storage;
  * Fill the vmem's boundary tag cache.  We guarantee that boundary tag
  * allocation will not fail once bt_fill() passes.  To do so we cache
  * at least the maximum possible tag allocations in the arena.
+ * 
+ * 填充 vmem btag 缓存。我们保证一旦 bt_fill() 通过，btag 的分配就不会失败。所以
+ * 我们至少缓存最大可能数量的 btag allocations
  */
 static int
 bt_fill(vmem_t *vm, int flags)
@@ -266,6 +283,7 @@ bt_fill(vmem_t *vm, int flags)
 	/*
 	 * Only allow the kernel arena and arenas derived from kernel arena to
 	 * dip into reserve tags.  They are where new tags come from.
+	 * 只有 kernel arena 或者继承于它的 arena 可以使用保留 btag。它们是新 btag 的来源
 	 */
 	flags &= BT_FLAGS;
 	if (vm != kernel_arena && vm->vm_arg != kernel_arena)
@@ -276,8 +294,15 @@ bt_fill(vmem_t *vm, int flags)
 	 * and prevent simultaneous fills we first try a NOWAIT regardless
 	 * of the caller's flags.  Specify M_NOVM so we don't recurse while
 	 * holding a vmem lock.
+	 * 循环直到我们遇到保留区。为了最大限度的减少锁混乱和阻止同时填充，我们首先尝试
+	 * NOWAIT 而不是调用者的 flags。指定 M_NOVM，这样我们在持有 vmem 锁时不会递归
 	 */
 	while (vm->vm_nfreetags < BT_MAXALLOC) {
+		/*
+			我们应该保证 btags 数量至少是 BT_MAXALLOC。首先采用比较严格的 UMA 分配方式
+			获取 btag。如果此时未获取到，则换成比较宽松的分配方式，如果仍然没有获取到，则
+			直接退出循环
+		*/
 		bt = uma_zalloc(vmem_bt_zone,
 		    (flags & M_USE_RESERVE) | M_NOWAIT | M_NOVM);
 		if (bt == NULL) {
@@ -293,12 +318,15 @@ bt_fill(vmem_t *vm, int flags)
 
 	if (vm->vm_nfreetags < BT_MAXALLOC)
 		return ENOMEM;
-
+	/*
+		从代码逻辑可以看出，可用 btag 貌似最少要保持有 4 个才行
+	*/
 	return 0;
 }
 
 /*
  * Pop a tag off of the freetag stack.
+		从 tag free list 中弹出一个可用 tag
  */
 static bt_t *
 bt_alloc(vmem_t *vm)
@@ -317,6 +345,7 @@ bt_alloc(vmem_t *vm)
 /*
  * Trim the per-vmem free list.  Returns with the lock released to
  * avoid allocator recursions.
+ * 修剪每个 vmem 的 free list。释放锁后返回，以避免分配器递归。
  */
 static void
 bt_freetrim(vmem_t *vm, int freelimit)
@@ -372,17 +401,28 @@ bt_freehead_tofree(vmem_t *vm, vmem_size_t size)
 	MPASS((size & vm->vm_quantum_mask) == 0);
 	MPASS(idx >= 0);
 	MPASS(idx < VMEM_MAXORDER);
-
+	/*
+		vm_freelist 是 vmem_freelist 类型的数据，其中的每一个元素都是一个
+		btag 链表。目前一共是包含有 5 个链表，该函数是通过 size 确定链表的在
+		数组中的索引
+	*/
 	return &vm->vm_freelist[idx];
 }
 
 /*
  * bt_freehead_toalloc: return the freelist for the given size and allocation
  * strategy.
+ * 返回能够匹配给定 size 和 分配策略的 freelist。说明每个 freelist 的大小和分配策略还是
+ * 不一样的？
  *
  * For M_FIRSTFIT, return the list in which any blocks are large enough
  * for the requested size.  otherwise, return the list which can have blocks
  * large enough for the requested size.
+ * 对于 first fit，返回的是任意一个 block 都足够容纳请求大小的链表。否则，返回有 block
+ * 足够容纳请求大小的链表
+ * 注意两者的区别，第一个表示的应该是链表中所有的 block 都大于请求分配的空间大小。第二种是
+ * 表示有、但是并不代表所有的 block 都可以满足请求。从这里可以看出，每个 freelist 中的块
+ * 大小应该是不一样的，应该是会根据请求空间的大小找到合适的链表，然后再进行分配
  */
 static struct vmem_freelist *
 bt_freehead_toalloc(vmem_t *vm, vmem_size_t size, int strat)
@@ -395,7 +435,7 @@ bt_freehead_toalloc(vmem_t *vm, vmem_size_t size, int strat)
 
 	if (strat == M_FIRSTFIT && ORDER2SIZE(idx) != qsize) {
 		idx++;
-		/* check too large request? */
+		/* check too large request? 检查过大的请求？ */
 	}
 	MPASS(idx >= 0);
 	MPASS(idx < VMEM_MAXORDER);
@@ -404,19 +444,26 @@ bt_freehead_toalloc(vmem_t *vm, vmem_size_t size, int strat)
 }
 
 /* ---- boundary tag hash */
-
+/*
+	找到 hash 数组中与 addr 相关的 hashlist 元素
+*/
 static struct vmem_hashlist *
 bt_hashhead(vmem_t *vm, vmem_addr_t addr)
 {
 	struct vmem_hashlist *list;
 	unsigned int hash;
-
+	/*
+		通过 address 计算 hash，然后利用 hash 找到对应的 hashlist，返回
+	*/
 	hash = hash32_buf(&addr, sizeof(addr), 0);
 	list = &vm->vm_hashlist[hash % vm->vm_hashsize];
 
 	return list;
 }
 
+/*
+	应该是判断某个地址是不是已经被占用了
+*/
 static bt_t *
 bt_lookupbusy(vmem_t *vm, vmem_addr_t addr)
 {
@@ -434,6 +481,11 @@ bt_lookupbusy(vmem_t *vm, vmem_addr_t addr)
 	return bt;
 }
 
+/*
+	将一个正在被使用的 btag(本质上是一个块地址空间) 从 vmem 中移除。
+	需要注意的是，要将 btag 从 hashlist 中移除掉，说明我们通过 hash
+	找的 btag 对象
+*/
 static void
 bt_rembusy(vmem_t *vm, bt_t *bt)
 {
@@ -445,6 +497,9 @@ bt_rembusy(vmem_t *vm, bt_t *bt)
 	LIST_REMOVE(bt, bt_hashlist);
 }
 
+/*
+	将某个 btag 置忙，然后添加到 hash 数组中的某个 hash 链表元素当中
+*/
 static void
 bt_insbusy(vmem_t *vm, bt_t *bt)
 {
@@ -469,6 +524,9 @@ bt_remseg(vmem_t *vm, bt_t *bt)
 	bt_free(vm, bt);
 }
 
+/*
+	注意函数参数中给出了一个 prev，猜测这个链表可能是根据地址大小有序排列的
+*/
 static void
 bt_insseg(vmem_t *vm, bt_t *bt, bt_t *prev)
 {
@@ -514,6 +572,10 @@ qc_import(void *arg, void **store, int cnt, int domain, int flags)
 	int i;
 
 	qc = arg;
+	/*
+		判断我们采用哪种匹配方式，如果是快速匹配，那就使用 M_FIRSTFIT。如果不是，
+		则采用 M_BESTFIT
+	*/
 	if ((flags & VMEM_FITMASK) == 0)
 		flags |= M_BESTFIT;
 	for (i = 0; i < cnt; i++) {
@@ -676,7 +738,9 @@ vmem_startup_count(void)
 void
 vmem_startup(void)
 {
-
+	/*
+		初始化全局 vmem 链表锁，创建 vmem 和 vmem_btag zone
+	*/
 	mtx_init(&vmem_list_lock, "vmem list lock", NULL, MTX_DEF);
 	vmem_zone = uma_zcreate("vmem",
 	    sizeof(struct vmem), NULL, NULL, NULL, NULL,
@@ -691,6 +755,8 @@ vmem_startup(void)
 	 * Reserve enough tags to allocate new tags.  We allow multiple
 	 * CPUs to attempt to allocate new tags concurrently to limit
 	 * false restarts in UMA.
+	 * 保留足够的标签以分配新标签。我们允许多个 CPU 同时尝试分配新标签，以限制
+	 * UMA 中的错误重启
 	 */
 	uma_zone_reserve(vmem_bt_zone, BT_MAXALLOC * (mp_ncpus + 1) / 2);
 	uma_zone_set_allocf(vmem_bt_zone, vmem_bt_alloc);

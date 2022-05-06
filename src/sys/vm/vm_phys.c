@@ -689,6 +689,7 @@ vm_phys_enq_range(vm_page_t m, u_int npages, struct vm_freelist *fl, int tail)
  * Tries to allocate the specified number of pages from the specified pool
  * within the specified domain.  Returns the actual number of allocated pages
  * and a pointer to each page through the array ma[].
+ * 尝试从指定域内的指定池中分配指定数量的页面。返回实际分配的页数，以及通过数组ma[]指向每页的指针
  *
  * The returned pages may not be physically contiguous.  However, in contrast
  * to performing multiple, back-to-back calls to vm_phys_alloc_pages(..., 0),
@@ -768,8 +769,10 @@ vm_phys_alloc_npages(int domain, int pool, int npages, vm_page_t ma[])
 /*
  * Allocate a contiguous, power of two-sized set of physical pages
  * from the free lists.
+ * 从空闲列表中分配两个大小的连续物理页面集
  *
  * The free page queues must be locked.
+ * 必须锁定空闲页面队列
  */
 vm_page_t
 vm_phys_alloc_pages(int domain, int pool, int order)
@@ -789,6 +792,7 @@ vm_phys_alloc_pages(int domain, int pool, int order)
  * Allocate a contiguous, power of two-sized set of physical pages from the
  * specified free list.  The free list must be specified using one of the
  * manifest constants VM_FREELIST_*.
+ * 从指定的空闲列表中分配两个大小的连续物理页面集。必须使用清单常量 VM_FREELIST_* 之一指定空闲列表
  *
  * The free page queues must be locked.
  */
@@ -1203,8 +1207,11 @@ vm_phys_set_pool(int pool, vm_page_t m, int order)
  * Search for the given physical page "m" in the free lists.  If the search
  * succeeds, remove "m" from the free lists and return TRUE.  Otherwise, return
  * FALSE, indicating that "m" is not in the free lists.
+ * 在 free list 中找到一个给定的物理页面。如果查找成功的话，将该页面从 free list 中移除，
+ * 并返回 true。否则，返回 false，表明该页面没有在 free list 上
  *
  * The free page queues must be locked.
+ * 空闲页队列必须处在锁定状态
  */
 boolean_t
 vm_phys_unfree_page(vm_page_t m)
@@ -1272,6 +1279,8 @@ vm_phys_unfree_page(vm_page_t m)
  * "boundary" is non-zero, then the set of physical pages cannot cross
  * any physical address boundary that is a multiple of that value.  Both
  * "alignment" and "boundary" must be a power of two.
+ * 给空闲链表上指定数量的 page 分配一组连续的物理页面。所有物理页面必须位于或高于给定
+ * 物理地址“低”和低于给定物理地址“高”。
  */
 vm_page_t
 vm_phys_alloc_contig(int domain, u_long npages, vm_paddr_t low, vm_paddr_t high,
@@ -1289,6 +1298,11 @@ vm_phys_alloc_contig(int domain, u_long npages, vm_paddr_t low, vm_paddr_t high,
 	if (low >= high)
 		return (NULL);
 	m_run = NULL;
+	/*
+		vm_phys_nsegs: 物理内存 segment 数量 
+		遍历系统的物理内存 segment，然后还需要判断 segment 所属的 domain 与给定的
+		domain 是否一致
+	*/
 	for (segind = vm_phys_nsegs - 1; segind >= 0; segind--) {
 		seg = &vm_phys_segs[segind];
 		if (seg->start >= high || seg->domain != domain)
@@ -1305,6 +1319,9 @@ vm_phys_alloc_contig(int domain, u_long npages, vm_paddr_t low, vm_paddr_t high,
 			pa_end = seg->end;
 		if (pa_end - pa_start < ptoa(npages))
 			continue;
+		/*
+			连续的物理页面是从 segment 中申请的
+		*/
 		m_run = vm_phys_alloc_seg_contig(seg, npages, low, high,
 		    alignment, boundary);
 		if (m_run != NULL)
@@ -1331,9 +1348,13 @@ vm_phys_alloc_seg_contig(struct vm_phys_seg *seg, u_long npages,
 	KASSERT(powerof2(alignment), ("alignment is not a power of 2"));
 	KASSERT(powerof2(boundary), ("boundary is not a power of 2"));
 	vm_domain_free_assert_locked(VM_DOMAIN(seg->domain));
-	/* Compute the queue that is the best fit for npages. */
+	/* Compute the queue that is the best fit for npages. 
+		计算最适合npages的队列
+	*/
 	order = flsl(npages - 1);
-	/* Search for a run satisfying the specified conditions. */
+	/* Search for a run satisfying the specified conditions. 
+			搜索满足指定条件的 run
+	*/
 	size = npages << PAGE_SHIFT;
 	for (oind = min(order, VM_NFREEORDER - 1); oind < VM_NFREEORDER;
 	    oind++) {

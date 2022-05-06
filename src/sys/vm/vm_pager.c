@@ -88,6 +88,9 @@ __FBSDID("$FreeBSD: releng/12.0/sys/vm/vm_pager.c 326403 2017-11-30 15:48:35Z pf
 
 int cluster_pbuf_freecnt = -1;	/* unlimited to begin with */
 
+/*
+	swbuf: swap buffer?
+*/
 struct buf *swbuf;
 
 static int dead_pager_getpages(vm_object_t, vm_page_t *, int, int *, int *);
@@ -148,6 +151,9 @@ static struct pagerops deadpagerops = {
 	.pgo_haspage =	dead_pager_haspage,
 };
 
+/*
+	全局的 pager operations table，从这里我们也可以看出 FreeBSD 一共支持七种类型的 pager
+*/
 struct pagerops *pagertab[] = {
 	&defaultpagerops,	/* OBJT_DEFAULT */
 	&swappagerops,		/* OBJT_SWAP */
@@ -166,6 +172,8 @@ struct pagerops *pagertab[] = {
  * XXX needs to be large enough to support the number of pending async
  * cleaning requests (NPENDINGIO == 64) * the maximum swap cluster size
  * (MAXPHYS == 64k) if you want to get the most efficiency.
+ * 需要足够大，以支持挂起的异步清理请求数（NPENDINGIO==64）*最大交换群集大小（MAXPHYS==64k），
+ * 如果您想获得最高效率
  */
 struct mtx_padalign __exclusive_cache_line pbuf_mtx;
 static TAILQ_HEAD(swqueue, buf) bswlist;
@@ -180,6 +188,7 @@ vm_pager_init(void)
 	TAILQ_INIT(&bswlist);
 	/*
 	 * Initialize known pagers
+	 		遍历 pager list，逐个执行 pager_init() 函数
 	 */
 	for (pgops = pagertab; pgops < &pagertab[nitems(pagertab)]; pgops++)
 		if ((*pgops)->pgo_init != NULL)
@@ -193,9 +202,14 @@ vm_pager_bufferinit(void)
 	int i;
 
 	mtx_init(&pbuf_mtx, "pbuf mutex", NULL, MTX_DEF);
+	/*
+
+	*/
 	bp = swbuf;
 	/*
 	 * Now set up swap and physical I/O buffer headers.
+			设置 swap 和 物理 I/O 缓存表头
+		nswbuf: number of swap buffer?
 	 */
 	for (i = 0; i < nswbuf; i++, bp++) {
 		TAILQ_INSERT_HEAD(&bswlist, bp, b_freelist);

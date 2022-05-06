@@ -168,6 +168,8 @@ struct pmap_physseg {
  * from which physical pages are allocated and VM_FREEPOOL_DIRECT is
  * the pool from which physical pages for small UMA objects are
  * allocated.
+ * 创建两个空闲页面池：VM_FREEPOOL_DEFAULT 是分配物理页面的默认池，VM_FREEPOOL_DIRECT
+ * 是分配小型UMA对象的物理页面的池
  */
 #define	VM_NFREEPOOL		2
 #define	VM_FREEPOOL_DEFAULT	0

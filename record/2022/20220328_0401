@@ -364,7 +364,85 @@ vm_object，那整个持久化内存区域就要改成利用 vm_map_entry 来管
   vm 模块中目前包含有一个 vmem 结构，对应有 kernel arena / buffer_arena/ transient_arena 这些实例。kernel arena 等可以
 理解为管理除了那些 data、text 段之外、可动态分配的剩余空间的一种对象。vmem_alloc() 其实就是在这些区域中分配连续的虚拟地址空间。
 如果我们要用 VM 模块中的数据结构和接口来管理文件，那么我们就不能采用现在这种方式 (用一个 vm_object 管理整个持久化区域)
-  还是要看 persistent 的实现机制。如果目前只能用 vm_object 管理的话，貌似就不能使用 vmem_alloc() 接口分配连续的虚拟地址空间。
+  还是要看 persistent 的实现机制。如果目前只能用 vm_object 管理的话，貌似就不能使用 vmem_alloc() 接口分配连续的虚拟地址空间
+
+  当我们执行 vm_page_alloc() 等相关函数的时候，经常会遇到 domain 这个参数。它其实是用于 NUMA 机制当中的，阅读源码可暂时忽略
+
+  为文件分配连续地址感觉也是要分情况讨论，如果是那些一般不会被改变的文件，那分配连续的地址空间是可以。但是对于可读写文件，如果只能
+分配连续空间并不见得是好事。因为当我们执行插入操作的时候，还是希望文件是离散的，这样我们就不用截断文件然后重新分配连续空间，管理起来
+比较灵活
+
+
+Thread 1 hit Breakpoint 2, vnode_pager_generic_putpages (vp=0xffffffd006f9c3d0, ma=0xffffffc094da13e0, 
+    bytecount=16384, flags=8, rtvals=0xffffffc094da1340) at /usr/home/wcg/qihai/sys/vm/VnodePager.cpp:963
+963		object = vp->v_object;
+(gdb) bt
+#0  vnode_pager_generic_putpages (vp=0xffffffd006f9c3d0, ma=0xffffffc094da13e0, bytecount=16384, flags=8, 
+    rtvals=0xffffffc094da1340) at /usr/home/wcg/qihai/sys/vm/VnodePager.cpp:963
+#1  0xffffffc00056fb30 in vop_stdputpages (ap=0xffffffc094da1200)
+    at /usr/home/wcg/qihai/sys/kern/vfs_default.c:810
+#2  0xffffffc0008c96d4 in VOP_PUTPAGES (vp=0xffffffd006f9c3d0, m=0xffffffc094da13e0, count=16384, sync=8, 
+    rtvals=0xffffffc094da1340) at ./vnode_if.h:1593
+#3  0xffffffc0008c954e in VnodePager::putpages (this=0xffffffc000a94670 <vnodePager>, 
+    object=0xffffffd006f6fe70, m=0xffffffc094da13e0, count=4, flags=8, rtvals=0xffffffc094da1340)
+    at /usr/home/wcg/qihai/sys/vm/VnodePager.cpp:262
+#4  0xffffffc0008bb792 in vm_pager_put_pages (object=0xffffffd006f6fe70, m=0xffffffc094da13e0, count=4, 
+    flags=8, rtvals=0xffffffc094da1340) at /usr/home/wcg/qihai/sys/vm/vm_pager.cpp:119
+#5  0xffffffc00084d808 in vm_pageout_flush (mc=0xffffffc094da13e0, count=4, flags=8, mreq=0, 
+    prunlen=0xffffffc094da14f0, eio=0xffffffc094da15a0) at /usr/home/wcg/qihai/sys/vm/vm_pageout.c:500
+#6  0xffffffc00083c624 in vm_object_page_collect_flush (object=0xffffffd006f6fe70, p=0xffffffd07d99c360, 
+    pagerflags=8, flags=0, allclean=0xffffffc094da1598, eio=0xffffffc094da15a0)
+    at /usr/home/wcg/qihai/sys/vm/vm_object.c:1153
+#7  0xffffffc00083c10a in vm_object_page_clean (object=0xffffffd006f6fe70, start=0, end=0, flags=0)
+    at /usr/home/wcg/qihai/sys/vm/vm_object.c:1068
+#8  0xffffffc00058f504 in vinactivef (vp=0xffffffd006f9c3d0) at /usr/home/wcg/qihai/sys/kern/vfs_subr.c:3646
+#9  0xffffffc00058f36a in vinactive (vp=0xffffffd006f9c3d0) at /usr/home/wcg/qihai/sys/kern/vfs_subr.c:3673
+#10 0xffffffc00058ec04 in vput_final (vp=0xffffffd006f9c3d0, func=VPUT)
+    at /usr/home/wcg/qihai/sys/kern/vfs_subr.c:3226
+#11 0xffffffc00058ed2a in vput (vp=0xffffffd006f9c3d0) at /usr/home/wcg/qihai/sys/kern/vfs_subr.c:3283
+#12 0xffffffc0005ac516 in vn_close1 (vp=0xffffffd006f9c3d0, flags=3, file_cred=0xffffffd006da7200, 
+    td=0xffffffc094e01080, keep_ref=false) at /usr/home/wcg/qihai/sys/kern/vfs_vnops.c:490
+#13 0xffffffc0005aa3bc in vn_closefile (fp=0xffffffd006d3adc0, td=0xffffffc094e01080)
+    at /usr/home/wcg/qihai/sys/kern/vfs_vnops.c:1763
+#14 0xffffffc0003af54e in fo_close (fp=0xffffffd006d3adc0, td=0xffffffc094e01080)
+    at /usr/home/wcg/qihai/sys/sys/file.h:377
+#15 0xffffffc0003a8f56 in _fdrop (fp=0xffffffd006d3adc0, td=0xffffffc094e01080)
+    at /usr/home/wcg/qihai/sys/kern/kern_descrip.c:3510
+#16 0xffffffc0003add10 in closef (fp=0xffffffd006d3adc0, td=0xffffffc094e01080)
+    at /usr/home/wcg/qihai/sys/kern/kern_descrip.c:2828
+#17 0xffffffc0003b2b7a in closefp_impl (fdp=0xffffffc0633f44f0, fd=3, fp=0xffffffd006d3adc0, 
+    td=0xffffffc094e01080, audit=true) at /usr/home/wcg/qihai/sys/kern/kern_descrip.c:1271
+#18 0xffffffc0003a9988 in closefp (fdp=0xffffffc0633f44f0, fd=3, fp=0xffffffd006d3adc0, 
+    td=0xffffffc094e01080, holdleaders=true, audit=true) at /usr/home/wcg/qihai/sys/kern/kern_descrip.c:1328
+#19 0xffffffc0003aac08 in kern_close (td=0xffffffc094e01080, fd=3)
+    at /usr/home/wcg/qihai/sys/kern/kern_descrip.c:1364
+#20 0xffffffc0003aab02 in sys_close (td=0xffffffc094e01080, uap=0xffffffc094e01468)
+    at /usr/home/wcg/qihai/sys/kern/kern_descrip.c:1345
+#21 0xffffffc000895c58 in syscallenter (td=0xffffffc094e01080)
+    at /usr/home/wcg/qihai/sys/riscv/riscv/../../kern/subr_syscall.c:189
+#22 0xffffffc00089552a in ecall_handler () at /usr/home/wcg/qihai/sys/riscv/riscv/trap.c:167
+#23 0xffffffc00089536c in do_trap_user (frame=0xffffffc094da1c50)
+    at /usr/home/wcg/qihai/sys/riscv/riscv/trap.c:371
+#24 <signal handler called>
+#25 0x0000000042ee2de6 in ?? ()
+
+
+////////////// 20220407 //////////////
+如何从虚拟地址定位到磁盘块上的某个块？
+  vm_fault -> vm_map_entry -> vm_object -> vm_pager -> pagein/out -> 读写磁盘某个数据块
+
+
+////////////// 20220408 //////////////
+  tmpfs 所有的数据都已经在内存当中了，所以它不需要特别去管理虚拟页的数据目前是否在内存当中，或者是数据在磁盘上。但是如果是要做内存
+持久化，那么 tptfs 必须要知道该文件对应多少数据块，这些数据块都在磁盘上的哪些位置，读到内存的时候是否要重新申请 page，以及申请到的
+page 都要按需填充。是不是需要对这些 page 进行修改，或者说这些 page 是否也是需要进行持久化处理
+
+  假设系统重启之后要读取某个文件，此时就需要将该文件读取到内存中，那就需要给该文件分配 vm_page，这些 page 是否需要跟重启之前该文件
+管理的 vm_page 一致？
+
+  对于文件目前是在内存，还是在磁盘的问题。可以在文件类中添加一个标志位，表示文件当前所在的位置
+
+  文件在磁盘上可以不连续，但是在虚拟内存中一定要是连续的
 
 
 ////////////// 周会记录 //////////////

@@ -131,7 +131,9 @@ vnode_create_vobject(struct vnode *vp, off_t isize, struct thread *td)
 	*/
 	if (!vn_isdisk(vp, NULL) && vn_canvmio(vp) == FALSE)
 		return (0);
-
+	/*
+		判断 bufobj 是否为空
+	*/
 	while ((object = vp->v_object) != NULL) {
 		VM_OBJECT_WLOCK(object);
 		if (!(object->flags & OBJ_DEAD)) {
@@ -232,7 +234,7 @@ vnode_pager_alloc(void *handle, vm_ooffset_t size, vm_prot_t prot,
 	 */
 	if (handle == NULL)
 		return (NULL);
-
+	/* handle 传入的是一个 vnode 指针 */
 	vp = (struct vnode *) handle;
 
 	/*
@@ -339,7 +341,8 @@ vnode_pager_dealloc(vm_object_t object)
 }
 
 /*
-	其实就是判断在 pindex 处是否存在页与之对应
+	其实就是判断在 pindex 处是否存在页与之对应。该函数中会调用 vop_bmap() 函数来
+	辅助进行判断，已经算是调用到了文件系统的相关接口了
 */
 static boolean_t
 vnode_pager_haspage(vm_object_t object, vm_pindex_t pindex, int *before,
@@ -659,6 +662,7 @@ vnode_pager_input_old(vm_object_t object, vm_page_t m)
 
 	/*
 	 * Return failure if beyond current EOF
+	 		如果 pindex 对应 offset 大于当前文件的大小，返回错误
 	 */
 	if (IDX_TO_OFF(m->pindex) >= object->un_pager.vnp.vnp_size) {
 		return VM_PAGER_BAD;
@@ -666,7 +670,7 @@ vnode_pager_input_old(vm_object_t object, vm_page_t m)
 		size = PAGE_SIZE;
 		if (IDX_TO_OFF(m->pindex) + size > object->un_pager.vnp.vnp_size)
 			size = object->un_pager.vnp.vnp_size - IDX_TO_OFF(m->pindex);
-		vp = object->handle;
+		vp = object->handle;	// 此时 handle 表示的是一个 vnode
 		VM_OBJECT_WUNLOCK(object);
 
 		/*
@@ -713,6 +717,8 @@ vnode_pager_input_old(vm_object_t object, vm_page_t m)
  * Local media VFS's that do not implement their own VOP_GETPAGES
  * should have their VOP_GETPAGES call to vnode_pager_generic_getpages()
  * to implement the previous behaviour.
+ * VFS 并没有实现自己的 getpages 函数，所以需要调用 vnode_pager_generic_getpages()
+ * 来实现之前的行为
  *
  * All other FS's should use the bypass to get to the local media
  * backing vp's VOP_GETPAGES.
@@ -772,7 +778,9 @@ vnode_pager_local_getpages_async(struct vop_getpages_async_args *ap)
 
 /*
  * This is now called from local media FS's to operate against their
- * own vnodes if they fail to implement VOP_GETPAGES.
+ * own vnodes if they fail to implement .
+ * 当底层文件系统并没有实现它们的 getpages 函数时，就默认调用这个函数。从传入的参数
+ * 来看，它不仅读取目标数据块，貌似还会读取相邻的前后数据块
  */
 int
 vnode_pager_generic_getpages(struct vnode *vp, vm_page_t *m, int count,
@@ -823,7 +831,7 @@ vnode_pager_generic_getpages(struct vnode *vp, vm_page_t *m, int count,
 	 * Synchronous and asynchronous paging operations use different
 	 * free pbuf counters.  This is done to avoid asynchronous requests
 	 * to consume all pbufs.
-	 * 同步和异步分页操作使用不同的空闲pbuf计数器。这样做是为了避免使用所有PBUF的异步请求
+	 * 同步和异步分页操作使用不同的空闲 pbuf 计数器。这样做是为了避免使用所有PBUF的异步请求
 	 * 
 	 * Allocate the pbuf at the very beginning of the function, so that
 	 * if we are low on certain kind of pbufs don't even proceed to BMAP,
@@ -834,7 +842,11 @@ vnode_pager_generic_getpages(struct vnode *vp, vm_page_t *m, int count,
 	 */
 	freecnt = iodone != NULL ?
 	    &vnode_async_pbuf_freecnt : &vnode_pbuf_freecnt;
-	bp = getpbuf(freecnt);	// 获取一个物理缓存区
+	/*
+		FreeBSD 中为文件提供的物理缓存是有限的，不可能让一个进程或者对象无限制的分配。所以提供了
+		getbuf() 这么一个接口来进行物理缓存申请管理
+	*/
+	bp = getpbuf(freecnt);
 
 	/*
 	 * Get the underlying device blocks for the file with VOP_BMAP().
@@ -846,7 +858,7 @@ vnode_pager_generic_getpages(struct vnode *vp, vm_page_t *m, int count,
 	 */
 	error = VOP_BMAP(vp, foff / bsize, &bo, &bp->b_blkno, &after, &before);
 	if (error == EOPNOTSUPP) {
-		relpbuf(bp, freecnt);
+		relpbuf(bp, freecnt);		// 释放掉申请的物理缓存
 		VM_OBJECT_WLOCK(object);
 		for (i = 0; i < count; i++) {
 			VM_CNT_INC(v_vnodein);
@@ -865,6 +877,8 @@ vnode_pager_generic_getpages(struct vnode *vp, vm_page_t *m, int count,
 	/*
 	 * If the file system supports BMAP, but blocksize is smaller
 	 * than a page size, then use special small filesystem code.
+	 * 当文件系统支持 vop_bmap，但是 blocksize 比 pagesize 要小的时候，需要利用
+	 * 特殊的小文件系统处理代码
 	 */
 	if (pagesperblock == 0) {
 		relpbuf(bp, freecnt);
@@ -881,6 +895,7 @@ vnode_pager_generic_getpages(struct vnode *vp, vm_page_t *m, int count,
 	/*
 	 * A sparse file can be encountered only for a single page request,
 	 * which may not be preceded by call to vm_pager_haspage().
+	 * 只能在单个页面请求中遇到稀疏文件，该请求之前不能调用 vm_pager_haspage()
 	 */
 	if (bp->b_blkno == -1) {
 		KASSERT(count == 1,
@@ -899,6 +914,9 @@ vnode_pager_generic_getpages(struct vnode *vp, vm_page_t *m, int count,
 #ifdef INVARIANTS
 	blkno0 = bp->b_blkno;
 #endif
+	/*
+		buf 结构中还会保存底层物理块号 b_blkno，对应的应该就是磁盘扇区号
+	*/
 	bp->b_blkno += (foff % bsize) / DEV_BSIZE;
 
 	/* Recalculate blocks available after/before to pages. */

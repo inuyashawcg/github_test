@@ -149,6 +149,7 @@ static int vm_pageproc_waiters;
 /*
  * bogus page -- for I/O to/from partially complete buffers,
  * or for paging into sparsely invalid regions.
+ * 伪页——用于向部分完整的缓冲区进行I/O或从中进行I/O，或用于分页到稀疏的无效区域
  */
 vm_page_t bogus_page;
 
@@ -204,18 +205,24 @@ vm_page_init(void *dummy)
 /*
  * The cache page zone is initialized later since we need to be able to allocate
  * pages before UMA is fully initialized.
+ * 缓存页区域将会在晚些时候初始化，因为我们需要等待 UMA 完全初始化之后才能正常申请页面
  */
 static void
 vm_page_init_cache_zones(void *dummy __unused)
 {
 	struct vm_domain *vmd;
 	int i;
-
+	/*
+		vm_domain 主要是用于 CPU NUMA 机制，感觉应该是每个 CPU 都会对应一个 domain，来管理它本身
+		优先使用的 page。可以认为是不同 CPU 和不同卡槽内存条的关系。因为不同的内存条和CPU之间的距离
+		不一样，所以数据访问会有区别，NUMA 应该就是为了解决这个问题才设计的(主要是 CPU 也支持这种机制)。
+		主要思想就是尽量让每个 CPU 访问的都是离自己最近的那个内存条，降低数据访问延迟
+	*/
 	for (i = 0; i < vm_ndomains; i++) {
 		vmd = VM_DOMAIN(i);
 		/*
-		 * Don't allow the page cache to take up more than .25% of
-		 * memory.
+		 * Don't allow the page cache to take up more than .25% of memory.
+		 * 不允许页缓存占用超过0.25%的内存。这里通过一个 for 循环给每个 domain 都创建页面缓存
 		 */
 		if (vmd->vmd_page_count / 400 < 256 * mp_ncpus)
 			continue;
@@ -239,6 +246,8 @@ CTASSERT(sizeof(u_long) >= 8);
  * fail to trylock we unlock and lock the pmap directly and cache the
  * locked pa in *locked.  The caller should then restart their loop in case
  * the virtual to physical mapping has changed.
+ * 当 pmap 被锁定时，尝试获取物理地址锁。如果无法锁定，则直接解锁并锁定 pmap，并将锁定的
+ * pa缓存保持在锁定状态。然后，调用方应该重新启动循环，以防虚拟到物理的映射发生变化
  */
 int
 vm_page_pa_tryrelock(pmap_t pmap, vm_paddr_t pa, vm_paddr_t *locked)
@@ -268,6 +277,7 @@ vm_page_pa_tryrelock(pmap_t pmap, vm_paddr_t pa, vm_paddr_t *locked)
  *	Sets the page size, perhaps based upon the memory
  *	size.  Must be called before any use of page-size
  *	dependent functions.
+ 		设置页面大小，可能基于内存大小。任何页面大小的函数在使用前都必须被调用
  */
 void
 vm_set_page_size(void)
@@ -286,6 +296,9 @@ vm_set_page_size(void)
  *	If an invalid integer is encountered then the rest of the
  *	string is skipped.  Updates the list pointer to the next
  *	character, or NULL if the string is exhausted or invalid.
+ 		在提供的黑名单地址字符串中查找下一个条目。条目之间用空格、逗号或换行符分隔。
+		如果遇到无效整数，则跳过字符串的其余部分。将列表指针更新为下一个字符，如果
+		字符串已用尽或无效，则更新为 NULL
  */
 static vm_paddr_t
 vm_page_blacklist_next(char **list, char *end)
@@ -346,11 +359,17 @@ vm_page_blacklist_add(vm_paddr_t pa, bool verbose)
 	struct vm_domain *vmd;
 	vm_page_t m;
 	int ret;
-
+	/*
+		将物理地址转换成包含改地址的 vm_page
+	*/
 	m = vm_phys_paddr_to_vm_page(pa);
 	if (m == NULL)
 		return (true); /* page does not exist, no failure */
-
+	/*
+		通过 vm_page 找到包含该结构的 vm_domain。从代码逻辑可以看出，这里会将
+		需要加入黑名单的页面执行 unfree 操作？ 猜测是将 vm_page 从 free list
+		中移除，然后加入到黑名单中
+	*/
 	vmd = vm_pagequeue_domain(m);
 	vm_domain_free_lock(vmd);
 	ret = vm_phys_unfree_page(m);
@@ -370,6 +389,8 @@ vm_page_blacklist_add(vm_paddr_t pa, bool verbose)
  *	Iterate through the provided string of blacklist addresses, pulling
  *	each entry out of the physical allocator free list and putting it
  *	onto a list for reporting via the vm.page_blacklist sysctl.
+		遍历黑名单地址中提供的字符串，将每个 entry 从物理分配器空闲链表中提取出来并将其
+		放到用于报告的链表当中
  */
 static void
 vm_page_blacklist_check(char *list, char *end)
@@ -391,6 +412,8 @@ vm_page_blacklist_check(char *list, char *end)
  *	Search for a special module named "ram_blacklist".  It'll be a
  *	plain text file provided by the user via the loader directive
  *	of the same name.
+ 		搜索名为“ram_黑名单”的特殊模块。它将是一个由用户通过相同名称的 loader 指令
+		提供的纯文本文件
  */
 static void
 vm_page_blacklist_load(char **list, char **end)
@@ -442,6 +465,8 @@ sysctl_vm_page_blacklist(SYSCTL_HANDLER_ARGS)
  * In principle, this function only needs to set the flag PG_MARKER.
  * Nonetheless, it write busies and initializes the hold count to one as
  * safety precautions.
+ * 初始化用于扫描指定分页队列的虚拟页。原则上，此功能只需要设置标志PG_MARKER。尽管如此，
+ * 作为安全预防措施，它仍会写入业务并将保持计数初始化为1
  */
 static void
 vm_page_init_marker(vm_page_t marker, int queue, uint8_t aflags)
@@ -462,7 +487,7 @@ vm_page_domain_init(int domain)
 	struct vm_pagequeue *pq;
 	int i;
 
-	vmd = VM_DOMAIN(domain);
+	vmd = VM_DOMAIN(domain);	// domain 就是一个索引值
 	bzero(vmd, sizeof(*vmd));
 	*__DECONST(char **, &vmd->vmd_pagequeues[PQ_INACTIVE].pq_name) =
 	    "vm inactive pagequeue";
@@ -477,12 +502,19 @@ vm_page_domain_init(int domain)
 	vmd->vmd_free_count = 0;
 	vmd->vmd_segs = 0;
 	vmd->vmd_oom = FALSE;
+	/*
+		PQ_COUNT: page queue count，其实就是每个 domain 对应的 active / free list 等
+		页面队列
+	*/
 	for (i = 0; i < PQ_COUNT; i++) {
 		pq = &vmd->vmd_pagequeues[i];
 		TAILQ_INIT(&pq->pq_pl);
 		mtx_init(&pq->pq_mutex, pq->pq_name, "vm pagequeue",
 		    MTX_DEF | MTX_DUPOK);
 		pq->pq_pdpages = 0;
+		/*
+			每个 page queue 都会创建一个用于遍历整个页面队列的虚拟页
+		*/
 		vm_page_init_marker(&vmd->vmd_markers[i], i, 0);
 	}
 	mtx_init(&vmd->vmd_free_mtx, "vm page free queue", NULL, MTX_DEF);
@@ -491,7 +523,9 @@ vm_page_domain_init(int domain)
 
 	/*
 	 * inacthead is used to provide FIFO ordering for LRU-bypassing
-	 * insertions.
+	 * insertions. 
+	 * inacthead 用于为 LRU-bypassing 插入操作提供 FIFO 排序。也就是排序算法
+	 * 需要一个额外的元素存放临时对象
 	 */
 	vm_page_init_marker(&vmd->vmd_inacthead, PQ_INACTIVE, PGA_ENQUEUED);
 	TAILQ_INSERT_HEAD(&vmd->vmd_pagequeues[PQ_INACTIVE].pq_pl,
@@ -502,6 +536,8 @@ vm_page_domain_init(int domain)
 	 * requeues.  Scans start at clock[0], which is advanced after the scan
 	 * ends.  When the two clock hands meet, they are reset and scanning
 	 * resumes from the head of the queue.
+	 * clock pages 用于无需重排的活跃页面队列的扫描操作。扫描从 clock[0] 开始，它要高于
+	 * 扫描结尾？当两个 clock 相遇之后，它们会被重置从队列头开始重新扫描
 	 */
 	vm_page_init_marker(&vmd->vmd_clock[0], PQ_ACTIVE, PGA_ENQUEUED);
 	vm_page_init_marker(&vmd->vmd_clock[1], PQ_ACTIVE, PGA_ENQUEUED);
@@ -514,6 +550,7 @@ vm_page_domain_init(int domain)
 /*
  * Initialize a physical page in preparation for adding it to the free
  * lists.
+ * 初始化一个物理页面，并且将它为添加到空闲链表做好准备
  */
 static void
 vm_page_init_page(vm_page_t m, vm_paddr_t pa, int segind)
@@ -541,15 +578,15 @@ vm_page_init_page(vm_page_t m, vm_paddr_t pa, int segind)
  *	bootstrapping UMA and some data structures that are used to manage
  *	physical pages.  Initializes these structures, and populates the free
  *	page queues.
- 		初始化驻留内存模块。为引导UMA和一些用于管理物理页的数据结构分配物理内存。
-		初始化这些结构，并填充空闲页队列
+ 		初始化驻留内存模块。为引导UMA和一些用于管理物理页的数据结构分配物理页面。初始化这些结构，
+		并填充空闲页队列
  */
 vm_offset_t
 vm_page_startup(vm_offset_t vaddr)
 {
 	struct vm_phys_seg *seg;
 	vm_page_t m;
-	char *list, *listend;
+	char *list, *listend;	// 链表头部和尾部
 	vm_offset_t mapped;
 	vm_paddr_t end, high_avail, low_avail, new_end, page_range, size;
 	vm_paddr_t biggestsize, last_pa, pa;
@@ -562,7 +599,10 @@ vm_page_startup(vm_offset_t vaddr)
 	biggestsize = 0;
 	biggestone = 0;
 	vaddr = round_page(vaddr);	// 向上扩展到页的整数倍
-
+	/*
+		对系统的可用的物理地址进行处理，将它们设置成边界刚好是页大小的整数倍。猜测存储的应该是
+		start / end 对，比如0元素是start，1元素是end；2元素是start，3元素是end。以此类推
+	*/
 	for (i = 0; phys_avail[i + 1]; i += 2) {
 		phys_avail[i] = round_page(phys_avail[i]);
 		phys_avail[i + 1] = trunc_page(phys_avail[i + 1]);
@@ -574,7 +614,9 @@ vm_page_startup(vm_offset_t vaddr)
 			biggestsize = size;
 		}
 	}
-
+	/*
+		找出来最大的一个可用区域，将它的结束地址赋值给 end
+	*/
 	end = phys_avail[biggestone+1];
 
 	/*
@@ -583,6 +625,9 @@ vm_page_startup(vm_offset_t vaddr)
 	mtx_init(&vm_domainset_lock, "vm domainset lock", NULL, MTX_DEF);
 	for (i = 0; i < PA_LOCK_COUNT; i++)
 		mtx_init(&pa_lock[i], "vm page", NULL, MTX_DEF);
+	/*
+		初始化 domain
+	*/
 	for (i = 0; i < vm_ndomains; i++)
 		vm_page_domain_init(i);
 
@@ -621,6 +666,9 @@ vm_page_startup(vm_offset_t vaddr)
 	mapped = pmap_map(&vaddr, new_end, end,
 	    VM_PROT_READ | VM_PROT_WRITE);
 	bzero((void *)mapped, end - new_end);
+	/*
+		计算引导阶段所需要的所有的 page，然后借助 UMA 机制进行初始启动
+	*/
 	uma_startup((void *)mapped, boot_pages);
 
 #ifdef WITNESS
@@ -637,13 +685,18 @@ vm_page_startup(vm_offset_t vaddr)
 	/*
 	 * Allocate a bitmap to indicate that a random physical page
 	 * needs to be included in a minidump.
+	 * 分配一个位图，以指示需要在小型转储中包含一个随机物理页
 	 *
 	 * The amd64 port needs this to indicate which direct map pages
 	 * need to be dumped, via calls to dump_add_page()/dump_drop_page().
+	 * amd64 端口需要通过调用 dump_add_page() / dump_drop_page() 来指示需要转储
+	 * 哪些直接映射页
 	 *
 	 * However, i386 still needs this workspace internally within the
 	 * minidump code.  In theory, they are not needed on i386, but are
 	 * included should the sf_buf code decide to use them.
+	 * 然而，i386 在 minidump 代码内部仍然需要这个工作区。理论上，i386不需要它们，
+	 * 但如果 sf_buf 代码决定使用它们，它们就会被包括在内
 	 */
 	last_pa = 0;
 	for (i = 0; dump_avail[i + 1] != 0; i += 2)
@@ -965,10 +1018,13 @@ vm_page_sunbusy(vm_page_t m)
  *
  *	Sleep and release the page lock, using the page pointer as wchan.
  *	This is used to implement the hard-path of busying mechanism.
+ 		休眠并释放页面锁，使用页面指针作为wchan。这是用来实现繁忙机制的硬路径
  *
  *	The given page must be locked.
+		给定的页面必须处在加锁状态
  *
  *	If nonshared is true, sleep only if the page is xbusy.
+ 		如果 nonshared 为 true，则仅当页面为 xbusy 时才睡眠
  */
 void
 vm_page_busy_sleep(vm_page_t m, const char *wmesg, bool nonshared)
@@ -993,6 +1049,8 @@ vm_page_busy_sleep(vm_page_t m, const char *wmesg, bool nonshared)
  *	Try to shared busy a page.
  *	If the operation succeeds 1 is returned otherwise 0.
  *	The operation never sleeps.
+		尝试共享一个 busy page；如果这个操作成功了，则返回1，否则返回0；
+		该操作永远不会睡眠
  */
 int
 vm_page_trysbusy(vm_page_t m)
@@ -1065,8 +1123,10 @@ vm_page_xunbusy_hard(vm_page_t m)
  *
  *	Wakeup anyone waiting for the page.
  *	The ownership bits do not change.
+		唤醒任何等待这个页面的进程，并且拥有者的 bits 不会被改变
  *
  *	The given page must be locked.
+		给定的页面一定要是加锁的状态
  */
 void
 vm_page_flash(vm_page_t m)
@@ -1088,6 +1148,7 @@ vm_page_flash(vm_page_t m)
 
 /*
  * Avoid releasing and reacquiring the same page lock.
+		避免释放并重新获取相同的锁对象
  */
 void
 vm_page_change_lock(vm_page_t m, struct mtx **mtx)
@@ -1108,6 +1169,8 @@ vm_page_change_lock(vm_page_t m, struct mtx **mtx)
  * much of the same effect as wiring, except much lower
  * overhead and should be used only for *very* temporary
  * holding ("wiring").
+ * 保持页面不被页面守护进程释放，这与 wiring 的效果基本相同，只是
+ * 开销要低得多，应该只用于*非常*临时的保持（“wiring”）
  */
 void
 vm_page_hold(vm_page_t mem)
@@ -1123,7 +1186,7 @@ vm_page_unhold(vm_page_t mem)
 
 	vm_page_lock_assert(mem, MA_OWNED);
 	KASSERT(mem->hold_count >= 1, ("vm_page_unhold: hold count < 0!!!"));
-	--mem->hold_count;
+	--mem->hold_count;	// 减少 hold 计数，当减小到 0 的时候，就返给空闲链表
 	if (mem->hold_count == 0 && (mem->flags & PG_UNHOLDFREE) != 0)
 		vm_page_free_toq(mem);
 }
@@ -1132,6 +1195,7 @@ vm_page_unhold(vm_page_t mem)
  *	vm_page_unhold_pages:
  *
  *	Unhold each of the pages that is referenced by the given array.
+		给定 array 中的任意一个被引用的 page 都执行 unhold 操作
  */
 void
 vm_page_unhold_pages(vm_page_t *ma, int count)
@@ -1175,9 +1239,11 @@ PHYS_TO_VM_PAGE(vm_paddr_t pa)
 /*
  *	vm_page_getfake:
  *
- *	Create a fictitious page with the specified physical address and
+ *	Create a fictitious(虚拟的) page with the specified physical address and
  *	memory attribute.  The memory attribute is the only the machine-
  *	dependent aspect of a fictitious page that must be initialized.
+ 		使用指定的物理地址和内存属性创建虚拟页。memory属性是虚拟页面中唯一必须初始化的
+		依赖于机器的方面
  */
 vm_page_t
 vm_page_getfake(vm_paddr_t paddr, vm_memattr_t memattr)
@@ -1202,7 +1268,7 @@ vm_page_initfake(vm_page_t m, vm_paddr_t paddr, vm_memattr_t memattr)
 		goto memattr;
 	}
 	m->phys_addr = paddr;
-	m->queue = PQ_NONE;
+	m->queue = PQ_NONE;	// 不属于任意一个 page queue
 	/* Fictitious pages don't use "segind". */
 	m->flags = PG_FICTITIOUS;
 	/* Fictitious pages don't use "order" or "pool". */
@@ -1234,6 +1300,7 @@ vm_page_putfake(vm_page_t m)
  *
  *	Update the given fictitious page to the specified physical address and
  *	memory attribute.
+		将一个给定的 page 更新成执行的物理地址和内存属性
  */
 void
 vm_page_updatefake(vm_page_t m, vm_paddr_t paddr, vm_memattr_t memattr)
@@ -1255,6 +1322,10 @@ vm_page_free(vm_page_t m)
 {
 
 	m->flags &= ~PG_ZERO;
+	/*
+		将页面解绑 object 并且返回给空闲链表。这里貌似是 page 设置成非零状态，
+		下面的函数是设置成零状态
+	*/
 	vm_page_free_toq(m);
 }
 
@@ -1274,12 +1345,15 @@ vm_page_free_zero(vm_page_t m)
 /*
  * Unbusy and handle the page queueing for a page from a getpages request that
  * was optionally read ahead or behind.
+ * 处理的应该是 vop_getpages 中 read ahead 和 behind 操作相关的 page (unbusy 和 handle)
  */
 void
 vm_page_readahead_finish(vm_page_t m)
 {
 
-	/* We shouldn't put invalid pages on queues. */
+	/* We shouldn't put invalid pages on queues.
+			我们不应该在队列中放置无效页面
+	*/
 	KASSERT(m->valid != 0, ("%s: %p is invalid", __func__, m));
 
 	/*
@@ -1287,6 +1361,8 @@ vm_page_readahead_finish(vm_page_t m)
 	 * be activated or deactivated is not obvious.  Empirical results
 	 * have shown that deactivating the page is usually the best choice,
 	 * unless the page is wanted by another thread.
+	 * 由于该页面不是实际需要的页面，所以是否应该激活该页面并不明显。实证结果表明，
+	 * 停用页面通常是最佳选择，除非另一个线程需要该页面
 	 */
 	vm_page_lock(m);
 	if ((m->busy_lock & VPB_BIT_WAITERS) != 0)
@@ -1336,9 +1412,11 @@ vm_page_sleep_if_busy(vm_page_t m, const char *msg)
  *	vm_page_dirty_KBI:		[ internal use only ]
  *
  *	Set all bits in the page's dirty field.
+		设置 page 脏区域的所有位
  *
  *	The object containing the specified page must be locked if the
  *	call is made from the machine-independent layer.
+		如果调用来自平台相关层级代码，那包含这个 page 的 object 一定要处在加锁状态
  *
  *	See vm_page_clear_dirty_mask().
  *
@@ -1367,6 +1445,11 @@ vm_page_insert(vm_page_t m, vm_object_t object, vm_pindex_t pindex)
 	vm_page_t mpred;
 
 	VM_OBJECT_ASSERT_WLOCKED(object);
+	/*
+		该函数会找到距离 pindex 最近位置的、小于或者等于 pindex 的 entry。
+		如果 mpred 刚好是 pindex，应该就直接插入到这个位置；如果是小于，那就
+		把页面插入到 mpred 的后面
+	*/
 	mpred = vm_radix_lookup_le(&object->rtree, pindex);
 	return (vm_page_insert_after(m, object, pindex, mpred));
 }
@@ -1378,8 +1461,10 @@ vm_page_insert(vm_page_t m, vm_object_t object, vm_pindex_t pindex)
  *
  *	The page "mpred" must immediately precede the offset "pindex" within
  *	the specified object.
+		页面“mpred”必须紧跟在指定对象内的偏移量“pindex”之前
  *
- *	The object must be locked.
+ *	The object must be locked. 
+		object 一定要是加锁的状态
  */
 static int
 vm_page_insert_after(vm_page_t m, vm_object_t object, vm_pindex_t pindex,
@@ -1474,6 +1559,7 @@ vm_page_insert_radixdone(vm_page_t m, vm_object_t object, vm_page_t mpred)
  *
  *	Removes the specified page from its containing object, but does not
  *	invalidate any backing storage.
+ 		从其包含对象中删除指定页，但不会使任何备份存储失效
  *
  *	The object must be locked.  The page must be locked if it is managed.
  */
@@ -1505,6 +1591,7 @@ vm_page_remove(vm_page_t m)
 
 	/*
 	 * The vnode may now be recycled.
+	 		当 vnode 对应的驻留内存页数量为0时，可能要回收 vnode
 	 */
 	if (object->resident_page_count == 0 && object->type == OBJT_VNODE)
 		vdrop(object->handle);
@@ -1517,7 +1604,7 @@ vm_page_remove(vm_page_t m)
  *
  *	Returns the page associated with the object/offset
  *	pair specified; if none is found, NULL is returned.
- *	返回与指定的对象/偏移对关联的页；如果找不到，则返回NULL
+ *	返回与指定的对象/偏移对关联的页；如果找不到，则返回 NULL
  *
  *	The object must be locked.
  */
@@ -1526,6 +1613,10 @@ vm_page_lookup(vm_object_t object, vm_pindex_t pindex)
 {
 
 	VM_OBJECT_ASSERT_LOCKED(object);
+	/*
+		object->rtree 表示的貌似是常驻页的根，也就是说会一直存在于内存中的 page。但是 tptfs 不可能
+		所有文件的数据页都存在于内存中，肯定要有一部分数据存在于磁盘块上，这种情况要如何处理？
+	*/
 	return (vm_radix_lookup(&object->rtree, pindex));
 }
 
@@ -1534,7 +1625,8 @@ vm_page_lookup(vm_object_t object, vm_pindex_t pindex)
  *
  *	Returns the page associated with the object with least pindex
  *	greater than or equal to the parameter pindex, or NULL.
- *
+ *	查找索引值至少大于或者等于 pindex 的 vm_page，或者为 null
+
  *	The object must be locked.
  */
 vm_page_t
@@ -1551,6 +1643,8 @@ vm_page_find_least(vm_object_t object, vm_pindex_t pindex)
 /*
  * Returns the given page's successor (by pindex) within the object if it is
  * resident; if none is found, NULL is returned.
+ * 返回给定页面在对象中的后续页面（通过pindex），如果它是常驻的；
+ * 如果没有找到，则返回NULL
  *
  * The object must be locked.
  */
@@ -1627,6 +1721,8 @@ vm_page_replace(vm_page_t mnew, vm_object_t object, vm_pindex_t pindex)
 	/*
 	 * The object's resident_page_count does not change because we have
 	 * swapped one page for another, but OBJ_MIGHTBEDIRTY.
+	 * 该对象的常驻页面数没有改变，因为我们已经将一个页面切换到另一个页面，
+	 * 除了 OBJ_MIGHTBEDIRTY
 	 */
 	if (pmap_page_is_write_mapped(mnew))
 		vm_object_set_writeable_dirty(object);
@@ -1697,9 +1793,29 @@ vm_page_rename(vm_page_t m, vm_object_t new_object, vm_pindex_t new_pindex)
  *
  *	Allocate and return a page that is associated with the specified
  *	object and offset pair.  By default, this page is exclusive busied.
+ 		分配并返回与指定对象和偏移对关联的页面。默认情况下，此页面处于独占繁忙状态
+
+ 		The vm_page_alloc() function allocates a page at pindex within object.
+    It is assumed that a page has not already been allocated at pindex. 
+		The page returned is inserted into the object, unless VM_ALLOC_NOOBJ
+		is specified in the req.
+		函数的作用是：在对象中的 pindex 处分配一个页面，假设 pindex 尚未分配页面。返回的页面
+		会插入到对象中，除非在 req 中指定了 VM_ALLOC_NOOBJ
+
+		vm_page_alloc() will not sleep.
+		vm_page_alloc() 将不会睡眠等待
  *
  *	The caller must always specify an allocation class.
+ 		调用方必须始终指定一个分配类
  *
+ * arguments：
+ * 	object： The VM object to allocate the page	for. The object must be
+	     				locked if VM_ALLOC_NOOBJ is not specified.
+		pindex: The index into the object at which the page should be inserted.
+		req: The bitwise-inclusive OR of a class and any optional flags	indicating
+					how	the page should	be allocated.
+			表示系统要以什么样的方式去申请一个 page，类型在下方表示
+
  *	allocation classes:
  *	VM_ALLOC_NORMAL		normal process request
  *	VM_ALLOC_SYSTEM		system *really* needs a page
@@ -1741,7 +1857,9 @@ vm_page_alloc_domain(vm_object_t object, vm_pindex_t pindex, int domain,
  * page index, or NULL if no such page exists.
  * 
  * 在指定对象中分配具有给定页面索引的页面。为了优化页面插入对象的过程，调用者还必须指定对象中最大
- * 索引小于给定页面索引的常驻页面，如果不存在此类页面，则必须指定NULL
+ * 索引小于给定页面索引的常驻页面，如果不存在此类页面，则必须指定 NULL
+ * mpred: vm_page preferred? 从上层代码调用逻辑来看，该参数的作用类似于文件系统中查找数据块时，
+ * 给出优先选择的块号，这里可能会指定一个优先选择的页号
  */
 vm_page_t
 vm_page_alloc_after(vm_object_t object, vm_pindex_t pindex,
@@ -1765,6 +1883,7 @@ vm_page_alloc_after(vm_object_t object, vm_pindex_t pindex,
 /*
  * Returns true if the number of free pages exceeds the minimum
  * for the request class and false otherwise.
+ * 如果空闲页面数超过请求类的最小值，则返回true，否则返回false
  */
 int
 vm_domain_allocate(struct vm_domain *vmd, int req, int npages)
@@ -1787,16 +1906,24 @@ vm_domain_allocate(struct vm_domain *vmd, int req, int npages)
 
 	/*
 	 * Attempt to reserve the pages.  Fail if we're below the limit.
+	 	系统中会为不同的应用场景保留不同数量的可用数据页，在我们需要分配新页的时候一定要满足这些
+		情况下的最小限制范围
 	 */
 	limit += npages;
 	old = vmd->vmd_free_count;
 	do {
+		/*
+			limit 表示的是最少需要保存的空闲页面数量，如果比当前可用页面数量还要大，说明当前可以空闲页
+			数量是不够的，函数直接退出，应该表示没有分配到对应的数据页
+		*/
 		if (old < limit)
 			return (0);
 		new = old - npages;
 	} while (atomic_fcmpset_int(&vmd->vmd_free_count, &old, new) == 0);
 
-	/* Wake the page daemon if we've crossed the threshold. */
+	/* Wake the page daemon if we've crossed the threshold. 
+			如果我们已经超过阈值，请唤醒页面守护进程
+	*/
 	if (vm_paging_needed(vmd, new) && !vm_paging_needed(vmd, old))
 		pagedaemon_wakeup(vmd->vmd_domain);
 
@@ -1843,17 +1970,24 @@ again:
 		goto found;
 	}
 #endif
-	vmd = VM_DOMAIN(domain);
+	vmd = VM_DOMAIN(domain);	// 通过给定的索引找到对应的 vm_domain
 	if (object != NULL && vmd->vmd_pgcache != NULL) {
 		m = uma_zalloc(vmd->vmd_pgcache, M_NOWAIT);
 		if (m != NULL)
 			goto found;
 	}
+	/*
+		req: request，page alloc 类型，normal / wired / system 等等
+	*/
 	if (vm_domain_allocate(vmd, req, 1)) {
 		/*
 		 * If not, allocate it from the free page queues.
+		 		如果该 domain 已经没有合适的页分配了，那就要从空间页队列中分配一个
 		 */
 		vm_domain_free_lock(vmd);
+		/*
+			从两个物理页池中去查找合适的物理页面
+		*/
 		m = vm_phys_alloc_pages(domain, object != NULL ?
 		    VM_FREEPOOL_DEFAULT : VM_FREEPOOL_DIRECT, 0);
 		vm_domain_free_unlock(vmd);
@@ -1876,15 +2010,22 @@ again:
 
 	/*
 	 *  At this point we had better have found a good page.
+	 		现在我们最好找到一个好的页面
 	 */
 	KASSERT(m != NULL, ("missing page"));
 
 found:
 	vm_page_dequeue(m);
+	/*
+		该函数是检查刚从空闲链表中移除的 vm_page，说明前一个函数是将一个 vm_page
+		从空闲链表中移除 (也符合逻辑，因为该函数刚好是要分配一个可用的页面，最直接
+		的方式就是从空闲链表中拿出一个对象出来)
+	*/
 	vm_page_alloc_check(m);
 
 	/*
 	 * Initialize the page.  Only the PG_ZERO flag is inherited.
+	 		初始化页面。只继承 PG_ZERO 标志
 	 */
 	flags = 0;
 	if ((req & VM_ALLOC_ZERO) != 0)
@@ -1905,13 +2046,18 @@ found:
 		/*
 		 * The page lock is not required for wiring a page until that
 		 * page is inserted into the object.
+		 * 在将页面插入对象之前，连接页面不需要页面锁
 		 */
 		vm_wire_add(1);
 		m->wire_count = 1;
 	}
-	m->act_count = 0;
+	m->act_count = 0;	// page 被使用的次数？
 
 	if (object != NULL) {
+		/*
+			当 object 不为空的时候，将该 page 插入到 object 当中。该页面目前的话应该还未被
+			使用，所以暂时添加到空闲链表当中
+		*/
 		if (vm_page_insert_after(m, object, pindex, mpred)) {
 			if (req & VM_ALLOC_WIRED) {
 				vm_wire_sub(1);
@@ -1930,7 +2076,9 @@ found:
 			return (NULL);
 		}
 
-		/* Ignore device objects; the pager sets "memattr" for them. */
+		/* Ignore device objects; the pager sets "memattr" for them. 
+				可能还需要将 object 的内存属性赋值给 vm_page
+		*/
 		if (object->memattr != VM_MEMATTR_DEFAULT &&
 		    (object->flags & OBJ_FICTITIOUS) == 0)
 			pmap_page_set_memattr(m, object->memattr);
@@ -1951,6 +2099,11 @@ found:
  *	non-zero, then the set of physical pages cannot cross any physical
  *	address boundary that is a multiple of that value.  Both "alignment"
  *	and "boundary" must be a power of two.
+
+		从空闲链表中申请一组连续的物理页面 (npages)。所有的物理页面都必须在给定的高低物理
+		地址范围之内。给定的 alignment 参数决定组内第一个物理页的对齐标志。如果给定值 
+		“boundary”为非零，则物理页面集不能跨越该值的倍数的任何物理地址边界。“对齐”和“边界”
+		都必须是二的幂
  *
  *	If the specified memory attribute, "memattr", is VM_MEMATTR_DEFAULT,
  *	then the memory attribute setting for the physical pages is configured
@@ -1960,10 +2113,16 @@ found:
  *	object's memory attribute setting is not VM_MEMATTR_DEFAULT, then the
  *	memory attribute setting for the physical pages cannot be configured
  *	to VM_MEMATTR_DEFAULT.
+ 		如果指定的内存属性 “memattr” 是 VM_MEMATTR_DEFAULT，那么物理页的内存属性设置
+		将配置为对象的内存属性设置。否则，物理页的内存属性设置将配置为 “memattr”，覆盖
+		对象的内存属性设置。但是，如果对象的内存属性设置不是 VM_MEMATTR_DEFAULT，则无法
+		将物理页的内存属性设置配置为 VM_MEMATTR_DEFAULT
  *
  *	The specified object may not contain fictitious pages.
+		给定的 object 可能不会包含有虚拟页
  *
  *	The caller must always specify an allocation class.
+		调用者必须指定 allocation 的类型
  *
  *	allocation classes:
  *	VM_ALLOC_NORMAL		normal process request
@@ -1999,6 +2158,10 @@ vm_page_alloc_contig(vm_object_t object, vm_pindex_t pindex, int req,
 	return (m);
 }
 
+/*
+	该函数的整体处理逻辑跟分配单个页差不多，就多了一步查找连续物理页面的操作。
+	后续也是将分配到的所有页面添加到空闲链表当中，然后判断是否修改内存属性
+*/
 vm_page_t
 vm_page_alloc_contig_domain(vm_object_t object, vm_pindex_t pindex, int domain,
     int req, u_long npages, vm_paddr_t low, vm_paddr_t high, u_long alignment,
@@ -2034,6 +2197,7 @@ vm_page_alloc_contig_domain(vm_object_t object, vm_pindex_t pindex, int domain,
 	/*
 	 * Can we allocate the pages without the number of free pages falling
 	 * below the lower bound for the allocation class?
+	 * 我们是否可以在空闲页面数不低于分配类的下限的情况下分配页面？
 	 */
 again:
 #if VM_NRESERVLEVEL > 0
@@ -2147,6 +2311,7 @@ found:
 
 /*
  * Check a page that has been freshly dequeued from a freelist.
+ 		检查刚从自由列表中退出队列的页面
  */
 static void
 vm_page_alloc_check(vm_page_t m)
@@ -2169,8 +2334,10 @@ vm_page_alloc_check(vm_page_t m)
  * 	vm_page_alloc_freelist:
  *
  *	Allocate a physical page from the specified free page list.
+		从一个指定的空闲链表中申请物理页面
  *
  *	The caller must always specify an allocation class.
+ 		调用方必须始终指定一个分配类
  *
  *	allocation classes:
  *	VM_ALLOC_NORMAL		normal process request
@@ -2200,6 +2367,10 @@ vm_page_alloc_freelist(int freelist, int req)
 	return (m);
 }
 
+/*
+	从一个指定的 domain 中的空闲链表中查找一个可用的页，其他过程与上面
+	页分配函数类似
+*/
 vm_page_t
 vm_page_alloc_freelist_domain(int domain, int freelist, int req)
 {
@@ -2238,6 +2409,7 @@ again:
 		/*
 		 * The page lock is not required for wiring a page that does
 		 * not belong to an object.
+		 * 连接不属于对象的页面时不需要页面锁
 		 */
 		vm_wire_add(1);
 		m->wire_count = 1;
@@ -2259,6 +2431,10 @@ vm_page_import(void *arg, void **store, int cnt, int domain, int flags)
 		return (0);
 	domain = vmd->vmd_domain;
 	vm_domain_free_lock(vmd);
+	/*
+		尝试从指定的 domain 中的指定的 page pool 当中分配指定数量的物理页面，返回
+		实际分配的页数。所以有可能实际分配的页数跟指定的页数是不一样的
+	*/
 	i = vm_phys_alloc_npages(domain, VM_FREEPOOL_DEFAULT, cnt,
 	    (vm_page_t *)store);
 	vm_domain_free_unlock(vmd);
@@ -2299,13 +2475,19 @@ vm_page_release(void *arg, void **store, int cnt)
  *	page in the run.  If the specified "boundary" is non-zero, then the
  *	run of physical pages cannot span a physical address that is a
  *	multiple of "boundary".
+ 		扫描指定项 m_start 和 m_end 之间的 vm_page_array[] 以查找满足指定条件的连续
+		物理页运行，并返回运行中最低的页。指定的“对齐方式”确定运行中最低物理页的对齐方式。
+		如果指定的“边界”为非零，则物理页的运行不能跨越“边界”倍数的物理地址
  *
  *	"m_end" is never dereferenced, so it need not point to a vm_page
  *	structure within vm_page_array[].
+		m_end 永远不会被取消引用，所以它不需要指向 vm_page_array[] 中的 vm_page 结构
  *
  *	"npages" must be greater than zero.  "m_start" and "m_end" must not
  *	span a hole (or discontiguity) in the physical address space.  Both
  *	"alignment" and "boundary" must be a power of two.
+		npages 一定要大于0；m_start 和 m_end 一定不能跨越物理地址中的孔(或者不连续)。
+		aligment 和 boundary 一定要是2的幂
  */
 vm_page_t
 vm_page_scan_contig(u_long npages, vm_page_t m_start, vm_page_t m_end,
@@ -2493,11 +2675,16 @@ unlock:
  *	is relocatable if and only if it could be laundered or reclaimed by
  *	the page daemon.  Whenever possible, a virtual page is relocated to a
  *	physical address above "high".
+ 		尝试将指定运行的物理页中分配的每个虚拟页重新定位到新的物理地址。释放重新定位的虚拟页面
+		下的物理页面。当且仅当页面守护进程可以清洗或回收虚拟页面时，虚拟页面才可重新定位。
+		只要有可能，虚拟页面就会被重新定位到“高”之上的物理地址
  *
  *	Returns 0 if every physical page within the run was already free or
  *	just freed by a successful relocation.  Otherwise, returns a non-zero
  *	value indicating why the last attempt to relocate a virtual page was
  *	unsuccessful.
+ 		如果运行中的每个物理页都已空闲或刚刚通过成功的重新定位释放，则返回0。否则，返回一个非零值，
+		指示上次尝试重新定位虚拟页失败的原因
  *
  *	"req_class" must be an allocation class.
  */
@@ -2841,6 +3028,7 @@ vm_page_reclaim_contig(int req, u_long npages, vm_paddr_t low, vm_paddr_t high,
 
 /*
  * Set the domain in the appropriate page level domainset.
+ 		在适当的页面级别域集中设置域
  */
 void
 vm_domain_set(struct vm_domain *vmd)
@@ -2860,6 +3048,7 @@ vm_domain_set(struct vm_domain *vmd)
 
 /*
  * Clear the domain from the appropriate page level domainset.
+ 		从相应的页面级域集中清除域
  */
 void
 vm_domain_clear(struct vm_domain *vmd)
@@ -2903,6 +3092,7 @@ vm_domain_clear(struct vm_domain *vmd)
 
 /*
  * Wait for free pages to exceed the min threshold globally.
+ 		等待空闲页面超过全局最小阈值
  */
 void
 vm_wait_min(void)
@@ -2918,6 +3108,7 @@ vm_wait_min(void)
 
 /*
  * Wait for free pages to exceed the severe threshold globally.
+		等待空闲页面在全局范围内超过严重阈值
  */
 void
 vm_wait_severe(void)
@@ -2977,6 +3168,7 @@ vm_wait_doms(const domainset_t *wdoms)
  *
  *	Sleep until free pages are available for allocation.
  *	- Called in various places after failed memory allocations.
+ 		睡眠直到空闲页面可供分配。在内存分配失败后在不同位置调用
  */
 void
 vm_wait_domain(int domain)
@@ -3305,6 +3497,8 @@ vm_page_dequeue_deferred(vm_page_t m)
  *	The page must either be locked or unallocated.  This constraint
  *	ensures that the queue state of the page will remain consistent
  *	after this function returns.
+ 		从任何页面队列中删除该页面（如果有）。页面必须被锁定或未分配。此约束可确保此
+		函数返回后页面的队列状态保持一致
  */
 void
 vm_page_dequeue(vm_page_t m)
@@ -3382,6 +3576,7 @@ vm_page_enqueue(vm_page_t m, uint8_t queue)
  *	vm_page_requeue:		[ internal use only ]
  *
  *	Schedule a requeue of the given page.
+ 		安排对给定页面的重新查询
  *
  *	The page must be locked.
  */
@@ -3404,8 +3599,11 @@ vm_page_requeue(vm_page_t m)
  *	Put the specified page on the active list (if appropriate).
  *	Ensure that act_count is at least ACT_INIT but do not otherwise
  *	mess with it.
+		将指定的 page 放到活跃链表中(如果合适)。确保 act_count 最少要是 ACT_INIT 并且
+		不要弄乱它
  *
  *	The page must be locked.
+		page 必须是被锁定的
  */
 void
 vm_page_activate(vm_page_t m)
@@ -3433,6 +3631,8 @@ vm_page_activate(vm_page_t m)
  *	Prepares the given page to be put on the free list,
  *	disassociating it from any VM object. The caller may return
  *	the page to the free list only if this function returns true.
+ 		准备将给定页面放在空闲列表上，将其与任何VM对象解除关联。只有当此函数返回
+		true 时，调用方才能将页面返回到空闲列表
  *
  *	The object must be locked.  The page must be locked if it is
  *	managed.
@@ -3517,9 +3717,11 @@ vm_page_free_prep(vm_page_t m)
  *
  *	Returns the given page to the free list, disassociating it
  *	from any VM object.
+		将一个 page 跟 object 解绑，并且返给空闲链表
  *
  *	The object must be locked.  The page must be locked if it is
  *	managed.
+		object 一定要是锁定状态。page 如果要被管理，也一定要是加锁状态
  */
 void
 vm_page_free_toq(vm_page_t m)
@@ -3546,6 +3748,8 @@ vm_page_free_toq(vm_page_t m)
  *	Returns a list of pages to the free list, disassociating it
  *	from any VM object.  In other words, this is equivalent to
  *	calling vm_page_free_toq() for each page of a list of VM objects.
+ 		将页面列表返回到空闲列表，将其与任何VM对象解除关联。换句话说，这相当于为 vm 
+		对象列表的每一页调用 vm_page_free_toq()
  *
  *	The objects must be locked.  The pages must be locked if it is
  *	managed.
@@ -3575,6 +3779,7 @@ vm_page_free_pages_toq(struct spglist *free, bool update_wire_count)
  *
  * Mark this page as wired down.  If the page is fictitious, then
  * its wire count must remain one.
+ * 将此页标记为已连线。如果页面是虚构的，则其连线数必须保持为1
  *
  * The page must be locked.
  */
@@ -3841,6 +4046,8 @@ vm_page_advise(vm_page_t m, int advice)
  * changing state.  We keep on waiting, if the page continues
  * to be in the object.  If the page doesn't exist, first allocate it
  * and then conditionally zero it.
+ * 抓取一个页面，等待由于页面更改状态而被唤醒。如果页面继续在对象中，我们将继续等待。
+ * 如果页面不存在，首先分配它，然后有条件地将其归零
  *
  * This routine may sleep.
  *

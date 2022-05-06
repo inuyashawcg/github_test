@@ -56,6 +56,7 @@ typedef void (vmem_reclaim_t)(vmem_t *, int);
  *	quantum		- Natural unit of allocation (ie PAGE_SIZE, 1, etc)
  *	qcache_max	- Maximum size to quantum cache.  This creates a UMA
  *			  cache for each multiple of quantum up to qcache_max.
+        量子缓存的最大大小。这将为 qcache_max 之前的每个 quantum 倍数创建一个 UMA 缓存
  *	flags		- M_* flags
  */
 vmem_t *vmem_create(const char *name, vmem_addr_t base,
@@ -77,12 +78,14 @@ void vmem_set_import(vmem_t *vm, vmem_import_t *importfn,
 
 /*
  * Set a limit on the total size of a vmem.
+    为 vmem 区域总大小设置限制
  */
 
 void vmem_set_limit(vmem_t *vm, vmem_size_t limit);
 
 /*
  * Set a callback for reclaiming memory when space is exhausted:
+    设置一个回调函数用于当地址空间枯竭时的内存回收
  */
 void vmem_set_reclaim(vmem_t *vm, vmem_reclaim_t *reclaimfn);
 
@@ -90,6 +93,8 @@ void vmem_set_reclaim(vmem_t *vm, vmem_reclaim_t *reclaimfn);
  * Allocate and free linear regions from a vmem.  Must specify
  * BESTFIT or FIRSTFIT.  Free is non-blocking.  These routines
  * respect the quantum caches.
+ * 从 vmem 分配和释放线性区域。必须指定 BESTFIT 或 FIRSTFIT。
+ * Free 就是不阻塞。这些例程尊重量子缓存
  */
 int vmem_alloc(vmem_t *vm, vmem_size_t size, int flags, vmem_addr_t *addrp);
 void vmem_free(vmem_t *vm, vmem_addr_t addr, vmem_size_t size);
@@ -113,6 +118,7 @@ void vmem_xfree(vmem_t *vm, vmem_addr_t addr, vmem_size_t size);
 /*
  * Add a static region to a vmem after create.  This won't be freed
  * until the vmem is destroyed.
+ * 在 vmem 创建之后添加一个静态区域，直到 vmem 破坏之后才会被 free 掉
  */
 int vmem_add(vmem_t *vm, vmem_addr_t addr, vmem_size_t size, int flags);
 

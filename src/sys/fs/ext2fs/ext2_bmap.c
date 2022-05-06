@@ -349,7 +349,7 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 	if (nump)
 		*nump = 0;
 	numlevels = 0; /* 应该表示的是寻址的等级，1、2、3级直接或者间接寻址 */
-	realbn = bn;	
+	realbn = bn;	// bn 在上层函数中传入的是文件的 logical block number 
 	if ((long)bn < 0)
 		bn = -(long)bn;
 
@@ -381,8 +381,15 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 		 * MNINDIR 表示每个块能包含有多少个块指针。第一次循环，blockcnt = 1，qblockcnt
 		 * 就表示一级间接寻址所包含的块数。如果 bn < qblockcnt，也就说明这个块也就用到了
 		 * 一级间接寻址(bn在循环开始赋值的时候就已经把直接寻址的12个块给去掉了)
+		 * 
+		 * bn 初始化的值是将原有值 - 直接块号，也就是说现在 bn 已经是除去直接块号后，剩余的块
+		 * 的数量，也就是间接寻址块所要管理的块的数量。
 		 */
 		qblockcnt = (int64_t)blockcnt * MNINDIR(ump);
+		/*
+			qblockcnt 表示当前索引等级所能管理的数据块的数量。如果是小于的情况，说明剩余数据块已经不能
+			填满当前索引，直接 break
+		*/
 		if (bn < qblockcnt)
 			break;
 		blockcnt = qblockcnt;
