@@ -790,7 +790,7 @@ lookup(struct nameidata *ndp)
 	 */
 	ni_dvp_unlocked = 0;
 	/*
-		这个操作很奇怪，应该就是只要包含这两个属性的其中一个就设置 wantparent 标志位
+		只要包含这两个属性的其中一个就设置 wantparent 标志位
 		LOCKPARENT：返回加锁状态的 parent vnode
 		WANTPARENT：返回不加锁状态的 parent vnode
 	*/
@@ -820,6 +820,7 @@ lookup(struct nameidata *ndp)
 	/*
 		从 namei 函数调用情况可以知道，ni_startdir 在 for 循环中都是被指定过的。所以，这里获取到的就是
 		需要处理的当前目录项，它会随着路径信息的处理而不断更新
+		这里需要注意的是，dp 上来就被加锁了，是不是说明 nameidata 中传入的这些 vnode 起初都是不加锁的？
 	*/
 	dp = ndp->ni_startdir;
 	ndp->ni_startdir = NULLVP;	// 将 start directory 置空，等待下次更新
@@ -874,8 +875,8 @@ dirloop:
 	    ("%s: ni_pathlen underflow to %zd\n", __func__, ndp->ni_pathlen));
 	prev_ni_next = ndp->ni_next;
 	ndp->ni_next = cp;	// cp 指向的位置在上面for循环中已经发生了改变，移动了一个路径组件名字的长度
-	// 从代码逻辑来看，此时 cp 指向的是字符 '/'
-
+	// 从代码逻辑来看，此时 cp 指向的是字符 '/'。紧接着下面就会对 cp 进行处理，当 cp 指向的是 '/' 的
+	// 时候会向后进行移位，直至遇到正常字符
 	/*
 	 * Replace multiple slashes by a single slash and trailing slashes
 	 * by a null.  This must be done before VOP_LOOKUP() because some
@@ -889,6 +890,11 @@ dirloop:
 	 * 应该就是对尾部'/'的处理，不同的文件系统处理的方式不一样，要注意区分
 	 */
 	while (*cp == '/' && (cp[1] == '/' || cp[1] == '\0')) {
+		/*
+			当 / 后面不跟 / 或者 \0 的时候，此时 cp 就不会进行自增操作，所以当处理正常情况下的路径时，
+			例如 /a/b，此时 ndp->ni_next 指向的是 /。所以可以推测一下，ni_next 指向的字符要么是 \，
+			要么是 \0
+		*/
 		cp++;
 		ndp->ni_pathlen--;
 		if (*cp == '\0') {
@@ -943,9 +949,11 @@ dirloop:
 		goto bad;
 	}
 
-	/* 将当前目录对应的 tracker 添加到队列当中 */
+	/* 
+		将当前目录对应的 tracker 添加到队列当中；
+		增加 vnode 引用计数(而不是使用计数)并且 lock interlock
+	*/
 	nameicap_tracker_add(ndp, dp);
-
 	/*
 	 * Check for degenerate(退化的) name (e.g. / or "")
 	 * which is a way of talking about a directory,
@@ -955,8 +963,20 @@ dirloop:
 	 * 结尾的路径名。这个可以认为是我们所要访问的就是c这个目录项，所以代码分支中会出现 ndp->ni_vp = dp
 	 */
 	if (cnp->cn_nameptr[0] == '\0') {
+		/*
+			应该就是为了处理最后一个组件名称为 "/" 或者直接是 "" 的情况。cn_nameptr 只有在最后要进行 dirloop
+			的时候会更新，还要对 ni_next 字段的值进行判断。ni_next 只会指向 \ 或者 \0，所以这里并不仅仅只处理
+			/ 或者直接空路径的情况，一些以 / 为结尾的情况也是可以处理的，同上所说
+		*/
 		if (dp->v_type != VDIR) {
 			error = ENOTDIR;
+			/*
+				这里需要注意，当我们执行 goto bad 时，处理的是 dp，而不是指定为 nameidata->ni_dvp。
+				就比如第一次循环，此时 dp = ni_startdir，并且 ni_dvp 还没有被赋值(赋值操作在后面)。此时我们处理
+				的对象就不能直接指定为 ni_dvp。
+				所以在 tptfs lookup() 对该函数的移植是存在错误的。处理 degenerate name 的代码分支还是以一个独立的
+				vnode 指针作为参数传入，而不要去直接使用 ni_dvp。因为此时 ni_dvp 有可能是空的。
+			*/
 			goto bad;
 		}
 		if (cnp->cn_nameiop != LOOKUP) {
@@ -964,12 +984,18 @@ dirloop:
 			goto bad;
 		}
 		/*
-			wantparent 存在的时候要注意 vnode 状态，可能是需要增加其引用计数并加锁
+			wantparent 存在的时候要注意 vnode 状态，可能是需要增加其引用计数并加锁。从这里我们可以看出，
+			需要对 vnode 加锁的一种情况就是在 nameidata 处理过程中的 LOCKPARENT 属性设置
 		*/
 		if (wantparent) {
 			ndp->ni_dvp = dp;
-			VREF(dp);	// 增加 vnode 引用计数并使得它处于加锁状态
+			VREF(dp);	// 增加 vnode 使用计数并使得它处于加锁状态
+			// dp 赋值给 ni_dvp 之后增加引用计数。感觉有点像是智能指针的操作。wantparent 是说要保留相对
+			// 父目录文件，所以才要增加引用计数，而不是说只要赋值就要增加使用计数
 		}
+		/*
+			这里处理的应该是组件名称信息为空的情况，应该就类似于 /  /a/b/ /.
+		*/
 		ndp->ni_vp = dp;
 
 		if (cnp->cn_flags & AUDITVNODE1)
@@ -988,7 +1014,6 @@ dirloop:
 		goto success;
 	}	// 当 componentname 中路径名指针指向字符 '\0' 时的处理逻辑，说明路径名已经解析完毕，
 	// 或者传入的字符本身就是空
-
 	/*
 	 * Handle "..": five special cases.
 	 * 0. If doing a capability lookup and lookup_cap_dotdot is
@@ -1113,7 +1138,7 @@ dirloop:
 				goto bad;
 			}
 		}	// end for
-	}	// end if，处理 .. 目录
+	}	// end if (IS_DOTDOT)，处理 .. 目录
 
 	/*
 	 * We now have a segment name to search for, and a directory to search.
@@ -1133,6 +1158,10 @@ unionlookup:
 #endif
 	ndp->ni_dvp = dp;
 	ndp->ni_vp = NULL;
+	/*
+		这个宏表示的是 dp 应该处在加锁状态，但是此时却没有被加锁。在 tptfs 中利用绝对路径获取 vnode 的时候，
+		要保证这个 vnode 是出于加锁的状态
+	*/
 	ASSERT_VOP_LOCKED(dp, "lookup");
 	/*
 	 * If we have a shared lock we may need to upgrade the lock for the
@@ -1328,6 +1357,10 @@ nextname:
 			goto bad2;
 		}
 	}
+	/*
+		从整体的逻辑来看， ni_next 字段指向的字符是 \ 或者 \0，
+		cn_nameptr 指向的貌似总是 \ 后面的字符，或者是空，或者不是空
+	*/
 	if (*ndp->ni_next == '/') {
 		cnp->cn_nameptr = ndp->ni_next;
 		while (*cnp->cn_nameptr == '/') {

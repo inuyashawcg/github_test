@@ -86,7 +86,7 @@ SYSCTL_INT(_vfs, OID_AUTO, read_min, CTLFLAG_RW, &read_min, 0,
 /*
  * Read data to a buf, including read-ahead if we find this to be beneficial.
  * cluster_read replaces bread.
- * 将数据读取到 buf，如果我们发现这是有益的，则包括预读。阅读代替面包。
+ * 将数据读取到 buf，如果我们发现这是有益的，则包括预读。用于替换 bread
  */
 int
 cluster_read(struct vnode *vp, u_quad_t filesize, daddr_t lblkno, long size,

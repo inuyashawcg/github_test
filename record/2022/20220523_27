@@ -1,0 +1,325 @@
+////////////// 20220523 //////////////
+  tptfs rename() 处理流程：
+    判断目标文件是否存在？
+      - 如果目标文件不存在 {
+          判断处理的文件是不是目录文件并且目标目录是不是新的目录？
+            - 如果是的 {
+              - 增加目标目录引用计数、设置一些属性等等
+              -  
+            }
+      }
+
+  原有机制中文件查找是分级查找，奇海改成了通过哈希表直接查找。这其实会导致一个问题，假如我们对一个目录文件加锁，
+原有机制下该目录下的所有文件都是不能被访问的。但是如果我们通过哈希表查找的话，就会绕过目录文件锁的状态检查，直接
+拿到目标文件的文件类指针，可能会在某些情况下导致数据同步异常。
+  所以，需要在 lookup() 函数中添加一个对目录文件锁的状态检查，作为是否可以继续执行的前提条件
+
+
+////////////// 20220525 //////////////
+root@:~ # cd /
+  Thread 8 hit Breakpoint 4, kern_chdir (td=0x1bcb5b680, path=0x40222000 "/", pathseg=UIO_USERSPACE)
+    at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vfs_syscalls.cpp:945
+  945		NDINIT(&nd, LOOKUP, FOLLOW | LOCKSHARED | LOCKLEAF | AUDITVNODE1,
+  (gdb) bt
+  #0  kern_chdir (td=0x1bcb5b680, path=0x40222000 "/", pathseg=UIO_USERSPACE)
+      at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vfs_syscalls.cpp:945
+  #1  0x000000010c23dfc6 in sys_chdir (td=0x1bcb5b680, uap=0x1def73bc0)
+      at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vfs_syscalls.cpp:936
+  #2  0x000000010c124aa0 in systemcall (a0=1075978240, a1=1075978241, a2=2416123208, a3=4507503256, a4=0, a5=0, a6=4496311056, 
+      a7=8035712360) at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/kern_syscalls.cpp:294
+  #3  0x000000010c004fb4 in system_call () at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/riscv/riscv/swtch.S:567
+  Backtrace stopped: frame did not save the PC
+  (gdb) p nd
+  $1 = {
+    ni_dirp = 0x1bcb5b680 "",
+    ni_segflg = (unknown: 3166050648),
+    ni_rightsneeded = 0xffffffd00beb8a10,
+    ni_startdir = 0x1bcb619e8,
+    ni_rootdir = 0x0,
+    ni_topdir = 0x0,
+    ni_dirfd = -1128941952,
+    ni_lcf = 1,
+    ni_filecaps = {
+      fc_rights = {
+        cr_rights = {3166050592, 18446743867751107088}
+      },
+      fc_ioctls = 0x200000002,
+      fc_nioctls = -18816,
+      fc_fcntls = 1
+    },
+    ni_vp = 0xbcb61958,
+    ni_dvp = 0x1def73b90,
+    ni_resflags = 201861846,
+    ni_debugflags = 0,
+    ni_loopcnt = 0,
+    ni_pathlen = 8035711848,
+    ni_next = 0x0,
+    ni_cnd = {
+      cn_origflags = 4294967298,
+      cn_flags = 7460992640,
+      cn_thread = 0x1def73bb0,
+      cn_cred = 0x10c114cb8 <sys_sigprocmask(thread*, sigprocmask_args*)+208>,
+      cn_nameiop = 158224208,
+      cn_lkflags = -48,
+      cn_pnbuf = 0x0,
+      cn_nameptr = 0x1def73b68 "",
+      cn_namelen = 0
+    },
+    ni_cap_tracker = {
+      tqh_first = 0xbcb61ce8,
+      tqh_last = 0x1def73b68
+    }
+  }
+  (gdb) n
+  947		if ((error = namei(&nd)) != 0)
+  (gdb) s
+
+  Thread 8 hit Breakpoint 2, namei (ndp=0x1def73a90) at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vfs_lookup.cpp:502
+  warning: Source file is more recent than executable.
+  502		cnp = &ndp->ni_cnd;
+  (gdb) p *ndp
+  $2 = {
+    ni_dirp = 0x40222000 "/",
+    ni_segflg = UIO_USERSPACE,
+    ni_rightsneeded = 0x110086678 <cap_no_rights>,
+    ni_startdir = 0x0,
+    ni_rootdir = 0x0,
+    ni_topdir = 0x0,
+    ni_dirfd = -100,
+    ni_lcf = 1,
+    ni_filecaps = {
+      fc_rights = {
+        cr_rights = {0, 0}
+      },
+      fc_ioctls = 0x0,
+      fc_nioctls = -1,
+      fc_fcntls = 0
+    },
+    ni_vp = 0xbcb61958,
+    ni_dvp = 0x1def73b90,
+    ni_resflags = 0,
+    ni_debugflags = 0,
+    ni_loopcnt = 0,
+    ni_pathlen = 8035711848,
+    ni_next = 0x0,
+    ni_cnd = {
+      cn_origflags = 4294967298,
+      cn_flags = 262468,
+      cn_thread = 0x1bcb5b680,
+      cn_cred = 0x10c114cb8 <sys_sigprocmask(thread*, sigprocmask_args*)+208>,
+      cn_nameiop = LOOKUP,
+      cn_lkflags = -48,
+      cn_pnbuf = 0x0,
+      cn_nameptr = 0x1def73b68 "",
+      cn_namelen = 0
+    },
+    ni_cap_tracker = {
+      tqh_first = 0xbcb61ce8,
+      tqh_last = 0x1def73b68
+    }
+  }
+
+  继续执行代码，我们可以看到 nameidata 中的几个 vnode 指针成员的赋值情况：
+
+  kern_chdir (td=0x1bcb5b680, path=0x40222000 "/", pathseg=UIO_USERSPACE)
+      at /home/mercury/Documents/code/qihai/rebuild/qihai/sys/kernel/vfs_syscalls.cpp:949
+  949		if ((error = change_dir(nd.ni_vp, td)) != 0) {
+  (gdb) p nd
+  $5 = {
+    ni_dirp = 0x40222000 "/",
+    ni_segflg = UIO_USERSPACE,
+    ni_rightsneeded = 0x110086678 <cap_no_rights>,
+    ni_startdir = 0x0,
+    ni_rootdir = 0xffffffd00a01f3d0,
+    ni_topdir = 0x0,
+    ni_dirfd = -100,
+    ni_lcf = 0,
+    ni_filecaps = {
+      fc_rights = {
+        cr_rights = {0, 0}
+      },
+      fc_ioctls = 0x0,
+      fc_nioctls = -1,
+      fc_fcntls = 0
+    },
+    ni_vp = 0xffffffd00a01f3d0,
+    ni_dvp = 0xffffffd00a01f3d0,
+    ni_resflags = 1,
+    ni_debugflags = 0,
+    ni_loopcnt = 0,
+    ni_pathlen = 2,
+    ni_next = 0xffffffd0096e6c01 "",
+    ni_cnd = {
+      cn_origflags = 4294967298,
+      cn_flags = 262468,
+      cn_thread = 0x1bcb5b680,
+      cn_cred = 0xffffffd00976aa00,
+      cn_nameiop = LOOKUP,
+      cn_lkflags = -48,
+      cn_pnbuf = 0xffffffd0096e6c00 "/",
+      cn_nameptr = 0xffffffd0096e6c01 "",
+      cn_namelen = 0
+    },
+    ni_cap_tracker = {
+      tqh_first = 0xbcb61ce8,
+      tqh_last = 0x1def73b68
+    }
+  }
+
+  FreeBSD 13.0 提供了 fast path lookup 机制 (宏 MNTK_FPLOOKUP)，可以通过设置文件系统的属性来对其进行开启和关闭。
+如果是开启状态，当我们使用绝对路径进行相关操作时，该机制会进行拦截，通过 cache 而不是原有的 lookup() 函数进行查找。
+这个貌似跟 lookup() 中的 degenerate name 的处理有点重叠。一旦开启，实际调试中就发现不会跳转到该代码分支执行
+
+  tptfs 仍然是沿用 vfs lookup 的实现方式，所以对 degenerate name 的处理逻辑还要继续保留，在 fast lookup 没有开启
+的时候使用。它所处理的情形主要包括： "/" "/." ""
+
+  当我们执行 cd . 这个命令的时候，nameidata ni_dvp 和 ni_vp 两个字段表示的 vnode 是同一个：
+    (gdb) p *ndp
+    $85 = {
+      ni_dirp = 0x40222000 ".",
+      ni_segflg = UIO_USERSPACE,
+      ni_rightsneeded = 0x110086678 <cap_no_rights>,
+      ni_startdir = 0x0,
+      ni_rootdir = 0xffffffd00b690b70,
+      ni_topdir = 0x0,
+      ni_dirfd = -100,
+      ni_lcf = 0,
+      ni_filecaps = {
+        fc_rights = {
+          cr_rights = {0, 0}
+        },
+        fc_ioctls = 0x0,
+        fc_nioctls = -1,
+        fc_fcntls = 0
+      },
+      ni_vp = 0xffffffd00b690b70,
+      ni_dvp = 0xffffffd00b690b70,
+      ni_resflags = 0,
+      ni_debugflags = 0,
+      ni_loopcnt = 0,
+      ni_pathlen = 1,
+      ni_next = 0xffffffd0096d6801 "",
+      ni_cnd = {
+        cn_origflags = 4294967298,
+        cn_flags = 335806788,
+        cn_thread = 0x1bcad3080,
+        cn_cred = 0xffffffd00a076700,
+        cn_nameiop = LOOKUP,
+        cn_lkflags = 2097152,
+        cn_pnbuf = 0xffffffd0096d6800 ".",
+        cn_nameptr = 0xffffffd0096d6800 ".",
+        cn_namelen = 1
+      },
+      ni_cap_tracker = {
+        tqh_first = 0x0,
+        tqh_last = 0x1def64b50
+      }
+    }
+
+  ni_rootdir / ni_vp / ni_dvp 同时指向根节点:
+  (gdb) p *(struct inode*)ndp->ni_dvp->v_data 
+    $86 = {
+      i_nextsnap = {
+        tqe_next = 0x0,
+        tqe_prev = 0x0
+      },
+      i_vnode = 0xffffffd00b690b70,
+      i_ump = 0xffffffd00b68de00,
+      i_dquot = {0x0, 0x0},
+      i_un = {
+        dirhash = 0x0,
+        snapblklist = 0x0
+      },
+      dinode_u = {
+        din1 = 0xffffffd00b68ae00,
+        din2 = 0xffffffd00b68ae00
+      },
+      i_number = 2,
+      i_flag = 1024,
+      i_effnlink = 22,
+      i_count = 0,
+      i_endoff = 0,
+      i_diroff = 512,
+      i_offset = 0,
+      i_nextclustercg = -1,
+      i_ea_area = 0x0,
+      i_ea_len = 0,
+      i_ea_error = 0,
+      i_ea_refs = 0,
+      i_size = 1024,
+      i_gen = 1188178455,
+      i_flags = 0,
+      i_uid = 0,
+      i_gid = 0,
+      i_mode = 16877,
+      i_nlink = 22
+    }
+  FreeBSD vfs lookup() 函数关于 degenerate name 处理的注释有误导性。那种情况只能处理 / 情况，处理不了 /. /.. 等情况，
+这两个都是按照正常流程来做，因为此时 componentname->cn_nameptr[0] != "\0"
+
+
+////////////// 20220526 //////////////
+p* (struct inode*)ndp->ni_rootdir->v_data
+p * (struct inode*)dp->v_data
+
+  FreeBSD-13.0 vfs namei() 函数中比 FreeBSD-12.0 增加一个快速路径查找的逻辑，然后在调用 lookup() 函数之前也会对 nameidata
+中的 start_dir / root_dir 等字段进行设置。如果路径名是以 / 为开头的，则会调用 namei_handle_root() 函数进行初步处理 (其实就是
+将路径前面的一个或者多个 / 字符给去除)
+
+  nameidata 在 lookup() 函数中处理完成之后应该是要包含目录对应的 vnode 和目标文件对应的 vnode。如果是以 / 为结尾的路径，说明所要
+查找的目标文件就是目录文件，所以这两个 vnode 对应的就应该是同一个。
+
+  当我们在一个随机子目录下执行 cd / 时， nameidata 在 经过 namei() 函数初步处理传递到 lookup() 函数时，
+它的 startdir 和 rootdir 两个指针都是指向根节点，好像是 FreeBSD-13.0 的特有支持( namei_setup() 函数处理？)
+
+
+////////////// vnode 引用计数&锁 //////////////
+减少 vnode 的使用计数 (use count) 函数汇总：
+  这些函数操作的是 vnode->v_usecount 成员。如果 vnode 没有被回收，并且使用计数变成了0，那么它将变成 inactive
+  状态并且会放置到 freelist 当中 (意味着 vnode 本身资源没有被释放)
+
+  vrele：
+    - input unlocked vnode, output unlocked vnode.
+    - may lock the vnode.
+    - may sleep.
+
+  vput:
+    - input locked vnode, output unlocked vnode.
+    - may sleep
+
+  vunref:
+    - input locked vnode, output locked vnode.
+    - may sleep.
+
+增加 vnode 使用计数 (use count) 函数汇总：
+  vref: 
+    - locks the vnode interlock.
+  
+  vrefl:
+    - expects the interlock to already be held.
+
+
+增加引用计数 (v_holdcount) 的函数：
+  vhold(): lock the vnode interlock.
+  vholdl(): expect the	interlock to already be	held.
+
+减少引用计数 (v_holdcount) 的函数:
+  vdrop(): lock the vnode interlock.
+  vdropl(): expect the	interlock to already be	held.
+
+
+
+其他：
+  vget:
+    - Get a vnode from the free list and increment its reference	count.
+    - 貌似会对 v_usecount 和 v_holdcount 都进行操作？
+  
+  vgone:
+    - prepares the vnode to	be destroyed.
+    - If	the vnode has a	v_usecount of zero, and	its VIRF_DOOMED	flag is	not
+      set, it is	moved to the head of the free list as in most cases the	vnode
+      is	about to be reused, or its file	system is being	unmounted.
+    - takes	an exclusively locked vnode, and returns with the vnode exclusively locked.
+  
+  vrefcnt:
+    - returns	the use	count of a vnode.

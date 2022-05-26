@@ -805,6 +805,7 @@ found:
 		/*
 		 * When we lookup "." we still can be asked to lock it
 		 * differently.
+		 * 从函数逻辑可以看出，当 lookup() 执行完成之后，得到的目标 vnode 应该是处于加锁的状态
 		 */
 		ltype = cnp->cn_lkflags & LK_TYPE_MASK;
 		if (ltype != VOP_ISLOCKED(vdp)) {
@@ -1443,6 +1444,7 @@ ext2_checkpath(struct inode *source, struct inode *target, struct ucred *cred)
 	int error, namlen;
 	struct dirtemplate dirbuf;
 
+	// vp 表示的是 target directory
 	vp = ITOV(target);
 	if (target->i_number == source->i_number) {
 		error = EEXIST;

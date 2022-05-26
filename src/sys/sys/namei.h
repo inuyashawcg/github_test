@@ -109,11 +109,14 @@ struct nameidata {
 	 */
 	struct	vnode *ni_vp;		/* vnode of result */
 	/*
-		指向执行查找的对象目录的Vnode指针。如果设置了LOCKPARENT或WANTPARENT，则在成功返回时可用。
-		如果设置了 LOCKPARENT，则锁定。NDF_NO_DVP_RELE、NDF_NO_DVP_PUT或NDF_NO_DVP_UNLOCK
-		（具有明显的效果）可以禁止在 NDFREE 中释放此项
+		指向执行查找的对象目录的Vnode指针。如果设置了 LOCKPARENT 或 WANTPARENT，则在成功返回时可用。
+		如果设置了 LOCKPARENT，则锁定。NDF_NO_DVP_RELE、NDF_NO_DVP_PUT 或 NDF_NO_DVP_UNLOCK
+		（具有明显的效果）可以禁止在 NDFREE 中释放此项。
+		从代码逻辑来看，该字段存放的应该是保存循环处理过程中的目录文件，比如我们要处理的路径是 /a/b/c/d，a 相对于
+		b 来说，是它的父级目录文件。所以处理的时候 ni_dvp = a，然后 ni_vp = b。继续处理时会更新 ni_dvp = b，
+		ni_vp = c。循环往复，直到处理完最后一个组件名称
 	*/
-	struct	vnode *ni_dvp;		/* vnode of intermediate directory 中间目录的vnode */
+	struct	vnode *ni_dvp;		/* vnode of intermediate directory 中间目录的 vnode */
 	/*
 	 * Shared between namei and lookup/commit routines.
 	 */

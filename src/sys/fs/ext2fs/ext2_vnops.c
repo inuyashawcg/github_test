@@ -887,7 +887,6 @@ abortit:
 		NOUNLINK: 文件可能不被允许移动或者重命名
 		IMMUTABLE： 文件不能被更改
 		APPEND： 对文件的写入只能附加
-
 		目标文件vp如果包含上述属性，那么重命名操作在该文件上是不被允许的，返回操作参数错误
 	*/
 	if (tvp && ((VTOI(tvp)->i_flags & (NOUNLINK | IMMUTABLE | APPEND)) ||
@@ -895,7 +894,6 @@ abortit:
 		error = EPERM;
 		goto abortit;
 	}
-
 	/*
 	 * Renaming a file to itself has no effect.  The upper layers should
 	 * not call us in that case.  Temporarily just warn if they do.
@@ -965,6 +963,7 @@ abortit:
 	 * 不会被修改，都是文件创建的时候差不多就固定下来了。
 	 */
 	dp = VTOI(tdvp);
+	// xp 在这里起到的作用推测是用于判断目标文件是否已经存在
 	xp = NULL;
 	if (tvp)
 		xp = VTOI(tvp);
@@ -979,7 +978,7 @@ abortit:
 	 * 这里是增加源文件的引用计数，可能是怕在后续的操作中该文件对应的 inode 会被删除。
 	 * 修改参数之后立马执行 update()，将更新后的数据同步到磁盘当中
 	 */
-	ext2_inc_nlink(ip);
+	ext2_inc_nlink(ip);	// ip 此时是源文件
 	ip->i_flag |= IN_CHANGE;
 	if ((error = ext2_update(fvp, !DOINGASYNC(fvp))) != 0) {
 		VOP_UNLOCK(fvp, 0);
@@ -1016,10 +1015,22 @@ abortit:
 			goto bad;
 		if (xp != NULL)
 			vput(tvp);
+		/*
+			此时 ip 表示的文件的类型是目录，这里要检查的是 ip 是不是在目标文件的父级路径上。
+			如果是的话，那肯定是不能成立的。后面要再次确认目标文件是否存在(relookup() 函数)
+		*/
 		error = ext2_checkpath(ip, dp, tcnp->cn_cred);
 		if (error)
 			goto out;
 		VREF(tdvp);
+		/*
+			rename() 函数中前后两个 relookup() 函数的作用要格外关注。第一个就是重新判断当前目标文件是否已经存在了，
+			说明了什么问题？说明我们有可能在执行完 checkpath 之后，执行 rename 操作的线程可能会被抢占。然后另外一个
+			线程刚好创建了一个同名的文件，所以这里才要重新查找目标文件是否存在。注意一个设计细节，这个 relookup() 刚好
+			是在第二阶段处理开始之前。下面的处理思路类似，也是在准备处理源文件之前，重新查找源文件是否已经被删除了。
+			tptfs rename() 要如何处理？ 可以简单粗暴一点，只要在执行 rename()，源目录和目标目录直接加写锁，这个时间段
+			内不允许对目录进行增删查找，等待命令执行完成之后在放开限制
+		*/
 		error = relookup(tdvp, &tvp, tcnp);
 		if (error)
 			goto out;
@@ -1055,7 +1066,15 @@ abortit:
 			if (error)
 				goto bad;
 		}
-		// 为 ip 在目标目录文件下添加一个 directory entry
+		/*
+			为 ip 在目标目录文件下添加一个 directory entry。tptfs 中应该是不能这么处理的。
+			我们应该先判断是不是在同一个目录下，如果是的话，那么我们不需要添加新的文件结点，
+			直接把原来的文件进行重命名就好了。如果不是同一个路径下，修改源文件的指针就好了。
+			需要注意的是，对应的 . 和 .. 两个子目录文件也要做相应的修改
+			按照现有的设计，其实这两个不用修改，因为我们再查找的时候会在路径解析的时候处理掉 . 和 ..，
+			所以现在该不该无所谓。为了稳妥起见，还是把正常需要修改的地方都改掉，因为以后可能
+			会有新的处理逻辑用到这两个节点
+		*/
 		error = ext2_direnter(ip, tdvp, tcnp);
 		if (error) {
 			if (doingdirectory && newparent) {
@@ -2262,7 +2281,12 @@ ext2_read(struct vop_read_args *ap)
 		nextlbn = lbn + 1;
 		size = blksize(fs, ip, lbn);
 		blkoffset = blkoff(fs, uio->uio_offset);
-
+		/*
+			blkoffset 表示的应该是 uio_offset 在块中的偏移，uio_resid 表示的应该是在一个块中剩余需要处理的
+			数据，而不是整个文件剩余的需要被处理的数据量。bytesinfile 表示的才是整个文件剩余数据量，如果它比 
+			xfersize 还要小，说明文件整体需要处理的数据量已经不足以填满最后一个数据块、blkoffset之后剩余的空间，
+			此时就将 xfersize 设置为 bytesinfile
+		*/
 		xfersize = fs->e2fs_fsize - blkoffset;
 		if (uio->uio_resid < xfersize)
 			xfersize = uio->uio_resid;
@@ -2271,7 +2295,9 @@ ext2_read(struct vop_read_args *ap)
 
 		/*
 			当文件系统支持 cluster_read 属性的时候，可以采用对应的功能函数。也就是说不采用也是可以
-			实现的。tptfs 直接将其省略掉
+			实现的。tptfs 直接将其省略掉。
+			seqcount 应该是跟磁盘数据块读写有关系，为了提高效率将数据块按照一定的顺序进行排序。该变量应该是
+			起到这个作用
 		*/
 		if (lblktosize(fs, nextlbn) >= ip->i_size)
 			error = bread(vp, lbn, size, NOCRED, &bp);

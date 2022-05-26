@@ -283,11 +283,20 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 	/* 
 		从这里可以看出，indir 结构体中的 in_off 字段表示的在间接查找数组的索引.
 		nb = 0，说明当前 ip->i_ib[indirs[0].in_off] 中并没有存放块号，所以要先
-		给它分配一个数据块
+		给它分配一个数据块，即分配一个存放间接索引的数据块
+
+		通过模拟 getbln() 函数的行为我们可以看出，indirs[] 中的第一个元素中保存的 off 表示的
+		貌似是我们所要查找的逻辑块所在的间接索引的等级的 off，也就是说我们要通过第一个元素判断
+		逻辑块号最终落在哪个间接索引中。后面元素存储的数据貌似是在单个块中，我们所要查找的 entry
+		相对于起始位置的 offset
 	*/
 	nb = ip->i_ib[indirs[0].in_off];
 	if (nb == 0) {
 		EXT2_LOCK(ump);
+		/*
+			首先尝试申请一个优先分配的块，然后调用 ext2_alloc() 函数在文件系统中分配一个
+			真实的可用数据块
+		*/
 		pref = ext2_blkpref(ip, lbn, indirs[0].in_off +
 		    EXT2_NDIR_BLOCKS, &ip->i_db[0], 0);
 		if ((error = ext2_alloc(ip, lbn, pref, fs->e2fs_bsize, cred,
@@ -297,6 +306,11 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 			return (EFBIG);
 		nb = newb;
 		bp = getblk(vp, indirs[1].in_lbn, fs->e2fs_bsize, 0, 0, 0);
+		/*
+			把刚才获取到的文件系统的数据块先更新到 buffer 当中，接着同步到磁盘。这也符合
+			文件系统中的常规操作：首先把需要修改的数据更新到磁盘，完成之后再操作内存中的
+			数据，防止内存中数据操作完成之后回写到磁盘失败产生的错误
+		*/
 		bp->b_blkno = fsbtodb(fs, newb);
 		vfs_bio_clrbuf(bp);
 		/*
@@ -307,6 +321,9 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 			ext2_blkfree(ip, nb, fs->e2fs_bsize);
 			return (error);
 		}
+		/*
+			回写完毕之后，更新内存中的 inode 数据
+		*/
 		ip->i_ib[indirs[0].in_off] = newb;
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
 	}
@@ -370,6 +387,10 @@ ext2_balloc(struct inode *ip, e2fs_lbn_t lbn, int size, struct ucred *cred,
 	}	/* end for */
 	/*
 	 * Get the data block, allocating if necessary.
+	 		前面的逻辑感觉处理的都是间接索引块，执行完毕之后，最后一个 entry 表示的其实就是逻辑块号真正对应的
+			磁盘块。如果磁盘块号为0，那就表示该逻辑块号还没有分配对应的磁盘块号，那就调用 alloc() 函数去给它
+			分配一个真正的磁盘块。如果不为0，那就表示该逻辑块号已经对应了磁盘块，那就直接读取磁盘块中的内容，
+			并且将数据 buffer 传递给上层的调用者
 	 */
 	if (nb == 0) {
 		EXT2_LOCK(ump);

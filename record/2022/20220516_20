@@ -1,0 +1,73 @@
+////////////// 20220516 //////////////
+模拟一下 tptfs 中对 struct buf 进行替换的情形
+
+  #include <iostream>
+  #include <memory>
+
+  class Buffer {
+  public:
+    Buffer() = default;
+    ~Buffer() = default;
+  };
+
+  void buffer_deleter(Buffer *buffer) {
+    std::cout << "Buffer deleter called." << std::endl;
+    delete buffer;
+  }
+
+  void buffer_alloctor(std::shared_ptr<Buffer>& buffer_ref) {
+    std::shared_ptr<Buffer> buffer(new Buffer(), buffer_deleter);
+    buffer_ref = std::move(buffer);
+  }
+
+  int main() {
+    std::shared_ptr<Buffer> sys_buffer;
+
+    for (int i = 0; i < 3; i++) {
+      buffer_alloctor(sys_buffer);
+      std::cout << "i = "  << i << std::endl;
+    }
+    std::cout << "end for!" << std::endl;
+
+    return 0;
+  }
+
+结果输出如下：
+  i = 0
+  Buffer deleter called.
+  i = 1
+  Buffer deleter called.
+  i = 2
+  end for!
+  Buffer deleter called.
+
+  在 for 循环当中，只要引用计数为0，执行一次循环都会调用一次 deleter。
+
+
+////////////// 20220517 //////////////
+  forward_list 与 lamda 函数相结合，可以使用 remove_if 删除符合某个条件的链表元素
+  forward_list 是一个模板类，也就是说我们要使用的话其实是要实例化的，所以以它作为 tptfs 管理元素链表项就需要考虑构造问题。
+  用起来反而比 FreeBSD 内核中提供的方法更加麻烦了。所以还是采用了原有的设计
+
+
+////////////// 20220519 //////////////
+  ext2_rename() 函数的执行逻辑：
+    - 首先对源文件、源目录、目标目录等文件的属性进行判断，如果不满足直接报错
+    - 判断两个文件是在相同目录下、还是在不同的目录下
+    - 判断目标文件是否存在
+    - 判断源文件的类型，是目录文件还是普通文件。如果是目录文件，那么目标文件必须是一个空的目录文件，只有这样才能进行重命名
+    - 在新的目录下创建目录项，然后将原有源文件相关数据同步到新的目录项当中
+    - 删除源目录中的源文件
+
+
+////////////// 20220520 //////////////
+  每个线程都会变成一个.o文件。目前奇海系统所有应用线程的 init 函数都放在了进程 init 当中，所以即使有相当部分的线程并没有在
+启动的时候开启，但是仍然进行了初始化操作，降低系统的启动速度
+  .ctor: 构造相关函数，貌似 C/C++ 都会存在
+  .fini: 析构相关函数
+
+  以后文件注册应该是可以通过 C++ std::map 来管理，每个文件对应一个 entry。这样的话，绝对路径存放可能就不太合适了，说不定
+又要回退到之前逐级查找的方式。所以，现有的文件系统 lookup() 函数还是暂时保留吧。《C++代码简洁之道》中有一段表述：不要为未来
+可能会用到的东西提前编写代码。所以，这些代码留到以后真正用到的时候在写
+
+  一些指令可以实现从寄存器找到第一个高 bit 的功能，所以如果可以的话，尽量使用位操作来替代链表或者数据的遍历
