@@ -1,0 +1,313 @@
+////////////// 20220613 //////////////
+  tptfs 对于文件的读写目前存在问题，首先要确定智能指针在内核中的功能是否是正常的
+
+
+# echo hello > a
+
+  Thread 3 hit Breakpoint 1, TptBlockAlloc::allocSpace (this=0xffffffd0097387c0, Inode=0x234003200, 
+    LogicalBlock=0, Buffer=..., Credential=0xffffffd0096dfd00)
+    at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptBlockAlloc.cpp:15
+  warning: Source file is more recent than executable.
+  15	  struct vnode *vnode = Inode->vnode;
+  (gdb) bt
+  #0  TptBlockAlloc::allocSpace (this=0xffffffd0097387c0, Inode=0x234003200, LogicalBlock=0, Buffer=..., 
+      Credential=0xffffffd0096dfd00)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptBlockAlloc.cpp:15
+  #1  0x000000010c38b452 in TptInodeOpts::shortenFile (this=0xffffffd0097387a0, Inode=0x234003200, 
+      NewFileSize=0, Credential=0xffffffd0096dfd00)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptInodeOpts.cpp:269
+  #2  0x000000010c38ae94 in TptInodeOpts::truncateInode (this=0xffffffd0097387a0, Vnode=0xffffffd00b62cb70, 
+      Length=0, Credential=0xffffffd0096dfd00)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptInodeOpts.cpp:212
+  #3  0x000000010c38adac in TptInodeOpts::truncate (this=0xffffffd0097387a0, Vnode=0xffffffd00b62cb70, 
+      Length=0, Credential=0xffffffd0096dfd00)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptInodeOpts.cpp:125
+  #4  0x000000010c392a9c in TptVopVector::setAttr (this=0xffffffd00a88be00, ap=0x1def6b7b8)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptVopVector.cpp:1282
+  #5  0x000000010c3879b2 in tptfs_setAttr (ap=0x1def6b7b8)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptFileSystem.cpp:207
+  #6  0x000000010c253258 in VOP_SETATTR_APV (vop=0x110035000 <tpt_vnops>, a=0x1def6b7b8)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vnode_if.cpp:928
+  #7  0x000000010c24c0b2 in VOP_SETATTR (vp=0xffffffd00b62cb70, vap=0x1def6b810, cred=0xffffffd0096dfd00)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vnode_if.h:485
+  #8  0x000000010c24c046 in vn_truncate_locked (vp=0xffffffd00b62cb70, length=0, sync=false, 
+      cred=0xffffffd0096dfd00)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_vnops.cpp:1577
+  #9  0x000000010c248494 in vn_truncate (fp=0xffffffd00971ef50, length=0, active_cred=0xffffffd0096dfd00, 
+      td=0x1bcb5f680) at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_vnops.cpp:1549
+  #10 0x000000010c23f88a in fo_truncate (fp=0xffffffd00971ef50, length=0, active_cred=0xffffffd0096dfd00, 
+      td=0x1bcb5f680) at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/sys/file.h:346
+  #11 0x000000010c23f4f6 in kern_openat (td=0x1bcb5f680, fd=-100, path=0x40272148 "a", pathseg=UIO_USERSPACE, 
+      flags=1026, mode=438)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_syscalls.cpp:1192
+  #12 0x000000010c23f650 in sys_openat (td=0x1bcb5f680, uap=0x1bcb5fa68)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_syscalls.cpp:1091
+  #13 0x000000010c0191b6 in syscallenter (td=0x1bcb5f680)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/../../kernel/subr_syscall:189
+  #14 0x000000010c018ab4 in ecall_handler ()
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/trap.cpp:168
+  #15 0x000000010c004fc0 in system_call ()
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/swtch.S:601
+  Backtrace stopped: frame did not save the PC
+
+  利用智能指针的时候，如果使用默认的 allocator，会产生无法找到相应地址的错误：
+    panic: vm_fault_lookup: fault on nofault entry, addr: 0x1def74000
+      cpuid = 3
+      time = 1655091234
+      KDB: stack backtrace:
+      Uptime: 22s
+  所以，目前的解决办法是使用自定义分配器(利用)
+
+
+////////////// 20220614 //////////////
+  # mount -t tptfs tptfs /tpt
+    # cd tpt
+    # mkdir a
+    # rmdir a
+    random: unblocking device.
+    test output is: 20
+    test output is: 30
+    # ls -al
+    ls: a: No such file or directory
+    total 0
+    drwxr-xr-x  2 root  wheel  512 Jun 14 08:07 ..
+  
+  正常来看应该是删除 abc 目录，但是从 ls -al 命令的输出结果来看，好像是把 dot 目录删除了，但是 abc 这个目录也没在(因为
+在哈希表中已经不存在这个条目了)
+
+  # mount -t tptfs tptfs /tpt
+    # cd tpt
+    # mkdir a
+    # rmdir a
+    random: unblocking device.
+    sub entry name is: ..
+    sub entry name is: .
+    # ls -al
+    ls: a: No such file or directory
+    total 0
+    drwxr-xr-x  2 root  wheel  512 Jun 14 09:09 ..
+
+  添加测试代码运行后发现，subentries 中的元素是正确的，为什么执行 ls -al 的时候会出现 a 这个目录项呢？
+
+删除操作文件类指针
+    target file:
+        (gdb) p target_file
+        $1 = (TptFile *) 0xffffffd0097efe00
+
+    dotdot:
+        (gdb) p test_filep
+        $2 = (TptFile *) 0xffffffd0097b3700
+
+    dot:
+        (gdb) p test_filep 
+        $3 = (TptFile *) 0xffffffd0097b3800
+
+
+ls -al 命令执行的文件类指针：
+    target_file:
+        (gdb) p entry_file
+        $4 = (TptFile *) 0xffffffd0097efe00
+
+    dotdot:
+        (gdb) p entry_file 
+        $6 = (TptFile *) 0xffffffd0097b3700
+
+
+////////////// 20220615 //////////////
+    #0  TptLookup::lookup (this=0xffffffd009763f00, NameiData=0x1d3386918)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptLookup.cpp:28
+    #1  0x000000010c388cb0 in tpt_lookup (ndp=0x1d3386918)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptFileSystem.cpp:584
+    #2  0x000000010c21821a in namei (ndp=0x1d3386918)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_lookup.cpp:608
+    #3  0x000000010c241dba in kern_statat (td=0x1bcadc100, flag=512, fd=-100, path=0x40226478 "a", 
+        pathseg=UIO_USERSPACE, sbp=0x1d3386a40, hook=0x0)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_syscalls.cpp:2400
+    #4  0x000000010c241c72 in sys_fstatat (td=0x1bcadc100, uap=0x1bcadc4e8)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_syscalls.cpp:2378
+    #5  0x000000010c0191b6 in syscallenter (td=0x1bcadc100)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/../../kernel/subr_syscall:189
+    #6  0x000000010c018ab4 in ecall_handler ()
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/trap.cpp:168
+    #7  0x000000010c004fc0 in system_call ()
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/swtch.S:601
+    Backtrace stopped: frame did not save the PC
+
+    执行完 rmdir a 之后，接着执行 ls -al 命令，路径中出现了a 本来已经被删除了，所以正常来说是不应该有的
+
+
+    ls -al
+    #0  TptLookup::lookup (this=0xffffffd009779800, NameiData=0x1def87918)
+    at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptLookup.cpp:28
+    #1  0x000000010c388cb0 in tpt_lookup (ndp=0x1def87918)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptFileSystem.cpp:584
+    #2  0x000000010c21821a in namei (ndp=0x1def87918)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_lookup.cpp:608
+    #3  0x000000010c241dba in kern_statat (td=0x1bcb66680, flag=512, fd=-100, path=0x40226478 "a", 
+        pathseg=UIO_USERSPACE, sbp=0x1def87a40, hook=0x0)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_syscalls.cpp:2400
+    #4  0x000000010c241c72 in sys_fstatat (td=0x1bcb66680, uap=0x1bcb66a68)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_syscalls.cpp:2378
+    #5  0x000000010c0191b6 in syscallenter (td=0x1bcb66680)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/../../kernel/subr_syscall:189
+    #6  0x000000010c018ab4 in ecall_handler ()
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/trap.cpp:168
+    #7  0x000000010c004fc0 in system_call ()
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/swtch.S:601
+Backtrace stopped: frame did not save the PC
+
+  造成上述问题的原因可能是传值拷贝。也就是说根目录 forward_list 子链表在 getSubEntryList() 值返回的时候复制了一份。所以删除其中
+元素的时候，删除的其实是它的副本中的元素，原始链表中的元素仍然是存在的。所以当我们再次调用上述函数的时候，返回的仍然是原始链表的副本，
+所以 ls -al 读取到的第一个元素仍然是 a。修改方法的话就是将原有的返回值变成返回该值的指针
+
+  执行 rmdir 命令造成系统阻塞，目前来看应该是锁的缘故。初始传入的 dir_vnode 锁的状态：
+    (gdb) p dir_vnode
+        $1 = (vnode *) 0xffffffd00971dd58
+        (gdb) p dir_vnode->v_lock
+        $2 = {
+        lock_object = {
+            lo_name = 0x10d0abe3e "tptfs",
+            lo_flags = 116588552,
+            lo_data = 0,
+            lo_witness = 0x0
+        },
+        lk_lock = 7460434048,
+        lk_exslpfail = 0,
+        lk_timo = 6,
+        lk_pri = 96
+        }
+
+  VOP_UNLOCK() 之后的锁的状态：
+    (gdb) p dir_vnode
+        $4 = (vnode *) 0xffffffd00971dd58
+        (gdb) p dir_vnode->v_lock
+        $5 = {
+        lock_object = {
+            lo_name = 0x10d0abe3e "tptfs",
+            lo_flags = 116588552,
+            lo_data = 0,
+            lo_witness = 0x0
+        },
+        lk_lock = 1,
+        lk_exslpfail = 0,
+        lk_timo = 6,
+        lk_pri = 96
+        }
+
+    (gdb) p/x dir_vnode->v_lock
+        $6 = {
+        lock_object = {
+            lo_name = 0x10d0abe3e,
+            lo_flags = 0x6f30008,
+            lo_data = 0x0,
+            lo_witness = 0x0
+        },
+        lk_lock = 0x1,
+        lk_exslpfail = 0x0,
+        lk_timo = 0x6,
+        lk_pri = 0x60
+        }
+  可以看到，锁状态的变化应该是通过 lk_lock 字段来反应的
+
+  造成阻塞的原因好像是在 tptfs lookup() 函数中，对于 LOCKPARENT 是否存在进行判断这个条件的缺失，导致目录文件 vnode 没有进行升级。
+所以对锁进行操作的话可能会造成阻塞。在 lookup() 函数中添加相关逻辑之后异常消失。(因为我们只有一次循环，所以就是对 last component 
+进行的操作，可以直接加上)
+
+  调试过程中又出现了另外一种情形，就是当我们创建在根目录下创建了一个新的文件(目录文件或者是普通文件)的时候，然后系统就阻塞了。从 vfs lookup()
+函数的实现逻辑来看，ni_startdir 传入进来的时候可能是不加锁的，否则执行到 vn_lock(... LK_SHARED) 的时候可能是要阻塞？或者 LK_SHARED 可以
+多次加锁 (递归锁)？
+  后面在根据 component_name 中的属性判断是否对该锁进行升级成独占锁。然后执行的时候就会随机产生阻塞。如果在升级前先对目录 vnode 解锁，然后再
+升级，则基本不会出现阻塞的情况。vn_lock(... LK_EXCLUSIVE) 或者 vn_lock(... LK_UPGRADE) 都是可以，是否说明锁的类型在解锁之后就会消失，
+然后再根据下次加锁的类型更新自己的类型?
+
+    共享锁 -> 解锁 -> 空类型锁 -> 加独占锁 -> 独占锁
+           |                |
+    独占锁 ->                -> 加共享锁 -> 共享锁
+
+
+又发现了一个奇怪的问题，当我们创建一个 a 文件之后，不管是目录文件还是普通文件，删除之后在创建同名文件，系统也会阻塞。。。缓存的问题？
+
+
+////////////// 20220616 //////////////
+    # echo world >> a
+    # cat a
+    world
+    # echo hi >> a
+    # cat a
+    hi
+    ld
+    # rm a
+    # ls -al
+    total 0
+    drwxr-xr-x  2 root  wheel  512 Jun 16 02:21 .
+    drwxr-xr-x  2 root  wheel  512 Jun 16 02:21 ..
+
+    # mkdir a
+    # touch a
+    # ls -al
+    total 0
+    drwxr-xr-x  3 root  wheel  768 Jun 16 02:21 .
+    drwxr-xr-x  3 root  wheel  768 Jun 16 02:21 ..
+    drwxr-xr-x  2 root  wheel  512 Jun 16 02:21 a
+
+  两个新问题：
+    - >> 没有在文件末尾追加数据，应该是文件大小在写入数据的时候没有正确更新
+    - 创建同名文件没有提示同名文件已经存在的异常信息
+
+  第一个问题是在 tptfs write() 函数中缺少了对于 IO_APPEND 属性的处理，其实就是 uio->uio_offset = inode->size
+  第二中情况应该是 linux/FreeBSD 共同拥有的特性，如下：
+    
+    mercury@mercury:~/test$ touch wcg
+    mercury@mercury:~/test$ touch wcg
+    mercury@mercury:~/test$ ls -al |grep wcg
+    -rw-rw-r--  1 mercury mercury       0 6月  16 11:55 wcg
+    mercury@mercury:~/test$ mkdir wcg
+    mkdir: cannot create directory ‘wcg’: File exists
+    mercury@mercury:~/test$ 
+
+    mercury@mercury:~/test$ mkdir wcg
+    mercury@mercury:~/test$ touch wcg
+    mercury@mercury:~/test$ ls -al |grep wcg
+    drwxrwxr-x  2 mercury mercury    4096 6月  16 11:56 wcg
+    mercury@mercury:~/test$ mkdir wcg
+    mkdir: cannot create directory ‘wcg’: File exists
+    mercury@mercury:~/test$ 
+
+  touch 命令的检查冗余度貌似是会更高一些，但是 mkdir 命令的检查更加严格一些，只要有同名文件就直接报错
+
+    # pwd
+    # /tpt/a/b/c/d/e
+    # cd ../../..
+    cd: ../../..: No such file or directory
+
+  对于路径中出现连续的 .. 情况的处理异常。/tpt 下执行 cd .. 后可以退出到 /，但是再进入 tpt 目录就会造成系统阻塞
+
+////////////// v2ray DNS 配置 //////////////
+  主页面->首选项->高级路由设置->直连->域名，然后把下面这些域名保存进去即可(注意，要清空浏览器数据和DNS缓存)
+    www.tpt.com
+    phabricator.tpt.com
+    tpts.tpt.com
+    git.tpt.com
+    ci.tpt.com
+    jenkins.tpt.com
+    db.tpt.com
+    mysql.tpt.com
+    share.tpt.com
+    file.tpt.com
+    redis.tpt.com
+    smt.tpt.com
+    freebsd-x86-1.tpt.com
+    freebsd-x86-2.tpt.com
+    freebsd-x86-3.tpt.com
+    linux-1.tpt.com
+    linux-2.tpt.com
+    linux-3.tpt.com
+    linux-4.tpt.com
+    linux-5.tpt.com
+    windows-10.tpt.com
+    windows-pc.tpt.com
+    linux-sifive-rv64gc.tpt.com
+    freebsd-sifive-rv64gc.tpt.com
+    backup.tpt.com
+    aquarius.tpt.com
+    scorpius.tpt.com

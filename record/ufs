@@ -1,15 +1,148 @@
-(gdb) p* ndp->ni_rootdir               
-$54 = {
+///////////////////////////// namei() 函数执行之前的状态
+(gdb) p nd.ni_vp 
+$1 = (vnode *) 0x1def739a0
+(gdb) p* nd.ni_vp 
+$2 = {
+  v_type = 68,
+  v_irflag = 4,
+  v_seqc = 0,
+  v_nchash = 3166049920,
+  v_op = 0x0,
+  v_data = 0x185fd00000000,
+  v_mount = 0x1bcb61680,
+  v_nmntvnodes = {
+    tqe_next = 0x0,
+    tqe_prev = 0x0
+  },
+  {
+    v_mountedhere = 0x0,
+    v_unpcb = 0x0,
+    v_rdev = 0x0,
+    v_fifoinfo = 0x0
+  },
+  v_hashlist = {
+    le_next = 0x20100d8528,
+    le_prev = 0x0
+  },
+  v_cache_src = {
+    lh_first = 0x1def73a40
+  },
+  v_cache_dst = {
+    tqh_first = 0xbcb61680,
+    tqh_last = 0x40272100
+  },
+  v_cache_dd = 0xffffff9c,
+  v_lock = {
+    lock_object = {
+      lo_name = 0x1bcb61680 "",
+      lo_flags = 3740744784,
+      lo_data = 1,
+      lo_witness = 0x1def73b40
+    },
+    lk_lock = 4498660330,
+    lk_exslpfail = 0,
+    lk_timo = 0,
+    lk_pri = 827218431
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x1def73ae0 "\350\002\001\024\001",
+      lo_flags = 201772368,
+      lo_data = 1,
+      lo_witness = 0x3
+    },
+    mtx_lock = 0
+  },
+  v_vnlock = 0x0,
+  v_vnodelist = {
+    tqe_next = 0x1100d8480 <riscvPcpu>,
+    tqe_prev = 0x1
+  },
+  v_lazylist = {
+    tqe_next = 0x140152f8,
+    tqe_prev = 0x300000005
+  },
+  v_bufobj = {
+    bo_lock = {
+      lock_object = {
+        lo_name = 0x115844800 "\230T\204\025\001",
+        lo_flags = 3166051256,
+        lo_data = 1,
+        lo_witness = 0x1bcb61680
+      },
+      rw_lock = 4294967296
+    },
+    bo_ops = 0x1158454c8,
+    bo_object = 0x1100dac40 <__pcpu+1280>,
+    bo_synclist = {
+      le_next = 0x1100d8480 <riscvPcpu>,
+      le_prev = 0x1
+    },
+    bo_private = 0x1140152e8,
+    bo_clean = {
+      bv_hd = {
+        tqh_first = 0x1def73b20,
+        tqh_last = 0x10c036624 <RiscvCounter::counter_u64_add(unsigned long*, long)+74>
+      },
+      bv_root = {
+        pt_root = 4630577896
+      },
+      bv_cnt = 335631080
+    },
+    bo_dirty = {
+      bv_hd = {
+        tqh_first = 0x1140152e8,
+        tqh_last = 0x1
+      },
+      bv_root = {
+        pt_root = 0
+      },
+      bv_cnt = -1128916392
+    },
+    bo_numoutput = -1128916368,
+    bo_flag = 1,
+    bo_domain = -554222320,
+    bo_bsize = 1
+  },
+  v_pollinfo = 0x1bcb61a68,
+  v_label = 0x1bcb61680,
+  v_lockf = 0x1def73c30,
+  v_rl = {
+    rl_waiters = {
+      tqh_first = 0x10c0191b6 <syscallenter(thread*)+1746>,
+      tqh_last = 0x1def73c50
+    },
+    rl_currdep = 0xffffffd000f84b00
+  },
+  v_cstart = 4564288488,
+  v_lasta = 202938080,
+  v_lastw = 8035711888,
+  v_clen = 0,
+  v_holdcnt = 0,
+  v_usecount = 0,
+  v_iflag = 0,
+  v_vflag = 0,
+  v_mflag = 19200,
+  v_dbatchcpu = 248,
+  v_writecount = -48,
+  v_seqc_users = -554222656,
+  v_hash = 1
+}
+
+
+///////////////////////////// namei() 函数执行之后， vop_stat() 执行之前
+(gdb) p* nd.ni_vp 
+$3 = {
   v_type = VDIR,
   v_irflag = 0,
-  v_seqc = 2,
-  v_nchash = 1450982582,
-  v_op = 0x110033c38 <ffs_vnodeops2>,
-  v_data = 0xffffffd00be85f00,
-  v_mount = 0x1bcae2080,
+  v_seqc = 0,
+  v_nchash = 1919625636,
+  v_op = 0x110033c60 <ffs_vnodeops2>,
+  v_data = 0xffffffd00a8b1dc0,
+  v_mount = 0x1bcadf080,
   v_nmntvnodes = {
-    tqe_next = 0xffffffd00be8a988,
-    tqe_prev = 0x1bcae2108
+    tqe_next = 0x0,
+    tqe_prev = 0xffffffd00a8b0b98
   },
   {
     v_mountedhere = 0x0,
@@ -19,19 +152,279 @@ $54 = {
   },
   v_hashlist = {
     le_next = 0x0,
-    le_prev = 0x189227828
+    le_prev = 0x18940d4f0
   },
   v_cache_src = {
-    lh_first = 0xffffffd00bebcea0
+    lh_first = 0x0
   },
   v_cache_dst = {
-    tqh_first = 0x0,
-    tqh_last = 0xffffffd00be8abc8
+    tqh_first = 0xffffffd00a8b2d68,
+    tqh_last = 0xffffffd00a8b2d78
   },
-  v_cache_dd = 0x0,
+  v_cache_dd = 0xffffffd00a8b2d68,
   v_lock = {
     lock_object = {
-      lo_name = 0x10cd31351 "ufs",
+      lo_name = 0x10d0af168 "ufs",
+      lo_flags = 117112832,
+      lo_data = 0,
+      lo_witness = 0x0
+    },
+    lk_lock = 7461017216,
+    lk_exslpfail = 0,
+    lk_timo = 6,
+    lk_pri = 96
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x10d0ff0a5 "vnode interlock",
+      lo_flags = 16973824,
+      lo_data = 0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0
+  },
+  v_vnlock = 0xffffffd00a8b09f8,
+  v_vnodelist = {
+    tqe_next = 0xffffffd00a8b0b70,
+    tqe_prev = 0xffffffd00a8b0868
+  },
+  v_lazylist = {
+    tqe_next = 0x0,
+    tqe_prev = 0x0
+  },
+  v_bufobj = {
+    bo_lock = {
+      lock_object = {
+        lo_name = 0x10d0ed6b9 "bufobj interlock",
+        lo_flags = 86179840,
+        lo_data = 0,
+        lo_witness = 0x0
+      },
+      rw_lock = 1
+    },
+    bo_ops = 0x11001c470 <buf_ops_bio>,
+    bo_object = 0x0,
+    bo_synclist = {
+      le_next = 0x0,
+      le_prev = 0x0
+    },
+    bo_private = 0xffffffd00a8b0988,
+    bo_clean = {
+      bv_hd = {
+        tqh_first = 0x0,
+        tqh_last = 0xffffffd00a8b0ab8
+      },
+      bv_root = {
+        pt_root = 0
+      },
+      bv_cnt = 0
+    },
+    bo_dirty = {
+      bv_hd = {
+        tqh_first = 0x0,
+        tqh_last = 0xffffffd00a8b0ad8
+      },
+      bv_root = {
+        pt_root = 0
+      },
+      bv_cnt = 0
+    },
+    bo_numoutput = 0,
+    bo_flag = 0,
+    bo_domain = 1,
+    bo_bsize = 32768
+  },
+  v_pollinfo = 0x0,
+  v_label = 0x0,
+  v_lockf = 0x0,
+  v_rl = {
+    rl_waiters = {
+      tqh_first = 0x0,
+      tqh_last = 0xffffffd00a8b0b20
+    },
+    rl_currdep = 0x0
+  },
+  v_cstart = 0,
+  v_lasta = 0,
+  v_lastw = 0,
+  v_clen = 0,
+  v_holdcnt = 1,
+  v_usecount = 1,
+  v_iflag = 0,
+  v_vflag = 0,
+  v_mflag = 0,
+  v_dbatchcpu = -1,
+  v_writecount = 0,
+  v_seqc_users = 0,
+  v_hash = 1203840
+}
+
+
+///////////////////////////// stat() 函数执行之后的状态， vput() 执行之前
+(gdb) p* nd.ni_vp
+$4 = {
+  v_type = VDIR,
+  v_irflag = 0,
+  v_seqc = 0,
+  v_nchash = 1919625636,
+  v_op = 0x110033c60 <ffs_vnodeops2>,
+  v_data = 0xffffffd00a8b1dc0,
+  v_mount = 0x1bcadf080,
+  v_nmntvnodes = {
+    tqe_next = 0x0,
+    tqe_prev = 0xffffffd00a8b0b98
+  },
+  {
+    v_mountedhere = 0x0,
+    v_unpcb = 0x0,
+    v_rdev = 0x0,
+    v_fifoinfo = 0x0
+  },
+  v_hashlist = {
+    le_next = 0x0,
+    le_prev = 0x18940d4f0
+  },
+  v_cache_src = {
+    lh_first = 0x0
+  },
+  v_cache_dst = {
+    tqh_first = 0xffffffd00a8b2d68,
+    tqh_last = 0xffffffd00a8b2d78
+  },
+  v_cache_dd = 0xffffffd00a8b2d68,
+  v_lock = {
+    lock_object = {
+      lo_name = 0x10d0af168 "ufs",
+      lo_flags = 117112832,
+      lo_data = 0,
+      lo_witness = 0x0
+    },
+    lk_lock = 7461017216,
+    lk_exslpfail = 0,
+    lk_timo = 6,
+    lk_pri = 96
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x10d0ff0a5 "vnode interlock",
+      lo_flags = 16973824,
+      lo_data = 0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0
+  },
+  v_vnlock = 0xffffffd00a8b09f8,
+  v_vnodelist = {
+    tqe_next = 0xffffffd00a8b0b70,
+    tqe_prev = 0xffffffd00a8b0868
+  },
+  v_lazylist = {
+    tqe_next = 0x0,
+    tqe_prev = 0x0
+  },
+  v_bufobj = {
+    bo_lock = {
+      lock_object = {
+        lo_name = 0x10d0ed6b9 "bufobj interlock",
+        lo_flags = 86179840,
+        lo_data = 0,
+        lo_witness = 0x0
+      },
+      rw_lock = 1
+    },
+    bo_ops = 0x11001c470 <buf_ops_bio>,
+    bo_object = 0x0,
+    bo_synclist = {
+      le_next = 0x0,
+      le_prev = 0x0
+    },
+    bo_private = 0xffffffd00a8b0988,
+    bo_clean = {
+      bv_hd = {
+        tqh_first = 0x0,
+        tqh_last = 0xffffffd00a8b0ab8
+      },
+      bv_root = {
+        pt_root = 0
+      },
+      bv_cnt = 0
+    },
+    bo_dirty = {
+      bv_hd = {
+        tqh_first = 0x0,
+        tqh_last = 0xffffffd00a8b0ad8
+      },
+      bv_root = {
+        pt_root = 0
+      },
+      bv_cnt = 0
+    },
+    bo_numoutput = 0,
+    bo_flag = 0,
+    bo_domain = 1,
+    bo_bsize = 32768
+  },
+  v_pollinfo = 0x0,
+  v_label = 0x0,
+  v_lockf = 0x0,
+  v_rl = {
+    rl_waiters = {
+      tqh_first = 0x0,
+      tqh_last = 0xffffffd00a8b0b20
+    },
+    rl_currdep = 0x0
+  },
+  v_cstart = 0,
+  v_lasta = 0,
+  v_lastw = 0,
+  v_clen = 0,
+  v_holdcnt = 1,
+  v_usecount = 1,
+  v_iflag = 0,
+  v_vflag = 0,
+  v_mflag = 0,
+  v_dbatchcpu = -1,
+  v_writecount = 0,
+  v_seqc_users = 0,
+  v_hash = 1203840
+}
+
+
+///////////////////////////// vput() 执行之后
+(gdb) p* nd.ni_vp
+$5 = {
+  v_type = VDIR,
+  v_irflag = 0,
+  v_seqc = 0,
+  v_nchash = 1919625636,
+  v_op = 0x110033c60 <ffs_vnodeops2>,
+  v_data = 0xffffffd00a8b1dc0,
+  v_mount = 0x1bcadf080,
+  v_nmntvnodes = {
+    tqe_next = 0x0,
+    tqe_prev = 0xffffffd00a8b0b98
+  },
+  {
+    v_mountedhere = 0x0,
+    v_unpcb = 0x0,
+    v_rdev = 0x0,
+    v_fifoinfo = 0x0
+  },
+  v_hashlist = {
+    le_next = 0x0,
+    le_prev = 0x18940d4f0
+  },
+  v_cache_src = {
+    lh_first = 0x0
+  },
+  v_cache_dst = {
+    tqh_first = 0xffffffd00a8b2d68,
+    tqh_last = 0xffffffd00a8b2d78
+  },
+  v_cache_dd = 0xffffffd00a8b2d68,
+  v_lock = {
+    lock_object = {
+      lo_name = 0x10d0af168 "ufs",
       lo_flags = 117112832,
       lo_data = 0,
       lo_witness = 0x0
@@ -43,17 +436,17 @@ $54 = {
   },
   v_interlock = {
     lock_object = {
-      lo_name = 0x10cd8056e "vnode interlock",
+      lo_name = 0x10d0ff0a5 "vnode interlock",
       lo_flags = 16973824,
       lo_data = 0,
       lo_witness = 0x0
     },
     mtx_lock = 0
   },
-  v_vnlock = 0xffffffd00be8abe0,
+  v_vnlock = 0xffffffd00a8b09f8,
   v_vnodelist = {
-    tqe_next = 0xffffffd00be8ad58,
-    tqe_prev = 0xffffffd00be8aa50
+    tqe_next = 0xffffffd00a8b0b70,
+    tqe_prev = 0xffffffd00a8b0868
   },
   v_lazylist = {
     tqe_next = 0x0,
@@ -62,34 +455,34 @@ $54 = {
   v_bufobj = {
     bo_lock = {
       lock_object = {
-        lo_name = 0x10cd6ed3e "bufobj interlock",
+        lo_name = 0x10d0ed6b9 "bufobj interlock",
         lo_flags = 86179840,
         lo_data = 0,
         lo_witness = 0x0
       },
       rw_lock = 1
     },
-    bo_ops = 0x11001c3a8 <buf_ops_bio>,
-    bo_object = 0xffffffd00be89d68,
+    bo_ops = 0x11001c470 <buf_ops_bio>,
+    bo_object = 0x0,
     bo_synclist = {
       le_next = 0x0,
       le_prev = 0x0
     },
-    bo_private = 0xffffffd00be8ab70,
+    bo_private = 0xffffffd00a8b0988,
     bo_clean = {
       bv_hd = {
-        tqh_first = 0x1142363b0,
-        tqh_last = 0x114236410
+        tqh_first = 0x0,
+        tqh_last = 0xffffffd00a8b0ab8
       },
       bv_root = {
-        pt_root = 4632831105
+        pt_root = 0
       },
-      bv_cnt = 1
+      bv_cnt = 0
     },
     bo_dirty = {
       bv_hd = {
         tqh_first = 0x0,
-        tqh_last = 0xffffffd00be8acc0
+        tqh_last = 0xffffffd00a8b0ad8
       },
       bv_root = {
         pt_root = 0
@@ -98,7 +491,7 @@ $54 = {
     },
     bo_numoutput = 0,
     bo_flag = 0,
-    bo_domain = 2,
+    bo_domain = 1,
     bo_bsize = 32768
   },
   v_pollinfo = 0x0,
@@ -107,22 +500,21 @@ $54 = {
   v_rl = {
     rl_waiters = {
       tqh_first = 0x0,
-      tqh_last = 0xffffffd00be8ad08
+      tqh_last = 0xffffffd00a8b0b20
     },
     rl_currdep = 0x0
   },
   v_cstart = 0,
   v_lasta = 0,
   v_lastw = 0,
---Type <RET> for more, q to quit, c to continue without paging--
   v_clen = 0,
-  v_holdcnt = 4,
-  v_usecount = 10,
+  v_holdcnt = 0,
+  v_usecount = 0,
   v_iflag = 0,
-  v_vflag = 1,
+  v_vflag = 0,
   v_mflag = 0,
-  v_dbatchcpu = -1,
+  v_dbatchcpu = 5,
   v_writecount = 0,
   v_seqc_users = 0,
-  v_hash = 2
+  v_hash = 1203840
 }

@@ -560,6 +560,8 @@ namei(struct nameidata *ndp)
 	/*
 		for 循环会首先更新 ndp->ni_startdir，推测是每次循环都会处理一个级别的目录项，然后进行
 		下一个目录项的处理，所以才会每次都更新一下 nameidata 中的成员
+		每次循环执行之前，都会对 ni_startdir 字段进行重新赋值，所以 lookup() 函数中可以保证
+		ni_startdir 不为空，放心使用
 	*/
 	for (;;) {
 		ndp->ni_startdir = dp;
@@ -682,6 +684,7 @@ compute_cn_lkflags(struct mount *mp, int lkflags, int cnflags)
 	return (lkflags);
 }
 
+// 该函数应该用于判断最后一个组件是否需要加独占锁
 static __inline int
 needs_exclusive_leaf(struct mount *mp, int flags)
 {
@@ -814,13 +817,16 @@ lookup(struct nameidata *ndp)
 	 * We use shared locks until we hit the parent of the last cn then
 	 * we adjust based on the requesting flags.
 	 * 我们使用共享锁，直到到达最后一个 cn 的父级，然后根据请求的标志进行调整。也就是说路径中间的组件
-	 * 对应的 vnode 都是利用共享锁进行锁操作，只有到最后一个目录的时候，在根据 flag 进行调整
+	 * 对应的 vnode 都是利用共享锁进行锁操作，只有到最后一个目录的时候，再根据 flag 进行调整
 	 */
 	cnp->cn_lkflags = LK_SHARED;
 	/*
 		从 namei 函数调用情况可以知道，ni_startdir 在 for 循环中都是被指定过的。所以，这里获取到的就是
 		需要处理的当前目录项，它会随着路径信息的处理而不断更新
 		这里需要注意的是，dp 上来就被加锁了，是不是说明 nameidata 中传入的这些 vnode 起初都是不加锁的？
+
+		上面提示，当我们用到最后一个组件的父级的时候，会根据请求的标志进行锁状态的调整。所以 lookup 函数起始
+		阶段对目录加锁的类型都是共享锁。lookup 也是在 namei 中的循环
 	*/
 	dp = ndp->ni_startdir;
 	ndp->ni_startdir = NULLVP;	// 将 start directory 置空，等待下次更新
@@ -951,7 +957,9 @@ dirloop:
 
 	/* 
 		将当前目录对应的 tracker 添加到队列当中；
-		增加 vnode 引用计数(而不是使用计数)并且 lock interlock
+		增加 vnode 引用计数(而不是使用计数)并且 lock interlock.
+		假设此时是首次进入 dirloop，或者只有一次 dirloop，则 dp 目前就是 ni_startdir，所以在 tptfs lookup()
+		的实现中要将该目录项添加到管理器当中
 	*/
 	nameicap_tracker_add(ndp, dp);
 	/*
@@ -1156,6 +1164,10 @@ unionlookup:
 			goto bad;
 	}
 #endif
+	/*
+		这里的处理逻辑是首先指定目录，因为是逐级查找，所以当前路径肯定是存在的。并且如果是以绝对路径查找的话，
+		也会对 startdir 进行更新操作，所以不会存在其实目录找不到的情况
+	*/
 	ndp->ni_dvp = dp;
 	ndp->ni_vp = NULL;
 	/*
@@ -1272,6 +1284,10 @@ good:
 	/*
 	 * Check to see if the vnode has been mounted on;
 	 * if so find the root of the mounted filesystem.
+	 * 
+	 * ni_vp 其实是在具体的文件系统 lookup() 函数进行申请的。
+	 * 这里处理的情况是当该组件是一个目录文件并且刚好是另外一个
+	 * 文件系统的挂载点。
 	 */
 	while (dp->v_type == VDIR && (mp = dp->v_mountedhere) &&
 	       (cnp->cn_flags & NOCROSSMOUNT) == 0) {
@@ -1374,8 +1390,9 @@ nextname:
 		goto dirloop;
 	}
 	/*
-		注意，这里是 dirloop 最后一次出现的地方，也就是说后面的代码不会再返回到循环当中处理
-		路径信息。所以下面的代码就是对路径信息处理完成后进行的一些属性的操作
+		注意，这里是 dirloop 最后一次出现的地方，也就是说后面的代码不会再
+		返回到循环当中处理路径信息。所以下面的代码就是对路径信息处理完成后
+		进行的一些属性的操作
 	*/
 	/*
 	 * If we're processing a path with a trailing slash,

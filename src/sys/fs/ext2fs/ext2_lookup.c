@@ -339,6 +339,10 @@ nextentry:
  *	  inode and return info to allow rewrite
  *	if not at end, add name to cache; if at end and neither creating
  *	  nor deleting, add name to cache
+		从注释中可以看到，ext2_lookup() 的总体实现上总共分成两个部分：
+			- 没找到目标文件
+					如果是操作类型是 create， 那就返回一个 locked directory 和可用的 slots；
+					要么就是返回 error。(貌似不需要对 directory 加锁)
  */
 int
 ext2_lookup(struct vop_cachedlookup_args *ap)
@@ -597,12 +601,18 @@ notfound:
 	 * If creating, and at end of pathname and current
 	 * directory has not been removed, then can consider
 	 * allowing file to be created.
+	 * 如果没有找到对应的组件，那就要判断 namei 的操作类型，从下面的代码可以看出，我们需要处理的只有两种情况：
+	 * 创建或者重命名，并且要保证是路径中的最后一个组件。tptfs 都是处理的绝对路径，所以第二个条件是始终满足的
 	 */
 	if ((nameiop == CREATE || nameiop == RENAME) &&
 	    (flags & ISLASTCN) && dp->i_nlink != 0) {
 		/*
 		 * Access for write is interpreted as allowing
 		 * creation of files in the directory.
+		 * ext2 采用的是逐级查找的方式，所以目录文件一定是存在的，否则中途就会返回对应的错误码。tptfs 中应该是
+		 * 要多做一步获取 vnode 的操作。VFS_VGET() 如果执行出错，从其他地方的使用情况来看，是不需要执行 vput()
+		 * 等类似的改变 vnode 引用计数的操作的，并且此时放回的 vnode 应该是已经加锁了的。所以在 tptfs 调用该函数
+		 * 的时候，如果出错，直接返回就好了，应该是不需要增加额外的操作
 		 */
 		if ((error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_thread)) != 0)
 			return (error);
@@ -805,7 +815,9 @@ found:
 		/*
 		 * When we lookup "." we still can be asked to lock it
 		 * differently.
-		 * 从函数逻辑可以看出，当 lookup() 执行完成之后，得到的目标 vnode 应该是处于加锁的状态
+		 * 从函数逻辑可以看出，当 lookup() 执行完成之后，得到的目标 vnode 应该是处于加锁的状态。
+		 * 这里调用的函数就是 ext2_vget() 函数，所以按照对应逻辑设计 tptfs_vget() 应该是可以
+		 * 保证获取到的 vnode 的都是处在加锁的状态
 		 */
 		ltype = cnp->cn_lkflags & LK_TYPE_MASK;
 		if (ltype != VOP_ISLOCKED(vdp)) {

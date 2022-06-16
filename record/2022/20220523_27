@@ -272,6 +272,243 @@ p * (struct inode*)dp->v_data
   当我们在一个随机子目录下执行 cd / 时， nameidata 在 经过 namei() 函数初步处理传递到 lookup() 函数时，
 它的 startdir 和 rootdir 两个指针都是指向根节点，好像是 FreeBSD-13.0 的特有支持( namei_setup() 函数处理？)
 
+  在根目录下执行 cd . 后，nameidata ni_dvp 和 ni_dp 两个字段指向的是同一个 vnode：
+    (gdb) p *ndp
+      $9 = {
+        ni_dirp = 0x40222000 ".",
+        ni_segflg = UIO_USERSPACE,
+        ni_rightsneeded = 0x110086678 <cap_no_rights>,
+        ni_startdir = 0x0,
+        ni_rootdir = 0xffffffd00be8cb70,
+        ni_topdir = 0x0,
+        ni_dirfd = -100,
+        ni_lcf = 0,
+        ni_filecaps = {
+          fc_rights = {
+            cr_rights = {0, 0}
+          },
+          fc_ioctls = 0x0,
+          fc_nioctls = -1,
+          fc_fcntls = 0
+        },
+        ni_vp = 0xffffffd00be8cb70,   // 这两个指针都是指向 root vnode
+        ni_dvp = 0xffffffd00be8cb70,
+        ni_resflags = 0,
+        ni_debugflags = 0,
+        ni_loopcnt = 0,
+        ni_pathlen = 1,
+        ni_next = 0xffffffd00975b801 "",
+        ni_cnd = {
+          cn_origflags = 4294967298,
+          cn_flags = 335806788,
+          cn_thread = 0x1bcad3080,
+          cn_cred = 0xffffffd0097cce00,
+          cn_nameiop = LOOKUP,
+          cn_lkflags = 2097152,
+          cn_pnbuf = 0xffffffd00975b800 ".",
+          cn_nameptr = 0xffffffd00975b800 ".",
+          cn_namelen = 1
+        },
+        ni_cap_tracker = {
+          tqh_first = 0x0,
+          tqh_last = 0x1def64b50
+        }
+      }
+
+  在任意目录下执行 ls . 的时候，nameidata 中的 ni_dvp 和 ni_vp 两个字段也是指向同一个 vnode：
+    (gdb) p *ndp
+      $23 = {
+        ni_dirp = 0xffffe69b ".",
+        ni_segflg = UIO_USERSPACE,
+        ni_rightsneeded = 0x110086478 <cap_fstat_rights>,
+        ni_startdir = 0x0,
+        ni_rootdir = 0xffffffd00be8cb70,
+        ni_topdir = 0x0,
+        ni_dirfd = -100,
+        ni_lcf = 0,
+        ni_filecaps = {
+          fc_rights = {
+            cr_rights = {0, 0}
+          },
+          fc_ioctls = 0x0,
+          fc_nioctls = -1,
+          fc_fcntls = 0
+        },
+        ni_vp = 0xffffffd00beb77a0,
+        ni_dvp = 0xffffffd00beb77a0,
+        ni_resflags = 0,
+        ni_debugflags = 65488,
+        ni_loopcnt = 0,
+        ni_pathlen = 1,
+        ni_next = 0xffffffd0097e9c01 "",
+        ni_cnd = {
+          cn_origflags = 4497960832,
+          cn_flags = 335806788,
+          cn_thread = 0x1bcb5f680,
+          cn_cred = 0xffffffd0097cce00,
+          cn_nameiop = LOOKUP,
+          cn_lkflags = 2097152,
+          cn_pnbuf = 0xffffffd0097e9c00 ".",
+          cn_nameptr = 0xffffffd0097e9c00 ".",
+          cn_namelen = 1
+        },
+        ni_cap_tracker = {
+          tqh_first = 0x0,
+          tqh_last = 0x1def78a48
+        }
+      }
+
+
+  在 /home 目录下执行 cd .. , nameidata 中字段的数据比较奇怪了：
+    (gdb) p *ndp
+      $30 = {
+        ni_dirp = 0x40222000 "..",
+        ni_segflg = UIO_USERSPACE,
+        ni_rightsneeded = 0x110086678 <cap_no_rights>,
+        ni_startdir = 0x0,
+        ni_rootdir = 0xffffffd00be8cb70,
+        ni_topdir = 0x0,
+        ni_dirfd = -100,
+        ni_lcf = 0,
+        ni_filecaps = {
+          fc_rights = {
+            cr_rights = {0, 0}
+          },
+          fc_ioctls = 0x0,
+          fc_nioctls = -1,
+          fc_fcntls = 0
+        },
+        ni_vp = 0xffffffd00be8c3d0,
+        ni_dvp = 0xffffffd00beb77a0,
+        ni_resflags = 0,
+        ni_debugflags = 0,
+        ni_loopcnt = 0,
+        ni_pathlen = 1,
+        ni_next = 0xffffffd00be21802 "",
+        ni_cnd = {
+          cn_origflags = 4294967298,
+          cn_flags = 872677700,
+          cn_thread = 0x1bcad3080,
+          cn_cred = 0xffffffd0097cce00,
+          cn_nameiop = LOOKUP,
+          cn_lkflags = 2097152,
+          cn_pnbuf = 0xffffffd00be21800 "..",
+          cn_nameptr = 0xffffffd00be21800 "..",
+          cn_namelen = 2
+        },
+        ni_cap_tracker = {
+          tqh_first = 0x0,
+          tqh_last = 0x1def64b50
+        }
+      }
+  ni_dvp 与 ni_vp 指向的 vnode 是不一样的，而且跟 ni_rootdir 指向的 vnode 也不一样。难道系统对 .. 处理
+的时候也会给它分配一个 vnode？ 可以尝试对比一下执行到最后数据的变化：
+  (gdb) p *ndp
+    $48 = {
+      ni_dirp = 0x40222000 "/usr",
+      ni_segflg = UIO_USERSPACE,
+      ni_rightsneeded = 0x110086478 <cap_fstat_rights>,
+      ni_startdir = 0x0,
+      ni_rootdir = 0xffffffd00be8cb70,
+      ni_topdir = 0x0,
+      ni_dirfd = -100,
+      ni_lcf = 0,
+      ni_filecaps = {
+        fc_rights = {
+          cr_rights = {0, 0}
+        },
+        fc_ioctls = 0x0,
+        fc_nioctls = -1,
+        fc_fcntls = 0
+      },
+      ni_vp = 0xffffffd00be8c3d0,
+      ni_dvp = 0xffffffd00be8cb70,
+      ni_resflags = 1,
+      ni_debugflags = 0,
+      ni_loopcnt = 0,
+      ni_pathlen = 1,
+      ni_next = 0xffffffd00be21804 "",
+      ni_cnd = {
+        cn_origflags = 1,
+        cn_flags = 335806788,
+        cn_thread = 0x1bcad3080,
+        cn_cred = 0xffffffd0097cce00,
+        cn_nameiop = LOOKUP,
+        cn_lkflags = 2097152,
+        cn_pnbuf = 0xffffffd00be21800 "/usr",
+        cn_nameptr = 0xffffffd00be21801 "usr",
+        cn_namelen = 3
+      },
+      ni_cap_tracker = {
+        tqh_first = 0x0,
+        tqh_last = 0x1def64a48
+      }
+    }
+  可以看到，ni_dvp 对应的是根目录，ni_vp 对应的则是 /usr (/usr/home/wcg)。所以这两次执行 ni_vp 是没有发生变化的，
+反而是 ni_dvp 发生了变化，打印 ni_dvp：
+  (gdb) p* (struct inode*)((struct vnode*)0xffffffd00beb77a0)->v_data
+    $51 = {
+      i_nextsnap = {
+        tqe_next = 0x0,
+        tqe_prev = 0x0
+      },
+      i_vnode = 0xffffffd00beb77a0,
+      i_ump = 0xffffffd00be89e00,
+      i_dquot = {0x0, 0x0},
+      i_un = {
+        dirhash = 0x0,
+        snapblklist = 0x0
+      },
+      dinode_u = {
+        din1 = 0xffffffd00beb8300,
+        din2 = 0xffffffd00beb8300
+      },
+      i_number = 160894,
+      i_flag = 1024,
+      i_effnlink = 3,
+      i_count = 0,
+      i_endoff = 0,
+      i_diroff = 0,
+      i_offset = 0,
+      i_nextclustercg = -1,
+      i_ea_area = 0x0,
+      i_ea_len = 0,
+      i_ea_error = 0,
+      i_ea_refs = 0,
+      i_size = 512,
+      i_gen = 2231004559,
+      i_flags = 0,
+      i_uid = 0,
+      i_gid = 0,
+      i_mode = 16877,
+      i_nlink = 3
+    }
+    (gdb) 
+  第一次表示的 home，其实就是目标文件和源文件的路径关系发生了反转，ni_vp 是 ni_dvp 的父级目录。
+
+  通过上述的实际测试可以基本得到 vfs namei() / lookup() 两个函数的处理逻辑
+    - / 用 degenerate name 代码分支处理
+    - 以 / 为结尾的路径信息，ni_dvp / ni_vp 保存相同的 vnode
+    - dot 情况处理与上述类似，最终都是保存同一个 vnode
+    - dotdot 处理稍微复杂，但是最终结果也符合上述分析，只不过 ni_dvp 表示上上级目录，ni_vp 表示的是上级目录
+
+////////////// 20220527 //////////////
+  vfs lookup() 如果当前正在处理最后一个组件，会首先判断 struct componentname->cn_lkflags 是否包含 LOCKPARENT，
+该属性针对的是相对目录。然后还需要执行 needs_exclusive_leaf()，判断最终得到的目标文件是否包含独占锁属性。
+  tptfs 就是直接处理的最后一个组件，所以处理流程可以进行一些调整。直接通过哈希表判断目标文件是否存在，然后再处理目录。
+与之对应，首先判断目标文件的独占锁，查找完成之后再进行目录锁属性判断
+
+  奇海持久化内存的设计不应该是增加过多的管理机制，导致处理流程越来越复杂，应该是一个尽可能简单的过程。操作系统在运行过程中
+绝大部分的时间应该是处理应用程序，而只需要少量的时间 (1% ~ 2%) 处理系统本身的事情，比如说 Windows idle 进程清理内存页。
+
+  这其实也是检验某个设计是否合理的一个指标：如果说某个设计会导致系统变得越来越复杂，需要管理的东西越来越多，那此时就要考虑
+这个设计是不是合理。
+
+  需要理清内核中到底哪些东西需要持久化，比如 SYSINIT 过程中产生的数据貌似是不用持久化的，每次重启的时候重新分配。内核空间
+的分配基本上都是要经过 struct vmem 和 UMA 相关结构体，目前采取的方案就是修改它们的行为。对于需要持久化的东西，重新设计
+一套实现机制，通过这种机制分配的数据全部在持久化区域 (这个目前是可以实现的，好像通过指定某个 arena 就可以)；其他的还按照
+原有的方式进行，系统关闭之后就释放掉，再次启动的时候就重新申请内存空间。
+
 
 ////////////// vnode 引用计数&锁 //////////////
 减少 vnode 的使用计数 (use count) 函数汇总：

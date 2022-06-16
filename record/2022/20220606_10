@@ -1,0 +1,142 @@
+////////////// 20220606 //////////////
+  # mount -t tptfs tptfs /tpt
+    tptfs_inactive
+    # cd tpt
+    tptfs_getAttr
+    tptfs_inactive
+    tptfs_getAttr
+    tptfs_inactive
+    tptfs_access!
+    # mkdir a
+    tptfs_access!
+    tptfs_mkdir
+    tptfs_inactive
+    # cd a
+    tptfs_getAttr
+    tptfs_inactive
+    tptfs_getAttr
+    tptfs_inactive
+    ...(到这里系统卡死了，从下面打印的信息来看，怀疑是不是 vput() 的时候把 vnode 引用计数减到了0，结果导致
+        该 vnode 对象被回收。然后系统找不到对应的 vnode，阻塞？ 或者是 vput() 过程那种某个锁原来的设置出错，
+        导致系统拿不到某个锁，阻塞？)
+
+Thread 4 hit Breakpoint 2, TptVopVector::inactive (this=0xffffffd00a888d00, ap=0x1def82760)
+    at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptVopVector.cpp:581
+  581		struct vnode *vnode = ap->a_vp;
+  (gdb) bt
+  #0  TptVopVector::inactive (this=0xffffffd00a888d00, ap=0x1def82760)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptVopVector.cpp:581
+  #1  0x000000010c3867ec in tptfs_inactive (ap=0x1def82760)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptFileSystem.cpp:102
+  #2  0x000000010c23b894 in VOP_INACTIVE (vp=0xffffffd00be18b70)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vnode_if.h:1042
+  #3  0x000000010c22f844 in vinactivef (vp=0xffffffd00be18b70)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_subr.cpp:3569
+  #4  0x000000010c22f62a in vinactive (vp=0xffffffd00be18b70)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_subr.cpp:3593
+  #5  0x000000010c22ef3e in vput_final (vp=0xffffffd00be18b70, func=VPUT)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_subr.cpp:3146
+  #6  0x000000010c22f068 in vput (vp=0xffffffd00be18b70)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_subr.cpp:3203
+  #7  0x000000010c241db6 in kern_statat (td=0x1bcb64680, flag=512, fd=-100, path=0x40272110 "a", 
+      pathseg=UIO_USERSPACE, sbp=0x1def82a40, hook=0x0)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_syscalls.cpp:2408
+  #8  0x000000010c241bea in sys_fstatat (td=0x1bcb64680, uap=0x1bcb64a68)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_syscalls.cpp:2378
+  #9  0x000000010c0191b6 in syscallenter (td=0x1bcb64680)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/../../kernel/subr_syscall:189
+  #10 0x000000010c018ab4 in ecall_handler ()
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/trap.cpp:168
+  #11 0x000000010c004fc0 in system_call ()
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/swtch.S:601
+
+
+////////////// 20220607 //////////////
+  经过实际调试发现，上述问题是 fast path lookup 机制引起的，更细致一点来说是对于绝对路径处理异常导致的。因为 tptfs 目前还是以
+/tpt 作为根节点，在  handle_root 的时候，会把 ufs 对应的 vnode 赋值给 nameidata->ni_startdir，导致查找的时候对应的不是
+tptfs vnode，而是 ufs vnode，然后就把线程给阻塞了。
+  现在很多代码的修改只是为了适配 /tpt，以后真的以 tptfs 作为根文件系统之后，还是要改回来的
+
+  执行 ls -al 之后，发现文件系统又会出现阻塞。查看函数调用栈如下所示：
+
+  (gdb) bt
+    #0  lockmgr_xlock_hard (lk=0xffffffd00be55628, flags=541696, ilk=0x0, 
+        file=0x10d0b7ad4 "/home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_acl.cpp", line=275, 
+        lwa=0x0) at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/kern_lock.cpp:771
+    #1  0x000000010c0ca3e6 in lockmgr_xlock (lk=0xffffffd00be55628, flags=525312, 
+        file=0x10d0b7ad4 "/home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_acl.cpp", line=275)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/kern_lock.cpp:1263
+    #2  0x000000010c21286e in vop_lock (ap=0x1def4b900)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_default.cpp:591
+    #3  0x000000010c24c106 in VOP_LOCK1 (vp=0xffffffd00be555b8, flags=525312, 
+        file=0x10d0b7ad4 "/home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_acl.cpp", line=275)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vnode_if.h:1127
+    #4  0x000000010c24a294 in _vn_lock (vp=0xffffffd00be555b8, flags=525312, 
+        file=0x10d0b7ad4 "/home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_acl.cpp", line=275)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_vnops.cpp:1726
+    #5  0x000000010c1e8d82 in vacl_get_acl (td=0x1bcb5cb80, vp=0xffffffd00be555b8, type=2, aclp=0x4025c000)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_acl.cpp:275
+    #6  0x000000010c1e89d4 in kern___acl_get_path (td=0x1bcb5cb80, path=0xffffe067 "./.", type=2, 
+        aclp=0x4025c000, follow=0)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_acl.cpp:384
+    #7  0x000000010c1e8a2e in sys___acl_get_link (td=0x1bcb5cb80, uap=0x1bcb5cf68)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_acl.cpp:370
+    #8  0x000000010c0191b6 in syscallenter (td=0x1bcb5cb80)
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/../../kernel/subr_syscall:189
+    #9  0x000000010c018ab4 in ecall_handler ()
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/trap.cpp:168
+    #10 0x000000010c004fc0 in system_call ()
+        at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/swtch.S:601
+    Backtrace stopped: frame did not save the PC
+
+  正常来说，不应该会有 acl 相关的系统调用会被触发。偶然测试发现是新增的 stat() 函数引起的。将该函数取消注册之后，上述现象消失。
+不过后续一定要再进一步阅读代码，把 vfs 对目录文件和目标文件的加锁机制搞清楚
+
+  向奇海系统中添加一个命令需要修改三个地方：
+    1、在 qihai/bin 目录项添加源文件和 CMakeLists.txt 文件
+    2、修改 qihai/rebuild_new/qihai/lib/csu/riscv/crt1_c.c，添加 command_main()
+    3、还需要修改链接脚本，为每一个应用程序配置数据段和代码段等
+    4、kern_exec.c 文件中也要进行修改
+
+
+////////////// 20220608 //////////////
+  实际调试发现一个问题，当 ufs 开启 fast path lookup 机制的时候，会影响到 tptfs cd 命令的执行，主要还是 namei() 函数的处理
+会出现问题。所以当前调试先将其暂时关闭，后续如果有需要在去详细研究一下该机制的实现原理。
+
+  实际调试中发现，跨文件系统拷贝文件也会出错。namei() 函数目前还不能够对 tptfs vnode 在跨文件系统查找时进行转换，这个后续要进行
+改进
+
+  kern_exec.cpp 368: args->tls = (long)&__tls_start, exec(td, imgp, td->td_proc->p_vmspace);
+  这行代码就表示系统执行某个用户线程，我们可以看一下具体用户线程 main 函数参数 argc 和 argv，它们可能不是直接就是 touch 命令，
+和可能是 /usr/bin/touch，要注意执行路径的差别。touch 是在 /usr/bin 下，所以我们指定的时候要把路径指定为 /usr/bin/touch，
+而不是简单指定成 touch
+
+代理服务器搭建：
+    https://iyideng.vip/black-technology/cgfw/vmess-v2ray-server-building-and-using-tutorial.html
+    https://blog.csdn.net/Drifter_Galaxy/article/details/124845081
+
+  翻墙： V2Ray
+
+
+
+
+////////////// vfs namei() / lookup() 的加锁机制和 vnode 引用计数增减 //////////////
+  从 lookup() 注释和代码实现来看，首先是对于 ni_startdir (作为起始目录) 的处理：
+      cnp->cn_lkflags = LK_SHARED;
+      ...
+      dp = ndp->ni_startdir;
+      vn_lock(dp, compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags | LK_RETRY, cnp->cn_flags));
+
+  初始目录加的是共享锁，然后根据路径一步一步向下查找。"We use shared locks until we hit the parent of the last cn
+  then we adjust based on the requesting flags." 所以中间组件应该都是利用共享锁进行操作，最后一个组件和它的父目录进行
+  特殊处理。
+
+  VREF() 在 lookup() 函数中出现的情形：
+    - 配置 wantparent 标志
+    - 当处理 .. 并且刚好是 rootdir / topdir / rootnode 等情况
+    - 跨文件系统挂载点进行操作时 (tptfs 暂时先不考虑，后续再加上)
+    - SAVESTART 标志设置的时候
+
+  ext2_lookup() 函数首先是利用名称查找当对应的 dir_entry 在磁盘中的位置，然后将其数据全部读出来，然后得到该 entry 中存放的
+它所表示的文件的 inode number，进而得知此次所要查找的文件。处理 dotdot 文件的时候，貌似没有对 ni_dvp 进行处理，猜测应该是
+可以保留 ni_dvp 原有的状态

@@ -1,0 +1,119 @@
+////////////// 20220530 //////////////
+add_subdirectory(tptfs)
+target_link_libraries(fs tptfs)
+
+
+////////////// 20220531 //////////////
+  qihai 启动之后只打印到 boot 信息，然后会被卡住的问题，可能是 opensbi 修改导致的。所以要尝试更改 opensbi
+  /share/rd/os/opensbi/fw_jump.elf
+
+  qihai 系统中的 shell 是 tcsh，可以通过如下命令查看：
+    echo $SHELL
+  
+  当前版本出现的问题：
+    - class Snapshot 没有继承自 class KernelObject，导致 new 的时候会初选问题
+    - class PersistentMemory->initialize() 没有被调用，并且调用的时候一般放在 vfs_mountroot() 后面，
+      否则可能会出现 nameidata->ni_vp / ni_dvp / ni_startdir 等字段错误 (猜测可能是 devfs 没有挂载
+      完毕，导致这些字段处理异常)
+    - 地址问题，可能要向后移动一段偏移量才能正确执行
+    - getBlock() 的实现逻辑可能有错误
+
+  
+  # mount -t tptfs tptfs /tpt
+    random: unblocking device.
+    panic: vm_fault_lookup: fault on nofault entry, addr: 0x1bfb8d000
+  该错误是函数执行向自目录链表插入时发生的 (std::forward_list->insert())。forward_list 其实就是一个模板类，所以
+当我们插入元素的时候其实就是 new 一个类实例出来，然后将元素放到这个类当中。此时就要注意，这个 new 调用的就是标准库提供
+的 new，而不是我们重载的 new，所以上述 insert() 是不能正确申请地址空间的，导致 panic。
+  解决方法就是给 forward_list 指定一个我们自己设计的 allocator 来给实例化对象分配空间
+
+(gdb) p target_file_key 
+  $3 = 4196169151702173208
+       4196169151702173208
+
+////////////// 20220602 //////////////
+  # mount -t tptfs tptfs /tpt
+  # cd tpt
+  # mkdir a
+  # ls
+  a	a
+  # mkdir b
+  # ls
+  a	b	b
+  # mkdir c
+  # ls
+  a	b	c	c
+
+  每次新创建的文件都会出现两个对象，并且会将之前创建的重复对象给覆盖掉，很神奇。感觉应该是信息读取错误，而不是在目录子链表中
+确实存在这么一个 entry，否则之前重复的将不会被覆盖。很可能是 readDir() 出现了问题。
+
+readDir() 的实现逻辑：
+  - 如果是在磁盘文件系统当中，就是遍历目录文件块中的目录项数据，然后通过 struct uio 将数据传递给用于程序
+  - 如果是在内存文件系统当中，则是遍历链表，其他逻辑是一致的。
+  
+  实际调试中发现，这个数据的读取并不一定是一次就能完成的。比如说如果一个目录下包含有几百上千个目录项，不可能一次性就读完了，
+可能需要多次读取。然后就会用到 uio->uio_offset 这个字段。它在这里表示的是用户已经处理了多少个 entry，下次再次处理的时候
+会在前一次的结果上继续增加。因为 uio_offset 初始值是0，其实是对占用一个位置，代码中判断已经是否处理完毕的时候要注意。
+
+  offset > current_dir->getSubentries() --->>> offset >= current_dir->getSubentries()
+
+修改之后就可以解决上述问题，相当于是对最后一个创建的文件构建了两次 struct dirent
+
+
+  #0  vput (vp=0x10c012af8 <spinlock_exit()+84>)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_subr.cpp:3199
+  #1  0x000000010c38b7b2 in TptLookup::lookup (this=0xffffffd0093019a0, NameiData=0x1bfbd0918)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptLookup.cpp:99
+  #2  0x000000010c387f78 in tpt_lookup (ndp=0x1bfbd0918)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/fs/tptfs/TptFileSystem.cpp:544
+  #3  0x000000010c2181fa in namei (ndp=0x1bfbd0918)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_lookup.cpp:602
+  #4  0x000000010c241d32 in kern_statat (td=0x1bfd47680, flag=512, fd=-100, 
+      path=0x40226478 "..", pathseg=UIO_USERSPACE, sbp=0x1bfbd0a40, hook=0x0)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_syscalls.cpp:2400
+  #5  0x000000010c241bea in sys_fstatat (td=0x1bfd47680, uap=0x1bfd47a68)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/kernel/vfs_syscalls.cpp:2378
+  #6  0x000000010c0191b6 in syscallenter (td=0x1bfd47680)
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/../../kernel/subr_syscall:189
+  #7  0x000000010c018ab4 in ecall_handler ()
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/trap.cpp:168
+  #8  0x000000010c004fc0 in system_call ()
+      at /home/mercury/Documents/code/qihai/rebuild_new/qihai/sys/riscv/riscv/swtch.S:601
+  Backtrace stopped: frame did not save the PC
+
+  FreeBSD 对于 .. 的处理方式是 struct nameidata->ni_vp 表示的文件深度要低于 ni_dvp，tptfs 尝试将两者变成一致的
+
+////////////// 重载 new //////////////
+为什么要重载？
+  - "因为某些程序对内存的分配有特殊的需求，因此我们无法将标准内存管理机制直接应用于这些程序。它们通常需要自定义内存分配的
+     细节。出于这样的目的，应用程序需要重载 new 和 delete 运算符以控制内存分配的过程。"
+  - 从上述官方解释可以看出，重载 new 和 delete 就是为了让我们能够自己来实现内存分配。对应到奇海操作系统就是，原来 new
+     是在用户进程地址空间进行分配，那我们就可以利用内核中的 malloc() 函数对其进行重载，这样我们再 new 一个类对象的时候，
+     就是在内核地址空间分配内存区域
+
+工作机制：
+  // new 表达式
+  string *sp = new string("a value");   // 分配并初始化一个 string 对象
+  string *arr = new string[10];   // 分配10个默认初始化的 string 对象
+
+  实际执行了三个步骤：
+    - new 表达式调用一个名为 operator new (或者 operator new[]) 的"标准库函数"。该函数分配一块足够大的、原始的、未命名的
+      内存空间以便存储特定类型的对象 (或者对象数组)
+    - "编译器运行相应的构造函数以构造这些对象，并为其传入初始值"
+    - 对象被分配了空间并完成了构造，返回一个指向该对象的指针
+  
+  delete 执行的顺序跟 new 是刚好反着来的，实际包括两步：
+    - 对指针指向的对象执行析构函数
+    - "编译器调用名为 operator delete (或者 operator delete[]) 的标准库函数来释放内存空间"
+
+  假如我们分配的是一个类对象，那么编译器首先会在类及其基类的作用域中查找。此时，如果该类中含有 operator new 或者 delete 成员，
+  则相应的表达式将调用这些成员。否则，编译器将在全局作用域查找用户自定义版本。如果上诉两种情况下都没有找到，那就调用标准库中提供的
+  版本。
+
+  我们还可以作用域运算符来忽略掉定义在类中的函数：
+    ::new - 只在全局作用域中查找匹配的 operator new "函数"; delete 与之类似
+  
+  "执行类的析构函数貌似只会破坏掉类对象，但是并不会释放类对象占用的这段内存"
+
+  自定义 alloctor 可以参考：
+    https://zhuanlan.zhihu.com/p/185611161
