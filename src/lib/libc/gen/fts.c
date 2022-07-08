@@ -57,7 +57,7 @@ static void	 fts_lfree(FTSENT *);
 static void	 fts_load(FTS *, FTSENT *);
 static size_t	 fts_maxarglen(char * const *);
 static void	 fts_padjust(FTS *, FTSENT *);
-static int	 fts_palloc(FTS *, size_t);
+static int	 fts_palloc(FTS *, size_t);		// path alloc，为路径名申请空间
 static FTSENT	*fts_sort(FTS *, FTSENT *, size_t);
 static int	 fts_stat(FTS *, FTSENT *, int, int);
 static int	 fts_safe_changedir(FTS *, FTSENT *, int, char *);
@@ -141,11 +141,14 @@ fts_open(char * const *argv, int options,
 	/*
 	 * Start out with 1K of path space, and enough, in any case,
 	 * to hold the user's paths.
+	 * 从1K的路径空间开始，在任何情况下都足以容纳用户的路径
 	 */
 	if (fts_palloc(sp, MAX(fts_maxarglen(argv), MAXPATHLEN)))
 		goto mem1;
 
-	/* Allocate/initialize root's parent. */
+	/* Allocate/initialize root's parent.
+			给根结点的 parent 分配一个 fts entry
+	*/
 	if ((parent = fts_alloc(sp, "", 0)) == NULL)
 		goto mem2;
 	parent->fts_level = FTS_ROOTPARENTLEVEL;
@@ -170,6 +173,7 @@ fts_open(char * const *argv, int options,
 		/*
 		 * If comparison routine supplied, traverse in sorted
 		 * order; otherwise traverse in the order specified.
+		 * 如果提供了比较例程，则按排序顺序遍历；否则，按指定的顺序遍历
 		 */
 		if (compar) {
 			p->fts_link = root;
@@ -183,7 +187,8 @@ fts_open(char * const *argv, int options,
 				tmp = p;
 			}
 		}
-	}
+	} // end for
+
 	if (compar && nitems > 1)
 		root = fts_sort(sp, root, nitems);
 
@@ -303,18 +308,29 @@ fts_read(FTS *sp)
 	char *t;
 	int saved_errno;
 
-	/* If finished or unrecoverable error, return NULL. */
+	/* If finished or unrecoverable error, return NULL.
+		首先要判断当前节点或者是否存在不可恢复的错误
+	*/
 	if (sp->fts_cur == NULL || ISSET(FTS_STOP))
 		return (NULL);
 
-	/* Set current node pointer. */
+	/* Set current node pointer. 
+		p 表示当前节点，从下文代码可以看出，我们会对当前文件节点的 instruction
+		字段进行初始化
+	*/
 	p = sp->fts_cur;
 
-	/* Save and zero out user instructions. */
+	/* Save and zero out user instructions. 
+			首先保存当前节点的指令数据，然后置零
+	*/
 	instr = p->fts_instr;
-	p->fts_instr = FTS_NOINSTR;
+	p->fts_instr = FTS_NOINSTR;	// ftsent 目前还没有指定任何类型的指令
 
-	/* Any type of file may be re-visited; re-stat and re-turn. */
+	/* Any type of file may be re-visited; re-stat and re-turn.
+		任何类型的文件都可以被重新访问、重新统计和重新返回。FTS_AGAIN 表示重新读取 node。
+		这一步是判断 ftsent 中原有指令的类型是不是 again。如果是的话，就需要重新读取文件
+		stat 信息
+	*/
 	if (instr == FTS_AGAIN) {
 		p->fts_info = fts_stat(sp, p, 0, -1);
 		return (p);
@@ -340,15 +356,20 @@ fts_read(FTS *sp)
 		return (p);
 	}
 
-	/* Directory in pre-order. */
+	/* Directory in pre-order.
+			当此时的命令是前序访问时
+	*/
 	if (p->fts_info == FTS_D) {
-		/* If skipped or crossed mount point, do post-order visit. */
+		/* If skipped or crossed mount point, do post-order visit.
+			如果命令是跳过或者跨文件系统节点，则执行后序访问。此时的 p 依然表示的
+			是当前节点
+		*/
 		if (instr == FTS_SKIP ||
 		    (ISSET(FTS_XDEV) && p->fts_dev != sp->fts_dev)) {
 			if (p->fts_flags & FTS_SYMFOLLOW)
 				(void)_close(p->fts_symfd);
 			if (sp->fts_child) {
-				fts_lfree(sp->fts_child);
+				fts_lfree(sp->fts_child);	// 释放掉所有子链表元素对应的 entry
 				sp->fts_child = NULL;
 			}
 			p->fts_info = FTS_DP;
@@ -370,9 +391,15 @@ fts_read(FTS *sp)
 		 * so the application will eventually get an error condition.
 		 * Set the FTS_DONTCHDIR flag so that when we logically change
 		 * directories back to the parent we don't do a chdir.
+		 * 
+		 * 如果已经读取但现在 chdir 失败，则重击列表以正确显示名称，并设置父 errno，
+		 * 以便应用程序最终获得错误条件。设置 FTS_DONTCHDIR 标志，以便在逻辑上将目录
+		 * 更改回父目录时，不执行 chdir
 		 *
 		 * If haven't read do so.  If the read fails, fts_build sets
 		 * FTS_STOP or the fts_info field of the node.
+		 * 如果没有读过，就这样做。如果读取失败，fts_build 将设置节点的 FTS_STOP
+		 * 或 fts_info 字段
 		 */
 		if (sp->fts_child != NULL) {
 			if (fts_safe_changedir(sp, p, -1, p->fts_accpath)) {
@@ -997,6 +1024,9 @@ fts_sort(FTS *sp, FTSENT *head, size_t nitems)
 	return (head);
 }
 
+/*
+	fts_palloc() 就是单纯给路径申请存储空间； fts_alloc() 则是为文件分配一个 fts entry
+*/
 static FTSENT *
 fts_alloc(FTS *sp, char *name, size_t namelen)
 {
@@ -1013,6 +1043,8 @@ fts_alloc(FTS *sp, char *name, size_t namelen)
 	 * necessary if the user has set the nostat bit.  Allocate the FTSENT
 	 * structure, the file name and the stat structure in one chunk, but
 	 * be careful that the stat structure is reasonably aligned.
+	 * 文件名是一个可变长度数组，如果用户设置了 nostat 位，则不需要 stat 结构。在一个块中
+	 * 分配 FTSENT 结构、文件名和 stat 结构，但要注意 stat 结构是否合理对齐
 	 */
 	if (ISSET(FTS_NOSTAT))
 		len = sizeof(FTSENT) + namelen + 1;
@@ -1021,7 +1053,7 @@ fts_alloc(FTS *sp, char *name, size_t namelen)
 
 	if ((p = malloc(len)) == NULL)
 		return (NULL);
-
+	/* 判断是否包含文件的 stat 信息 */
 	if (ISSET(FTS_NOSTAT)) {
 		p->fts_name = (char *)(p + 1);
 		p->fts_statp = NULL;
@@ -1044,6 +1076,7 @@ fts_alloc(FTS *sp, char *name, size_t namelen)
 	return (p);
 }
 
+/* 释放掉子链表中的所有元素对应的 fts entry */
 static void
 fts_lfree(FTSENT *head)
 {
@@ -1061,6 +1094,11 @@ fts_lfree(FTSENT *head)
  * Most systems will allow creation of paths much longer than MAXPATHLEN, even
  * though the kernel won't resolve them.  Add the size (not just what's needed)
  * plus 256 bytes so don't realloc the path 2 bytes at a time.
+ * 
+ * 允许基本上无限的路径；find、rm、ls 都应该在任何树上工作。大多数系统将允许创建比 MAXPATHLEN 
+ * 长得多的路径，即使内核不会解析它们。添加大小（而不仅仅是所需的大小）加上 256 个字节，因此不要
+ * 一次重新定位 2 个字节的路径。
+ * fts_palloc() 感觉就是单纯的为 path 分配存储空间
  */
 static int
 fts_palloc(FTS *sp, size_t more)

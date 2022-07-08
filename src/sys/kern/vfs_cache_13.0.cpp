@@ -161,6 +161,7 @@ SDT_PROBE_DECLARE(vfs, namei, lookup, return);
 /*
  * This structure describes the elements in the cache of recent
  * names looked up by namei.
+ * 最近被查找的缓存条目用 negative 来表示？
  */
 struct negstate {
 	u_char neg_flag;
@@ -169,13 +170,16 @@ struct negstate {
 _Static_assert(sizeof(struct negstate) <= sizeof(struct vnode *),
     "the state must fit in a union with a pointer without growing it");
 
+/*
+	vnode 中包含有三个字段管理 namecache
+*/
 struct	namecache {
 	LIST_ENTRY(namecache) nc_src;	/* source vnode list */
 	TAILQ_ENTRY(namecache) nc_dst;	/* destination vnode list */
 	CK_SLIST_ENTRY(namecache) nc_hash;/* hash chain */
-	struct	vnode *nc_dvp;		/* vnode of parent of name */
+	struct	vnode *nc_dvp;		/* vnode of parent of name 表示的应该是目录项 */
 	union {
-		struct	vnode *nu_vp;	/* vnode the name refers to */
+		struct	vnode *nu_vp;	/* vnode the name refers to 表示名称对应的源文件本体 */
 		struct	negstate nu_neg;/* negative entry state */
 	} n_un;
 	u_char	nc_flag;		/* flag bits */
@@ -201,6 +205,7 @@ struct	namecache_ts {
 	struct namecache nc_nc;
 };
 
+// batch: 一群，一批
 TAILQ_HEAD(cache_freebatch, namecache);
 
 /*
@@ -247,6 +252,7 @@ _Static_assert((CACHE_ZONE_LARGE_TS_SIZE % (CACHE_ZONE_ALIGNMENT + 1)) == 0, "ba
 
 /*
  * Flags in namecache.nc_flag
+		NCF: name cache flag
  */
 #define NCF_WHITE	0x01
 #define NCF_ISDOTDOT	0x02
@@ -259,13 +265,15 @@ _Static_assert((CACHE_ZONE_LARGE_TS_SIZE % (CACHE_ZONE_ALIGNMENT + 1)) == 0, "ba
 
 /*
  * Flags in negstate.neg_flag
+		NEG: negative
  */
 #define NEG_HOT		0x01
 
+// evict: 驱逐
 static bool	cache_neg_evict_cond(u_long lnumcache);
 
 /*
- * Mark an entry as invalid.
+ * Mark an entry as invalid. 将条目标记为无效
  *
  * This is called before it starts getting deconstructed.
  */
@@ -275,6 +283,7 @@ cache_ncp_invalidate(struct namecache *ncp)
 
 	KASSERT((ncp->nc_flag & NCF_INVALID) == 0,
 	    ("%s: entry %p already invalid", __func__, ncp));
+	// 通过原子操作的方式将某种类型的数据赋值给另外一个数据
 	atomic_store_char(&ncp->nc_flag, ncp->nc_flag | NCF_INVALID);
 	atomic_thread_fence_rel();
 }
@@ -314,42 +323,59 @@ cache_ncp_invalidate(struct namecache *ncp)
  * used names will hang around.  Cache is indexed by hash value
  * obtained from (dvp, name) where dvp refers to the directory
  * containing name.
+ * 目录扫描找到的名称保留在缓存中，以供将来参考。它是受管理的 LRU，因此经常
+ * 使用的名称将随处可见。缓存通过从（dvp，name）中获得的哈希值进行索引，
+ * 其中 dvp 指的是包含名称的目录
  *
  * If it is a "negative" entry, (i.e. for a name that is known NOT to
  * exist) the vnode pointer will be NULL.
+ * 如果是消极条目，比如已经知道以某个名称命名的文件是不存在的，那么 vnode 指针将置空
  *
  * Upon reaching the last segment of a path, if the reference
  * is for DELETE, or NOCACHE is set (rewrite), and the
  * name is located in the cache, it will be dropped.
+ * 当达到路径中最后一个组件时，如果引用设置了 DELETE，或者 NOCACHE (rewrite)，并且
+ * 该名称已经存在与缓存当中，那么它将被丢弃
  *
  * These locks are used (in the order in which they can be taken):
- * NAME		TYPE	ROLE
- * vnodelock	mtx	vnode lists and v_cache_dd field protection
- * bucketlock	mtx	for access to given set of hash buckets
- * neglist	mtx	negative entry LRU management
+ * 这些锁的使用貌似是有顺序要求的，应该是先拿到 vnodelock，然后在拿到 bucketlock(hash table)，
+ * 最后使用 negative list lock.
+ * 
+ * NAME					TYPE			ROLE
+ * vnodelock		mtx			vnode lists and v_cache_dd field protection
+ * bucketlock		mtx			for access to given set of hash buckets
+ * neglist			mtx			negative entry LRU management
  *
- * It is legal to take multiple vnodelock and bucketlock locks. The locking
- * order is lower address first. Both are recursive.
+ * It is legal(合法的) to take multiple vnodelock and bucketlock locks. The locking
+ * order is lower address first. Both are recursive(递归的).
  *
- * "." lookups are lockless.
+ * "." lookups are lockless. 处理 dot 文件时是不需要加锁的
  *
  * ".." and vnode -> name lookups require vnodelock.
+ * dotdot 和从 vnode 到 name 的转换需要用到 vnode lock
  *
  * name -> vnode lookup requires the relevant bucketlock to be held for reading.
+ * 从 name 转换成 vnode 需要获取相关的 bucketlock 用于读取
  *
  * Insertions and removals of entries require involved vnodes and bucketlocks
  * to be locked to provide safe operation against other threads modifying the
  * cache.
+ * 条目的插入和删除需要锁定涉及的 vnode 和 bucketlock，以提供针对修改缓存的其他线程的安全操作
  *
  * Some lookups result in removal of the found entry (e.g. getting rid of a
  * negative entry with the intent to create a positive one), which poses a
  * problem when multiple threads reach the state. Similarly, two different
  * threads can purge two different vnodes and try to remove the same name.
+ * 某些查找会导致删除找到的条目（例如，为了创建一个正条目而删除一个负条目），这会在多个线程
+ * 达到该状态时引发问题。类似地，两个不同的线程可以清除两个不同的 vnode 并尝试删除相同的名称
  *
  * If the already held vnode lock is lower than the second required lock, we
  * can just take the other lock. However, in the opposite case, this could
  * deadlock. As such, this is resolved by trylocking and if that fails unlocking
  * the first node, locking everything in order and revalidating the state.
+ * 如果已经持有的vnode锁低于第二个所需的锁，我们可以只使用另一个锁。然而，在相反的情况下，
+ * 这可能会导致死锁。因此，这可以通过 trylocking 来解决，如果无法解锁第一个节点，则按顺序
+ * 锁定所有节点并重新验证状态
  */
 
 VFS_SMR_DECLARE;
@@ -358,9 +384,11 @@ static SYSCTL_NODE(_vfs_cache, OID_AUTO, param, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
     "Name cache parameters");
 
 /*
- * Negative entry % of namecache capacity above which automatic eviction is allowed.
+ * Negative entry % of namecache capacity above which automatic eviction(驱逐，驱赶)
+ 		is allowed.
  *
  * Check cache_neg_evict_cond for details.
+ * ncnegminpct： namecache negative minimal percent
  */
 static u_int ncnegminpct = 3;
 
@@ -371,13 +399,17 @@ static u_int ncnegminpct = 3;
 	(&nchashtbl[(hash) & pSysctlDebug->nchash])
 static __read_mostly CK_SLIST_HEAD(nchashhead, namecache) *nchashtbl;/* Hash Table */
 
-struct nchstats	nchstats;		/* cache effectiveness statistics */
+struct nchstats	nchstats;		/* cache effectiveness statistics 缓存有效性统计信息 */
 
 static u_int __exclusive_cache_line neg_cycle;
 
+/*
+	系统中貌似一共就包含有三个 negative entry list
+*/
 #define ncneghash	3
 #define	numneglists	(ncneghash + 1)
 
+// 结构体中包含了一个驱逐锁，前面也出现过类似的对象，需要留意一下
 struct neglist {
 	struct mtx		nl_evict_lock;
 	struct mtx		nl_lock __aligned(CACHE_LINE_SIZE);
@@ -386,8 +418,12 @@ struct neglist {
 	u_long			nl_hotnum;
 } __aligned(CACHE_LINE_SIZE);
 
+// 注意元素类型
 static struct neglist neglists[numneglists];
 
+/*
+	namecache 和 negative list 之间的转换函数
+*/
 static inline struct neglist *
 NCP2NEGLIST(struct namecache *ncp)
 {
@@ -618,7 +654,7 @@ cache_alloc(int len, bool ts)
 	u_long lnumcache;
 
 	/*
-	 * Avoid blowout in namecache entries.
+	 * Avoid blowout in namecache entries. 避免 namecache 条目崩溃
 	 *
 	 * Bugs:
 	 * 1. filesystems may end up trying to add an already existing entry
@@ -653,6 +689,7 @@ cache_free(struct namecache *ncp)
 	atomic_subtract_long(&pVFSCacheStats->numcache, 1);
 }
 
+// 上面的函数是释放一个 namecache 对象，该函数则是释放一批
 static void
 cache_free_batch(struct cache_freebatch *batch)
 {
@@ -677,6 +714,7 @@ out:
 /*
  * TODO: With the value stored we can do better than computing the hash based
  * on the address. The choice of FNV should also be revisited.
+ * 使用存储的值，我们可以比根据地址计算哈希做得更好。还应重新考虑 FNV 的选择
  */
 static void
 cache_prehash(struct vnode *vp)
@@ -769,6 +807,7 @@ _cache_sort_vnodes(void **p1, void **p2)
 	}
 }
 
+// 锁住所有的哈希表 bucket
 static void
 cache_lock_all_buckets(void)
 {
@@ -778,6 +817,7 @@ cache_lock_all_buckets(void)
 		mtx_lock(&bucketlocks[i]);
 }
 
+// 释放所有哈希表 bucket 锁
 static void
 cache_unlock_all_buckets(void)
 {
@@ -871,6 +911,7 @@ SYSCTL_PROC(_vfs_cache, OID_AUTO, nchstats, CTLTYPE_OPAQUE | CTLFLAG_RD |
     CTLFLAG_MPSAFE, 0, 0, sysctl_nchstats, "LU",
     "VFS cache effectiveness statistics");
 
+// 重新计算 negative 对象的最低占比
 static void
 cache_recalc_neg_min(u_int val)
 {
@@ -994,20 +1035,26 @@ SYSCTL_PROC(_debug_hashstat, OID_AUTO, nchash, CTLTYPE_INT|CTLFLAG_RD|
 #endif
 
 /*
- * Negative entries management
+ * Negative entries management - 消极项的处理方法
  *
  * Various workloads create plenty of negative entries and barely use them
  * afterwards. Moreover malicious users can keep performing bogus lookups
  * adding even more entries. For example "make tinderbox" as of writing this
  * comment ends up with 2.6M namecache entries in total, 1.2M of which are
  * negative.
+ * 各种各样的工作负载会产生大量的消极条目，并且之后几乎不会再使用它们。此外，恶意用户可以
+ * 继续执行虚假查找，添加更多条目。或者，在撰写此评论时的“make tinderbox”示例最终总共有
+ * 260万个 namecache 条目，其中120万个是负数
  *
  * As such, a rather aggressive eviction method is needed. The currently
  * employed method is a placeholder.
+ * 因此，需要一种相当激进的驱逐方法。当前使用的方法是占位符
  *
  * Entries are split over numneglists separate lists, each of which is further
  * split into hot and cold entries. Entries get promoted after getting a hit.
  * Eviction happens on addition of new entry.
+ * 条目在 numneglists 单独的列表上拆分，每个列表进一步拆分为热条目和冷条目。获得成功后，条目
+ * 将得到提升。逐出发生在添加新条目时
  */
 static SYSCTL_NODE(_vfs_cache, OID_AUTO, neg, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
     "Name cache negative entry statistics");
@@ -1039,6 +1086,8 @@ cache_neg_init(struct namecache *ncp)
 	counter_u64_add(neg_created, 1);
 }
 
+// promotion: 促进，促销，升级
+// thresh: 脱粒。敲打，阈值？
 #define CACHE_NEG_PROMOTION_THRESH 2
 
 static bool
@@ -1062,6 +1111,8 @@ cache_neg_hit_prep(struct namecache *ncp)
  * Nothing to do here but it is provided for completeness as some
  * cache_neg_hit_prep callers may end up returning without even
  * trying to promote.
+ * 此处无需执行任何操作，但为了完整起见，提供了它，因为一些 cache_neg_hit_prep
+ * 调用方可能最终返回，甚至没有尝试升级
  */
 #define cache_neg_hit_abort(ncp)	do { } while (0)
 
@@ -1379,6 +1430,7 @@ out_evict:
  *
  *   Removes a namecache entry from cache, whether it contains an actual
  *   pointer to a vnode or if it is just a negative cache entry.
+ * 	 从缓存中删除namecache项，无论它是否包含指向 vnode 的实际指针，或者它只是一个负缓存项
  */
 static void
 cache_zap_locked(struct namecache *ncp)
@@ -1496,6 +1548,8 @@ out_relock:
 /*
  * If trylocking failed we can get here. We know enough to take all needed locks
  * in the right order and re-lookup the entry.
+ * 如果 trylocking 失败，我们可以到达这里。我们知道的足够多，可以按正确的顺序获取所有需要的锁，
+ * 并重新查找条目
  */
 static int
 cache_zap_unlocked_bucket(struct namecache *ncp, struct componentname *cnp,
@@ -1785,6 +1839,8 @@ negative_success:
  * On a cache hit, vpp will be returned locked and ref'd.  If we're looking up
  * .., dvp is unlocked.  If we're looking up . an extra ref is taken, but the
  * lock is not recursively acquired.
+ * 缓存命中时，vpp将返回锁定和引用。如果我们正在查找 dotdot，dvp已解锁。如果我们查找 dot 的话
+ * 会获取额外的ref，但不会递归获取锁
  */
 static int __noinline
 cache_lookup_fallback(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
@@ -2217,6 +2273,7 @@ cache_enter_dotdot_prep(struct vnode *dvp, struct vnode *vp,
 
 /*
  * Add an entry to the cache.
+		向 cache 中添加一个 entry。分析一下函数参数，包括目录、源文件、组件名和两个时间对象
  */
 void
 cache_enter_time(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
@@ -2247,6 +2304,10 @@ cache_enter_time(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
 #endif
 
 	flag = 0;
+	/*
+		__predict_false 其实就是 __builtin_expect(exp, 0)，所表达的意思是 exp == 0 的概率很大。
+		其实就是分支优化，编译器此时就可以根据程序员给的提示对代码进行优化，以减少跳转指令带来的性能下降
+	*/
 	if (__predict_false(cnp->cn_nameptr[0] == '.')) {
 		if (cnp->cn_namelen == 1)
 			return;
@@ -2255,7 +2316,7 @@ cache_enter_time(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
 			flag = NCF_ISDOTDOT;
 		}
 	}
-
+	// vfs 中貌似也就这个地方会用到 cache_alloc() 这个函数
 	ncp = cache_alloc(cnp->cn_namelen, tsp != NULL);
 	if (ncp == NULL)
 		return;
@@ -2267,9 +2328,14 @@ cache_enter_time(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
 	/*
 	 * Calculate the hash key and setup as much of the new
 	 * namecache entry as possible before acquiring the lock.
+	 * 在获取锁之前，计算哈希键并设置尽可能多的新 namecache 条目
 	 */
 	ncp->nc_flag = flag | NCF_WIP;
 	ncp->nc_vp = vp;
+	/*
+		当源文件 vnode 为空的时候，说明该名称对应的文件是不存在的，
+		需要将 namecache 设置成 negative 状态
+	*/
 	if (vp == NULL)
 		cache_neg_init(ncp);
 	ncp->nc_dvp = dvp;
@@ -2283,6 +2349,9 @@ cache_enter_time(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
 			ncp_ts->nc_nc.nc_flag |= NCF_DTS;
 		}
 	}
+	/*
+		设置文件名长度、计算哈希值、从 componentname 中拷贝文件名到 namecache 
+	*/
 	len = ncp->nc_nlen = cnp->cn_namelen;
 	hash = cache_get_hash(cnp->cn_nameptr, len, dvp);
 	memcpy(ncp->nc_name, cnp->cn_nameptr, len);
@@ -2293,6 +2362,8 @@ cache_enter_time(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
 	 * See if this vnode or negative entry is already in the cache
 	 * with this name.  This can happen with concurrent lookups of
 	 * the same path name.
+	 * 查看此 vnode 或负条目是否已在具有此名称的缓存中。这可能发生在同时查找
+	 * 相同路径名的情况下
 	 */
 	ncpp = NCHHASH(hash);
 	CK_SLIST_FOREACH(n2, ncpp, nc_hash) {
@@ -2475,13 +2546,17 @@ nchinit(void *dummy __unused)
 	VFS_SMR_ZONE_SET(cache_zone_large_ts);
 
 	pVFSCacheParam->ncsize = desiredvnodes * ncsizefactor;
+	// 计算 negative 对象的最低占比
 	cache_recalc_neg_min(ncnegminpct);
+	// 初始化哈希表
 	nchashtbl = nchinittbl(desiredvnodes * 2, &pSysctlDebug->nchash);
 	ncbuckethash = cache_roundup_2(mp_ncpus * mp_ncpus) - 1;
 	if (ncbuckethash < 7) /* arbitrarily chosen to avoid having one lock */
 		ncbuckethash = 7;
 	if (ncbuckethash > pSysctlDebug->nchash)
 		ncbuckethash = pSysctlDebug->nchash;
+
+	// 给每个哈希表 bucket 都申请一个锁对象
 	bucketlocks = (struct mtx_padalign *)malloc(sizeof(*bucketlocks) * numbucketlocks, M_VFSCACHE,
 	    M_WAITOK | M_ZERO);
 	for (i = 0; i < numbucketlocks; i++)
@@ -3630,6 +3705,7 @@ syscal_vfs_cache_fast_lookup(SYSCTL_HANDLER_ARGS)
 /*
  * Components of nameidata (or objects it can point to) which may
  * need restoring in case fast path lookup fails.
+ * 如果快速路径查找失败，可能需要恢复 nameidata 的组件（或它可以指向的对象）
  */
 struct nameidata_outer {
 	size_t ni_pathlen;
@@ -3643,26 +3719,32 @@ struct nameidata_saved {
 #endif
 };
 
+/*
+	应该是为了方便 fpl debug 设计的结构体。目前来看里边只包含有一个 ni_pathlen 字段
+*/
 #ifdef INVARIANTS
 struct cache_fpl_debug {
 	size_t ni_pathlen;
 };
 #endif
 
+/*
+	cache fast path lookup.
+*/
 struct cache_fpl {
 	struct nameidata *ndp;
 	struct componentname *cnp;
-	char *nulchar;
-	struct vnode *dvp;
-	struct vnode *tvp;
-	seqc_t dvp_seqc;
-	seqc_t tvp_seqc;
+	char *nulchar;	// null char? 貌似是路径数组中的最后一个字符元素
+	struct vnode *dvp;	// directory vnode
+	struct vnode *tvp;	// target vnode
+	seqc_t dvp_seqc;	// directory sequence count
+	seqc_t tvp_seqc;	// target file sequence count
 	uint32_t hash;
 	struct nameidata_saved snd;
 	struct nameidata_outer snd_outer;
 	int line;
 	enum cache_fpl_status status:8;
-	bool in_smr;
+	bool in_smr;	// is in safe memory reclaimation
 	bool fsearch;
 	bool savename;
 	struct pwd **pwd;
@@ -3684,7 +3766,7 @@ static void cache_fpl_pathlen_sub(struct cache_fpl *fpl, size_t n);
 static void
 cache_fpl_cleanup_cnp(struct componentname *cnp)
 {
-
+	// componentname->cn_pnbuf 是利用 uma 分配存储空间存放路径信息
 	uma_zfree(namei_zone, cnp->cn_pnbuf);
 #ifdef DIAGNOSTIC
 	cnp->cn_pnbuf = NULL;
@@ -3692,6 +3774,8 @@ cache_fpl_cleanup_cnp(struct componentname *cnp)
 #endif
 }
 
+// vfs 原来貌似包含有一个函数专门用来处理绝对路径信息的，感觉功能有点重叠，
+// 应该是对应不同的应用场景
 static struct vnode *
 cache_fpl_handle_root(struct cache_fpl *fpl)
 {
@@ -3703,7 +3787,7 @@ cache_fpl_handle_root(struct cache_fpl *fpl)
 
 	MPASS(*(cnp->cn_nameptr) == '/');
 	cnp->cn_nameptr++;
-	cache_fpl_pathlen_dec(fpl);
+	cache_fpl_pathlen_dec(fpl);	// 路径长度自减1
 
 	if (__predict_false(*(cnp->cn_nameptr) == '/')) {
 		do {
@@ -3733,6 +3817,11 @@ cache_fpl_checkpoint(struct cache_fpl *fpl)
 #endif
 }
 
+/*
+	cache fpl 部分恢复，什么意思？ 其实可以从上文的注释来推测一下。
+	fpl->snd_outer 的作用是在快速查找失败的时候，保存组件名结构的
+	一些属性。这里可能只用于部分恢复
+*/
 static void
 cache_fpl_restore_partial(struct cache_fpl *fpl)
 {
@@ -3743,6 +3832,7 @@ cache_fpl_restore_partial(struct cache_fpl *fpl)
 #endif
 }
 
+// 终止恢复
 static void
 cache_fpl_restore_abort(struct cache_fpl *fpl)
 {
@@ -3808,6 +3898,7 @@ cache_fpl_assert_status(struct cache_fpl *fpl)
 	_fpl->in_smr = false;					\
 })
 
+// cache fpl aborted early implement?
 static int
 cache_fpl_aborted_early_impl(struct cache_fpl *fpl, int line)
 {
@@ -3960,14 +4051,17 @@ cache_can_fplookup(struct cache_fpl *fpl)
 	cnp = fpl->cnp;
 	td = cnp->cn_thread;
 
+	// 通过 sysctl 控制是否允许快速路径查找
 	if (!atomic_load_char(&cache_fast_lookup_enabled)) {
 		cache_fpl_aborted_early(fpl);
 		return (false);
 	}
+	// 通过 componentname->cn_flags 判断是否包含相关属性
 	if ((cnp->cn_flags & ~CACHE_FPL_SUPPORTED_CN_FLAGS) != 0) {
 		cache_fpl_aborted_early(fpl);
 		return (false);
 	}
+	// 判断线程是否支持快速路径查找
 	if (IN_CAPABILITY_MODE(td)) {
 		cache_fpl_aborted_early(fpl);
 		return (false);
@@ -3976,6 +4070,7 @@ cache_can_fplookup(struct cache_fpl *fpl)
 		cache_fpl_aborted_early(fpl);
 		return (false);
 	}
+	// nameidata->ni_startdir 不为空的时候
 	if (ndp->ni_startdir != NULL) {
 		cache_fpl_aborted_early(fpl);
 		return (false);
@@ -4937,6 +5032,7 @@ cache_fplookup_next(struct cache_fpl *fpl)
 
 	MPASS(!cache_fpl_isdotdot(cnp));
 
+	// 通过哈希表中存放的 namecache 元素链表查找特定对象
 	CK_SLIST_FOREACH(ncp, (NCHHASH(hash)), nc_hash) {
 		if (ncp->nc_dvp == dvp && ncp->nc_nlen == cnp->cn_namelen &&
 		    !bcmp(ncp->nc_name, cnp->cn_nameptr, ncp->nc_nlen))
@@ -4966,7 +5062,8 @@ cache_fplookup_next(struct cache_fpl *fpl)
 	counter_u64_add(numposhits, 1);
 	SDT_PROBE3(vfs, namecache, lookup, hit, dvp, ncp->nc_name, tvp);
 
-	error = 0;
+	error = 0；
+	// 处理某个目录是挂载点的时候
 	if (cache_fplookup_is_mp(fpl)) {
 		error = cache_fplookup_cross_mount(fpl);
 	}
@@ -5542,6 +5639,7 @@ cache_fplookup_failed_vexec(struct cache_fpl *fpl, int error)
 	return (error);
 }
 
+// 从代码上下文来看，该函数应该是 fpl 机制的真正逻辑实现
 static int
 cache_fplookup_impl(struct vnode *dvp, struct cache_fpl *fpl)
 {
@@ -5553,6 +5651,7 @@ cache_fplookup_impl(struct vnode *dvp, struct cache_fpl *fpl)
 	ndp = fpl->ndp;
 	cnp = fpl->cnp;
 
+	// 基本数据备份，跟 outer 的作用是类似的，用于在 fpl 执行失败的时候的数据恢复
 	cache_fpl_checkpoint(fpl);
 
 	/*
@@ -5563,6 +5662,8 @@ cache_fplookup_impl(struct vnode *dvp, struct cache_fpl *fpl)
 	fpl->dvp = dvp;
 	fpl->dvp_seqc = vn_seqc_read_notmodify(fpl->dvp);
 
+	// 以原子操作的方式获取 mount 结构体，然后调用 cache_fplookup_mp_supported() 函数
+	// 判断是否支持 fpl。所以 tptfs 可以通过设置这个属性规避 fpl
 	mp = atomic_load_ptr(&dvp->v_mount);
 	if ((struct mount *)__predict_false(mp == NULL || !cache_fplookup_mp_supported(mp))) {
 		return (cache_fpl_aborted(fpl));
@@ -5571,6 +5672,7 @@ cache_fplookup_impl(struct vnode *dvp, struct cache_fpl *fpl)
 	MPASS(fpl->tvp == NULL);
 
 	for (;;) {
+		// 开始对 fpl 结构体中的数据进行解析
 		cache_fplookup_parse(fpl);
 
 		error = VOP_FPLOOKUP_VEXEC(fpl->dvp, cnp->cn_cred);
@@ -5579,6 +5681,10 @@ cache_fplookup_impl(struct vnode *dvp, struct cache_fpl *fpl)
 			break;
 		}
 
+		// 从代码结构可以看出，对于 namecache 是一层层向下进行处理的。每次处理完成之后，
+		// 调用 cache_fpl_checkpoint() 函数更新一下当前状态值，然后继续执行。
+		// 接着就是调用 cache_fpl_terminated() 函数，判断此次操作是否已经执行完毕。
+		// 如果是的话，就直接跳出循环
 		error = cache_fplookup_next(fpl);
 		if (__predict_false(cache_fpl_terminated(fpl))) {
 			break;
@@ -5587,6 +5693,7 @@ cache_fplookup_impl(struct vnode *dvp, struct cache_fpl *fpl)
 		VNPASS(!seqc_in_modify(fpl->tvp_seqc), fpl->tvp);
 
 		if (fpl->tvp->v_type == VLNK) {
+			// 处理目标文件是链接文件的情况
 			error = cache_fplookup_symlink(fpl);
 			if (cache_fpl_terminated(fpl)) {
 				break;
@@ -5602,11 +5709,13 @@ cache_fplookup_impl(struct vnode *dvp, struct cache_fpl *fpl)
 				break;
 			}
 
+			// 这里是将 dvp 更新成了 target vnode，说明也是逐级查找
 			fpl->dvp = fpl->tvp;
 			fpl->dvp_seqc = fpl->tvp_seqc;
 			cache_fplookup_parse_advance(fpl);
 		}
-
+		// 该函数是在循环当中，说明每解析一次，就会刷新之前保存的数据。这就会使得
+		// 结构体中保存的状态值始终是最新的
 		cache_fpl_checkpoint(fpl);
 	}
 
@@ -5615,6 +5724,7 @@ cache_fplookup_impl(struct vnode *dvp, struct cache_fpl *fpl)
 
 /*
  * Fast path lookup protected with SMR and sequence counters.
+		SMR: Safe memory reclamation.
  *
  * Note: all VOP_FPLOOKUP_VEXEC routines have a comment referencing this one.
  *
@@ -5636,6 +5746,7 @@ cache_fplookup_impl(struct vnode *dvp, struct cache_fpl *fpl)
  *
  * Each jump to the next vnode is safe memory-wise and atomic with respect to
  * any modifications thanks to holding respective locks.
+ * 由于持有各自的锁，每个跳转到下一个 vnode 的操作都是安全的，并且对于任何修改都是原子的
  *
  * The same guarantee can be provided with a combination of safe memory
  * reclamation and sequence counters instead. If all operations which affect
@@ -5644,6 +5755,10 @@ cache_fplookup_impl(struct vnode *dvp, struct cache_fpl *fpl)
  * we made the jump. This includes things like permissions, mount points etc.
  * Counter modification is provided by enclosing relevant places in
  * vn_seqc_write_begin()/end() calls.
+ * 安全内存回收和序列计数器的组合也可以提供相同的保证。如果影响当前 vnode 和我们正在查找的
+ * vnode 之间关系的所有操作也修改了计数器，那么我们可以验证在进行跳转时是否所有条件都成立。
+ * 这包括权限、装载点等。计数器修改是通过在 vn_seqc_write_begin()/end() 调用中包含相关
+ * 位置来实现的
  *
  * Thus this translates to:
  *
@@ -5669,25 +5784,39 @@ cache_fplookup_impl(struct vnode *dvp, struct cache_fpl *fpl)
  * // at this point we know nothing has changed for any parent<->child pair
  * // as they were crossed during the lookup, meaning we matched the guarantee
  * // of the locked variant
+ * 此时，我们知道在查找过程中，任何父<->子对都没有发生任何变化，这意味着我们匹配了锁定变体的保证
  * return (tvp);
  *
  * The API contract for VOP_FPLOOKUP_VEXEC routines is as follows:
  * - they are called while within vfs_smr protection which they must never exit
+ * 		它们在 vfs_smr 保护中被调用，但决不能退出
+ * 
  * - EAGAIN can be returned to denote checking could not be performed, it is
  *   always valid to return it
+ * 		可以返回EAGAIN来表示无法执行检查，返回它总是有效的
+ * 		
  * - if the sequence counter has not changed the result must be valid
  * - if the sequence counter has changed both false positives and false negatives
  *   are permitted (since the result will be rejected later)
+ * 		如果序列计数器已更改，则允许出现积极误报和消极误报（因为稍后将拒绝结果）
+ * 
  * - for simple cases of unix permission checks vaccess_vexec_smr can be used
+ * 		对于 unix 权限检查的简单情况，可以使用 vaccess_vexec_smr
  *
- * Caveats to watch out for:
+ * Caveats to watch out for: 注意事项
  * - vnodes are passed unlocked and unreferenced with nothing stopping
  *   VOP_RECLAIM, in turn meaning that ->v_data can become NULL. It is advised
  *   to use atomic_load_ptr to fetch it.
+ * 		vnodes的传递是解锁和未引用的，不会停止 VOP_RECLAIM，这意味着 ->v_data 可能会变为 NULL。
+ * 		建议使用 atomic_load_ptr 获取它
+ * 
  * - the aforementioned object can also get freed, meaning absent other means it
  *   should be protected with vfs_smr
+ * 		前面提到的对象也可以被释放，这意味着如果没有其他方法，它应该受到 vfs_smr 的保护
+ * 
  * - either safely checking permissions as they are modified or guaranteeing
  *   their stability is left to the routine
+ * 		要么在权限被修改时安全地检查权限，要么保证权限的稳定性，都由例程来完成
  */
 int
 cache_fplookup(struct nameidata *ndp, enum cache_fpl_status *status,
@@ -5699,6 +5828,7 @@ cache_fplookup(struct nameidata *ndp, enum cache_fpl_status *status,
 	struct componentname *cnp;
 	int error;
 
+	// CACHE_FPL_STATUS_UNSET 应该是初始化状态值
 	fpl.status = CACHE_FPL_STATUS_UNSET;
 	fpl.in_smr = false;
 	fpl.ndp = ndp;
@@ -5719,8 +5849,10 @@ cache_fplookup(struct nameidata *ndp, enum cache_fpl_status *status,
 		return (EOPNOTSUPP);
 	}
 
+	// 给 outer 结构体赋值，可以在后续 fpl 执行失败时进行部分数据恢复操作
 	cache_fpl_checkpoint_outer(&fpl);
 
+	// 可以认为是分配了一个 smr 管理结构
 	cache_fpl_smr_enter_initial(&fpl);
 #ifdef INVARIANTS
 	fpl.debug.ni_pathlen = ndp->ni_pathlen;
@@ -5728,20 +5860,25 @@ cache_fplookup(struct nameidata *ndp, enum cache_fpl_status *status,
 	fpl.nulchar = &cnp->cn_nameptr[ndp->ni_pathlen - 1];
 	fpl.fsearch = false;
 	fpl.savename = (cnp->cn_flags & SAVENAME) != 0;
+	/*
+		从前面的操作可以看出，fpl 中其实就是将原来 nameidata 中的一些属性或者对象
+		做了进一步的汇总
+	*/
 	fpl.tvp = NULL; /* for degenerate path handling */
 	fpl.pwd = pwdp;
-	pwd = pwd_get_smr();
+	pwd = pwd_get_smr();	// pwd 也要利用 SMR 管理
 	*(fpl.pwd) = pwd;
 	ndp->ni_rootdir = pwd->pwd_rdir;
 	ndp->ni_topdir = pwd->pwd_jdir;
 
+	// 这个 if 条件分支的作用应该就是为了获取目录 vnode
 	if (cnp->cn_pnbuf[0] == '/') {
-		dvp = cache_fpl_handle_root(&fpl);
+		dvp = cache_fpl_handle_root(&fpl);	// 返回 rootdir
 		MPASS(ndp->ni_resflags == 0);
-		ndp->ni_resflags = NIRES_ABS;
+		ndp->ni_resflags = NIRES_ABS;	// 表示此次处理的是绝对路径
 	} else {
 		if (ndp->ni_dirfd == AT_FDCWD) {
-			dvp = pwd->pwd_cdir;
+			dvp = pwd->pwd_cdir;	// current directory
 		} else {
 			error = cache_fplookup_dirfd(&fpl, &dvp);
 			if (__predict_false(error != 0)) {
@@ -5751,6 +5888,7 @@ cache_fplookup(struct nameidata *ndp, enum cache_fpl_status *status,
 	}
 
 	SDT_PROBE4(vfs, namei, lookup, entry, dvp, cnp->cn_pnbuf, cnp->cn_flags, true);
+	// 上面可以认为是前期准备工作，这里应该才开始真正处理
 	error = cache_fplookup_impl(dvp, &fpl);
 out:
 	cache_fpl_smr_assert_not_entered(&fpl);

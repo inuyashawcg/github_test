@@ -1,0 +1,57 @@
+////////////// 20220704 //////////////
+  实际调试发现，rm -rf *** 无法删除的原因就是 tptfs lookup() 函数对 .. 的处理出现了问题，修复 bug 之后
+上述命令可以正常执行。所以，以后遇到一些匪夷所思的问题，首先要考虑的就是 tptfs lookup() 函数的问题，毕竟是
+对原有 vfs 进行的重构，肯定还是会存在一些细节处理不完善的地方
+
+  # cd a
+  # mkdir -p b/c/d
+  # pwd
+  /tpt/a
+  # cd ..
+  # ls -al
+  total 0
+  drwxr-xr-x  3 root  wheel  768 Jul  4 03:55 .
+  drwxr-xr-x  3 root  wheel  768 Jul  4 03:55 ..
+  drwxr-xr-x  3 root  wheel  768 Jul  4 03:55 a
+  # rm -rf a
+  # (处于阻塞状态)
+  QEMU: Terminated
+
+  此处也是随机发生的错误，目前还不太能确定到底是如何引起的
+
+
+  # mkdir b
+  # mkdir c
+  # mkdir b/c
+  # mv a b/c
+  # ls b/c
+  a
+  # cat a
+  cat: a: No such file or directory
+  # cat b/c/a
+  # echo "hi" > b/c/a
+  QEMU: Terminated
+  阻塞。。。
+
+
+////////////// 20220705 //////////////
+向奇海操作系统中添加 df 和 umount 命令，运行正常
+
+  root@:~ # mount -t tmpfs tmpfs /tpt
+  random: unblocking device.
+  root@:~ # df -a
+  Filesystem 1K-blocks    Used   Avail Capacity  Mounted on
+  /dev/vtbd0  10143484 2815444 6516564    30%    /
+  devfs              1       1       0   100%    /dev
+  tmpfs        8004304       4 8004300     0%    /tpt
+  root@:~ # umount tpt
+  root@:~ # df -a
+  Filesystem 1K-blocks    Used   Avail Capacity  Mounted on
+  /dev/vtbd0  10143484 2815444 6516564    30%    /
+  devfs              1       1       0   100%    /dev
+
+
+////////////// 20220708 //////////////
+  文件系统类跟文件类应该都是不能设计成虚基类的，每个文件系统都会实现自己需要用到的函数，不用的函数直接置空。如果是
+设计成虚基类的话，每个函数都必须要有实现，这个应该是不必要的。VFS 为提供了 vnode operations 的默认实现，所以
+应该是作为基类的实现，然后每个 vnode 再去覆盖自己需要的那部分功能函数，否则就直接使用基类中的默认实现。

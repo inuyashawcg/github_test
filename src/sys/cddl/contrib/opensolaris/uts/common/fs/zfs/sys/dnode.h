@@ -221,6 +221,12 @@ typedef struct dnode_phys {
 #define	DN_SPILL_BLKPTR(dnp)	(blkptr_t *)((char *)(dnp) + \
 	(((dnp)->dn_extra_slots + 1) << DNODE_SHIFT) - (1 << SPA_BLKPTRSHIFT))
 
+/*
+	dnode 类似于 ufs 中的 inode，但又比 inode 具备更广泛的功能。当它用于表示文件系统的
+	文件、目录的时候，该结构体会被嵌入到 znode 当中。
+	dnode 还可以用于描述 MOS 层级中的对象，比如表示文件系统、快照、克隆、ZVOL、空间映射、
+	属性列表和死块列表(成为死区列表)的对象
+*/
 struct dnode {
 	/*
 	 * Protects the structure of the dnode, including the number of levels
@@ -246,10 +252,10 @@ struct dnode {
 	dmu_object_type_t dn_type;	/* object type */
 	uint16_t dn_bonuslen;		/* bonus length */
 	uint8_t dn_bonustype;		/* bonus type */
-	uint8_t dn_nblkptr;		/* number of blkptrs (immutable) */
+	uint8_t dn_nblkptr;		/* number of blkptrs (immutable) 块指针的数量 */
 	uint8_t dn_checksum;		/* ZIO_CHECKSUM type */
-	uint8_t dn_compress;		/* ZIO_COMPRESS type */
-	uint8_t dn_nlevels;
+	uint8_t dn_compress;		/* ZIO_COMPRESS type 数据压缩类型 */
+	uint8_t dn_nlevels;		/* 对比 inode 中的间接索引数组等级 */
 	uint8_t dn_indblkshift;
 	uint8_t dn_datablkshift;	/* zero if blksz not power of 2! */
 	uint8_t dn_moved;		/* Has this dnode been moved? */

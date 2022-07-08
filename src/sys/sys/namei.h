@@ -79,8 +79,9 @@ TAILQ_HEAD(nameicap_tracker_head, nameicap_tracker);
 struct nameidata {
 	/*
 	 * Arguments to namei/lookup.
-	 		这对应的是路径名实际存储的位置，componentname 中表示的可能就只是缓存，当我们查找的时候更多情况下就是对
-			这部分缓存进行操作
+	 		这对应的是路径名实际存储的位置，componentname 中表示的可能就只是缓存，当我们查找的时候
+			更多情况下就是对这部分缓存进行操作
+			FreeBSD-13.0 中该字段指向的是从用户空间或者是内核空间传递的路径信息
 	 */
 	const	char *ni_dirp;		/* pathname pointer 指向路径名指针，查找文件？？ */
 	enum	uio_seg ni_segflg;	/* location of pathname 标定指向的是用户空间还是内核空间 */

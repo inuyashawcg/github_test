@@ -1,0 +1,270 @@
+*** 一不小心把本周总结的内容给删除了，这里只能凭印象再补充上去，一些现象只能口头阐述了 ***
+
+////////////// 20220620 //////////////
+  上周报告中提到的对一个文本文件创建一个硬链接文件后，执行 cat 命令，源文件和硬链接文件的内容都显示为空。
+造成这部分的原因是 tptfs 的设计与磁盘文件系统不一样。磁盘文件系统建立硬链接文件，其实就是在目录文件的磁盘
+数据块中添加一个 dir_entry 结构。该结构体中存放一个字段表示文件 inode number，我们读取文件的时候就可以
+通过 inode number 定位文件。
+
+  这里只是新增一个 entry 对象，并不会改变 inode table entry 的数据，除了 links count。但是 tptfs 
+实现则是直接对其就行修改，insert 的时候会初始化 inode table entry，将 file size 设置为0。所以，只要
+我们创建一个硬链接文件，就会对同一个 entry 进行初始化，导致源文件的属性被重置。源文件管理的那些数据块事实
+上已经丢失了，而且那些数据块将永远被占用，类似于内存泄露。这是导致上述问题的根本原因
+
+  如何去解决？ 方法就是我们要对新创建的文件进行判断，是源文件还是硬链接文件 (因为这两种文件创建的步骤几乎是一模
+一样的)。最大限度保持现有实现的前提下，一种可行的方案是在 inode -> inode_flags 中额外添加一种类型 TPT_IN_HARD_LINK，
+并且只在创建硬链接的时候才设置，源文件则不具备该属性
+
+
+////////////// 20220621 //////////////
+  # mount -t tptfs tptfs /tpt
+  random: unblocking device.
+  # cd tpt
+  cd: tpt: Bad file descriptor
+  # cd /tpt
+  cd: /tpt: Bad file descriptor
+
+  出现这种情况的原因是 inactive 对于 inode 回收时的 links_count <= 0 和 <= 2
+  touch 命令指定路径 /usr/bin/touch
+
+  普通文件链接计数的初始值是1，目录链接数的初始值是2
+
+  ufs下 普通文件 /kk
+
+    (gdb) p ip
+    $1 = (struct inode *) 0xffffffd0096b9c80
+    (gdb) p* ip
+    $2 = {
+      i_nextsnap = {
+        tqe_next = 0x0,
+        tqe_prev = 0x0
+      },
+      i_vnode = 0xffffffd00c6d8988,
+      i_ump = 0xffffffd0096bbe00,
+      i_dquot = {0x0, 0x0},
+      i_un = {
+        dirhash = 0x0,
+        snapblklist = 0x0
+      },
+      dinode_u = {
+        din1 = 0xffffffd0096b8900,
+        din2 = 0xffffffd0096b8900
+      },
+      i_number = 24093,
+      i_flag = 1024,
+      i_effnlink = 1,
+      i_count = 0,
+      i_endoff = 0,
+      i_diroff = 0,
+      i_offset = 0,
+      i_nextclustercg = -1,
+      i_ea_area = 0x0,
+      i_ea_len = 0,
+      i_ea_error = 0,
+      i_ea_refs = 0,
+      i_size = 16352,
+      i_gen = 706844605,
+      i_flags = 0,
+      i_uid = 0,
+      i_gid = 0,
+      i_mode = 33261,
+      i_nlink = 1
+    }
+
+  
+  ufs 下目录 /tpt
+    (gdb) p ip
+    $3 = (struct inode *) 0xffffffd00a845f00
+    (gdb) p* ip
+    $4 = {
+      i_nextsnap = {
+        tqe_next = 0x0,
+        tqe_prev = 0x0
+      },
+      i_vnode = 0xffffffd00a844d58,
+      i_ump = 0xffffffd0096bbe00,
+      i_dquot = {0x0, 0x0},
+      i_un = {
+        dirhash = 0x0,
+        snapblklist = 0x0
+      },
+      dinode_u = {
+        din1 = 0xffffffd0096b8b00,
+        din2 = 0xffffffd0096b8b00
+      },
+      i_number = 1203840,
+      i_flag = 1024,
+      i_effnlink = 2,
+      i_count = 0,
+      i_endoff = 0,
+      i_diroff = 0,
+      i_offset = 0,
+      i_nextclustercg = -1,
+      i_ea_area = 0x0,
+      i_ea_len = 0,
+      i_ea_error = 0,
+      i_ea_refs = 0,
+      i_size = 512,
+      i_gen = 1664326355,
+      i_flags = 0,
+      i_uid = 0,
+      i_gid = 0,
+      i_mode = 16877,
+      i_nlink = 2
+    }
+
+
+////////////// 20220622 //////////////
+  # ls -al
+  total 0
+  drwxr-xr-x  3 root  wheel  1024 Jun 22 01:48 .
+  drwxr-xr-x  3 root  wheel  1024 Jun 22 01:48 ..
+  drwxr-xr-x  1 root  wheel   512 Jun 22 01:49 a
+  -rw-r--r--  1 root  wheel     0 Jun 22 01:49 b
+  # mv b a
+  # ls
+  a	b
+  # ls -al
+  ls: a: Resource deadlock avoided
+  total 0
+  drwxr-xr-x  3 root  wheel  1024 Jun 22 01:48 .
+  drwxr-xr-x  3 root  wheel  1024 Jun 22 01:48 ..
+  -rw-r--r--  2 root  wheel     0 Jun 22 01:49 b
+
+  rename 调试中出现了一个新的死锁异常，目前猜测应该是进行 rename 操作的时候将目标文件和目录文件同时加锁这个操作的问题。
+假设源目录与目标目录是同级的目录，这样两个目录对应的锁也算是平行关系，同时加锁是没有问题的。但是一旦这两个目录是包含关系，
+即目标目录是源目录的一个子文件，那么再同时对这两个锁加锁的话就有可能出现死锁状态
+
+  Thread 7 hit Breakpoint 6, lockmgr_slock_hard (lk=0xffffffd0097fcbe0, flags=2121728, 
+  ilk=0x0, 
+  file=0x10d0ac009 "/home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_subr.cpp", line=2894, lwa=0x0)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/kern_lock.cpp:586
+  586		int error = 0;
+  (gdb) bt
+  #0  lockmgr_slock_hard (lk=0xffffffd0097fcbe0, flags=2121728, ilk=0x0, 
+  file=0x10d0ac009 "/home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_subr.cpp", line=2894, lwa=0x0)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/kern_lock.cpp:586
+  #1  0x000000010c0ca338 in lockmgr_slock (lk=0xffffffd0097fcbe0, flags=2105344, 
+  file=0x10d0ac009 "/home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_subr.cpp", line=2894)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/kern_lock.cpp:1243
+  #2  0x000000010c212872 in vop_lock (ap=0x1defa7f70)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_default.cpp:589
+  #3  0x000000010c24c14e in VOP_LOCK1 (vp=0xffffffd0097fcb70, flags=2105344, 
+  file=0x10d0ac009 "/home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_subr.cpp", line=2894)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vnode_if.h:1127
+  #4  0x000000010c24a2dc in _vn_lock (vp=0xffffffd0097fcb70, flags=2105344, 
+  file=0x10d0ac009 "/home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_subr.cpp", line=2894)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_vnops.cpp:1726
+  #5  0x000000010c22e820 in vget_finish (vp=0xffffffd0097fcb70, flags=2105344, 
+  vs=VGET_USECOUNT)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_subr.cpp:2894
+  #6  0x000000010c05b5ae in VfsHash::vfs_hash_get (this=0x1100d8660 <vfsHash>, 
+  mp=0x1bcadc580, hash=4, flags=2105344, td=0x1bcad3080, vpp=0x1defa81e8, fn=0x0, arg=0x0)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsHash.cpp:90
+  #7  0x000000010c05c410 in vfs_hash_get (mp=0x1bcadc580, hash=4, flags=2105344, 
+  td=0x1bcad3080, vpp=0x1defa81e8, fn=0x0, arg=0x0)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsHashWrapper.cpp:53
+  #8  0x000000010c38d612 in TptLookup::allocateVnode (this=0xffffffd0096edf20, 
+  File=0xffffffd00a80ab00, LockFlags=2105344, NewVnode=0x1defa81e8)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/tptfs/TptLookup.cpp:612
+  #9  0x000000010c38cf00 in TptLookup::handleNameiOpts (this=0xffffffd0096edf20, 
+  AbsPath=0x1defa83d0 "/tpt/b", PathLen=6, NameiData=0x1defa8918)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/tptfs/TptLookup.cpp:564
+  #10 0x000000010c38bdd4 in TptLookup::lookup (this=0xffffffd0096edf20, NameiData=0x1defa8918)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/tptfs/TptLookup.cpp:130
+  #11 0x000000010c3883f8 in tpt_lookup (ndp=0x1defa8918)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/tptfs/TptFileSystem.cpp:584
+  #12 0x000000010c218222 in namei (ndp=0x1defa8918)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_lookup.cpp:608
+  #13 0x000000010c241dd2 in kern_statat (td=0x1bcad3080, flag=512, fd=-100, 
+  path=0x40226478 "b", pathseg=UIO_USERSPACE, sbp=0x1defa8a40, hook=0x0)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_syscalls.cpp:2402
+  #14 0x000000010c241c8a in sys_fstatat (td=0x1bcad3080, uap=0x1bcad3468)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_syscalls.cpp:2380
+  #15 0x000000010c0191b6 in syscallenter (td=0x1bcad3080)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/../../kernel/subr_syscall:189
+  #16 0x000000010c018ab4 in ecall_handler ()
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/trap.cpp:168
+  #17 0x000000010c004fc0 in system_call ()
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/swtch.S:601
+
+  ...
+  615		if (LK_HOLDER(x) == tid) {
+    (gdb) 
+    619			printf("kern_lock: EDEADLK --- 111\n");
+    (gdb) 
+    620			error = EDEADLK;
+  ...
+
+  这里可以看一下 lockmgr_slock_hard() 中关于 EDEADLK 的注释：
+    "The lock may already be locked exclusive by curthread, avoid deadlock."
+
+  也就是说这个锁已经被当前这个线程锁定了，为了避免死锁的产生，返回这么一个错误码，结束加锁请求。应该是我们在某个应该解锁的地方没有
+进行解锁，导致了可能会出现死锁的隐患，这个可能是对死锁进行检测一个简单操作步骤。
+  ls -al 是在处理目标目录 a 的时候出现的问题，说明很可能是在 rename() 函数中对于目标目录 vnode 的处理存在问题。调试发现是对应
+代码分支中的 vput() 没有正确使用导致的。也就是说明 rename() 处理完成之后，目标目录对应的 vnode 应该是处于解锁状态。进一步猜测，
+处于某个操作中的文件对应 vnode 可能是处在加锁状态，一旦这个动作彻底结束了，vnode 就会解锁。
+
+  # cd tpt 
+  # mkdir a
+  # touch b
+  # cd a
+  # ls -al
+  total 0
+  drwxr-xr-x  2 root  wheel  512 Jun 22 06:38 .
+  drwxr-xr-x  2 root  wheel  512 Jun 22 06:38 ..
+  -rw-r--r--  2 root  wheel    0 Jun 22 06:37 b
+  # cd ..
+  # rm -rf a
+  ...
+  执行完上述步骤之后，最后执行 rm -rf a 后系统阻塞
+
+
+  #  mount -t tptfs tptfs /tpt   
+  # cd tpt
+  # touch a
+  # touch b
+  # mv a b
+  pid 32 (/bin/mv), jid 0, uid 0: exited on signal 11
+  Segmentation fault
+
+  执行 mv 的时候会提示一些异常情况，比如将一个目录重命名成一个相同命名的普通文件的时候。这些操作一般都是不被允许的，所以能到
+调用 rename() 函数这一步的应该都是合法操作。重命名无外乎下面几种情况：
+  - 目标文件不存在
+      处理方法比较简单，修改指针的指向和注册表中的位置即可
+
+  - 目标文件存在
+      -1- 目录 -> 普通文件
+          异常操作，实际调试发现并没有调用到 rename() 函数，在 lookup() 上层函数中应该就已经被处理了
+
+      -2- 目录 -> 目录
+          当目标目录是空目录的时候，执行正常。会调用到 rename() 函数，所以代码实现中要包含对这种情况的处理
+
+      -3- 普通文件 -> 目录
+          异常操作，也没有调用到 rename() 函数
+
+      -4- 普通文件 -> 普通文件
+          执行正常，源文件会覆盖目标文件。感觉应该是要添加 truncate 操作
+
+  命令执行完成之后，被覆盖的文件应该是需要释放它原来占有的数据块。一般我们删除文件的时候，最后都会调用 inactive() 函数。该函数
+会调用 truncate() 释放存储空间。tmpfs 调试4过程的时候发现，命令执行完成之后会调用 inactive() 函数，说明我们在 rename() 函数
+中不需要手动 truncate。
+  但是，tmpfs 调试情况 2 的时候，发现系统是没有调用 inactive() 函数的。所以在磁盘文件系统中，需要在 rename() 函数中手动添加
+truncate()。但是 tptfs 中并没有为目录文件申请任何数据空间，因此也不需要添加
+
+  ext2 文件系统中貌似只有创建目录的时候，才会给父目录增加引用计数，如果只是创建普通文件的话，不会增加父目录的引用计数。
+  但是 tmpfs 貌似是所有文件创建之后，都会给父目录 inode 增加引用计数
+
+////////////// tptfs 设计中的一些不好的设计 //////////////
+  tptfs 调试中遇到的很多问题都是跟 vnode 的加解锁有关系。进一步打开格局，文件数据同步也是一样的，文件读取加解锁也一定要先保证
+功能绝对正确，然后再去考虑效率的问题。
+
+  目前版本还没有完全走出原始磁盘文件系统的条条框框，尤其是 vnode 与 inode 的直接映射关系。因为目前文件读写锁是包含在文件类当中，
+所以在处理文件数据同步的时候，经常要进行 inode / vnode / TptFile 三者之间的转换，稍不注意就会导致访问空指针，造成 panic。
+这一版代码主要还是着眼于代码可维护性、C++一些高级语法的引入、面向对象的思想和功能测试，顺带解决一些小问题，例如删除 goto 语句等等，
+最原始的设计还是没有改变。
+
+  tptfs 的开发从目前来大体上要分成3个阶段：
+    1、在原有文件系统的基础上增加文件类 class TptFile，负责文件的注册并替换现有的文件查找功能
+    2、用 TptFile 替换 inode，使文件类作为管理文件最底层的数据结构，inode 是否保留需要再讨论。这个阶段应该是要与持久化进行更深程度的融合
+    3、用 TptFile 替换 vnode。这个阶段应该是在大后期，因为需要修改整个系统对文件进行管理和访问的方式

@@ -47,6 +47,7 @@ extern "C" {
 /*
  * Additional file level attributes, that are stored
  * in the upper half of zp_flags
+ * 额外的文件层级的属性，被保存在 zp_flags 的前半部分
  * 
  * immutable: 不变的，不可改变的
  */
@@ -157,40 +158,58 @@ extern "C" {
  * Directory entry locks control access to directory entries.
  * They are used to protect creates, deletes, and renames.
  * Each directory znode has a mutex and a list of locked names.
+ * 设计思路：
+ * 		给目录下的每个子文件都分配一个锁对象，并通过单向链表管理起来
  */
 #ifdef _KERNEL
 typedef struct zfs_dirlock {
+	/* 应该是目录项的名字，而不是目录本身的名字 */
 	char		*dl_name;	/* directory entry being locked */
 	uint32_t	dl_sharecnt;	/* 0 if exclusive, > 0 if shared */
 	uint8_t		dl_namelock;	/* 1 if z_name_lock is NOT held */
 	uint16_t	dl_namesize;	/* set if dl_name was allocated */
+	/*
+		竟然还有条件变量 (应该是用于控制顺序访问)。搞这么复杂干嘛呀。。。
+	*/
 	kcondvar_t	dl_cv;		/* wait for entry to be unlocked */
-	struct znode	*dl_dzp;	/* directory znode */
+	struct znode	*dl_dzp;	/* directory znode 父目录指针 */
 	struct zfs_dirlock *dl_next;	/* next in z_dirlocks list */
 } zfs_dirlock_t;
 
+/*
+	znode 类似 ufs 中的 inode，用于描述文件、目录等对象
+*/
 typedef struct znode {
 	/*
 		类似于指向 mount 结构体的指针
 	*/
 	struct zfsvfs	*z_zfsvfs;
-	vnode_t		*z_vnode;
-	uint64_t	z_id;		/* object ID for this znode */
+	vnode_t		*z_vnode;		/* vnode pointer */
+	uint64_t	z_id;		/* object ID for this znode = inode number? */
 #ifdef illumos
 	kmutex_t	z_lock;		/* znode modification lock */
 	krwlock_t	z_parent_lock;	/* parent lock for directories */
+	/*
+		master lock? 可能是用于目录，那它下面的子文件应该就是 slave lock。作用可能是当用户想要
+		访问子文件进行访问的时候，首先要拿到目录的 master lock，之后再去拿到 slave lock。双重
+		加锁之后，才可以顺利访问文件。
+	*/
 	krwlock_t	z_name_lock;	/* "master" lock for dirent locks */
 	zfs_dirlock_t	*z_dirlocks;	/* directory entry lock list */
 #endif
+	/*
+		自平衡二叉查找树。发现这个数据结构在文件系统中出现的概率相当高，非常有必要研究一下。
+		貌似是把文件范围锁用二叉查找树管理起来了
+	*/
 	kmutex_t	z_range_lock;	/* protects changes to z_range_avl */
 	avl_tree_t	z_range_avl;	/* avl tree of file range locks */
 	uint8_t		z_unlinked;	/* file has been unlinked */
 	uint8_t		z_atime_dirty;	/* atime needs to be synced */
-	uint8_t		z_zn_prefetch;	/* Prefetch znodes? */
+	uint8_t		z_zn_prefetch;	/* Prefetch(预读取) znodes? */
 	uint8_t		z_moved;	/* Has this znode been moved? */
-	uint_t		z_blksz;	/* block size in bytes */
-	uint_t		z_seq;		/* modification sequence number */
-	uint64_t	z_mapcnt;	/* number of pages mapped to file */
+	uint_t		z_blksz;	/* block size in bytes - 以 byte 为单位的块大小 */
+	uint_t		z_seq;		/* modification sequence number - 修改序号，感觉应该是用于数据顺序同步 */
+	uint64_t	z_mapcnt;	/* number of pages mapped to file - 映射到该文件的页数 */
 	uint64_t	z_dnodesize;	/* dnode size */
 	uint64_t	z_gen;		/* generation (cached) */
 	uint64_t	z_size;		/* file size (cached) */
@@ -200,8 +219,8 @@ typedef struct znode {
 	uint64_t	z_uid;		/* uid fuid (cached) */
 	uint64_t	z_gid;		/* gid fuid (cached) */
 	mode_t		z_mode;		/* mode (cached) */
-	uint32_t	z_sync_cnt;	/* synchronous open count 被同步打开的计数 */
-	kmutex_t	z_acl_lock;	/* acl data lock */
+	uint32_t	z_sync_cnt;	/* synchronous open count - 被同步打开的计数 */
+	kmutex_t	z_acl_lock;	/* acl data lock - 给 ACL 数据单独加锁 */
 	zfs_acl_t	*z_acl_cached;	/* cached acl */
 	list_node_t	z_link_node;	/* all znodes in fs link - 所有 znode 在 fs 中以链表形式关联 */
 	sa_handle_t	*z_sa_hdl;	/* handle to sa data */
