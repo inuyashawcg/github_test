@@ -651,8 +651,8 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 	struct ext2fs_htree_sort_entry *sort_info;
 
 	fs = ip->i_e2fs;
-	ep = (struct ext2fs_direct_2 *)block1;
-	dest = block2;
+	ep = (struct ext2fs_direct_2 *)block1;	// source block (or buffer)
+	dest = block2;	// destination block (or buffer)
 	/*
 		这里的 sort_info 指向了数据块的末尾，下面的 while 循环中它的操作都是自减，
 		感觉这里的处理方式是倒序；
@@ -797,6 +797,9 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	char *buf2 = NULL;
 	int error = 0;
 
+	/*
+		dp 有可能一开始并不是空的目录，里面可能已经包含有 entry?
+	*/
 	dp = VTOI(vp);
 	fs = dp->i_e2fs->e2fs;
 	m_fs = dp->i_e2fs;
@@ -840,6 +843,9 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 		的其他所有数据都拷贝到了缓存，利用对缓存处理的结果再对 root node 中的元素进行赋值；
 		tptfs 感觉是可以利用这个函数初始化 root node，要把数据块分割成三个目录项：. / .. / 空目录。然后
 		空目录项的长度 = 4096 - 256 * 2
+
+		该代码分支其实就是将原来可能存在的子目录项，除了 dot 和 dotdot 之外，拷贝到 buf1 当中，然后重新
+		构造一个新的块 (最后一个目录项的 reclen = block size - 其余目录项的总长度)
 	*/
 	while ((char *)ep < buf1 + dirlen)
 		ep = (struct ext2fs_direct_2 *)
@@ -869,11 +875,6 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	ext2_htree_set_limit(root->h_entries,
 	    ext2_htree_root_limit(dp, sizeof(root->h_info)));
 
-	/*
-		设置 htree lookup info 信息。info 可看到是一个局部变量，并且在磁盘结构体中并没有该字段。
-		所以，注意下面的代码逻辑是否包含对该信息的保存操作，如果没有的话，那它的生命周期就是函数执行
-		的这段时间
-	*/
 	memset(&info, 0, sizeof(info));
 	info.h_levels_num = 1;	/* 表示当前的搜索等级数组中只有一个元素 */
 	info.h_levels[0].h_entries = root->h_entries;

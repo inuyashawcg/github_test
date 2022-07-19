@@ -196,7 +196,7 @@ ext2_readdir(struct vop_readdir_args *ap)
 			- uio offset 要小于 inode size
 	*/
 	while (error == 0 && uio->uio_resid > 0 &&
-	    uio->uio_offset < ip->i_size) {	
+	    uio->uio_offset < ip->i_size) {
 		error = ext2_blkatoff(vp, uio->uio_offset, NULL, &bp);
 		if (error)
 			break;
@@ -333,6 +333,9 @@ nextentry:
  * notfound:
  *	if creating, return locked directory, leaving info on available slots
  *	else return error
+		注意这里注释的表述，没有找到目标文件的情况下，并且是创建操作，将会返回一个加锁的目录项，
+		并且会将可用 slot 信息保留。猜测只有在这种情况下才会对目录项相关字段的数据进行更新
+
  * found:
  *	if at end of path and deleting, return information to allow delete
  *	if at end of path and rewriting (RENAME and LOCKPARENT), lock target
@@ -370,9 +373,9 @@ ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp, struct componentname *cnp
 	struct ext2fs_searchslot ss;
 	doff_t i_diroff;		/* cached i_diroff value */
 	doff_t i_offset;		/* cached i_offset value */
-	int numdirpasses;		/* strategy for directory search 目录查找策略 */
-	doff_t endsearch;		/* offset to end directory search 目录查找终止位置的偏移量 */
-	doff_t prevoff;			/* prev entry dp->i_offset 上一个 entry 的 offset */
+	int numdirpasses;		/* strategy for directory - search 目录查找策略 */
+	doff_t endsearch;		/* offset to end directory - search 目录查找终止位置的偏移量 */
+	doff_t prevoff;			/* prev entry dp->i_offset - 上一个 entry 的 offset */
 	struct vnode *pdp;		/* saved dp during symlink work 符号链接时候保存的 vnode 指针 */
 	struct vnode *tdp;		/* returned by VFS_VGET 宏定义返回的 vnode 指针 */
 	doff_t enduseful;		/* pointer past last used dir slot 指向最后一次使用的目录slot后？ */
@@ -530,6 +533,10 @@ restart:
 		从上面的注释可以看到，当我们执行的是 lookup 操作的时候，可以利用上次的缓存信息，可能就不需要重新遍历
 		整个数据块中的 entry；但如果我们执行的是 create 操作，那就必须重新搜索整个数据块，确保 entry 不存在。
 		所以也就不需要利用缓存信息，不走 else 分支。就是为了获取 i_offset，即上一次在目录项查找的 offset
+
+		i_diroff 和 i_offset 都是对目录项进行查找的时候才会用到的，并且初始值都是可以为0的，这种情况就是从头
+		开始查找。好像 namecache 介入之后，会对两个字段进行更新，下次再进行查找的时候就不用从头开始，而是从某个
+		中间位置开始，应该是可以节省查找时间
 	*/
 	prevoff = i_offset;
 	/*
@@ -537,7 +544,7 @@ restart:
 		4096 个字节，利用 roundup2 就可以将 4000 扩展到距离最近的 4096 的整数倍，也就是 4096 * 1。所以，
 		endsearch = 4096 * n。
 	*/
-	endsearch = roundup2(dp->i_size, DIRBLKSIZ);
+	endsearch = roundup2(dp->i_size, DIRBLKSIZ); // 根据文件大小 i_size 计算出来
 	enduseful = 0;
 
 searchloop:
@@ -559,6 +566,7 @@ searchloop:
 
 		entryoffsetinblock = 0;	// entryoffsetinblock 重新置零
 		if (ss.slotstatus == NONE) {
+			// 执行 create / rename
 			ss.slotoffset = -1;
 			ss.slotfreespace = 0;	// 注意，这里将 freespace 设置为了0
 		}
@@ -1102,8 +1110,7 @@ out:
  * 
  * 在调用namei之后，使用nameidata中的参数编写一个目录条目。参数ip是新的目录项所对应的
  * inode。dvp是将要被写入的目录项所对应的指针，它被namei锁住。其余参数（dp->i_offset，dp->i_count）
- * 指示如何获取新条目的空间
- * 
+ * 指示如何获取新条目的空间。那是不是说明另外两个目录项相关参数主要是用于文件查找？
  */
 int
 ext2_direnter(struct inode *ip, struct vnode *dvp, struct componentname *cnp)
@@ -1112,7 +1119,6 @@ ext2_direnter(struct inode *ip, struct vnode *dvp, struct componentname *cnp)
 	struct ext2fs_direct_2 newdir;	/* 目录项 */
 	int DIRBLKSIZ = ip->i_e2fs->e2fs_bsize;	/* 指定块大小 */
 	int error;
-
 
 #ifdef INVARIANTS
 	if ((cnp->cn_flags & SAVENAME) == 0)
@@ -1252,9 +1258,10 @@ ext2_add_entry(struct vnode *dvp, struct ext2fs_direct_2 *entry)
 	dsize = EXT2_DIR_REC_LEN(ep->e2d_namlen);
 	spacefree = ep->e2d_reclen - dsize;
 	/*
-		上面可以认为是计算空目录项的实际大小，也就是数据块中未被使用的区域的大小。从下面的代码逻辑可以推测，i_count 表示的可能是
-		包含可用数据的目录项成员总的大小，也就是说如果一个被释放的成员合并到上一个目录项当中，i_count 表示的就是这两个合并后总的
-		大小，i_offset 就是指向这个区域的起始地址，也就是原来的上一个成员的起始地址
+		上面可以认为是计算空目录项的实际大小，也就是数据块中未被使用的区域的大小。从下面的代码逻辑可以推测，
+		i_count 表示的可能是包含可用数据的目录项成员总的大小，也就是说如果一个被释放的成员合并到上一个
+		目录项当中，i_count 表示的就是这两个合并后总的大小，i_offset 就是指向这个区域的起始地址，也就是
+		原来的上一个成员的起始地址
 	*/
 	for (loc = ep->e2d_reclen; loc < dp->i_count; ) {
 		/* next entry pointer */

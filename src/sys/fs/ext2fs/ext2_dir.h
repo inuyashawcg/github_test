@@ -49,6 +49,9 @@ enum slotstatus {
 	FOUND
 };
 
+/*
+	从代码实现来看，该结构体只在 lookup 和 htree 模块中出现，说明只是用于可用 slot 的查找
+*/
 struct ext2fs_searchslot {
 	enum slotstatus slotstatus;
 	doff_t	slotoffset;		/* offset of area with free space 拥有空闲空间的区域的偏移 */

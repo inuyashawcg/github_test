@@ -108,3 +108,6 @@ git merge-base a b
   此时可以设置一下 git 中的一个属性，限制重命名文件数量：
     git config merge.renameLimit 999999
   后面这个最大数字应该是可以配置的，可以查阅一下
+
+github token:
+  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

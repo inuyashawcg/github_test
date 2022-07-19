@@ -1529,7 +1529,7 @@ ext2_mkdir(struct vop_mkdir_args *ap)
 	ip->i_flag |= IN_ACCESS | IN_CHANGE | IN_UPDATE;
 	ip->i_mode = dmode;
 	tvp->v_type = VDIR;	/* Rest init'd in getnewvnode(). */
-	ip->i_nlink = 2;	/* 一个是它本身，一个是.目录？ */
+	ip->i_nlink = 2;
 	if (cnp->cn_flags & ISWHITEOUT)
 		ip->i_flags |= UF_OPAQUE;
 	error = ext2_update(tvp, 1);	/* 上面的代码就是对 inode 和 vnode 属性的设置 */
@@ -1564,7 +1564,7 @@ ext2_mkdir(struct vop_mkdir_args *ap)
 	 */
 #undef  DIRBLKSIZ
 #define DIRBLKSIZ  VTOI(dvp)->i_e2fs->e2fs_bsize
-	dirtemplate.dotdot_reclen = DIRBLKSIZ - 12;
+	dirtemplate.dotdot_reclen = DIRBLKSIZ - 12;	// 这里要注意
 	buf = malloc(DIRBLKSIZ, M_TEMP, M_WAITOK | M_ZERO);
 	if (!buf) {
 		error = ENOMEM;
@@ -1591,7 +1591,7 @@ ext2_mkdir(struct vop_mkdir_args *ap)
 		/* XXX should grow with balloc() */
 		panic("ext2_mkdir: blksize");
 	else {
-		ip->i_size = DIRBLKSIZ;
+		ip->i_size = DIRBLKSIZ;	// i_size = 块大小，并不是目录文件的真实大小
 		ip->i_flag |= IN_CHANGE;
 	}
 

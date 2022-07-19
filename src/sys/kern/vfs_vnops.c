@@ -1686,9 +1686,6 @@ unlock:
 	return (error);
 }
 
-/*
-	前面调用的一种情况是，mpp 直接传进来一个空指针
-*/
 int
 vn_start_write(struct vnode *vp, struct mount **mpp, int flags)
 {

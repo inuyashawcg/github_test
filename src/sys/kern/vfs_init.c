@@ -115,7 +115,10 @@ struct vattr va_null;
 
 /*
 	vfsconf 表示的应该就是文件系统的描述信息，然后通过队列来管理，所以我们就可以通过搜索整个
-	队列来查找相应的文件系统
+	队列来查找相应的文件系统。
+	从该函数的命名和下文的使用来看，该函数一定是要在 vfsconf_sx 处在加锁的状态下才能调用，
+	函数体中包含有一个 sx_assert 来提醒锁的状态。也就是我们在遍历 vfsconf 链表的时候，首先要
+	对 vfsconf_sx 加锁，是一种保持数据一致性的常见操作
 */
 static struct vfsconf *
 vfs_byname_locked(const char *name)
@@ -370,7 +373,10 @@ vfs_purge_sigdefer(struct mount *mp)
 	sigallowstop(prev_stops);
 }
 
-// 文件系统操作函数表，上面有具体的定义
+/*
+	这里定义的全是跟 signal-deferred 相关的函数，从下文可以看出，当文件系统具备
+	VFCF_SBDRY 属性的时候，才会去注册这些函数，暂时先不进行处理
+*/
 static struct vfsops vfsops_sigdefer = {
 	.vfs_mount =		vfs_mount_sigdefer,
 	.vfs_unmount =		vfs_unmount_sigdefer,
@@ -388,7 +394,6 @@ static struct vfsops vfsops_sigdefer = {
 	.vfs_reclaim_lowervp =	vfs_reclaim_lowervp_sigdefer,
 	.vfs_unlink_lowervp =	vfs_unlink_lowervp_sigdefer,
 	.vfs_purge =		vfs_purge_sigdefer,
-
 };
 
 /* Register a new filesystem type in the global table 
@@ -593,6 +598,8 @@ vfs_unregister(struct vfsconf *vfc)
 /*
  * Standard kernel module handling code for filesystem modules.
  * Referenced from VFS_SET().
+ * 可以看出，该文件中有很多全局函数在其他部分使用，甚至是别的模块，所以 init 类可以作为
+ * 整个文件系统层级中的上层方法表类，其他的部分再引用其中的方法
  */
 int
 vfs_modevent(module_t mod, int type, void *data)

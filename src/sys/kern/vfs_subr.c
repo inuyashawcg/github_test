@@ -127,9 +127,9 @@ static void	destroy_vpollinfo(struct vpollinfo *vi);
  * by the interlock, but we have some internal assertions that check vnode
  * flags without acquiring the lock.  Thus, these fences are INVARIANTS-only
  * for now.
- * 这些围栏适用于需要在访问v_iFlag和无锁vnode refcount（v_holdcnt和v_usecount）更新
- * 之间进行同步的情况。对v_iflags的访问通常由联锁同步，但我们有一些内部断言，它们在不获取锁
- * 的情况下检查vnode标志。因此，这些围栏只是暂时不变的
+ * 这些围栏适用于需要在访问 v_iFlag 和无锁 vnode refcount（v_holdcnt和v_usecount）更新
+ * 之间进行同步的情况。对 v_iflags 的访问通常由联锁同步，但我们有一些内部断言，它们在不获取锁
+ * 的情况下检查 vnode 标志。因此，这些围栏只是暂时不变的
  */
 #ifdef INVARIANTS
 #define	VNODE_REFCOUNT_FENCE_ACQ()	atomic_thread_fence_acq()
@@ -240,7 +240,10 @@ SYSCTL_COUNTER_U64(_vfs, OID_AUTO, free_owe_inact, CTLFLAG_RD, &free_owe_inact,
 
 /* To keep more than one thread at a time from running vfs_getnewfsid 
 	保证每个时刻都至少一个线程运行 vfs_getnewfsid 函数。这个锁貌似是专门用来处理获取文件系统
-	id 时候才会用到的，应用场景比较单一
+	id 时候才会用到的，应用场景比较单一；
+	文件系统 id 的生成主要包含两种方式，第一种就是利用文件名计算的 hash 值；第二种就是利用 vfs
+	提供的 base-id 累加生成。目前 id 值的范围是 1-255。所以，这个锁可能就是用来保护 id 的一致性，
+	防止两个文件系统拿到的是同一个 id 值
 */
 static struct mtx mntid_mtx;
 
@@ -249,7 +252,6 @@ static struct mtx mntid_mtx;
  *	vnode_free_list
  *	numvnodes
  *	freevnodes
-
 	如果要访问下面列举的三个变量，首先要加锁 vnode_free_list_mtx
  */
 static struct mtx vnode_free_list_mtx;
@@ -290,12 +292,12 @@ static uma_zone_t vnodepoll_zone;
  *
  *	syncer_workitem_pending[(syncer_delayno + 15) & syncer_mask]
  *
- * 将文件数据和文件系统元数据的写入延迟几十秒是很有用的，这样快速创建和删除的文件
- * 就不必浪费创建和删除时的磁盘带宽。为了实现这一点，我们将vnode附加到“workitem”队列中。
+ * 将文件数据和文件系统元数据的写入延迟几十秒是很有用的，这样快速创建和删除的文件就不必
+ * 浪费创建和删除时的磁盘带宽。为了实现这一点，我们将 vnode 附加到 workitem 队列中。
  * 使用软更新实现运行时，大多数挂起的元数据依赖项不应等待超过几秒钟。因此，安装在块设备上
  * 的延迟时间仅为文件数据延迟时间的一半左右。类似地，目录更新更为关键，因此仅延迟文件数据
- * 延迟时间的三分之一。因此，有SYNCER_MAXDELAY队列以每秒一个的速率进行循环处理（从文件
- * 系统SYNCER进程驱动）。syncer_delayno变量表示要处理的下一个队列。需要尽快处理的项目
+ * 延迟时间的三分之一。因此，有 SYNCER_MAXDELAY 队列以每秒一个的速率进行循环处理（从文件
+ * 系统 SYNCER 进程驱动）。syncer_delayno 变量表示要处理的下一个队列。需要尽快处理的项目
  * 将放置在此队列中 
  * 	syncer_workitem_pending[syncer_delayno]
  * 
@@ -321,6 +323,9 @@ static struct synclist *syncer_workitem_pending;
 static struct mtx sync_mtx;	// sync_mtx 会保护上述变量
 static struct cv sync_wakeup; //  条件变量，唤醒同步操作
 
+/*
+	下面定义的这些变量都是对应上文对于不同类型数据的操作延迟
+*/
 #define SYNCER_MAXDELAY		32
 static int syncer_maxdelay = SYNCER_MAXDELAY;	/* maximum delay time */
 static int syncdelay = 30;		/* max time to delay syncing data 延迟数据同步的最大时间 */
@@ -333,7 +338,7 @@ SYSCTL_INT(_kern, OID_AUTO, dirdelay, CTLFLAG_RW, &dirdelay, 0,
 static int metadelay = 28;		/* time to delay syncing metadata */
 SYSCTL_INT(_kern, OID_AUTO, metadelay, CTLFLAG_RW, &metadelay, 0,
     "Time to delay syncing metadata (in seconds)");
-static int rushjob;		/* number of slots to run ASAP */
+static int rushjob;		/* number of slots to run ASAP(一种调度算法) */
 static int stat_rush_requests;	/* number of times I/O speeded up I/O加速次数 */
 SYSCTL_INT(_debug, OID_AUTO, rush_requests, CTLFLAG_RW, &stat_rush_requests, 0,
     "Number of times I/O speeded up (rush requests)");
@@ -349,7 +354,7 @@ static enum { SYNCER_RUNNING, SYNCER_SHUTTING_DOWN, SYNCER_FINAL_DELAY }
     syncer_state;
 
 /* Target for maximum number of vnodes.
-	desiredvnodes 是根据RAM大小和进程数等等系统参数预估的一个值，然后根据它建立 vfs 哈希表，就是一个初始值。
+	desiredvnodes 是根据 RAM 大小和进程数等等系统参数预估的一个值，然后根据它建立 vfs 哈希表，就是一个初始值。
 	vnode 实际生成跟它没有任何关系的，只会增加 numvnodes 和 vnodes_created 的值。所以，numvnodes 是可以
 	增长到比 desiredvnodes 要大的。free_list 其实也是实例化出的 vnode 不再被使用之后，添加到其中的。所以
 	链表大小跟 desiredvnodes 也是没有关系的，阅读代码的时候就把它们独立来看就好。
@@ -448,6 +453,7 @@ vnode_init(void *mem, int size, int flags)
 	mtx_init(&vp->v_interlock, "vnode interlock", NULL, MTX_DEF);
 	/*
 	 * By default, don't allow shared locks unless filesystems opt-in.
+	 		从这里的注释我们可以看出，vnode->v_vnlock 只要是文件系统操作不允许，默认采用独占锁
 	 */
 	lockinit(vp->v_vnlock, PVFS, "vnode", VLKTIMEOUT,
 	    LK_NOSHARE | LK_IS_VNODE);
@@ -458,8 +464,8 @@ vnode_init(void *mem, int size, int flags)
 	/*
 	 * Initialize namecache.
 	 */
-	LIST_INIT(&vp->v_cache_src);
-	TAILQ_INIT(&vp->v_cache_dst);
+	LIST_INIT(&vp->v_cache_src);	// source vnode
+	TAILQ_INIT(&vp->v_cache_dst);	// destination vnode
 	/*
 	 * Initialize rangelocks.
 	 */
@@ -469,6 +475,7 @@ vnode_init(void *mem, int size, int flags)
 
 /*
  * Free a vnode when it is cleared from the zone.
+		从代码实现来看，其实就是释放各种锁资源
  */
 static void
 vnode_fini(void *mem, int size)
@@ -494,7 +501,7 @@ vnode_fini(void *mem, int size)
  * Still, we care about differences in the size between 64- and 32-bit
  * platforms.
  *
- * Namecache structure size is heuristically
+ * Namecache structure size is heuristically (试探性的)
  * sizeof(struct namecache_ts) + CACHE_PATH_CUTOFF + 1.
  */
 #ifdef _LP64
@@ -597,8 +604,9 @@ SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_FIRST, vntblinit, NULL);
 /*
  * Mark a mount point as busy. Used to synchronize access and to delay
  * unmounting. Eventually, mountlist_mtx is not released on failure.
- * 将一个挂载点标记为 busy 状态，用于同步访问和延迟卸载。最终，mountlist_mtx 在失败的时候
- * 是不会被释放的。查阅用户手册注释，实现该功能的方式是通过增加 point的引用计数
+ * 将一个挂载点标记为 busy 状态，用于同步访问和延迟卸载。最终，mountlist_mtx 
+ * 在失败的时候是不会被释放的。查阅用户手册注释，实现该功能的方式是通过增加 point
+ * 的引用计数
  *
  * vfs_busy() is a custom lock, it can block the caller.
  * vfs_busy() only sleeps if the unmount is active on the mount point.
@@ -612,8 +620,8 @@ SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_FIRST, vntblinit, NULL);
  * vfs_busy lock	C	vfs_busy lock			F
  *
  * Within each file system, the lock order is C->A->B and F->D->E.
- * 跨文件系统访问的时候，我们应该是要先锁住原文件系统中对应节点的vnode，然后再锁住挂载的文件系统
- * 对应节点分配的 vnode
+ * 跨文件系统访问的时候，我们应该是要先锁住原文件系统中对应节点的vnode，然后再锁住
+ * 挂载的文件系统对应节点分配的 vnode
  * 
  * When traversing across mounts, the system follows that lock order:
  *
@@ -632,7 +640,7 @@ SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_FIRST, vntblinit, NULL);
  *    Attempt to lock A (instead of vp_crossmp) while D is held would
  *    violate the global order, causing deadlocks.
  *
- * dounmount() locks B while F is drained.
+ * dounmount() locks B while F is drained (筋疲力竭的).
  */
 int
 vfs_busy(struct mount *mp, int flags)
@@ -642,19 +650,23 @@ vfs_busy(struct mount *mp, int flags)
 	CTR3(KTR_VFS, "%s: mp %p with flags %d", __func__, mp, flags);
 
 	MNT_ILOCK(mp);	// 给 mount 加锁，然后增加引用计数
-	MNT_REF(mp);
+	MNT_REF(mp);	// 同时增加引用计数
 	/*
 	 * If mount point is currently being unmounted, sleep until the
 	 * mount point fate is decided.  If thread doing the unmounting fails,
 	 * it will clear MNTK_UNMOUNT flag before waking us up, indicating
 	 * that this mount point has survived the unmount attempt and vfs_busy
-	 * should retry.  Otherwise the unmounter thread will set MNTK_REFEXPIRE
+	 * should retry. Otherwise the unmounter thread will set MNTK_REFEXPIRE
 	 * flag in addition to MNTK_UNMOUNT, indicating that mount point is
 	 * about to be really destroyed.  vfs_busy needs to release its
 	 * reference on the mount point in this case and return with ENOENT,
 	 * telling the caller that mount mount it tried to busy is no longer
 	 * valid.
-	 * 在我们先要通过flag判断一下挂载点是否可用
+	 * 如果装载点当前正在卸载，请休眠，直到确定装载点的命运。如果执行卸载的线程失败，
+	 * 它将在唤醒我们之前清除 MNTK_UNMOUNT 标志，这表明此装载点在卸载尝试中幸存下来，
+	 * vfs_busy() 应该重试。否则，除 MNTK_UNMOUNT 外，unmounter 线程还将设置
+	 * MNTK_REFEXPIRE 标志，指示装入点即将被真正销毁。在这种情况下，vfs_busy() 需要
+	 * 释放其在装载点上的引用，并返回 ENOENT，告诉调用方它试图繁忙的装载不再有效
 	 */
 	while (mp->mnt_kern_flag & MNTK_UNMOUNT) {
 		if (flags & MBF_NOWAIT || mp->mnt_kern_flag & MNTK_REFEXPIRE) {
@@ -666,7 +678,7 @@ vfs_busy(struct mount *mp, int flags)
 		}
 		if (flags & MBF_MNTLSTLOCK)
 			mtx_unlock(&mountlist_mtx);
-		mp->mnt_kern_flag |= MNTK_MWAIT;	// 等待umount操作结束
+		mp->mnt_kern_flag |= MNTK_MWAIT;	// 等待 umount 操作结束
 		msleep(mp, MNT_MTX(mp), PVFS | PDROP, "vfs_busy", 0);
 		if (flags & MBF_MNTLSTLOCK)
 			mtx_lock(&mountlist_mtx);
@@ -674,11 +686,9 @@ vfs_busy(struct mount *mp, int flags)
 	}
 	if (flags & MBF_MNTLSTLOCK)
 		mtx_unlock(&mountlist_mtx);
-	/*
-		从这里可以看出，
-	*/
-	mp->mnt_lockref++;
-	MNT_IUNLOCK(mp);	// 对应开始的mount加锁
+
+	mp->mnt_lockref++;	// busy() 对应 lockref++，下文 unbusy() 对应 lockref--
+	MNT_IUNLOCK(mp);
 	return (0);
 }
 
@@ -759,6 +769,11 @@ vfs_busyfs(fsid_t *fsid)
 	uint32_t hash;
 
 	CTR2(KTR_VFS, "%s: fsid %p", __func__, fsid);
+	/*
+		代码实现逻辑：
+			- 利用 fsid 计算 hash 值，并利用 hash 作为 cache 数组的索引值，获取指定位置的元素
+			- 如果元素为空，或者 vfs_busy() 发生错误，则在 mountlist 中重新遍历查找
+	*/
 	hash = fsid->val[0] ^ fsid->val[1];
 	hash = (hash >> 16 ^ hash) & (FSID_CACHE_SIZE - 1);
 	mp = cache[hash];
@@ -874,7 +889,9 @@ vfs_getnewfsid(struct mount *mp)
 			break;
 		/*
 			如果某个 fsid 的 mount 已经存在在管理链表当中，则会获取到该 mount 对象，并增加引用计数。
-			因为这里只是用来确定该 id 是否已经存在，并不会做其他操作，所以最后要把引用计数减去
+			如果结果为空，则说明 mountlist 中该 fsid 并不存在，说明新的 id 还未被使用。因为这里只是
+			用来确定该 id 是否已经存在，并不会做其他操作，所以最后要把引用计数减去 (vfs_getvfs() 中
+			包含增加 mount 结构引用计数的操作)
 		*/
 		vfs_rel(nmp);
 	}

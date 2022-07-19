@@ -542,7 +542,7 @@ struct xvfsconf {
 	char	vfc_name[MFSNAMELEN];	/* filesystem type name */
 	int	vfc_typenum;		/* historic filesystem type number */
 	int	vfc_refcount;		/* number mounted of this type */
-	int	vfc_flags;		/* permanent flags */
+	int	vfc_flags;		/* permanent flags - 永久标志 */
 	struct	vfsconf *vfc_next;	/* next in list */
 };
 
@@ -641,6 +641,10 @@ struct uio;
  * vfs_busy specific flags and mask.
  */
 #define	MBF_NOWAIT	0x01
+/*
+	mount list lock. 从实际使用情况来看，它表示的应该是此时 mount list 锁还未被释放，
+	我们要需要增加一步锁释放操作
+*/
 #define	MBF_MNTLSTLOCK	0x02
 #define	MBF_MASK	(MBF_NOWAIT | MBF_MNTLSTLOCK)
 

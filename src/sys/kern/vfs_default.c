@@ -570,6 +570,7 @@ vop_stdpoll(ap)
 
 /*
  * Return our mount point, as we will take charge of the writes.
+ 		返回我们的装载点，因为我们将负责写入
  */
 int
 vop_stdgetwritemount(ap)
