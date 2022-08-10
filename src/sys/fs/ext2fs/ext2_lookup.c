@@ -841,7 +841,6 @@ found:
 			return (error);
 		*vpp = tdp;
 	}
-
 	/*
 	 * Insert name into cache if appropriate.
 	 */
@@ -895,7 +894,6 @@ ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
 			offset += i;
 			continue;
 		}
-
 		/*
 		 * If an appropriate sized slot has not yet been found,
 		 * check to see if one is available. Also accumulate space
@@ -915,7 +913,6 @@ ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
 				size -= EXT2_DIR_REC_LEN(ep->e2d_namlen);
 			else if (ext2_is_dirent_tail(ip, ep))
 				size -= sizeof(struct ext2fs_direct_tail);
-
 			/* 
 				经过上述处理之后的长度值仍然大于0，这个应该就是处理把两个目录项合并成一个，或者数据块的
 				最后一个目录项成员的情况
@@ -938,7 +935,6 @@ ext2_search_dirblock(struct inode *ip, void *data, int *foundp,
 				}
 			}	// end if (size > 0)
 		}	// 处理当 ssp->slotstatus ！= FOUND，也就是创建、重命名并且是最后一个组件的情况
-	
 		/*
 		 * Check for a name match.
 		 */

@@ -1,0 +1,202 @@
+////////////// 20220808 //////////////
+上周梅潮提出了一个新的文件系统设计思路，就是把虚拟文件也封装成一个类对象，然后挂载根文件系统的时候就是
+  class VirtualFileSystem->mountRoot(class TptFileSystem)
+
+  目前 vfs 层级是通过一个数组将所有类型的文件系统都放到一个队列中处理，貌似队列中的第一个元素就代表根文件系统类型。
+感觉两者的处理方式差不多，只不过一个是通过函数参数直接传递进去，vfs 是通过拿到队列中的第一个元素。
+
+  如果我们要独立设计一个 vfs 类对象，里面包含的应该不是所有的函数，比如 default functions 还是可以放到文件系统基类
+当中。不是特定于某个文件系统的函数，比如 mountroot，就可以放到 vfs 类对象当中
+
+  上周将 class TptFile 类当中的一些简单的成员函数显式定义成了 inline 类型，发现编译的时候会提示： undefined reference to `***``
+造成此类错误的原因是 inline 定义的成员函数的实现一定要跟函数声明在同一个源文件中，也就是都要放在 .h 文件当中
+
+
+  PersistentMemory::initialize (this=0x1102909c0 <persistentMemory>)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/pm/PersistentMemory.cpp:111
+  111	        kc_printf("namei(ndp) error.\n");
+  (gdb) n
+  112	    NDFREE(ndp, NDF_ONLY_PNBUF);
+  (gdb) n
+  113	    devvp = ndp->ni_vp;
+  (gdb) 
+  115	    g_topology_lock();
+  (gdb) p devvp
+  $1 = (vnode *) 0x0
+
+
+  将 tptfs 作为根文件系统，首先要把文件系统对应的持久化内存进行初始化，时机一定要选对，不能在 vfs mountroot() 函数之后。
+因为该函数会调用 tptfs_mount，如果放在后面，就会导致挂载的时候找不到对应的持久化内存区域，panic。但是如果直接放在 mountroot()
+前面，也不行。因为系统加载设备可能需要花一段时间，所以为调用下面这个函数
+
+  vfs_mountroot_wait_if_neccessary()
+
+  从函数命名可以看出，如果必要的话就等待，猜测是等待设备加载完毕。所以，如果持久化内存初始化操作过于靠前，可能会发生找不到设备文件的
+情况。综合考虑，放在 wait_if 函数之后是比较合适的
+
+
+  panic: Fatal page fault at 0x10c3851f8: 0x00000000000050
+  cpuid = 7
+  time = 3
+  KDB: stack backtrace:
+  #0 0x10c179f50 at kdb_backtrace+0x7c
+  #1 0x10c114f50 at vpanic+0x202
+  #2 0x10c114d4a at panic+0x32
+  #3 0x10c019d64 at do_trap_supervisor+0x5da
+  #4 0x10c019860 at do_trap_supervisor+0xd6
+  #5 0x10c004508 at cpu_exception_handler_supervisor+0x68
+  #6 0x10c388f9e at _ZN13TptFileSystem17constructTreeNodeEPciS0_i+0x24e
+  #7 0x10c388c50 at _ZN13TptFileSystem15parseRecordFileEv+0x1b8
+  #8 0x10c38841a at _ZN13TptFileSystem14createFileTreeEv+0x190
+  #9 0x10c387ecc at _ZN13TptFileSystem5mountEP5mount+0x27a
+  #10 0x10c389350 at _Z11tptfs_mountP5mount+0x1c
+  #11 0x10c222cea at resume_all_fs+0xd06
+  #12 0x10c21dd1a at vfs_getopt_pos+0x44a
+  #13 0x10c21c9f8 at vfs_donmount+0xa74
+  #14 0x10c2219e6 at kernel_mount+0x6e
+  #15 0x10c22767e at vfs_mountroot+0x25e4
+  #16 0x10c225f6a at vfs_mountroot+0xed0
+  #17 0x10c22510c at vfs_mountroot+0x72
+  Uptime: 3s
+
+  OpenSBI v0.9
+
+
+////////////// 20220809 //////////////
+  Trying to mount root from tptfs:/dev/vtbd1 []...
+  mountroot: unable to remount devfs under /dev (error 20)
+  mountroot: unable to unlink /dev/dev (error 2)
+  panic: vm_fault_lookup: fault on nofault entry, addr: 0x11414a000
+  cpuid = 7
+  time = 2
+  KDB: stack backtrace:
+  #0 0x10c179f8c at kdb_backtrace+0x7c
+  #1 0x10c114f8c at vpanic+0x202
+  #2 0x10c114d86 at panic+0x32
+  #3 0x10c291bbc at vm_fault+0xdc4
+  #4 0x10c290e9c at vm_fault+0xa4
+  #5 0x10c290c22 at vm_fault_trap+0x86
+  #6 0x10c019c2e at do_trap_supervisor+0x4a4
+  #7 0x10c019860 at do_trap_supervisor+0xd6
+  #8 0x10c004508 at cpu_exception_handler_supervisor+0x68
+  #9 0x10c38ccc8 at _ZN9TptLookup6lookupEP9nameidata+0x2de
+  #10 0x10c389476 at _Z10tpt_lookupP9nameidata+0x24
+  #11 0x10c05ed36 at _ZN9VfsLookup5nameiEP9nameidata+0x29e
+  #12 0x10c061678 at namei+0x1c
+  #13 0x10c249874 at vn_open_cred+0x430
+  #14 0x10c249438 at vn_open+0x40
+  #15 0x10c226cfa at vfs_mountroot+0x1c24
+  #16 0x10c225186 at vfs_mountroot+0xb0
+  #17 0x10c06d646 at mi_startup+0x2294
+  Uptime: 2s
+
+
+  系统打印完 start_init 后阻塞，首先判断是否进入 main 函数，可以在
+    __start
+    main
+    exec
+  等函数处打断点
+
+  i thread 查看进程情况
+
+  通过添加断点可以看到，open_console() 函数已经被调用，就是没有界面显示出来。这个函数回去查找 /dev/console 设备，猜测是没有
+正确找到设备文件，导致 shell 界面加载异常。根本原因应该还是 devfs 挂载异常导致的
+
+
+////////////// 20220810 //////////////
+  (gdb) p* pwd     
+  $12 = {
+    pwd_refcount = 2,
+    pwd_cdir = 0xffffffd00a806d58,
+    pwd_rdir = 0xffffffd00a806d58,
+    pwd_jdir = 0x0
+  }
+  (gdb) bt
+  #0  VfsLookup::namei (this=0x1100db038 <vfsLookup>, ndp=0x11414e688)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsLookup.cpp:508
+  #1  0x000000010c061640 in namei (ndp=0x11414e688)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsLookupWrapper.cpp:15
+  #2  0x000000010c2286e2 in parse_mount_dev_present (dev=0xffffffd00a805f34 "/dev/vtbd0")
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:719
+  #3  0x000000010c228366 in vfs_mountroot_wait_if_neccessary (fs=0xffffffd00a805f30 "ufs", 
+      dev=0xffffffd00a805f34 "/dev/vtbd0")
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:1023
+  #4  0x000000010c227552 in parse_mount (conf=0x11414e8e8)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:770
+  #5  0x000000010c225f6e in vfs_mountroot_parse (sb=0xffffffd00972ef00, mpdevfs=0x1bcada040)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:847
+  #6  0x000000010c225110 in vfs_mountroot ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:1066
+  #7  0x000000010c06d60e in start_init (dummy=0x0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/init_main.cpp:675
+  #8  0x000000010c0b1318 in fork_exit (callout=0x10c06d5e4 <start_init(void*)>, arg=0x0, frame=0x11414ec50)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/kern_fork.cpp:1045
+  #9  0x000000010c004d8e in fork_trampoline ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/swtch.S:385
+
+以 ufs 作为根文件系统挂载时 pwd 当前目录和根目录都是 devfs vnode 类型
+
+
+  #0  VfsLookup::namei (this=0x1100db038 <vfsLookup>, ndp=0x11414e558)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsLookup.cpp:509
+  #1  0x000000010c061640 in namei (ndp=0x11414e558)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsLookupWrapper.cpp:15
+  #2  0x000000010c21dc02 in vfs_domount (td=0x115ab0100, fstype=0xffffffd00a805f00 "ufs", fspath=0xffffffd00a805ee0 "/", 
+      fsflags=16385, optlist=0x11414e718)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mount.cpp:1344
+  #3  0x000000010c21c9fc in vfs_donmount (td=0x115ab0100, fsflags=16385, fsoptions=0x11414e760)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mount.cpp:780
+  #4  0x000000010c2219ea in kernel_mount (ma=0xffffffd00b62bd40, flags=16384)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mount.cpp:2438
+  #5  0x000000010c227682 in parse_mount (conf=0x11414e8e8)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:787
+  #6  0x000000010c225f6e in vfs_mountroot_parse (sb=0xffffffd00972ef00, mpdevfs=0x1bcada040)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:847
+  #7  0x000000010c225110 in vfs_mountroot ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:1066
+  #8  0x000000010c06d60e in start_init (dummy=0x0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/init_main.cpp:675
+  #9  0x000000010c0b1318 in fork_exit (callout=0x10c06d5e4 <start_init(void*)>, arg=0x0, frame=0x11414ec50)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/kern_fork.cpp:1045
+  #10 0x000000010c004d8e in fork_trampoline ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/swtch.S:385
+  Backtrace stopped: frame did not save the PC
+  (gdb) p pwd
+  $27 = (pwd *) 0xffffffd00a803fa0
+  (gdb) p* pwd
+  $28 = {
+    pwd_refcount = 2,
+    pwd_cdir = 0xffffffd00a806d58,
+    pwd_rdir = 0xffffffd00a806d58,
+    pwd_jdir = 0x0
+  }
+
+真正挂载 ufs 作为根文件系统的时候，pwd 跟之前还是一样的
+
+
+  如果不对 vfs lookup 进行修改，仍然采用逐级查找的方式，应该是可以比较好解决跨文件系统访问的问题。但是现在要把 devfs 也加进来，
+或者以后我们要挂载别的文件系统，那么就必须要支持逐级查找的方式。
+
+  原有以逐级查找方式的文件系统作为根文件系统，其实不用考虑设备挂载问题的，因为它们都是遵循同一种查找机制，vfs 已经支持跨文件系统的
+文件访问。但是 tptfs 采用的是直接查找的方法，在不作为根文件系统的情况下是不会存在问题的。但是如果作为根文件系统，那么将会导致兼容性
+问题。
+
+vfs lookup() 与 tptfs lookup() 的关系：
+  1、如果是以逐级查找方式的文件系统作为根文件系统，则 vfs_lookup() 包含 tptfs_lookup()
+  2、如果是以直接查找方式的文件系统作为根文件系统，则 tptfs_lookup() 包含 vfs_lookup()
+所以，目前需要做的工作是将在 vfs_lookup() 函数融入到 tptfs_lookup() 函数中。不要再想着退回到之前的逐级查找方式了！！！
+
+
+为什么 tptfs lookup() 可以在跟现有机制无缝衔接？
+  因为现有的机制会去处理跨文件系统访问的情况，这样当我们访问到一个挂载点的时候，vfs 会帮助我们将一些属性环境构建好，就比如说 mount
+结构和 vnode 对象的替换，即将原有文件系统文件节点对应的 vnode 转换成新挂载的文件系统的 root vnode。这样我们下次再访问的时候就会
+调用新文件系统注册的函数。
+  所以，tptfs 需要做的就是把上述过程反过来，给那些逐级查找的文件系统挂载点构建好初始环境，然后进行跳转
+
+
+通过实际调试和源码阅读，可以发现操作系统是如何处理挂载的：
+  1、首先按照原文件系统的方式找到某个特定的文件节点
+  2、判断该文件节点是不是挂载点
+  3、如果是，进一步判断是否查找属性，即是否支持跨文件系统访问
+  4、如果是，vfs 会提供相应的处理逻辑，将一些基本的数据结构 (mount / vnode) 进行替换，然后在新的文件系统查找后续文件节点
+  5、如果不是，则仍然在原有文件系统中查找文件节点

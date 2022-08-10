@@ -1,256 +1,76 @@
-(gdb) p* nd.ni_vp
-$6 = {
-  v_type = 68,
-  v_irflag = 4,
-  v_seqc = 0,
-  v_nchash = 3166049920,
-  v_op = 0x0,
-  v_data = 0x85d00000000,
-  v_mount = 0x1def73ae8,
-  v_nmntvnodes = {
-    tqe_next = 0x0,
-    tqe_prev = 0x0
+357			stat("/", &stst);
+(gdb) n
+358			root_devno = stst.st_dev;
+(gdb) p stst
+$1 = {
+  st_dev = 18446744071763459841,
+  st_ino = 2,
+  st_nlink = 2,
+  st_mode = 16877,
+  st_padding0 = 0,
+  st_uid = 0,
+  st_gid = 0,
+  st_padding1 = 0,
+  st_rdev = 18446744073709551615,
+  st_atim = {
+    tv_sec = 0,
+    tv_nsec = 0
   },
-  {
-    v_mountedhere = 0x0,
-    v_unpcb = 0x0,
-    v_rdev = 0x0,
-    v_fifoinfo = 0x0
+  st_mtim = {
+    tv_sec = 0,
+    tv_nsec = 0
   },
-  v_hashlist = {
-    le_next = 0x20802c7415,
-    le_prev = 0x0
+  st_ctim = {
+    tv_sec = 0,
+    tv_nsec = 0
   },
-  v_cache_src = {
-    lh_first = 0x1def73a40
+  st_birthtim = {
+    tv_sec = 0,
+    tv_nsec = 0
   },
-  v_cache_dst = {
-    tqh_first = 0xbcb61680,
-    tqh_last = 0x40272100
-  },
-  v_cache_dd = 0xffffff9c,
-  v_lock = {
-    lock_object = {
-      lo_name = 0x1bcb61680 "",
-      lo_flags = 3740744784,
-      lo_data = 1,
-      lo_witness = 0x1def73b40
-    },
-    lk_lock = 4498660330,
-    lk_exslpfail = 0,
-    lk_timo = 0,
-    lk_pri = 484672455
-  },
-  v_interlock = {
-    lock_object = {
-      lo_name = 0x1def73ae0 "\350\002\001\024\001",
-      lo_flags = 201772368,
-      lo_data = 1,
-      lo_witness = 0x1def73ac0
-    },
-    mtx_lock = 0
-  },
-  v_vnlock = 0x2,
-  v_vnodelist = {
-    tqe_next = 0xa8b8000,
-    tqe_prev = 0x1bcb61680
-  },
-  v_lazylist = {
-    tqe_next = 0x0,
-    tqe_prev = 0xffffffff
-  },
-  v_bufobj = {
-    bo_lock = {
-      lock_object = {
-        lo_name = 0xffffffd00beb6c28 "",
-        lo_flags = 2416574464,
-        lo_data = 0,
-        lo_witness = 0x0
-      },
-      rw_lock = 0
-    },
-    bo_ops = 0x11584e4c8,
-    bo_object = 0x1100da840 <__pcpu+256>,
-    bo_synclist = {
-      le_next = 0x1100d8480 <riscvPcpu>,
-      le_prev = 0x1
-    },
-    bo_private = 0x1140112e8,
-    bo_clean = {
-      bv_hd = {
-        tqh_first = 0x1def73b20,
-        tqh_last = 0x10c036624 <RiscvCounter::counter_u64_add(unsigned long*, long)+74>
-      },
-      bv_root = {
-        pt_root = 4630577896
-      },
-      bv_cnt = 335614696
-    },
-    bo_dirty = {
-      bv_hd = {
-        tqh_first = 0x1140112e8,
-        tqh_last = 0x1
-      },
-      bv_root = {
-        pt_root = 0
-      },
-      bv_cnt = -1128916392
-    },
-    bo_numoutput = -1128916368,
-    bo_flag = 1,
-    bo_domain = -554222320,
-    bo_bsize = 1
-  },
-  v_pollinfo = 0x1bcb61a68,
-  v_label = 0x1bcb61680,
-  v_lockf = 0x1def73c30,
-  v_rl = {
-    rl_waiters = {
-      tqh_first = 0x10c0191b6 <syscallenter(thread*)+1746>,
-      tqh_last = 0x1def73c50
-    },
-    rl_currdep = 0xffffffd000f84b00
-  },
-  v_cstart = 4564288488,
-  v_lasta = 202938080,
-  v_lastw = 8035711888,
-  v_clen = 0,
-  v_holdcnt = 0,
-  v_usecount = 0,
-  v_iflag = 0,
-  v_vflag = 0,
-  v_mflag = 19200,
-  v_dbatchcpu = 248,
-  v_writecount = -48,
-  v_seqc_users = -554222656,
-  v_hash = 1
+  st_size = 11776,
+  st_blocks = 0,
+  st_blksize = 4096,
+  st_flags = 0,
+  st_gen = 0,
+  st_spare = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 }
 
 
-(gdb) p* nd.ni_vp
-$7 = {
-  v_type = VDIR,
-  v_irflag = 0,
-  v_seqc = 2,
-  v_nchash = 3146429153,
-  v_op = 0x110035000 <tpt_vnops>,
-  v_data = 0x234003100,
-  v_mount = 0x1bcb6b040,
-  v_nmntvnodes = {
-    tqe_next = 0xffffffd00bf15988,
-    tqe_prev = 0x1bcb6b0c8
+359			if (stat("/dev", &stst) != 0)
+(gdb) 
+361			else if (stst.st_dev == root_devno)
+(gdb) p stst
+$2 = {
+  st_dev = 18446744071763459841,
+  st_ino = 6,
+  st_nlink = 2,
+  st_mode = 16893,
+  st_padding0 = 0,
+  st_uid = 1000,
+  st_gid = 1000,
+  st_padding1 = 0,
+  st_rdev = 18446744073709551615,
+  st_atim = {
+    tv_sec = 1660022420,
+    tv_nsec = 0
   },
-  {
-    v_mountedhere = 0x0,
-    v_unpcb = 0x0,
-    v_rdev = 0x0,
-    v_fifoinfo = 0x0
+  st_mtim = {
+    tv_sec = 1660022420,
+    tv_nsec = 0
   },
-  v_hashlist = {
-    le_next = 0x0,
-    le_prev = 0x1894a2b48
+  st_ctim = {
+    tv_sec = 1660022420,
+    tv_nsec = 0
   },
-  v_cache_src = {
-    lh_first = 0x0
+  st_birthtim = {
+    tv_sec = 0,
+    tv_nsec = 0
   },
-  v_cache_dst = {
-    tqh_first = 0x0,
-    tqh_last = 0xffffffd00bf15bc8
-  },
-  v_cache_dd = 0x0,
-  v_lock = {
-    lock_object = {
-      lo_name = 0x10d0a9afe "tptfs",
-      lo_flags = 116588552,
-      lo_data = 0,
-      lo_witness = 0x0
-    },
-    lk_lock = 7461017216,
-    lk_exslpfail = 0,
-    lk_timo = 6,
-    lk_pri = 96
-  },
-  v_interlock = {
-    lock_object = {
-      lo_name = 0x10d0ff0a5 "vnode interlock",
-      lo_flags = 16973824,
-      lo_data = 0,
-      lo_witness = 0x0
-    },
-    mtx_lock = 0
-  },
-  v_vnlock = 0xffffffd00bf15be0,
-  v_vnodelist = {
-    tqe_next = 0xffffffd00bf15d58,
-    tqe_prev = 0xffffffd00bf15a50
-  },
-  v_lazylist = {
-    tqe_next = 0x0,
-    tqe_prev = 0x0
-  },
-  v_bufobj = {
-    bo_lock = {
-      lock_object = {
-        lo_name = 0x10d0ed6b9 "bufobj interlock",
-        lo_flags = 86179840,
-        lo_data = 0,
-        lo_witness = 0x0
-      },
-      rw_lock = 1
-    },
-    bo_ops = 0x11001c470 <buf_ops_bio>,
-    bo_object = 0x0,
-    bo_synclist = {
-      le_next = 0x0,
-      le_prev = 0x0
-    },
-    bo_private = 0xffffffd00bf15b70,
-    bo_clean = {
-      bv_hd = {
-        tqh_first = 0x0,
-        tqh_last = 0xffffffd00bf15ca0
-      },
-      bv_root = {
-        pt_root = 0
-      },
-      bv_cnt = 0
-    },
-    bo_dirty = {
-      bv_hd = {
-        tqh_first = 0x0,
-        tqh_last = 0xffffffd00bf15cc0
-      },
-      bv_root = {
-        pt_root = 0
-      },
-      bv_cnt = 0
-    },
-    bo_numoutput = 0,
-    bo_flag = 0,
-    bo_domain = 2,
-    bo_bsize = 4096
-  },
-  v_pollinfo = 0x0,
-  v_label = 0x0,
-  v_lockf = 0x0,
-  v_rl = {
-    rl_waiters = {
-      tqh_first = 0x0,
-      tqh_last = 0xffffffd00bf15d08
-    },
-    rl_currdep = 0x0
-  },
-  v_cstart = 0,
-  v_lasta = 0,
-  v_lastw = 0,
-  v_clen = 0,
-  v_holdcnt = 1,
-  v_usecount = 1,
-  v_iflag = 0,
-  v_vflag = 1,
-  v_mflag = 0,
-  v_dbatchcpu = 6,
-  v_writecount = 0,
-  v_seqc_users = 0,
-  v_hash = 2
+  st_size = 512,
+  st_blocks = 8,
+  st_blksize = 4096,
+  st_flags = 0,
+  st_gen = 0,
+  st_spare = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 }

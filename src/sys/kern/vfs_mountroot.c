@@ -314,7 +314,7 @@ vfs_mountroot_devfs(struct thread *td, struct mount **mpp)
 		mp->mnt_opt = opts;
 
 		/*
-			先加锁，然后再多mountlist进行操作，说明它会关联到多线程应用场景；mountlist就是
+			先加锁，然后再多mountlist进行操作，说明它会关联到多线程应用场景；mountlist 就是
 			管理系统中所有挂载的文件系统
 			这里是把 devfs mp 插入到了链表的起始位置，tptfs 是否可以将其插入到链表尾部，读取
 			的时候从最后尾部获取数据
@@ -352,7 +352,7 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 		mporoot: mount pointer old root
 		也就是收新的根文件系统是在 devfs 后面的一个 mount 结构
 	*/
-	mpnroot = TAILQ_NEXT(mpdevfs, mnt_list); // mpdevfs下一个文件系统就是rootfs
+	mpnroot = TAILQ_NEXT(mpdevfs, mnt_list); // mpdevfs下一个文件系统就是 rootfs
 
 	/* Shuffle the mountlist. */
 	mtx_lock(&mountlist_mtx);
@@ -400,6 +400,9 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 	set_rootvnode();
 	cache_purgevfs(rootvnode->v_mount, true);
 
+	/*
+		从调试的过程来看，mporoot 其实就是 devfs，所以它跟 mpdevfs 是同一个对象。
+	*/
 	if (mporoot != mpdevfs) {
 		/* Remount old root under /.mount or /mnt */
 		fspath = "/.mount";
@@ -437,6 +440,10 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 
 	/* Remount devfs under /dev */
 	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, "/dev", td);
+	/*
+		这里查找输出的是我们所要挂载的根文件系统中对应的根目录和 dev 对应的 vnode，
+		而不是 devfs vnode 对象。后面可能会进行替换
+	*/
 	error = namei(&nd);
 	if (!error) {
 		vp = nd.ni_vp;

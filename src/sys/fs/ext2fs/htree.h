@@ -85,7 +85,7 @@ struct ext2fs_htree_entry {
 
 /*
  * This goes at the end of each htree block.
-	如果文件系统支持 checksum 属性的话，这个还是有用的
+		如果文件系统支持 checksum 属性的话，这个还是有用的
  */
 struct ext2fs_htree_tail {
 	uint32_t ht_reserved;	/* 保留项 */
@@ -135,7 +135,8 @@ struct ext2fs_htree_root {
 };
 
 /*
-	Interior nodes of an htree are recorded as struct htree_node, which is also the full length of a data block
+	Interior nodes of an htree are recorded as struct htree_node, which is also
+	the full length of a data block.
 	htree 的内部节点记录为struct htree_node，也是数据块的全长
 */
 struct ext2fs_htree_node {

@@ -269,7 +269,7 @@ ext2_htree_hash(const char *name, int len,
 		memcpy(hash, hash_seed, sizeof(hash));
 
 	/* 
-		根据不同的hash版本信息，获取 major 和 minor 
+		根据不同的hash版本信息，获取 major 和 minor
 	*/
 	switch (hash_version) {
 	case EXT2_HTREE_TEA_UNSIGNED:

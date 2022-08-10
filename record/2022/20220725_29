@@ -1,0 +1,158 @@
+////////////// 20220725 //////////////
+  goldfish_rtc0: providing initial system time
+  start init
+  # ufs_lookup: /etc/malloc.conf
+  # ufs_lookup: /etc/malloc.conf
+  ufs_lookup: /etc/login.conf
+  ufs_lookup: /etc/login.conf.db
+  ufs_lookup: /etc/rc
+  # ufs_lookup: /usr/share/locale/en/LC_MESSAGES/tcsh.cat
+  # ufs_lookup: /usr/share/locale/en/LC_MESSAGES/tcsh.cat
+  # ufs_lookup: /usr/share/locale/en/LC_MESSAGES/tcsh.cat
+  # ufs_lookup: /usr/share/locale/en/LC_MESSAGES/tcsh.cat
+  # ufs_lookup: /usr/share/nls/C/tcsh.cat
+  # ufs_lookup: /usr/share/nls/C/tcsh.cat
+  # ufs_lookup: /usr/share/nls/C/tcsh.cat
+  # ufs_lookup: /usr/share/nls/tcsh/C
+  # ufs_lookup: /usr/local/share/nls/C/tcsh.cat
+  # ufs_lookup: /usr/local/share/nls/C/tcsh.cat
+  ufs_lookup: /etc/nsswitch.conf
+  ufs_lookup: /etc/spwd.db
+  ufs_lookup: /etc/group
+  ufs_lookup: /etc/csh.cshrc
+  ufs_lookup: /sbin
+  ufs_lookup: /bin
+  ufs_lookup: /usr/sbin
+  ufs_lookup: /usr/bin
+  # ufs_lookup: /.tcshrc
+  ufs_lookup: /.cshrc
+  ufs_lookup: /usr/local/sbin
+  ufs_lookup: /usr/local/bin
+  # ufs_lookup: /.history
+  # ufs_lookup: //.terminfo
+  # ufs_lookup: /home/neptune/Downloads/ncurses-6.3/build/share/terminfo
+  # ufs_lookup: usr/home/neptune/Downloads/ncurses-6.3/build/share/terminfo
+  # ufs_lookup: usr/home/neptune/Downloads/ncurses-6.3/build/share/terminfo
+  # ufs_lookup: /var/mail/root
+  # ufs_lookup: /var/mail/root
+  # ufs_lookup: /var/mail/root
+  # ufs_lookup: /etc/localtime
+  ufs_lookup: /usr/share/zoneinfo/UTC
+  ufs_lookup: /usr/share/zoneinfo/UTC
+  ufs_lookup: /usr/share/zoneinfo/posixrules
+  root@:~ # 
+
+
+////////////// 20220726 //////////////
+C++ 逐行读取文件数据相关参考：
+  https://q.cnblogs.com/q/111075/
+  https://zhuanlan.zhihu.com/p/354962025
+
+
+////////////// 20220727 //////////////
+分支预测与流水线：
+  https://zhuanlan.zhihu.com/p/22469702
+  https://blog.51cto.com/u_15301988/5180860
+
+
+////////////// 20220728 //////////////
+  Write done!
+  inode number: 3
+  file size: 198
+  block used: 1
+  file type: 32768
+  virtual page:
+  131598	
+
+  inode number: 4
+  file size: 0
+  block used: 0
+  file type: 16384
+  virtual page:
+
+
+  inode number: 5
+  file size: 52
+  block used: 1
+  file type: 32768
+  virtual page:
+  131579	
+
+  inode number: 6
+  file size: 628
+  block used: 1
+  file type: 32768
+  virtual page:
+  131580	
+
+  inode number: 7
+  file size: 7106
+  block used: 2
+  file type: 32768
+  virtual page:
+  131581	131582	
+
+  inode number: 8
+  file size: 16384
+  block used: 4
+  file type: 32768
+  virtual page:
+  131583	131584	131585	131586	
+
+  inode number: 9
+  file size: 272
+  block used: 1
+  file type: 32768
+  virtual page:
+  131587	
+
+  inode number: 10
+  file size: 0
+  block used: 0
+  file type: 16384
+  virtual page:
+
+
+  inode number: 11
+  file size: 40960
+  block used: 10
+  file type: 32768
+  virtual page:
+  131588	131589	131590	131591	131592	131593	131594	131595	131596	131597	
+
+  inode number: 12
+  file size: 0
+  block used: 0
+  file type: 16384
+  virtual page:
+
+
+  inode number: 13
+  file size: 0
+  block used: 0
+  file type: 16384
+  virtual page:
+
+
+  inode number: 14
+  file size: 0
+  block used: 0
+  file type: 16384
+  virtual page:
+
+
+  magic number: 8224
+  free pages: 32241
+  free inodes: 8051
+  format inodes used: 14
+  format pages used: 20
+
+  Test Done!
+
+
+////////////// 20220729 //////////////
+各种标点符号的英文单词参考
+  http://www.360doc.com/content/18/0703/12/43682464_767336600.shtml
+
+  # - hyphen
+  / - virgule

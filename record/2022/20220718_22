@@ -1,0 +1,230 @@
+////////////// 20220718 //////////////
+  tptfs 需要提供一种能够通过利用磁盘上已经存放的数据反向构造文件注册表的功能。正常情况下，该功能主要用在根文件系统的构建；
+异常情况下，可以恢复上一个 snapshot 下的文件系统的状态
+
+  SerenityOS 提供的思路是，对磁盘文件系统中的一些基本数据结构都对应创建一个类，将原有对结构体的操作转换成为类实例的操作。
+这个其实就是原来讨论过的 tptfs 采用直接查找还是逐级查找的问题。SerenityOS 文件系统设计方法的好处是，所有的类都会在磁盘
+上对应有一个结构体，我们可以直接使用原有磁盘文件系统磁盘格式化方法构造根文件系统
+
+  tptfs 目前只保留了 inode，对应文件组织层次方面的结构体 (例如 struct dir_entry) 都已经删除。所以只能依靠持久化机制
+将文件类实例全部同步到磁盘，这样才能保存整个系统的文件树。采用这种方式就会使得根文件系统的构造比较麻烦，需要我们自己重新写
+一个格式化程序
+
+  所以，核心问题是什么？ 就是在磁盘中以一种较为简单的方式，保留一份能够描述操作系统文件组织结构的数据。目录项其实就是起到了
+这么一个功能，tptfs 开发过程中只考虑到了其文件查找的属性，忽视了它在根文件系统构造方面的作用
+
+
+root@qemu:~/ext2 # ls -al
+total 17
+drwxr-xr-x  3 root  wheel   1024 Jul 18 07:46 .
+drwxr-x---  5 root  wheel    512 Jul 18 07:45 ..
+-rw-r--r--  1 root  wheel      0 Jul 18 07:45 a
+drwx------  2 root  wheel  12288 Jul 18 07:43 lost+found
+
+  (gdb) p* ip
+  $29 = {
+    i_vnode = 0xffffffd006ec8b70,
+    i_ump = 0xffffffd006e39e80,
+    i_flag = 0,
+    i_number = 2,
+    i_e2fs = 0xffffffd002cf7c00,
+    i_modrev = 361652740286,
+    i_count = 1000,
+    i_endoff = 1024,
+    i_diroff = 0,
+    i_offset = 24,
+    i_block_group = 0,
+    i_next_alloc_block = 0,
+    i_next_alloc_goal = 0,
+    i_mode = 16877,
+    i_nlink = 3,
+    i_uid = 0,
+    i_gid = 0,
+    i_size = 1024,
+    i_blocks = 2,
+    i_atime = 1658130187,
+    i_mtime = 1658130360,
+    i_ctime = 1658130360,
+    i_birthtime = 0,
+    i_mtimensec = 492519000,
+    i_atimensec = 0,
+    i_ctimensec = 492519000,
+    i_birthnsec = 0,
+    i_gen = 0,
+    i_facl = 0,
+    i_flags = 0,
+    {
+      {
+        i_db = {773, 0 <repeats 11 times>},
+        i_ib = {0, 0, 0}
+      },
+      i_data = {773, 0 <repeats 14 times>}
+    },
+    i_ext_cache = {
+      ec_start = 0,
+      ec_blk = 0,
+      ec_len = 0,
+      ec_type = 0
+    }
+  }
+
+
+root@qemu:~/ext2 # ls -al
+total 5
+drwxr-xr-x  2 root  wheel  1024 Jul 18 07:46 .
+drwxr-x---  5 root  wheel   512 Jul 18 07:45 ..
+-rw-r--r--  1 root  wheel     0 Jul 18 07:45 a
+
+  (gdb) p ip
+  $28 = (struct inode *) 0xffffffd006dde000
+  (gdb) p* ip
+  $29 = {
+    i_vnode = 0xffffffd006ec8b70,
+    i_ump = 0xffffffd006e39e80,
+    i_flag = 0,
+    i_number = 2,
+    i_e2fs = 0xffffffd002cf7c00,
+    i_modrev = 361652740286,
+    i_count = 1000,
+    i_endoff = 1024,
+    i_diroff = 0,
+    i_offset = 24,
+    i_block_group = 0,
+    i_next_alloc_block = 0,
+    i_next_alloc_goal = 0,
+    i_mode = 16877,
+    i_nlink = 3,
+    i_uid = 0,
+    i_gid = 0,
+    i_size = 1024,
+    i_blocks = 2,
+    i_atime = 1658130187,
+    i_mtime = 1658130360,
+    i_ctime = 1658130360,
+    i_birthtime = 0,
+    i_mtimensec = 492519000,
+    i_atimensec = 0,
+    i_ctimensec = 492519000,
+    i_birthnsec = 0,
+    i_gen = 0,
+    i_facl = 0,
+    i_flags = 0,
+    {
+      {
+        i_db = {773, 0 <repeats 11 times>},
+        i_ib = {0, 0, 0}
+      },
+      i_data = {773, 0 <repeats 14 times>}
+    },
+    i_ext_cache = {
+      ec_start = 0,
+      ec_blk = 0,
+      ec_len = 0,
+      ec_type = 0
+    }
+  }
+
+
+  root@qemu:~/ext2 # ls -al
+  total 6
+  drwxr-xr-x  3 root  wheel  1024 Jul 18 08:10 .
+  drwxr-x---  5 root  wheel   512 Jul 18 07:45 ..
+  -rw-r--r--  1 root  wheel     0 Jul 18 08:09 a
+  drwxr-xr-x  2 root  wheel  1024 Jul 18 08:10 b
+
+  (gdb) p* ip
+  $31 = {
+    i_vnode = 0xffffffd006eab1e8,
+    i_ump = 0xffffffd006df6a00,
+    i_flag = 0,
+    i_number = 2,
+    i_e2fs = 0xffffffd002cf5c00,
+    i_modrev = 606350248338,
+    i_count = 1000,
+    i_endoff = 1024,
+    i_diroff = 0,
+    i_offset = 24,
+    i_block_group = 0,
+    i_next_alloc_block = 0,
+    i_next_alloc_goal = 0,
+    i_mode = 16877,
+    i_nlink = 3,
+    i_uid = 0,
+    i_gid = 0,
+    i_size = 1024,
+    i_blocks = 2,
+    i_atime = 1658130187,
+    i_mtime = 1658131809,
+    i_ctime = 1658131809,
+    i_birthtime = 0,
+    i_mtimensec = 304931000,
+    i_atimensec = 0,
+    i_ctimensec = 304931000,
+    i_birthnsec = 0,
+    i_gen = 0,
+    i_facl = 0,
+    i_flags = 0,
+    {
+      {
+        i_db = {773, 0 <repeats 11 times>},
+        i_ib = {0, 0, 0}
+      },
+      i_data = {773, 0 <repeats 14 times>}
+    },
+    i_ext_cache = {
+      ec_start = 0,
+      ec_blk = 0,
+      ec_len = 0,
+      ec_type = 0
+    }
+  }
+
+
+////////////// 20220719 //////////////
+修改 struct dir_entry 的行为，由原来的逐级查找变成直接查找
+
+ext2fs 关于目录项的一些设计:
+  1、在 lookup() 中，目录项行为大致分成两种，一种是单纯的查找，判断目标文件是不是真的存在；第二种是 create，它不仅仅要
+    判断目标文件是否存在，而且如果不存在的话，还要将可用的 slot 信息标记出来
+  2、默认情况下是通过从头遍历来查找是否有存在目标文件；如果 namecache 介入的话，好像是可以从上次查找结束的地方继续向后查找，
+    可以节省时间上的花销 (只是猜测)
+
+  ext2 lookup() 函数中，不管执行的是创建、重命名或者简单查找，都会遍历目录项，查询目标文件是否存在。只不过创建或者重命名操作
+会再将可用 slot 信息一并返回。
+
+  tptfs 应该是不需要做两遍的检查的，两者应该是相互配合的关系：
+    - 首先还是通过绝对路径查找判断目标文件是否存在。如果不存在的话，其实就没必要再去遍历目录项列表，entry 肯定是没有的
+    - 如果存在的话，再去判断是什么操作。如果是简单的查找操作，不需要更新 inode 中的字段 (namecache?)；如果涉及到文件的创建
+      或者删除，那就要遍历整个目录项列表。因为如果是创建操作，我们需要找到可用 slot；如果是删除操作，我们需要知道被删除的文件
+      对应的目录项在哪
+
+
+////////////// 20220720 //////////////
+  如果将目录项重新添加，那么对应文件大小的计算一定要注意，这个很可能会影响目录 htree 的建立。并且还要确认一个问题，那就是
+index_block 是不是会包含在 inode 索引数组当中
+
+
+////////////// 20220721 //////////////
+  对目录项进行删除的时候，我们要注意该目录项所在的位置。如果该目录项刚好在一个数据块的起始位置，那么我们就要创建一个空目录项，
+然后指向下一个目录或者是该数据块的结尾。这样，我们才能保证可以根据 ren_len 连续获取 dir_entry 数据
+
+
+////////////// 20220722 //////////////
+  从 ext2fs 代码实现来看，当需要获取目录文件的某个数据块的时候，都是直接调用 ext2_blkoff() 函数通过偏移量直接读取数据到 buf，
+ext2_readdir() 函数中的实现也是一样的。可以从侧面反映出 htree index block 应该不会包含在 inode 索引数组当中
+
+  将类的一些操作比较简单的成员函数设置成 inline
+
+
+////////////// 二叉树深度优先遍历 //////////////
+前序遍历、中序遍历和后序遍历都是属于深度优先遍历的一种，从算法方面来看，它们三个都是包含有三个步骤：
+  1、访问节点数据 - V
+  2、访问左子节点 - L
+  3、访问右子节点 - R
+
+  前序遍历 - VLR
+  后序遍历 - LRV
+  中序遍历 - LVR
+
+  可以看到，它们之间的区别就是访问节点数据的时机。然后都是先左后右访问子节点。采用非递归算法的话，一般是用栈来实现。栈是先进后出，
+所以要先对右子节点压栈，然后在对左子节点压栈

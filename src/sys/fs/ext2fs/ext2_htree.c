@@ -198,6 +198,10 @@ ext2_htree_set_limit(struct ext2fs_htree_entry *ep, uint16_t limit)
 	((struct ext2fs_htree_count *)(ep))->h_entries_max = limit;
 }
 
+/*
+	struct ext2fs_htree_lookup_info 应该只是在文件查找时候会用到的临时数据对象，并不会
+	同步到磁盘当中，所以即使移植到 tptfs 当中，使用 buf 也是不会有任何问题的
+*/
 static void
 ext2_htree_release(struct ext2fs_htree_lookup_info *info)
 {
@@ -211,13 +215,6 @@ ext2_htree_release(struct ext2fs_htree_lookup_info *info)
 	}
 }
 
-/*
-	在上级函数调用过程中，len 传进来的是 ext2fs_htree_root_info 的 info_len，再加上减去的
-	. 和 .. 两个目录项的长度，可以大致推测出来目录项第一个数据块中的内容：
-		./
-		../
-		struct ext2fs_htree_root_info
-*/
 static uint32_t
 ext2_htree_root_limit(struct inode *ip, int len)
 {
@@ -225,16 +222,20 @@ ext2_htree_root_limit(struct inode *ip, int len)
 	uint32_t space;
 
 	fs = ip->i_e2fs;
+	/*
+		space = block size - sizeof(got) - sizeof(dotdot) - sizeof(root_info)
+	*/
 	space = ip->i_e2fs->e2fs_bsize - EXT2_DIR_REC_LEN(1) -
 	    EXT2_DIR_REC_LEN(2) - len;
-
 	/* 
 		如果有 tail 的话，还要把 tail 的所占用的空间给删掉。这个其实也是判断 csum 属性获知文件系统
 		是否支持
 	*/
 	if (EXT2_HAS_RO_COMPAT_FEATURE(fs, EXT2F_ROCOMPAT_METADATA_CKSUM))
 		space -= sizeof(struct ext2fs_htree_tail);
-
+	/*
+		返回的是剩余空间所能包含的 struct ext2fs_htree_entry 的数量
+	*/
 	return (space / sizeof(struct ext2fs_htree_entry));
 }
 
@@ -283,11 +284,9 @@ ext2_htree_find_leaf(struct inode *ip, const char *name, int namelen,
 	vp = ITOV(ip);
 	fs = ip->i_e2fs->e2fs;
 	m_fs = ip->i_e2fs;
-
 	/*
 		通过逻辑块号读取对应磁盘上的数据块。需要注意的是，逻辑块号这里直接指定的是0，说明读取的是第一个逻辑块。
 		根据文档中的说明可以看到，root 节点的信息是保存在第一个逻辑块当中的
-
 		奇海 newtpt 工具的执行流程可能需要改一下，目前采用的方式是直接将目录项信息写入，没有这里 htree 的信息，是否
 		需要补充上呢？ 其他数据块是否也需要相应的做一些处理？
 		观察 ext2fs_htree_root 结构体设计可以看出，前面的字段就是按照目录项在磁盘块中排布进行的。从这里其实也可以反向
@@ -296,8 +295,10 @@ ext2_htree_find_leaf(struct inode *ip, const char *name, int namelen,
 	if (ext2_blkatoff(vp, 0, NULL, &bp) != 0)
 		return (-1);
 
-	/* ext2fs_htree_lookup_info 应该就是对查找信息的一个封装 */
-	info->h_levels_num = 1;	/* 表示 h_levels 数组中已有元素的数量？ */
+	/*
+		这里直接设定进行一级节点查找，目的是为了获取 htree root 节点信息
+	*/
+	info->h_levels_num = 1;
 	info->h_levels[0].h_bp = bp;
 	rootp = (struct ext2fs_htree_root *)bp->b_data;	/* 获取根节点信息 */
 
@@ -311,16 +312,17 @@ ext2_htree_find_leaf(struct inode *ip, const char *name, int namelen,
 	if (hash_version <= EXT2_HTREE_TEA)
 		hash_version += m_fs->e2fs_uhash;
 	*hash_ver = hash_version;	/* 这里处理需要返回给上级的 hash version */
-
 	/*
 		在数据块中的目录项的 hash 值是顺序排布的。通过 hash_major 和 hash_minor 就可以判断当前
 		所要查找的 hash 是否在所包含的范围之内。要注意的是这里计算的是要查找的那个目录项的 hash 值
 	*/
 	ext2_htree_hash(name, namelen, fs->e3fs_hash_seed,
 	    hash_version, &hash_major, &hash_minor);
-	/* 将 hash 进行赋值 */
+	/* 
+		注意 ext2_htree_hash() 函数返回的是两个值，一个是 hash_major，一个是 hash_minor。但是赋值用的
+		只是 hash_major
+	*/
 	*hash = hash_major;
-
 	/* 
 		目前来看，目录项不会包含特别多的数据，所以两级查找完全是够了的。在设计 ext2 hash tree 的时候作者考虑到了这一点，
 		对查找等级做了一些限制。如果奇海操作系统中的目录项规模比较大，就可以在这里把查找等级放开
@@ -331,7 +333,6 @@ ext2_htree_find_leaf(struct inode *ip, const char *name, int namelen,
 	/* entry pointer 应该是指向 ext2fs_htree_root 中的 ext2fs_htree_entry 类型数组的第一个元素 */
 	entp = (struct ext2fs_htree_entry *)(((char *)&rootp->h_info) +
 	    rootp->h_info.h_info_len);
-
 	/*
 		ext2_htree_get_limit: 判断 entry 数量的最大值
 		ext2_htree_root_limit: 计算除去 . / .. / info 之后数据块剩余空间的大小。这里就从侧面验证了目录项
@@ -341,16 +342,17 @@ ext2_htree_find_leaf(struct inode *ip, const char *name, int namelen,
 	if (ext2_htree_get_limit(entp) !=
 	    ext2_htree_root_limit(ip, rootp->h_info.h_info_len))
 		goto error;
-	
 	/*
 		上面的代码逻辑更多的还是针对root节点来的，但是从函数命名来看，它的功能其实是查找页节点。所以还是按照正常
 		的步骤从根节点处一步步往下找，所以下面的while循环才是整个函数的重点内容
 	*/
 	while (1) {
-		cnt = ext2_htree_get_count(entp);	/* 判断第一个 entry 所拥有的子 entry 的数量 */
+		/*
+			从这里可以看出，ext2_htree_get_count() 函数获取的应该是该 header 下所包含的 htree_entry 总个数。
+		*/
+		cnt = ext2_htree_get_count(entp);
 		if (cnt == 0 || cnt > ext2_htree_get_limit(entp))
 			goto error;
-
 		/* entp 是 struct ext2fs_htree_entry* 类型，+1直接跳转到下一项(第一个entry表示的可能是它本身) */
 		start = entp + 1;
 		end = entp + cnt - 1;
@@ -370,7 +372,7 @@ ext2_htree_find_leaf(struct inode *ip, const char *name, int namelen,
 
 		level_info = &(info->h_levels[info->h_levels_num - 1]);
 		level_info->h_bp = bp;
-		/* 
+		/*
 			entp 指向数据块中的 entry 数据的起始位置，一直没有被改变。所以 level_info->h_entries 表示的是
 			数据块中 entry 组的起始位置
 		*/
@@ -393,7 +395,6 @@ ext2_htree_find_leaf(struct inode *ip, const char *name, int namelen,
 		info->h_levels_num++;
 		info->h_levels[info->h_levels_num - 1].h_bp = bp;
 	}	// end while
-
 	/*
 		经过上面的循环可知，htree 查找数据全部都放到了 info 当中，上层的函数就可以通过收集到的信息进行查找
 	*/
@@ -438,9 +439,7 @@ ext2_htree_lookup(struct inode *ip, const char *name, int namelen,
 	m_fs = ip->i_e2fs;
 	bsize = m_fs->e2fs_bsize;
 	vp = ITOV(ip);
-
 	/* TODO: print error msg because we don't lookup '.' and '..' */
-
 	memset(&info, 0, sizeof(info));
 	/*
 		通过 find_leaf 函数，我们把要查找的叶结点的信息保存到了 dirhash / hash_version / info 之中。
@@ -449,7 +448,6 @@ ext2_htree_lookup(struct inode *ip, const char *name, int namelen,
 	if (ext2_htree_find_leaf(ip, name, namelen, &dirhash,
 	    &hash_version, &info))
 		return (-1);
-
 	/*
 		通过 find_leaf 函数将查找信息保存到 info 当中，用于后续对叶节点的查找。
 		这个函数的除了 find leaf 函数之外的主要代码逻辑就是这个 while 循环了，所以重点关注这个循环做了哪些操作
@@ -464,7 +462,6 @@ ext2_htree_lookup(struct inode *ip, const char *name, int namelen,
 			ext2_htree_release(&info);
 			return (-1);
 		}
-
 		*offp = blk * bsize;	// offset pointer，应该是距离目录文件起始位置的偏移
 		*entryoffp = 0;
 		*prevoffp = blk * bsize;
@@ -486,7 +483,6 @@ ext2_htree_lookup(struct inode *ip, const char *name, int namelen,
 			ext2_htree_release(&info);
 			return (-1);
 		}
-
 		/* 
 			found 是我们查找到 entry 的标志。如果找到的话，就直接返回 buf 并且释放掉 info；
 			如果没有找到的话，执行下面的代码分支，即 ext2_htree_check_next。如果遍历完成之后
@@ -579,13 +575,19 @@ ext2_htree_insert_entry_to_level(struct ext2fs_htree_lookup_level *level,
 
 /*
  * Insert an index entry to the index node.
+		注意这里传入的参数是 lookup_info，而不是 root_info
  */
 static void
 ext2_htree_insert_entry(struct ext2fs_htree_lookup_info *info,
     uint32_t hash, uint32_t blk)
 {
 	struct ext2fs_htree_lookup_level *level;
-
+	/*
+		注意 info->h_levels_num - 1 这个参数，我们当前处理的层次等级是 h_levels_num，
+		然后插入新的 entry 的时候操作的是 -1 层级(也就是上一层级)。从这里我们可以看出，
+		lookup_info 保存的就是查找信息，然后每个层级的信息放到 lookup_level 数组当中。
+		要确认一下 h_levels_num 的含义，是总的查找等级数还是当前处理的查找等级
+	*/
 	level = &info->h_levels[info->h_levels_num - 1];
 	ext2_htree_insert_entry_to_level(level, hash, blk);
 }
@@ -664,14 +666,12 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 
 	if (EXT2_HAS_RO_COMPAT_FEATURE(fs, EXT2F_ROCOMPAT_METADATA_CKSUM))
 		csum_size = sizeof(struct ext2fs_direct_tail);
-
 	/*
 	 * Calculate name hash value for the entry which is to be added.
 	 * 利用新创建的目录项的名字计算该项的 hash 值，并保存到 entry_hash 当中，在数据块拆分中会使用到
 	 */
 	ext2_htree_hash(entry->e2d_name, entry->e2d_namlen, hash_seed,
 	    hash_version, &entry_hash, NULL);
-
 	/*
 	 * Fill in directory entry sort descriptors.
 	 * ep 指向 block1，这里把所有的目录项成员的 hash 都计算了出来，放到 sort_info 项当中
@@ -689,14 +689,12 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 		ep = (struct ext2fs_direct_2 *)
 		    ((char *)ep + ep->e2d_reclen);
 	}
-
 	/*
 	 * Sort directory entry descriptors by name hash value.
 	 * 上面把所有的目录项成员hash值都计算出来了，下面开始对这些 hash 值进行排序
 	 */
 	qsort(sort_info, entry_cnt, sizeof(struct ext2fs_htree_sort_entry),
 	    ext2_htree_cmp_sort_entry);
-
 	/*
 	 * Count the number of entries to move to directory block 2.
 	 * 计算需要转移到 block2 的目录项的个数，注意 sort_info 目前已经是顺序排列了。
@@ -709,14 +707,12 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 	}
 
 	*split_hash = sort_info[i + 1].h_hash;
-
 	/*
 	 * Set collision bit.
 	 * 如果处于中间的两个目录项的 hash 值刚好相等，那就将 split_hash 自加1
 	 */
 	if (*split_hash == sort_info[i].h_hash)
 		*split_hash += 1;
-
 	/*
 	 * Move half of directory entries from block 1 to block 2.
 	 */
@@ -731,7 +727,6 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 		dest += entry_len;
 	}
 	dest -= entry_len;
-
 	/* Shrink directory entries in block 1. 
 		收缩块1中的目录项
 	*/
@@ -749,6 +744,9 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 		}
 	}
 
+	/*
+		entry_hash 和 entry 表示的是需要新添加的目录项，而不是原有的、已经存在在目录中的 entry
+	*/
 	if (entry_hash >= *split_hash) {
 		/* Add entry to block 2. */
 		ext2_append_entry(block2, blksize,
@@ -774,7 +772,7 @@ ext2_htree_split_dirblock(struct inode *ip, char *block1, char *block2,
 }
 
 /*
- * Create an HTree index for a directory
+ * Create an HTree index for a directory.
  */
 int
 ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
@@ -796,7 +794,6 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	char *buf1 = NULL;
 	char *buf2 = NULL;
 	int error = 0;
-
 	/*
 		dp 有可能一开始并不是空的目录，里面可能已经包含有 entry?
 	*/
@@ -807,14 +804,12 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 
 	buf1 = malloc(blksize, M_TEMP, M_WAITOK | M_ZERO);
 	buf2 = malloc(blksize, M_TEMP, M_WAITOK | M_ZERO);
-
 	/*
 		root node 并不是对应系统的根节点，而是对应于某个目录项。所以这里还是读取的目录项
 		对应的第一个逻辑块数据
 	*/
 	if ((error = ext2_blkatoff(vp, 0, NULL, &bp)) != 0)
 		goto out;
-
 	/* 
 		第一个逻辑块就是对应 root 节点。从这里可以看出，每个目录项的第一个数据块应该都是 htree_root，
 		并且此时数据块中已经填充了对应的数据。所以肯定是在此之前的某个函数完成了写入操作
@@ -827,6 +822,10 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 		从这里可以看出，dotdot->e2d_reclen 不应该被设置为数据块剩余长度，就是它本身的长度。所以 tptfs 目前对于目录项信息
 		的设置需要修改；
 		此时 ep 在这里指向的 root info 的起始地址，dirlen 表示的数据块除去 . 和 .. 两个目录项成员所占空间后剩余空间的大小
+
+		这里应该是要考虑两种情况，第一种情况是目录是空目录，只有 dot 和 dotdot 两个目录项。此时 dotdot->e2d_reclen 应该是
+		block_size - 12，此时 dirlen = 0 (需要进一步确认)；另外一种情况就是非空目录的情况，此时 dotdot->e2d_reclen = 12,
+		那么 dirlen 就是除去 dot 和 dotdot 目录项之后剩余数据块空间大小
 	*/
 	ep = (struct ext2fs_direct_2 *)((char *)dotdot + dotdot->e2d_reclen);
 	dirlen = (char *)root + blksize - (char *)ep;
@@ -837,7 +836,6 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	*/
 	memcpy(buf1, ep, dirlen);
 	ep = (struct ext2fs_direct_2 *)buf1;
-
 	/*
 		从代码逻辑可以看出，原来这个数据块中的数据貌似就是线性存储的方式，然后这里将除了 . 和 .. 两个目录项
 		的其他所有数据都拷贝到了缓存，利用对缓存处理的结果再对 root node 中的元素进行赋值；
@@ -851,16 +849,13 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 		ep = (struct ext2fs_direct_2 *)
 		    ((char *)ep + ep->e2d_reclen);
 	ep->e2d_reclen = buf1 + blksize - (char *)ep;
-
 	/*
 		要注意这一步操作，在 ext2_htree_create_index 执行的过程中将 inode flag 设置为 hash index。
 		而不能直接手动进行操作。
 	*/
 	dp->i_flag |= IN_E3INDEX;
-
 	/*
 	 * Initialize index root.
-	 * 
 	 * .. 的目录项长度还是要设置为除去 . 之后剩余空间的长度
 	 */
 	dotdot->e2d_reclen = blksize - EXT2_DIR_REC_LEN(1);
@@ -868,7 +863,9 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	root->h_info.h_hash_version = fs->e3fs_def_hash_version;
 	root->h_info.h_info_len = sizeof(root->h_info);
 	/*
-		设置第一个 ext2fs_htree_entry，表示的应该就是 root node 的相关信息
+		设置第一个 ext2fs_htree_entry，表示的应该就是 root node 的相关信息；
+		count 和 limit 共同组成了 hash，block 表示的应该就是在文件中的逻辑块号。count 为什么要设置为1？
+		貌似是因为 root_info 自己也要被包含在 entries 当中，是第一个 entry？
 	*/
 	ext2_htree_set_block(root->h_entries, 1);
 	ext2_htree_set_count(root->h_entries, 1);
@@ -876,7 +873,10 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	    ext2_htree_root_limit(dp, sizeof(root->h_info)));
 
 	memset(&info, 0, sizeof(info));
-	info.h_levels_num = 1;	/* 表示当前的搜索等级数组中只有一个元素 */
+	info.h_levels_num = 1;
+	/*
+		此时 lookup_info 中的字段都是指向 root_info
+	*/
 	info.h_levels[0].h_entries = root->h_entries;
 	info.h_levels[0].h_entry = root->h_entries;
 	hash_version = root->h_info.h_hash_version;
@@ -885,12 +885,12 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	*/
 	if (hash_version <= EXT2_HTREE_TEA)
 		hash_version += m_fs->e2fs_uhash;
-	
-	/* new_entry 表示的是最新的需要创建的目录项成员 */
+	/*
+		new_entry 表示的是最新的需要创建的目录项成员
+	*/
 	ext2_htree_split_dirblock(dp, buf1, buf2, blksize, fs->e3fs_hash_seed,
 	    hash_version, &split_hash, new_entry);
 	ext2_htree_insert_entry(&info, split_hash, 2);
-
 	/*
 	 * Write directory block 0.
 	 */
@@ -904,7 +904,6 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	dp->i_flag |= IN_CHANGE | IN_UPDATE;
 	if (error)
 		goto out;
-
 	/*
 	 * Write directory block 1.
 	 */
@@ -912,7 +911,6 @@ ext2_htree_create_index(struct vnode *vp, struct componentname *cnp,
 	error = ext2_htree_append_block(vp, buf1, cnp, blksize);
 	if (error)
 		goto out1;
-
 	/*
 	 * Write directory block 2.
 	 */
@@ -951,8 +949,8 @@ ext2_htree_add_entry(struct vnode *dvp, struct ext2fs_direct_2 *entry,
 	uint8_t hash_version;
 	char *newdirblock = NULL;
 	char *newidxblock = NULL;
-	struct ext2fs_htree_node *dst_node;
-	struct ext2fs_htree_entry *dst_entries;
+	struct ext2fs_htree_node *dst_node;	// destination node.
+	struct ext2fs_htree_entry *dst_entries;	// destination entires.
 	struct ext2fs_htree_entry *root_entires;
 	struct buf *dst_bp = NULL;
 	int error, write_bp = 0, write_dst_bp = 0, write_info = 0;
@@ -961,7 +959,6 @@ ext2_htree_add_entry(struct vnode *dvp, struct ext2fs_direct_2 *entry,
 	m_fs = ip->i_e2fs;
 	fs = m_fs->e2fs;
 	blksize = m_fs->e2fs_bsize;
-
 	/*
 		目录项中可用的 slot 不为 0 的时候，直接调用 ext2_add_entry，这个函数是添加一个目录项成员，
 		而不是添加一个 hash 索引。当 i_count ！= 0 的时候会执行下面的函数。根据调试结果来看，这个
@@ -969,6 +966,9 @@ ext2_htree_add_entry(struct vnode *dvp, struct ext2fs_direct_2 *entry,
 		所以这个处理逻辑还是存在问题。
 		在挂载目录中添加第一个目录项成员的时候，感觉 i_count 应该是0，这样才会分配新的 block。导致
 		icount 不为 0 的原因有可能是 inode 初始化的时候对 i_size 的设置不正确。
+
+		这里直接调用了 ext2_add_entry() 函数，是不是说明 hash index block 是不计算在 inode 索引
+		数组当中的？
 	*/
 	if (ip->i_count != 0)
 		return ext2_add_entry(dvp, entry);

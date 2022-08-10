@@ -1,0 +1,173 @@
+////////////// 20220801 //////////////
+  (gdb) p root_inode  
+  $5 = (tpt_inode *) 0x2340030e0
+
+  (gdb) p record_inode 
+  $7 = (tpt_inode *) 0x2340031c0
+
+
+////////////// 20220802 //////////////
+  root@:~ # mount -t tptfs tptfs /tpt
+  random: unblocking device.
+  i = 0, cursor = (null)
+  i = 1, cursor = (null)
+  i = 2, cursor = (null)
+  i = 3, cursor = (null)
+  i = 4, cursor = (null)
+  i = 5, cursor = (null)
+  i = 6, cursor = (null)
+  i = 7, cursor = (null)
+  i = 8, cursor = (null)
+  i = 9, cursor = (null)
+  i = 10, cursor = (null)
+  panic: vm_fault_lookup: fault on nofault entry, addr: 0x1def79000
+  cpuid = 7
+
+
+  panic: Fatal page fault at 0x10c385156: 0x00000000000068
+  cpuid = 1
+  time = 1659418157
+  KDB: stack backtrace:
+  #0 0x10c179f92 at kdb_backtrace+0x7c
+  #1 0x10c114f92 at vpanic+0x202
+  #2 0x10c114d8c at panic+0x32
+  #3 0x10c019d64 at do_trap_supervisor+0x5da
+  #4 0x10c019860 at do_trap_supervisor+0xd6
+  #5 0x10c004508 at cpu_exception_handler_supervisor+0x68
+  #6 0x10c388b3c at _ZN13TptFileSystem17constructTreeNodeERNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEE+0x1fe
+  #7 0x10c388822 at _ZN13TptFileSystem15parseRecordFileEv+0xf0
+  #8 0x10c3880b4 at _ZN13TptFileSystem14createFileTreeEv+0x11e
+  #9 0x10c387bd8 at _ZN13TptFileSystem5mountEP5mount+0x26a
+  #10 0x10c388c6c at _Z11tptfs_mountP5mount+0x1c
+  #11 0x10c222d2c at resume_all_fs+0xd06
+  #12 0x10c21dd5c at vfs_getopt_pos+0x44a
+  #13 0x10c21ca3a at vfs_donmount+0xa74
+  #14 0x10c21bf76 at sys_nmount+0xce
+  #15 0x10c0191b2 at ecall_handler+0x71e
+  #16 0x10c018ab0 at ecall_handler+0x1c
+  #17 0x10c004fbc at system_call+0x6c
+
+  调试结果如下：
+    root@:~ # mount -t tptfs tptfs /tpt
+    random: unblocking device.
+    root@:~ # cd tpt
+    root@:/tpt # ls -al
+    total 8
+    drwxr-xr-x  2 root  wheel  1536 Jan  1  1970 .
+    drwxr-xr-x  2 root  wheel  1536 Jan  1  1970 ..
+    ----------  0 root  wheel  1464 Jan  1  1970 .cshrc
+    ----------  0 root  wheel    36 Jan  1  1970 FilesRecord.txt
+    d---------  0 root  wheel   512 Jan  1  1970 etc
+    d---------  0 root  wheel   512 Jan  1  1970 usr
+    root@:/tpt # 
+
+  期间遇到各种坑：
+    - 持久化机制感觉还存在一些问题，当文件系统访问某个地址的时候，并没有通过 page_fault 将磁盘上对应块上的数据读取到相应地址，
+      目前暂时手动调用 getBlock() 等接口函数来实现上述功能
+    - 当 config 文件中存放的数据过长时，解析到中间某个位置的时候会出现段错误。拷贝的数据长度不够，还是别的原因？
+    - 调用 getBlock() 函数之后，会把之前原有文件系统内置 FormatTool 工具写入的初始化数据给覆盖掉，到时 inactive() 函数经常
+      出问题，这个要注意
+    - 从上述结构来看，很多文件的属性出现缺失。这个后续要补充上
+
+
+  tptfs mount 过程承载了过多的压力，很多操作本来是不应该出现在这里的。如果未来 tptfs 变成了根文件系统，那就会导致开机速度变慢，
+从用户使用体验来看，肯定是不好的。所以还是应该在格式化工具中做足工作，减轻文件挂载时的压力
+
+
+////////////// 20220803 //////////////
+  文件属性可以利用操作系统提供的 stat() 函数来获取。格式化工具文件类中的成员本来打算只包含一些基本数据，遵循格式化工具应做尽做的思路，
+则可以参考 struct stat 的设计，将其中的成员移植到文件类当中。FreeBSD 和 Linux 中的一些基本的属性宏定义都是一样的，应该是通用的
+
+  ext2 中对于位图设置和清除的实现，还是挺有意思的。第一步肯定是要确定这个 bit 所在的字节空间 (以字节作为最小单位进行切割)；然后计算
+在字节中的偏移量 offset， 1 << offset。所以从这里可以看出，位图并不是按照顺序与块一一对应的，而是以字节为单位倒序对应的。这种方法
+逻辑上感觉有点不太对，但是实现起来比较简单。判断是否被占用按照同样的逻辑实现就好了
+
+  root@:~ # mount -t tptfs tptfs /tpt
+  root@:~ # cd tpt
+  root@:/tpt # ls -al
+  total 16
+  drwxr-xr-x  2 root  wheel  1536 Jan  1  1970 .
+  drwxr-xr-x  2 root  wheel  1536 Jan  1  1970 ..
+  -rw-r--r--  1 1000  1000   1464 Jul 25 09:15 .cshrc
+  -rw-rw-r--  1 1000  1000     36 Aug  3 06:02 FilesRecord.txt
+  drwxrwxr-x  3 1000  1000    512 Jul 25 09:25 etc
+  drwxrwxr-x  3 1000  1000    512 Jul 25 09:21 usr
+  root@:/tpt # 
+
+  关于在 tptfs 中需要手动调用 getblock() 函数读取磁盘数据的原因，应该是没有对 snapshot 中的 bitmap 数据(还是数组)的状态进行
+更新。我们在镜像文件中添加文件之后，snapshot 其实是不知道的，所以我们可能需要在格式化工具添加这部分的逻辑
+
+利用 std::string 来构造根文件系统树时，会报如下错误：
+
+  root@:~ # mount -t tptfs tptfs /tpt
+  random: unblocking device.
+  panic: vm_fault_lookup: fault on nofault entry, addr: 0x1def7e000
+
+  但是用 char[] 来做就没有这样的问题。具体操作就是遍历数据页中的每一个字符，append 到 string 当中作为路径信息。实测如果文件数量
+比较少，需要处理的条目也比较少，这样就可以正常执行。一旦文件数量多了起来，发现在用这个方法就会报错。感觉应该还是 string 在操作过程
+中出现的问题，目前还不能确定具体原因。猜测有可能是内核空间到用户空间的切换导致的问题
+
+
+////////////// 20220804 //////////////
+  root@:~ # mount -t tptfs tptfs /tpt
+  root@:~ # cd /tpt
+  root@:/tpt # ls -al
+  random: unblocking device.
+  ls: /.cshr: No such file or directory
+  ls: /csh.cshr: No such file or directory
+  ls: /et: No such file or directory
+  ls: /grou: No such file or directory
+  ls: /login.con: No such file or directory
+  ls: /login.conf.d: No such file or directory
+  ls: /nsswitch.con: No such file or directory
+  ls: /r: No such file or directory
+  ls: /shar: No such file or directory
+  ls: /spwd.d: No such file or directory
+  ls: /us: No such file or directory
+  ls: /zoneinf: No such file or directory
+  total 4
+  drwxr-xr-x  2 root  wheel  3840 Jan  1  1970 .
+  drwxr-xr-x  2 root  wheel  3840 Jan  1  1970 ..
+  -rw-rw-r--  1 1000  1000    228 Aug  4 05:13 FilesRecord.txt
+  root@:/tpt # cat FilesRecord.txt 
+  /tpt/.cshrc#4
+  /tpt/etc#5
+  /tpt/etc/csh.cshrc#6
+  /tpt/etc/group#7
+  /tpt/etc/login.conf#8
+  /tpt/etc/login.conf.db#9
+  /tpt/etc/nsswitch.conf#10
+  /tpt/etc/rc#11
+  /tpt/etc/spwd.db#12
+  /tpt/usr#13
+  /tpt/usr/share#14
+  /tpt/usr/share/zoneinfo#15
+  root@:/tpt # 
+
+
+////////////// 20220805 //////////////
+  在处理 record 文件的时候，一定要注意当数据块不是连续排布的情况。因为此时一个完整的路径有可能是被截断，一部分在前一个数据块，
+另外一部分在后一个数据块，需要对刚好处于截断位置的绝对路径进行特殊处理
+
+
+////////////// 周会总结 //////////////
+操作系统源码编译出的 kernel.elf 是静态链接文件还是动态链接文件？
+  - 不同的文件系统处理的方式好像是不一样的。Linux vmlinux 是静态链接文件，这个符合我们一般的理解。因为动态链接的话，必须使用动态链接器和加载器
+进行重定位操作，但操作系统此时都还没有完全运行起来，根本没有链接器和加载器能提供支持。所以正常情况下应该是静态链接类型
+
+  - FreeBSD 机制不太相同，编译出的 kernel.elf 是动态链接类型，但是执行 ldd 发现并没有依赖什么动态库。为什么会这样呢？刘强貌似对这个问题有过
+研究，可能是为了支持动态可加载模块，最典型的就是设备驱动。
+  就比如说设备驱动程序提供了很多函数接口，这些接口应该都是在内核中有注册的。但是这些函数的实现其实是在内核模块当中，只有我们加载了之后，引用程序
+访问的时候才能跳转到一个可用地址找到函数入口，否则是不能被使用的。这就可能导致内核变成了一个动态链接文件，用来在可加载模块真正加载的时候进行重定位
+
+
+DMA 使用的是物理地址还是虚拟地址？
+  刚入职的时候貌似就碰到过这个问题，其实既不是物理地址，也不是虚拟地址。要搞明白这个，首先得弄懂什么是物理地址，它跟 CPU 可寻址有什么区别。
+假设我们的 CPU 是64位的，那么它所能访问的地址空间的范围是 0 - 2^64 这么大。那这个是物理地址吗？其实不是的，RAM 占用的那块地址才是真正的物理
+地址，也就是物理内存对应的那块地址叫物理地址，而不是CPU的可寻址范围叫物理地址。
+
+  物理地址也是操作系统可寻址范围的一部分。内存也是设备的一种，所以它跟其他设备的关系其实是平行的，所以每个设备占用的地址也是可寻址空间的一部分。
+这个感觉也跟不同的 CPU 有关系，相同的设备在不同的 CPU 中占用的地址空间是不一样的。
+
+  Linux 会通过 iommu 将设备地址映射到虚拟地址空间，这里的地址应该指的就是设备占用的 CPU 的一部分可寻址地址，跟物理地址是没有关系的。我们只要
+访问这块虚拟地址，就可以通过映射关系访问到具体的设备。否则应该就只能写入 CPU 可寻址访问设备了
