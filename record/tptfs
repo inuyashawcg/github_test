@@ -1,76 +1,21 @@
-357			stat("/", &stst);
-(gdb) n
-358			root_devno = stst.st_dev;
-(gdb) p stst
-$1 = {
-  st_dev = 18446744071763459841,
-  st_ino = 2,
-  st_nlink = 2,
-  st_mode = 16877,
-  st_padding0 = 0,
-  st_uid = 0,
-  st_gid = 0,
-  st_padding1 = 0,
-  st_rdev = 18446744073709551615,
-  st_atim = {
-    tv_sec = 0,
-    tv_nsec = 0
+v_lock = {
+  lock_object = {
+    lo_name = 0x10d0b5919,
+    lo_flags = 0x6f30008,
+    lo_data = 0x0,
+    lo_witness = 0x0
   },
-  st_mtim = {
-    tv_sec = 0,
-    tv_nsec = 0
+  lk_lock = 0xfffffffffffffec1,
+  lk_exslpfail = 0x0,
+  lk_timo = 0x6,
+  lk_pri = 0x60
+},
+v_interlock = {
+  lock_object = {
+    lo_name = 0x10d10b58e,
+    lo_flags = 0x1030000,
+    lo_data = 0x0,
+    lo_witness = 0x0
   },
-  st_ctim = {
-    tv_sec = 0,
-    tv_nsec = 0
-  },
-  st_birthtim = {
-    tv_sec = 0,
-    tv_nsec = 0
-  },
-  st_size = 11776,
-  st_blocks = 0,
-  st_blksize = 4096,
-  st_flags = 0,
-  st_gen = 0,
-  st_spare = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-}
-
-
-359			if (stat("/dev", &stst) != 0)
-(gdb) 
-361			else if (stst.st_dev == root_devno)
-(gdb) p stst
-$2 = {
-  st_dev = 18446744071763459841,
-  st_ino = 6,
-  st_nlink = 2,
-  st_mode = 16893,
-  st_padding0 = 0,
-  st_uid = 1000,
-  st_gid = 1000,
-  st_padding1 = 0,
-  st_rdev = 18446744073709551615,
-  st_atim = {
-    tv_sec = 1660022420,
-    tv_nsec = 0
-  },
-  st_mtim = {
-    tv_sec = 1660022420,
-    tv_nsec = 0
-  },
-  st_ctim = {
-    tv_sec = 1660022420,
-    tv_nsec = 0
-  },
-  st_birthtim = {
-    tv_sec = 0,
-    tv_nsec = 0
-  },
-  st_size = 512,
-  st_blocks = 8,
-  st_blksize = 4096,
-  st_flags = 0,
-  st_gen = 0,
-  st_spare = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-}
+  mtx_lock = 0x0
+},

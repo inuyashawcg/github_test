@@ -1,0 +1,64 @@
+////////////// 20220822 //////////////
+  根文件系统工具可以将主脚本文件放在源代码其实目录，这样获取的路径信息就是源代码最顶层路径。
+处理起来会比较简单。总体的文件结构：
+  - /build_rootfs
+    - rootfs/
+    - formatting_tool/
+    - build_rootfs.sh
+    - SourceFiles.txt
+    - RecordFile.txt
+
+clang++ Formatting.cpp TptFile.cpp TptfsFormatTool.cpp main.cpp -o format
+
+
+////////////// 20220824 //////////////
+  关于 rootvnode 到底如何去处理，可能要去看一下 vfs 中的源码，最重要的就是要了解 vnode 的加解锁过程，目前 tptfs 遇到的阻塞问题
+大部分原因都是 vnode 重复加锁导致的
+
+  freebsd mutex 包含有 MTX_RECURSE 宏定义，其实就表示 mutex 是运行允许递归加锁的。
+
+  (gdb) bt
+  #0  ffs_mount (mp=0x1bfcbd080)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/ufs/ffs/ffs_vfsops.c:744
+  #1  0x000000010c222cac in vfs_domount_first (td=0x115ab0100, vfsp=0x1100335f0 <ufs_vfsconf>, 
+      fspath=0xffffffd00ba03c00 "/", vp=0xffffffd0093d7d58, fsflags=16385, optlist=0x11414e658)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mount.cpp:963
+  #2  0x000000010c21dcdc in vfs_domount (td=0x115ab0100, fstype=0xffffffd00ba07f90 "ufs", 
+      fspath=0xffffffd00ba07f70 "/", fsflags=16385, optlist=0x11414e658)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mount.cpp:1360
+  #3  0x000000010c21c9ba in vfs_donmount (td=0x115ab0100, fsflags=16385, fsoptions=0x11414e6a0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mount.cpp:780
+  #4  0x000000010c2219a8 in kernel_mount (ma=0xffffffd00ba20d80, flags=16384)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mount.cpp:2439
+  #5  0x000000010c22764c in parse_mount (conf=0x11414e808)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:789
+  #6  0x000000010c227a82 in parse_dir_ask (conf=0x11414e8e8)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:560
+  #7  0x000000010c2271ee in parse_directive (conf=0x11414e8e8)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:697
+  #8  0x000000010c225f18 in vfs_mountroot_parse (sb=0xffffffd0092c7f00, mpdevfs=0x1bfcbb040)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:846
+  #9  0x000000010c2250ce in vfs_mountroot ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:1068
+  #10 0x000000010c06d5cc in start_init (dummy=0x0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/init_main.cpp:673
+  #11 0x000000010c0b12d6 in fork_exit (callout=0x10c06d5a2 <start_init(void*)>, arg=0x0, frame=0x11414ec50)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/kern_fork.cpp:1045
+  #12 0x000000010c004d8e in fork_trampoline ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/swtch.S:385
+
+  rootfs read-only 的情况，貌似只能通过修改内核源码的方式来解决，通过 qemu 传参不太行：
+    - parse_mount():
+      ma = mount_arg(ma, "ro", "rw", 0); // 直接把 ro 参数写死
+    
+    - parse_mountroot_options():
+      // if( kc_strcmp(name, "rw") == 0 ||
+      //     kc_strcmp(name, "noro") == 0) {
+      // 	/*
+      // 	 * The first time we mount the root file system,
+      // 	 * we need to mount 'ro', so We need to ignore
+      // 	 * 'rw' and 'noro' mount options.
+      // 	 */
+      // 	continue;
+      // }
+      // 直接注释掉对于 ro 属性的判断逻辑

@@ -2808,7 +2808,9 @@ v_init_counters(struct vnode *vp)
 static void
 v_incr_usecount_locked(struct vnode *vp)
 {
-
+	/*
+		要求传入的 vnode interlock 处于加锁状态
+	*/
 	ASSERT_VI_LOCKED(vp, __func__);
 	if ((vp->v_iflag & VI_OWEINACT) != 0) {
 		VNASSERT(vp->v_usecount == 0, vp,
@@ -2822,11 +2824,14 @@ v_incr_usecount_locked(struct vnode *vp)
 /*
  * Increment the use count on the vnode, taking care to reference
  * the driver's usecount if this is a chardev.
+ * 增加 vnode 上的使用计数，如果这是一个 chardev，请注意引用驱动程序的使用计数
  */
 static void
 v_incr_usecount(struct vnode *vp)
 {
-
+	/*
+		传入的 vnode interlock 要处于解锁状态
+	*/
 	ASSERT_VI_UNLOCKED(vp, __func__);
 	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
 
@@ -2836,6 +2841,10 @@ v_incr_usecount(struct vnode *vp)
 		VNASSERT((vp->v_iflag & VI_OWEINACT) == 0, vp,
 		    ("vnode with usecount and VI_OWEINACT set"));
 	} else {
+		/*
+			v_incr_usecount_locked() 要求 vnode interlock 处于加锁状态，
+			所以调用之前首先要调用 VI_LOCK()，返回时要再解锁
+		*/
 		VI_LOCK(vp);
 		v_incr_usecount_locked(vp);
 		VI_UNLOCK(vp);
@@ -2886,6 +2895,9 @@ v_decr_devcount(struct vnode *vp)
  * is not transitioning 0->1 nor 1->0, the manipulation can be done
  * with atomic operations. Otherwise the interlock is taken covering
  * both the atomic and additional actions.
+ * _vhold、vputx 和其他例程根据 holdcnt 或 usecount 为0做出各种决定。只要任一
+ * 计数器不转换为0->1或1->0，就可以通过原子操作进行操作。否则，联锁将覆盖原子和
+ * 附加动作
  */
 int
 vget(struct vnode *vp, int flags, struct thread *td)
@@ -2895,19 +2907,30 @@ vget(struct vnode *vp, int flags, struct thread *td)
 	VNASSERT((flags & LK_TYPE_MASK) != 0, vp,
 	    ("vget: invalid lock operation"));
 
+	/*
+		LK_INTERLOCK 表示 interlock 已经处于加锁状态，所以这里需要首先检查一下
+	*/
 	if ((flags & LK_INTERLOCK) != 0)
 		ASSERT_VI_LOCKED(vp, __func__);
 	else
 		ASSERT_VI_UNLOCKED(vp, __func__);
+	/*
+		flags 中带有 LK_VNHELD 属性，就表示 vnode holdcount > 0 要成立
+	*/
 	if ((flags & LK_VNHELD) != 0)
 		VNASSERT((vp->v_holdcnt > 0), vp,
 		    ("vget: LK_VNHELD passed but vnode not held"));
 
 	CTR3(KTR_VFS, "%s: vp %p with flags %d", __func__, vp, flags);
-
+	/*
+		当不存在 LK_VNHELD 属性时，需要增加 vnode holdcount，然后判断是否需要
+		对 interlock 进行加锁
+	*/
 	if ((flags & LK_VNHELD) == 0)
 		_vhold(vp, (flags & LK_INTERLOCK) != 0);
-
+	/*
+		这里要注意，vget() 还要对 vnode 进行加锁操作
+	*/
 	if ((error = vn_lock(vp, flags)) != 0) {
 		vdrop(vp);
 		CTR2(KTR_VFS, "%s: impossible to lock vnode %p", __func__,
@@ -2947,7 +2970,7 @@ vget(struct vnode *vp, int flags, struct thread *td)
 /*
  * Increase the reference (use) and hold count of a vnode.
  * This will also remove the vnode from the free list if it is presently free.
- * 如果vnode当前是空闲的，这也将从空闲列表中删除它
+ * 如果 vnode 当前是空闲的，这也将从空闲列表中删除它
  */
 void
 vref(struct vnode *vp)
@@ -2955,19 +2978,33 @@ vref(struct vnode *vp)
 
 	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
 	_vhold(vp, false);
+	/*
+		_vhold() 返回时，vnode interlock 处于解锁状态。所以要关注一下 v_incr_usecount() 锁的变化情况。
+		v_incr_usecount() 返回时 interlock 处于解锁状态。说明 vref() 返回时，vnode 处于解锁状态。
+		该函数既增加 vnode usecount，又增加 holdcount
+	*/
 	v_incr_usecount(vp);
 }
 
 void
 vrefl(struct vnode *vp)
 {
-
+	/*
+		vrefl() 期望获取到的 vnode interlock 处于加锁状态。所以这里首先要判断一下。 _vhold() 传入的
+		locked flag = true，说明返回的 vnode interlock 处于加锁状态。这样就可以直接调用 v_incr_usecount_locked()，
+		而不用向 vref() 那样再经过 v_incr_usecount() 中间函数。
+		该函数也是既增加 usecount，又增加 holdcount
+	*/
 	ASSERT_VI_LOCKED(vp, __func__);
 	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
 	_vhold(vp, true);
 	v_incr_usecount_locked(vp);
 }
 
+/*
+	该函数貌似不用判断锁的状态，只需要区分设备 vnode 或者普通文件 vnode。然后直接调用原子操作函数增加 usecount 和 holdcount。
+	这个函数应用应该是用在能够很好的保证 vnode 数据同步的环境之下
+*/
 void
 vrefact(struct vnode *vp)
 {
@@ -2998,6 +3035,9 @@ vrefact(struct vnode *vp)
  * case if the caller holds the only reference.  This is also useful when stale
  * data is acceptable as race conditions may be accounted for by some other
  * means.
+ * 只有在使用某种机制阻止其他进程获取对 vnode 的引用时，才能保证此调用的结果。如果调用者持有
+ * 唯一的引用，则可能会出现这种情况。当陈旧数据是可接受的时，这也很有用，因为竞争条件可能会通过
+ * 某些其他方法来解释
  */
 int
 vrefcnt(struct vnode *vp)
@@ -3012,9 +3052,10 @@ vrefcnt(struct vnode *vp)
 
 /*
  * Decrement the use and hold counts for a vnode.
- * 减少vnode的使用和保持计数
+ * 减少 vnode 的使用和保持计数
  *
  * See an explanation near vget() as to why atomic operation is safe.
+ * 有关原子操作安全的原因，请参见 vget() 附近的说明
  */
 static void
 vputx(struct vnode *vp, int func)
@@ -3028,29 +3069,61 @@ vputx(struct vnode *vp, int func)
 		ASSERT_VOP_LOCKED(vp, "vput");
 	else
 		KASSERT(func == VPUTX_VRELE, ("vputx: wrong func"));
+	/*
+		确保传入的 vnode 的 interlock 没有处在加锁状态
+	*/
 	ASSERT_VI_UNLOCKED(vp, __func__);
 	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
 
+	/*
+		当 vnode 对应的不是设备文件，并且使用计数不为 0 的时候，执行该代码分支。
+		如果是 VPUTX_VPUT 类型的操作，则需要对 vnode 解锁
+	*/
 	if (vp->v_type != VCHR &&
 	    refcount_release_if_not_last(&vp->v_usecount)) {
+		/*
+			vnode 内部貌似也就包含有两个锁，一个是 vnode lock，另外一个是 interlock。
+			像是 VI_LOCK 类似的宏应该就是对 interlock 进行操作；VOP_LOCK / vn_lock
+			类似的应该就是对 vnode lock 操作。
+			如果是 VPUTX_VPUT 类型的操作，则是需要对 vnode lock 进行解锁的，并且它关注
+			的对象应该是 vnode lock。而 vdrop() 则是减少 hold count 并且会对 interlock
+			进行加锁。所以经过这番处理之后，vnode 的状态应该是：
+				- use count--
+				- hold count-- (VPUTX_VPUT)
+				- unlock vnode lock (VPUTX_VPUT)
+				- hold count--
+				- lock interlock
+			VOP_UNLOCK() / vdrop() 两者作用的对象不同，所以加解锁不会冲突
+		*/
 		if (func == VPUTX_VPUT)
 			VOP_UNLOCK(vp, 0);
 		vdrop(vp);
 		return;
 	}
 
+	/*
+		mtx_lock(&(vp)->v_interlock)，对 vnode interlock 加锁。说明传入的 vnode 初始状态
+		interlock 是没有加锁的
+	*/
 	VI_LOCK(vp);
 
 	/*
 	 * We want to hold the vnode until the inactive finishes to
 	 * prevent vgone() races.  We drop the use count here and the
 	 * hold count below when we're done.
+	 * 我们希望保持 vnode 直到 inactive 动作完成之后，以防止 vgone() 的竞争。所以采取的方法是
+	 * 在此处先减少 use count，然后等动作完成之后，在减少 hold count。
+	 * refcount_release() 如果是最后一个引用的话，返回1；否则，返回0
 	 */
 	if (!refcount_release(&vp->v_usecount) ||
 	    (vp->v_iflag & VI_DOINGINACT)) {
 		if (func == VPUTX_VPUT)
 			VOP_UNLOCK(vp, 0);
 		v_decr_devcount(vp);
+		/*
+			减少 vnode hold count，并且期望 interlock 已经处于加锁状态
+			前面代码中刚好有一个 VI_LOCK
+		*/
 		vdropl(vp);
 		return;
 	}
@@ -3058,7 +3131,10 @@ vputx(struct vnode *vp, int func)
 	v_decr_devcount(vp);
 
 	error = 0;
-
+	/*
+		上面的 if 代码分支感觉像是确保 vnode use count = 0，
+		否则应该已经在前面 return 了
+	*/
 	if (vp->v_usecount != 0) {
 		vn_printf(vp, "vputx: usecount not zero for vnode ");
 		panic("vputx: usecount not zero");
@@ -3069,10 +3145,18 @@ vputx(struct vnode *vp, int func)
 	/*
 	 * We must call VOP_INACTIVE with the node locked. Mark
 	 * as VI_DOINGINACT to avoid recursion.
+	 * 我们必须在节点锁定的情况下调用 VOP_INACTIVE。标记为 VI_DOINGINACT 
+	 * 以避免递归。
+	 * 上面代码中已经存在一个 VI_LOCK，然后下面又有了这个宏。如果中间没有地方
+	 * 对 inter lock 解锁，那么应该会造成阻塞。或者 interlock 是一个递归锁？
 	 */
 	vp->v_iflag |= VI_OWEINACT;
 	switch (func) {
 	case VPUTX_VRELE:
+		/*
+			LK_INTERLOCK 宏定义的注释中说明，在执行 vn_lock() 的过程中，需要对 interlock
+			执行 unlock 操作。这就解释了为什么在这里仍然要执行 VI_LOCK
+		*/
 		error = vn_lock(vp, LK_EXCLUSIVE | LK_INTERLOCK);
 		VI_LOCK(vp);
 		break;
@@ -3095,6 +3179,10 @@ vputx(struct vnode *vp, int func)
 	if (error == 0) {
 		if (vp->v_iflag & VI_OWEINACT)
 			vinactive(vp, curthread);
+		/*
+			貌似只有 vunref() 函数，才会返回一个 locked vnode，而 vput() 和 vrele()
+			都是返回 unlocked vnode。可对照 man page 中的相关说明
+		*/ 
 		if (func != VPUTX_VUNREF)
 			VOP_UNLOCK(vp, 0);
 	}
@@ -3104,6 +3192,7 @@ vputx(struct vnode *vp, int func)
 /*
  * Vnode put/release.
  * If count drops to zero, call inactive routine and return to freelist.
+ * 对比 freebsd-13.0 中该函数的注释可知，vrele() 处理前后 vnode 的状态是没有改变的
  */
 void
 vrele(struct vnode *vp)
@@ -3116,6 +3205,10 @@ vrele(struct vnode *vp)
  * Release an already locked vnode.  This give the same effects as
  * unlock+vrele(), but takes less time and avoids releasing and
  * re-aquiring the lock (as vrele() acquires the lock internally.)
+ * 
+ * 释放已锁定的 vnode。这与 unlock + vrele() 的效果相同，但所需时间较少，
+ * 并避免释放和重新获取锁 (因为 vrele() 在内部获取锁)。这三个函数其实底层调用
+ * 的都是 vputx() 函数，只不过传入的参数类型不同
  */
 void
 vput(struct vnode *vp)
@@ -3126,6 +3219,7 @@ vput(struct vnode *vp)
 
 /*
  * Release an exclusively locked vnode. Do not unlock the vnode lock.
+		释放一个加了独占锁的 vnode。不要对 vnode lock 解锁
  */
 void
 vunref(struct vnode *vp)
@@ -3136,33 +3230,50 @@ vunref(struct vnode *vp)
 
 /*
  * Increase the hold count and activate if this is the first reference.
- * 如果这是第一个引用，则增加保持计数并激活
+ * 如果这是第一个引用，则增加保持计数并激活。
+ * vhold() 和 vholdl() 底层函数都是 _vhold()，只不过传入的 locked 是不一样的。
+ * vhold() 会执行 interlock 的加锁操作，所以传入的 vnode interlock 处于不加锁的状态，locked= 0；
+ * vholdl() 期望获取的是一个已经加锁的 interlock，所以传入的 locked = 1
  */
 void
 _vhold(struct vnode *vp, bool locked)
 {
 	struct mount *mp;
-
+	/*
+		如果 locked == 1，要检测 interlock 是否处于加锁的状态；
+		否则，检测其是否处于解锁状态。
+	*/
 	if (locked)
 		ASSERT_VI_LOCKED(vp, __func__);
 	else
 		ASSERT_VI_UNLOCKED(vp, __func__);
 	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
 	if (!locked) {
+		/*
+			如果处于不加锁的状态，判断 vnode holdcount 是否为0
+		*/
 		if (refcount_acquire_if_not_zero(&vp->v_holdcnt)) {
 			VNODE_REFCOUNT_FENCE_ACQ();
+			// VI_FREE 用于判断 vnode 是否在 freelist 当中
 			VNASSERT((vp->v_iflag & VI_FREE) == 0, vp,
 			    ("_vhold: vnode with holdcnt is free"));
 			return;
 		}
-		VI_LOCK(vp);
+		VI_LOCK(vp);	// interlock 加锁
 	}
 	if ((vp->v_iflag & VI_FREE) == 0) {
+		/*
+			当 vnode 不处于 freelist 中时，holdcount++
+		*/
 		refcount_acquire(&vp->v_holdcnt);
 		if (!locked)
 			VI_UNLOCK(vp);
+		// 返回时， vnode interlock 处于解锁状态
 		return;
 	}
+	/*
+		下面的代码分支就是处理当 vnode 在 freelist 上时的情况
+	*/
 	VNASSERT(vp->v_holdcnt == 0, vp,
 	    ("%s: wrong hold count", __func__));
 	VNASSERT(vp->v_op != NULL, vp,
@@ -3196,6 +3307,11 @@ _vhold(struct vnode *vp, bool locked)
 	TAILQ_INSERT_HEAD(&mp->mnt_activevnodelist, vp, v_actfreelist);
 	mp->mnt_activevnodelistsize++;
 	mtx_unlock(&mp->mnt_listmtx);
+	/*
+		最后给 vnode 增加 holdcount，因为前边代码已经对没有处于解锁状态的 interlock 进行了
+		加锁操作，所以这里会将 interlock 再次解锁。说明 vhold() / vholdl() 返回时，vnode
+		interlock 处于解锁状态
+	*/
 	refcount_acquire(&vp->v_holdcnt);
 	if (!locked)
 		VI_UNLOCK(vp);
@@ -3205,10 +3321,16 @@ _vhold(struct vnode *vp, bool locked)
  * Drop the hold count of the vnode.  If this is the last reference to
  * the vnode we place it on the free list unless it has been vgone'd
  * (marked VI_DOOMED) in which case we will free it.
+ * 删除 vnode 的保持计数。如果这是对 vnode 的最后一次引用，我们将其放在自由列表中，
+ * 除非它已被 vgone (标记为 VI_DOOMED)，在这种情况下，我们将释放它
  *
  * Because the vnode vm object keeps a hold reference on the vnode if
  * there is at least one resident non-cached page, the vnode cannot
  * leave the active list without the page cleanup done.
+ * 因为如果至少有一个驻留的非缓存页面，vnode vm object 会在 vnode 上保留一个保持
+ * 引用，所以在页面清理完成之前，vnode 不能离开活动列表
+ * 
+ * vdrop() 和 vdropl() 与上面 vhold() 的设计思路一致
  */
 void
 _vdrop(struct vnode *vp, bool locked)
@@ -3225,11 +3347,19 @@ _vdrop(struct vnode *vp, bool locked)
 	if ((int)vp->v_holdcnt <= 0)
 		panic("vdrop: holdcnt %d", vp->v_holdcnt);
 	if (!locked) {
+		/*
+			如果当前 vnode interlock 处于解锁状态，判断是不是最后一个 holdcount。
+			然后对 interlock 进行加锁
+		*/
 		if (refcount_release_if_not_last(&vp->v_holdcnt))
 			return;
 		VI_LOCK(vp);
 	}
 	if (refcount_release(&vp->v_holdcnt) == 0) {
+		/*
+			如果自减之后 holdcount 不为0，那就对 interlock 解锁，返回。
+			否则就要执行后面的代码分支，处理 vnode 被回收的问题
+		*/
 		VI_UNLOCK(vp);
 		return;
 	}
@@ -3281,16 +3411,24 @@ _vdrop(struct vnode *vp, bool locked)
 			VI_UNLOCK(vp);
 			counter_u64_add(free_owe_inact, 1);
 		}
+		/*
+			如果检测到 vnode 正在被回收，则执行相应的代码逻辑。但是可以看到，不管走的
+			是哪个代码分支，return 之前都有 VI_UNLOCK 宏。说明 vdrop() / vdropl()
+			返回时 vnode interlock 都是处于解锁的状态
+		*/
 		return;
 	}
 	/*
 	 * The vnode has been marked for destruction, so free it.
+	 	代码走到这里的时候，意味着 vnode 已经被标记成销毁，所以释放它
 	 *
 	 * The vnode will be returned to the zone where it will
 	 * normally remain until it is needed for another vnode. We
 	 * need to cleanup (or verify that the cleanup has already
 	 * been done) any residual data left from its current use
 	 * so as not to contaminate the freshly allocated vnode.
+	 * vnode 将返回到通常保留的区域，直到需要另一个 vnode。我们需要清理
+	 * （或验证清理已经完成）当前使用的任何剩余数据，以免污染新分配的 vnode
 	 */
 	CTR2(KTR_VFS, "%s: destroying the vnode %p", __func__, vp);
 	atomic_subtract_long(&numvnodes, 1);
@@ -3313,7 +3451,7 @@ _vdrop(struct vnode *vp, bool locked)
 	VNASSERT(vp->v_cache_dd == NULL, vp, ("vp has namecache for .."));
 	VNASSERT(TAILQ_EMPTY(&vp->v_rl.rl_waiters), vp,
 	    ("Dangling rangelock waiters"));
-	VI_UNLOCK(vp);
+	VI_UNLOCK(vp);	// 注意这里，interlock 依然要被解锁
 #ifdef MAC
 	mac_vnode_destroy(vp);
 #endif
@@ -3333,7 +3471,7 @@ _vdrop(struct vnode *vp, bool locked)
 	vp->v_iflag = 0;
 	vp->v_vflag = 0;
 	bo->bo_flag = 0;
-	uma_zfree(vnode_zone, vp);
+	uma_zfree(vnode_zone, vp);	// 直接释放内存
 }
 
 /*
@@ -3341,6 +3479,9 @@ _vdrop(struct vnode *vp, bool locked)
  * flags.  DOINGINACT prevents us from recursing in calls to vinactive.
  * OWEINACT tracks whether a vnode missed a call to inactive due to a
  * failed lock upgrade.
+ * 在 vnode 上调用 VOP_INACTIVE，并管理 DOINGINACT 和 OWEINACT 标志。DOINGINACT
+ * 防止我们在调用 vinactive 时递归。 OWEINACT 跟踪 vnode 是否由于锁升级失败而错过了
+ * 对 inactive 的调用
  */
 void
 vinactive(struct vnode *vp, struct thread *td)
@@ -3354,16 +3495,23 @@ vinactive(struct vnode *vp, struct thread *td)
 	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
 	vp->v_iflag |= VI_DOINGINACT;
 	vp->v_iflag &= ~VI_OWEINACT;
+	/*
+		注意这里仍然执行了 VI_UNLOCK()，说明 vnode interlock 在执行 vinactive() 之前
+		是处于加锁的状态
+	*/
 	VI_UNLOCK(vp);
 	/*
 	 * Before moving off the active list, we must be sure that any
 	 * modified pages are converted into the vnode's dirty
 	 * buffers, since these will no longer be checked once the
 	 * vnode is on the inactive list.
+	 * 在离开活动列表之前，我们必须确保任何修改的页面都被转换为 vnode 的脏缓冲区，因为一旦
+	 * vnode 位于非活动列表中，这些缓冲区将不再被检查
 	 *
 	 * The write-out of the dirty pages is asynchronous.  At the
 	 * point that VOP_INACTIVE() is called, there could still be
 	 * pending I/O and dirty pages in the object.
+	 * 脏页的写入是异步的。在调用 VOP_INACTIVE() 时，对象中仍可能有挂起的 I/O 和脏页
 	 */
 	if ((obj = vp->v_object) != NULL && (vp->v_vflag & VV_NOSYNC) == 0 &&
 	    (obj->flags & OBJ_MIGHTBEDIRTY) != 0) {
@@ -3372,10 +3520,13 @@ vinactive(struct vnode *vp, struct thread *td)
 		VM_OBJECT_WUNLOCK(obj);
 	}
 	VOP_INACTIVE(vp, td);
+	/*
+		inactive 执行完成之后，仍然要对 interlock 进行加锁
+	*/
 	VI_LOCK(vp);
 	VNASSERT(vp->v_iflag & VI_DOINGINACT, vp,
 	    ("vinactive: lost VI_DOINGINACT"));
-	vp->v_iflag &= ~VI_DOINGINACT;
+	vp->v_iflag &= ~VI_DOINGINACT;	// inactive 已经完成，所以消除该 flag
 }
 
 /*
@@ -3405,7 +3556,23 @@ vinactive(struct vnode *vp, struct thread *td)
  * rootrefs 指定了文件系统 root vnode 的基本引用次数。如果它的 v_usecount 超过了这个值，
  * 我们就认为 root vnode 处于忙碌状态。返回成功时，vflush 函数将调用 root vnode 上的 vrele
  * 函数正好 rootrefs 次。如果 SKIPSYSTEM 和 WRITECLOSE 都被设置的话，rootrefs 将被设置
- * 为0
+ * 为 0
+ * 
+ * Its arguments are:
+     mp - The mount point whose vnodes should be removed.
+
+     rootrefs - The number of references expected on the root vnode. vrele(9)
+	       				will be invoked on the root vnode rootrefs times.
+
+     flags - The flags indicating how	vnodes should be handled.
+
+	       FORCECLOSE  If set, busy	vnodes will be forcibly	closed.
+
+	       SKIPSYSTEM  If set, vnodes with the VV_SYSTEM flag set will be skipped.
+
+	       WRITECLOSE  If set, only	regular	files currently	opened for writing will	be removed.
+
+     td - The calling thread.
  */
 #ifdef DIAGNOSTIC
 static int busyprt = 0;		/* print out busy vnodes */
@@ -3427,7 +3594,7 @@ vflush(struct mount *mp, int rootrefs, int flags, struct thread *td)
 		/*
 		 * Get the filesystem root vnode. We can vput() it
 		 * immediately, since with rootrefs > 0, it won't go away.
-		 * 获取文件系统根vnode。我们可以立即使用vput，因为rootrefs>0时，它不会消失
+		 * 获取文件系统根 vnode。我们可以立即使用 vput，因为 rootrefs > 0 时，它不会消失
 		 */
 		if ((error = VFS_ROOT(mp, LK_EXCLUSIVE, &rootvp)) != 0) {
 			/* VFS_ROOT 属于 vnode 操作范畴，暂时不考虑，作用就是获取root vnode */
@@ -3551,12 +3718,17 @@ int
 vrecyclel(struct vnode *vp)
 {
 	int recycled;
-
+	/*
+		要求 vnode 持有 interlock，所以上层调用函数要首先对 interlock 加锁
+	*/
 	ASSERT_VOP_ELOCKED(vp, __func__);
 	ASSERT_VI_LOCKED(vp, __func__);
 	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
 	recycled = 0;
 	if (vp->v_usecount == 0) {
+		/*
+			只有当 v_usecout 为 0 的时候，才会调用 vgonel() 真正回收 vnode
+		*/
 		recycled = 1;
 		vgonel(vp);
 	}
@@ -3566,6 +3738,10 @@ vrecyclel(struct vnode *vp)
 /*
  * Eliminate all activity associated with a vnode
  * in preparation for reuse.
+ * 消除与 vnode 关联的所有活动，为重用做准备
+ * 
+ * vgonel() 处理完成后，vnode lock 和 interlock 都是处于加锁的状态。
+ * vgone() 则是将 interlock 解锁，vnode lock 依然是加锁的状态
  */
 void
 vgone(struct vnode *vp)
@@ -3583,6 +3759,7 @@ notify_lowervp_vfs_dummy(struct mount *mp __unused,
 
 /*
  * Notify upper mounts about reclaimed or unlinked vnode.
+ 	通知上层挂载已回收或未链接的 vnode
  */
 void
 vfs_notify_upper(struct vnode *vp, int event)
@@ -3640,6 +3817,8 @@ unlock:
 
 /*
  * vgone, with the vp interlock held.
+		此时也是需要 vnode 持有 interlock。 man page 中指出，vgone 传入的 vnode 持有独占 vnode lock，
+		返回时并没有解锁。说明 vgone() 返回时，vnode lock 和 interlock 都是处于加锁状态
  */
 static void
 vgonel(struct vnode *vp)
@@ -3658,6 +3837,8 @@ vgonel(struct vnode *vp)
 
 	/*
 	 * Don't vgonel if we're already doomed.
+			当 vnode 正在被回收的时候，不要执行 vgonel()。
+			如果不是，则要给其增加 VI_DOOMED 标记
 	 */
 	if (vp->v_iflag & VI_DOOMED)
 		return;
@@ -3675,6 +3856,7 @@ vgonel(struct vnode *vp)
 	/*
 	 * If purging an active vnode, it must be closed and
 	 * deactivated before being reclaimed.
+	 * 如果清除活动 vnode，则必须在回收之前关闭并停用该 vnode
 	 */
 	if (active)
 		VOP_CLOSE(vp, FNONBLOCK, NOCRED, td);
@@ -3690,6 +3872,8 @@ vgonel(struct vnode *vp)
 	/*
 	 * Clean out any buffers associated with the vnode.
 	 * If the flush fails, just toss the buffers.
+	 * 清除与 vnode 关联的所有缓冲区。如果刷新失败，只需丢弃缓冲区。
+	 * 注意这里调用的宏变成了 BO_LOCK / BO_UNLOCK
 	 */
 	mp = NULL;
 	if (!TAILQ_EMPTY(&vp->v_bufobj.bo_dirty.bv_hd))
@@ -3735,9 +3919,9 @@ vgonel(struct vnode *vp)
 	cache_purge(vp);
 	/*
 	 * Done with purge, reset to the standard lock and invalidate
-	 * the vnode.
+	 * the vnode. 清除完成后，重置为标准锁定并使 vnode 无效
 	 */
-	VI_LOCK(vp);
+	VI_LOCK(vp);	// lock interlock
 	vp->v_vnlock = &vp->v_lock;
 	vp->v_op = &dead_vnodeops;
 	vp->v_tag = "none";
@@ -3746,12 +3930,15 @@ vgonel(struct vnode *vp)
 
 /*
  * Calculate the total number of references to a special device.
+ 		计算对特殊设备的引用总数
  */
 int
 vcount(struct vnode *vp)
 {
 	int count;
-
+	/*
+		device lock 是一个全局的锁
+	*/
 	dev_lock();
 	count = vp->v_rdev->si_usecount;
 	dev_unlock();

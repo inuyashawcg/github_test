@@ -200,3 +200,549 @@ vfs lookup() 与 tptfs lookup() 的关系：
   3、如果是，进一步判断是否查找属性，即是否支持跨文件系统访问
   4、如果是，vfs 会提供相应的处理逻辑，将一些基本的数据结构 (mount / vnode) 进行替换，然后在新的文件系统查找后续文件节点
   5、如果不是，则仍然在原有文件系统中查找文件节点
+
+
+ufs 查找 /dev 时的一些初始化环境，tptfs 可以根据这个进行设置
+  (gdb) p* (struct inode*)ndp->ni_startdir->v_data
+  $10 = {
+    i_nextsnap = {
+      tqe_next = 0x0,
+      tqe_prev = 0x0
+    },
+    i_vnode = 0xffffffd00a8043d0,
+    i_ump = 0xffffffd0096fbc00,
+    i_dquot = {0x0, 0x0},
+    i_un = {
+      dirhash = 0x0,
+      snapblklist = 0x0
+    },
+    dinode_u = {
+      din1 = 0xffffffd00b67ae00,
+      din2 = 0xffffffd00b67ae00
+    },
+    i_number = 2,
+    i_flag = 1024,
+    i_effnlink = 22,
+    i_count = 0,
+    i_endoff = 0,
+    i_diroff = 0,
+    i_offset = 0,
+    i_nextclustercg = -1,
+    i_ea_area = 0x0,
+    i_ea_len = 0,
+    i_ea_error = 0,
+    i_ea_refs = 0,
+    i_size = 1024,
+    i_gen = 1188178455,
+    i_flags = 0,
+    i_uid = 0,
+    i_gid = 0,
+    i_mode = 16877,
+    i_nlink = 22
+  }
+
+  (gdb) p* (struct inode*)ndp->ni_rootdir->v_data 
+  $11 = {
+    i_nextsnap = {
+      tqe_next = 0x0,
+      tqe_prev = 0x0
+    },
+    i_vnode = 0xffffffd00a8043d0,
+    i_ump = 0xffffffd0096fbc00,
+    i_dquot = {0x0, 0x0},
+    i_un = {
+      dirhash = 0x0,
+      snapblklist = 0x0
+    },
+    dinode_u = {
+      din1 = 0xffffffd00b67ae00,
+      din2 = 0xffffffd00b67ae00
+    },
+    i_number = 2,
+    i_flag = 1024,
+    i_effnlink = 22,
+    i_count = 0,
+    i_endoff = 0,
+    i_diroff = 0,
+    i_offset = 0,
+    i_nextclustercg = -1,
+    i_ea_area = 0x0,
+    i_ea_len = 0,
+    i_ea_error = 0,
+    i_ea_refs = 0,
+    i_size = 1024,
+    i_gen = 1188178455,
+    i_flags = 0,
+    i_uid = 0,
+    i_gid = 0,
+    i_mode = 16877,
+    i_nlink = 22
+  }
+
+  (gdb) bt
+  #0  VfsLookup::namei (this=0x1100db038 <vfsLookup>, ndp=0x11414e590)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsLookup.cpp:503
+  #1  0x000000010c06160a in namei (ndp=0x11414e590)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsLookupWrapper.cpp:15
+  #2  0x000000010c241248 in kern_funlinkat (td=0x115ab0100, dfd=-100, path=0x10d1048bf "/dev/dev", fd=-200, 
+      pathseg=UIO_SYSSPACE, flag=0, oldinum=0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_syscalls.cpp:1877
+  #3  0x000000010c226b94 in vfs_mountroot_shuffle (td=0x115ab0100, mpdevfs=0x1bcad7040)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:415
+  #4  0x000000010c2250fc in vfs_mountroot ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:1070
+  #5  0x000000010c06d5d8 in start_init (dummy=0x0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/init_main.cpp:675
+  #6  0x000000010c0b12e2 in fork_exit (callout=0x10c06d5ae <start_init(void*)>, arg=0x0, frame=0x11414ec50)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/kern_fork.cpp:1045
+  #7  0x000000010c004d8e in fork_trampoline ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/swtch.S:385
+  Backtrace stopped: frame did not save the PC
+
+  gdb) p *ndp            
+  $23 = {
+    ni_dirp = 0x10d1048bf "/dev/dev",
+    ni_segflg = UIO_SYSSPACE,
+    ni_rightsneeded = 0x110088458 <cap_unlinkat_rights>,
+    ni_startdir = 0x0,
+    ni_rootdir = 0xffffffd00a8043d0,
+    ni_topdir = 0x0,
+    ni_dirfd = -100,
+    ni_lcf = 0,
+    ni_filecaps = {
+      fc_rights = {
+        cr_rights = {0, 0}
+      },
+      fc_ioctls = 0x0,
+      fc_nioctls = -1,
+      fc_fcntls = 0
+    },
+    ni_vp = 0x0,
+    ni_dvp = 0x115ab0100,
+    ni_resflags = 1,
+    ni_debugflags = 65488,
+    ni_loopcnt = 0,
+    ni_pathlen = 8,
+    ni_next = 0x115ab0100 "",
+    ni_cnd = {
+      cn_origflags = 4631881280,
+      cn_flags = 262156,
+      cn_thread = 0x115ab0100,
+      cn_cred = 0xffffffd000c94900,
+      cn_nameiop = DELETE,
+      cn_lkflags = 1,
+      cn_pnbuf = 0xffffffd00a800800 "/dev/dev",
+      cn_nameptr = 0xffffffd00a800801 "dev/dev",
+      cn_namelen = 0
+    },
+    ni_cap_tracker = {
+      tqh_first = 0x0,
+      tqh_last = 0x11414e650
+    }
+  }
+
+  (gdb) p *ndp->ni_rootdir
+  $22 = {
+    v_type = VDIR,
+    v_irflag = 0,
+    v_seqc = 2,
+    v_nchash = 1972156343,
+    v_op = 0x110033c60 <ffs_vnodeops2>,
+    v_data = 0xffffffd00b67bf00,
+    v_mount = 0x1bcad9080,
+    v_nmntvnodes = {
+      tqe_next = 0xffffffd009778d58,
+      tqe_prev = 0x1bcad9108
+    },
+    {
+      v_mountedhere = 0x0,
+      v_unpcb = 0x0,
+      v_rdev = 0x0,
+      v_fifoinfo = 0x0
+    },
+    v_hashlist = {
+      le_next = 0x0,
+      le_prev = 0x18920ec10
+    },
+    v_cache_src = {
+      lh_first = 0xffffffd009775f70
+    },
+    v_cache_dst = {
+      tqh_first = 0x0,
+      tqh_last = 0xffffffd00a804428
+    },
+    v_cache_dd = 0x0,
+    v_lock = {
+      lock_object = {
+        lo_name = 0x10d0d944a "ufs",
+        lo_flags = 117112832,
+        lo_data = 0,
+        lo_witness = 0x0
+      },
+      lk_lock = 1,
+      lk_exslpfail = 0,
+      lk_timo = 6,
+      lk_pri = 96
+    },
+    v_interlock = {
+      lock_object = {
+        lo_name = 0x10d12a62e "vnode interlock",
+
+通过上述调试，感觉可以使用
+  nameidata->ni_startdir = tptfs /dev vnode
+  nameidata->ni_rootdir = tptfs / vnode
+
+与此同时，还应该把 componentname->cn_nameptr, cn_namelen 等参数进行更新，然后直接调用 vfs lookup() 函数应该就可以了
+
+
+////////////// 20220811 //////////////
+  #0  devfs_lookup (ap=0x11414dd10)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/devfs/devfs_vnops.c:1187
+  #1  0x000000010c38fe86 in VOP_LOOKUP (dvp=0xffffffd0096dad58, vpp=0x11414e5e8, cnp=0x11414e610)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vnode_if.h:65
+  #2  0x000000010c38ddc2 in TptLookup::lookupLBL (this=0xffffffd00b61cc60, ndp=0x11414e590)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/tptfs/TptLookup.cpp:974
+  #3  0x000000010c38ca44 in TptLookup::lookupFile (this=0xffffffd00b61cc60, NameiData=0x11414e590)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/tptfs/TptLookup.cpp:35
+  #4  0x000000010c389440 in tpt_lookup (ndp=0x11414e590)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/tptfs/TptFileSystem.cpp:728
+  #5  0x000000010c05eccc in VfsLookup::namei (this=0x1100db038 <vfsLookup>, ndp=0x11414e590)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsLookup.cpp:505
+  #6  0x000000010c06160a in namei (ndp=0x11414e590)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsLookupWrapper.cpp:15
+  #7  0x000000010c241278 in kern_funlinkat (td=0x115ab0100, dfd=-100, path=0x10d105f80 "/dev/dev", 
+      fd=-200, pathseg=UIO_SYSSPACE, flag=0, oldinum=0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_syscalls.cpp:1877
+  #8  0x000000010c226bc4 in vfs_mountroot_shuffle (td=0x115ab0100, mpdevfs=0x1bcada040)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:415
+  #9  0x000000010c22512c in vfs_mountroot ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_mountroot.cpp:1070
+  #10 0x000000010c06d608 in start_init (dummy=0x0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/init_main.cpp:675
+  #11 0x000000010c0b1312 in fork_exit (callout=0x10c06d5de <start_init(void*)>, arg=0x0, 
+      frame=0x11414ec50)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/kern_fork.cpp:1045
+  #12 0x000000010c004d8e in fork_trampoline ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/swtch.S:385
+  Backtrace stopped: frame did not save the PC
+
+  貌似已经可以跳转到 devfs 注册函数表当中了
+
+
+  Trying to mount root from tptfs:/dev/vtbd1 []...
+  goldfish_rtc0: providing initial system time
+  start init
+  2022-08-11T05:38:42.682691+00:00 - init 1 - - Can't stat /dev: No such file or directory
+  2022-08-11T05:38:42.840674+00:00 - init 26 - - login_getclass: unknown class 'daemon'
+  2022-08-11T05:38:42.859916+00:00 - init 26 - - can't access /etc/rc: No such file or directory
+  sh: The terminal database could not be opened.
+  sh: using dumb terminal settings.
+  t[0] == 0x000000000000000d
+  t[1] == 0x0000000040000980
+  t[2] == 0x0000000040200020
+  t[3] == 0x00000000ffff69f0
+  t[4] == 0x000000004000c900
+  t[5] == 0x0000000000000000
+  t[6] == 0x000000010c006e42
+  s[0] == 0x00000001def66090
+  s[1] == 0x000000000000000e
+  s[2] == 0x000000000000001e
+  s[3] == 0x000000000000001f
+  s[4] == 0x000000000000001c
+  s[5] == 0x0000000000000000
+  s[6] == 0x0000000000000000
+  s[7] == 0x0000000000000000
+  s[8] == 0x0000000000000000
+  s[9] == 0x0000000000000000
+  s[10] == 0x0000000000000000
+  s[11] == 0x0000000000000000
+  a[0] == 0x206c616e696d7265
+  a[1] == 0x0000000000000000
+  a[2] == 0x000000000000000f
+  a[3] == 0x00000001def66008
+  a[4] == 0x0000000000000001
+  a[5] == 0x0000000000000021
+  a[6] == 0x000000010c004310
+  a[7] == 0x00000001def66d68
+  ra == 0x000000010c38a198
+  sp == 0x00000001def66070
+  gp == 0x00000001def65f90
+  tp == 0xffffffd0096e9c78
+  sepc == 0x000000010c384e6a
+  sstatus == 0x8000000000006120
+  panic: Fatal page fault at 0x10c384e6a: 0x206c616e696d72a5
+  cpuid = 6
+  time = 1660196323
+  KDB: stack backtrace:
+  #0 0x10c179f4a at kdb_backtrace+0x7c
+  #1 0x10c114f4a at vpanic+0x202
+  #2 0x10c114d44 at panic+0x32
+  #3 0x10c019d64 at do_trap_supervisor+0x5da
+  #4 0x10c019860 at do_trap_supervisor+0xd6
+  #5 0x10c004508 at cpu_exception_handler_supervisor+0x68
+  #6 0x10c38a194 at _ZN12TptHashTable10getElementEmtt+0x6e
+  #7 0x10c38ef62 at _ZN9TptLookup15handleNameiOptsEPciP9nameidata+0x132
+  #8 0x10c38cd00 at _ZN9TptLookup10lookupFileEP9nameidata+0x350
+  #9 0x10c38943c at _Z10tpt_lookupP9nameidata+0x24
+  #10 0x10c05ecc8 at _ZN9VfsLookup5nameiEP9nameidata+0x266
+  #11 0x10c061606 at namei+0x1c
+  #12 0x10c24983e at vn_open_cred+0x430
+  #13 0x10c249402 at vn_open+0x40
+  #14 0x10c23f46a at kern_openat+0x28a
+  #15 0x10c23f1d4 at sys_open+0x2a
+  #16 0x10c0191b2 at ecall_handler+0x71e
+  #17 0x10c018ab0 at ecall_handler+0x1c
+  Uptime: 3s
+
+
+  kern_openat: /etc/login.conf.db
+  kern_openat: /dev/null
+  kern_openat: /etc/nsswitch.conf
+  kern_openat: /etc/spwd.db
+  kern_openat: /etc/group
+  kern_openat: /etc/csh.cshrc
+  kern_openat: /sbin
+  kern_openat: /bin
+  kern_openat: /usr/sbin
+  kern_openat: /usr/bin
+  kern_openat: /.tcshrc
+  kern_openat: /.cshrc
+  kern_openat: /sbin
+  kern_openat: /bin
+  kern_openat: /usr/sbin
+  kern_openat: /usr/bin
+  kern_openat: /usr/local/sbin
+  kern_openat: /usr/local/bin
+  kern_openat: //bin
+  kern_openat: /.history
+  sh: The terminal database could not be opened.
+  sh: using dumb terminal settings.
+  You have mail.
+  kern_openat: /etc/localtime
+  kern_openat: /usr/share/zoneinfo/UTC
+  kern_openat: /usr/share/zoneinfo/posixrules
+
+  Thread 6 hit Breakpoint 4, stat (path=0xffffe440 "/usr/share/locale/en/LC_MESSAGES/tcsh.cat", 
+    sb=0xffffe360) at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/libc/sys/stat.c:44
+  44		if (__getosreldate() >= INO64_FIRST)
+  (gdb) c
+  Continuing.
+
+  Thread 6 hit Breakpoint 4, stat (path=0xffffe2c0 "/usr/share/nls/C/tcsh.cat", sb=0xffffe720)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/libc/sys/stat.c:44
+  44		if (__getosreldate() >= INO64_FIRST)
+  (gdb) c
+  Continuing.
+
+  Thread 6 hit Breakpoint 4, stat (path=0xffffe2c0 "/usr/share/nls/tcsh/C", sb=0xffffe720)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/libc/sys/stat.c:44
+  44		if (__getosreldate() >= INO64_FIRST)
+  (gdb) c
+  Continuing.
+
+  Thread 6 hit Breakpoint 4, stat (path=0xffffe2c0 "/usr/local/share/nls/C/tcsh.cat", sb=0xffffe720)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/libc/sys/stat.c:44
+  44		if (__getosreldate() >= INO64_FIRST)
+  (gdb) c
+  Continuing.
+
+  Thread 6 hit Breakpoint 4, stat (path=0xffffe2c0 "/usr/local/share/nls/tcsh/C", sb=0xffffe720)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/libc/sys/stat.c:44
+  44		if (__getosreldate() >= INO64_FIRST)
+
+  如果是路径信息中只要一个单纯的 /dev， 和 /dev/*** 两种处理的逻辑应该是不一样的。第一种应该可以直接返回 devfs vnode，
+第二种方式则是需要在逐级查找中再去找另外以文件节点，所以这里可能是一个 bug 点。第一种感觉应该是做成一个单独的循环函数，专门
+处理 devfs 或者其他文件系统挂载。其他情况下，只需要设置好初始变量，然后按照原有函数的处理逻辑执行
+
+
+////////////// 20220812 //////////////
+terminfo 在奇海中源代码中的实际位置：
+  /qihai/lib/ncurses/misc/terminfo.src
+
+  ncurses_cfg.h 文件中，刘强定义了两个绝对本地路径信息，导致 tptfs 在启动的时候找不到相应的文件而引发 panic。因为 ufs 不会
+生成文件类，但是 tptfs 却默认目标文件的目录是存在文件类的 (前序遍历生成文件树)。所以会有访问空指针的问题。解决方法就是将本地绝对
+路径改成奇海系统中的绝对路径，然后在根文件系统中添加相应的路径文件
+
+tptfs 根文件系统挂载时的打印信息：
+  namei: /dev
+  namei: /dev/dev
+  namei: /.mount.conf
+  goldfish_rtc0: providing initial system time
+  start init
+  namei: /etc/malloc.conf
+  namei: /
+  namei: /dev
+  namei: /dev/reroot
+  namei: /dev/reroot
+  namei: /etc/login.conf
+  namei: /etc/login.conf.db
+  namei: /etc/login.conf
+  namei: /etc/login.conf
+  namei: /etc/localtime
+  namei: /usr/share/zoneinfo/UTC
+  namei: /usr/share/zoneinfo/posixrules
+  namei: /var/run/logpriv
+  namei: /var/run/log
+  namei: /dev/log
+  namei: /var/run/logpriv
+  namei: /var/run/log
+  namei: /dev/log
+  namei: /dev/console
+  2022-08-12T02:37:09.777204+00:00 - init 26 - - login_getclass: unknown class 'daemon'
+  namei: /etc/login.conf.db
+  namei: /etc/login.conf
+  namei: /etc/login.conf
+  namei: /etc/login.conf.db
+  namei: /etc/login.conf
+  namei: /etc/rc
+  namei: /usr/share/nls/C/libc.cat
+  namei: /usr/share/nls/libc/C
+  namei: /usr/local/share/nls/C/libc.cat
+  namei: /usr/local/share/nls/libc/C
+  namei: /var/run/logpriv
+  namei: /var/run/log
+  namei: /dev/log
+  namei: /var/run/logpriv
+  namei: /var/run/log
+  namei: /dev/log
+  namei: /dev/console
+  2022-08-12T02:37:09.850645+00:00 - init 26 - - can't access /etc/rc: No such file or directory
+  namei: /etc/malloc.conf
+  namei: /usr/share/locale/en/LC_MESSAGES/tcsh.cat
+  namei: /usr/share/nls/C/tcsh.cat
+  namei: /usr/share/nls/tcsh/C
+  namei: /usr/local/share/nls/C/tcsh.cat
+  namei: /usr/local/share/nls/tcsh/C
+  namei: /dev/null
+  namei: /
+  namei: /
+  namei: /etc/nsswitch.conf
+  namei: /etc/spwd.db
+  namei: /etc/pwd.db
+  namei: /etc/spwd.db
+  namei: /etc/pwd.db
+  namei: /etc/group
+  namei: /etc/csh.cshrc
+  namei: /sbin
+  namei: /bin
+  namei: /usr/sbin
+  namei: /usr/bin
+  namei: /.tcshrc
+  namei: /.cshrc
+  namei: /.history
+  namei: //.terminfo
+  namei: /home/neptune/Downloads/ncurses-6.3/build/share/terminfo
+
+
+ufs 作为根文件系统时的打印信息：
+  namei: /dev/vtbd0
+  namei: /dev/vtbd0
+  namei: /dev/vtbd1
+  namei: /dev/vtbd1
+  namei: /
+  namei: /
+  namei: /dev/vtbd0
+  namei: /dev/vtbd0
+  WARNING: / was not properly dismounted
+  namei: /dev
+  namei: /dev/dev
+  namei: /.mount.conf
+  goldfish_rtc0: providing initial system time
+  start init
+  namei: /etc/malloc.conf
+  namei: /
+  namei: /dev
+  namei: /dev/reroot
+  namei: /dev/reroot
+  namei: /etc/login.conf
+  namei: /etc/login.conf.db
+  namei: /etc/login.conf
+  namei: /etc/login.conf.db
+  namei: /etc/rc
+  namei: /etc/malloc.conf
+  namei: /usr/share/locale/en/LC_MESSAGES/tcsh.cat
+  namei: /usr/share/nls/C/tcsh.cat
+  namei: /usr/share/nls/tcsh/C
+  namei: /usr/local/share/nls/C/tcsh.cat
+  namei: /usr/local/share/nls/tcsh/C
+  namei: /dev/null
+  namei: /
+  namei: /
+  namei: /etc/nsswitch.conf
+  namei: /etc/nsswitch.conf
+  namei: /etc/spwd.db
+  namei: /etc/spwd.db
+  namei: /etc/group
+  namei: /etc/csh.cshrc
+  namei: /sbin
+  namei: /bin
+  namei: /usr/sbin
+  namei: /usr/bin
+  namei: /.tcshrc
+  namei: /.cshrc
+  namei: /sbin
+  namei: /bin
+  namei: /usr/sbin
+  namei: /usr/bin
+  namei: /usr/local/sbin
+  namei: /usr/local/bin
+  namei: //bin
+  namei: /.history
+  namei: //.terminfo
+  namei: /home/neptune/Downloads/ncurses-6.3/build/share/terminfo
+  namei: /home/neptune/Downloads/ncurses-6.3/build/share/terminfo
+  sh: The terminal database could not be opened.
+  sh: using dumb terminal settings.
+  namei: /var/mail/root
+  You have mail.
+  namei: /etc/localtime
+  namei: /usr/share/zoneinfo/UTC
+  namei: /usr/share/zoneinfo/posixrules
+
+可以看到，tptfs 挂载时貌似需要打开 /dev/console 设备，但是 ufs 是不用的，这一点比较奇怪
+
+
+  namei: //.terminfo
+  namei: /lib/ncurses/misc
+  sh: The terminal database could not be opened.
+  sh: using dumb terminal settings.
+  namei: /etc/localtime
+  namei: /usr/share/zoneinfo/UTC
+  namei: /usr/share/zoneinfo/posixrules
+  # 
+
+  貌似进来了。。。但给人的感觉就是非常不稳定，有时候直接在 UTC 检测的时候挂掉了，有的时候又可以直接进来
+
+
+  # ls
+  .cshrc		csh.cshrc	group		login.conf	rc
+  FilesRecord.txt	dev		localtime	login.conf.db	spwd.db
+  bin		etc		login.access	nsswitch.conf
+  # cd etc
+  etc: No such file or directory.
+  # pwd
+  /
+  # cd dev
+  dev: No such file or directory.
+  # ls -al
+  ls: .cshrc: No such file or directory
+  ls: FilesRecord.txt: No such file or directory
+  ls: bin: No such file or directory
+  ls: csh.cshrc: No such file or directory
+  ls: dev: No such file or directory
+  ls: etc: No such file or directory
+  ls: group: No such file or directory
+  ls: localtime: No such file or directory
+  ls: login.access: No such file or directory
+  ls: login.conf: No such file or directory
+  ls: login.conf.db: No such file or directory
+  ls: nsswitch.conf: No such file or directory
+  ls: rc: No such file or directory
+  ls: spwd.db: No such file or directory
+  total 0
+  drwxr-xr-x  2 0  0  7936 Jan  1  1970 .
+  drwxr-xr-x  2 0  0  7936 Jan  1  1970 ..
+  # ll
+  /sbin/ll: Operation not permitted.
+  # ls -al
+  #

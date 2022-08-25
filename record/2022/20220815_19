@@ -1,0 +1,563 @@
+////////////// 20220815 //////////////
+  std::string 在 record file 文件解析的过程中出现 panic 的原因是 string allocator 的问题。
+可以通过打印信息看到为 std::string 添加内容时候地址的变化情况：
+
+  (gdb) p/x *fs
+  $7 = {
+    vaddr = 0x234004000,  // 数据源地址
+    m_hold = 0x0,
+    fault_type = 0x1,
+    prot = 0xb0,
+    fault_flags = 0x0,
+    oom = 0x0,
+    wired = 0x0,
+    m_cow = 0x11414d998,
+    object = 0x110119358,
+    pindex = 0x11414da10,
+    m = 0x10c272c56,
+    first_object = 0x0,
+    first_pindex = 0x0,
+    first_m = 0x0,
+    map = 0x110119860,
+    entry = 0x0,
+    map_generation = 0x15ab0100,
+    lookup_still_valid = 0x0,
+    vp = 0x0
+  }
+
+  Thread 4 hit Breakpoint 8, vm_fault_lookup (fs=0x114149c50)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/vm/vm_fault.cpp:751
+  751	    KASSERT(!fs->lookup_still_valid, ("vm_fault_lookup: Map already locked."));
+  (gdb) p/x *fs
+  $8 = {
+    vaddr = 0x11414a000,  // 源数据地址
+    m_hold = 0x0,
+    fault_type = 0x2,
+    prot = 0x20,
+    fault_flags = 0x0,
+    oom = 0x0,
+    wired = 0x0,
+    m_cow = 0x114149ca8,
+    object = 0x110119358,
+    pindex = 0x114149d20,
+    m = 0x10c272c56,
+    first_object = 0x0,
+    first_pindex = 0x0,
+    first_m = 0x0,
+    map = 0x110119860,
+    entry = 0x0,
+    map_generation = 0x15ab0100,
+    lookup_still_valid = 0x0,
+    vp = 0x0
+  }
+
+  在内核中使用的 std::string 应该是在内核申请申请存储空间，而不能跳转到用户空间去申请。所以才会出现 panic
+的情况。要使用内核自定义的 allocator
+
+
+////////////// 20220816 //////////////
+  ra == 0x000000010c19279e
+  sp == 0x00000001def75670
+  gp == 0x00000001def75720
+  tp == 0x000000010c1833b0
+  sepc == 0x000000010c192880
+  sstatus == 0x8000000000006120
+  panic: Fatal page fault at 0x10c192880: 0x2d38302d3232303a
+  cpuid = 7
+  time = 1660614631
+  KDB: stack backtrace:
+  #0 0x10c179f5e at kdb_backtrace+0x7c
+  #1 0x10c114f5e at vpanic+0x202
+  #2 0x10c114d58 at panic+0x32
+  #3 0x10c019d64 at do_trap_supervisor+0x5da
+  #4 0x10c019860 at do_trap_supervisor+0xd6
+  #5 0x10c004508 at cpu_exception_handler_supervisor+0x68
+  #6 0x10c19279a at uiomove+0x26
+  #7 0x10c050588 at _ZN17TTYLineDiscipline13 ttydisc_write EP3ttyP3uioi+0x16c
+  #8 0x10c0528b0 at ttydisc_write+0x2c
+  #9 0x10c04c92c at _ZN3TTY9outwakeupEP3tty+0xa2c
+  #10 0x10c04de8a at _ZN3TTY9outwakeupEP3tty+0x1f8a
+  #11 0x10c2e050a at dev2udev+0x49c4
+  #12 0x10c1a0f52 at seltdfini+0x270
+  #13 0x10c19cda4 at sys_writev+0x146
+  #14 0x10c19c9e4 at kern_writev+0x6a
+  #15 0x10c19ccb2 at sys_writev+0x54
+  #16 0x10c0191b2 at ecall_handler+0x71e
+  #17 0x10c018ab0 at ecall_handler+0x1c
+  Uptime: 3s
+
+  目前一个 tptfs 作为根文件系统启动的时候，会出现 tty panic 的问题，可能的原有如下几个：
+    1、缺少相应的配置文件
+    2、ufs 作为根文件系统启动不会访问 /dev/console 设备文件，但是 tptfs 会，有可能是相同原因
+
+
+  Thread 2 hit Breakpoint 2, ttydisc_write (tp=0xffffffd000fb2808, uio=0x1def87ae8, ioflag=0)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/TTYLineDisciplineWrapper.cpp:31
+  31	    return ttyLineDiscipline.ttydisc_write(tp, uio, ioflag);
+  (gdb) bt
+  #0  ttydisc_write (tp=0xffffffd000fb2808, uio=0x1def87ae8, ioflag=0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/TTYLineDisciplineWrapper.cpp:31
+  #1  0x000000010c04c930 in ttydev_write (dev=0xffffffd000ecbc00, uio=0x1def87ae8, ioflag=0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/TTY.cpp:524
+  #2  0x000000010c04de8e in ttyconsdev_write (dev=0xffffffd000ecbc00, uio=0x1def87ae8, ioflag=0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/TTY.cpp:2022
+  #3  0x000000010c2e04be in devfs_write_f (fp=0xffffffd0097b5f50, uio=0x1def87ae8, 
+      cred=0xffffffd009794e00, flags=0, td=0x1bcb5e680)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/devfs/devfs_vnops.c:1933
+  #4  0x000000010c1a0f06 in fo_write (fp=0xffffffd0097b5f50, uio=0x1def87ae8, 
+      active_cred=0xffffffd009794e00, flags=0, td=0x1bcb5e680)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/sys/file.h:342
+  #5  0x000000010c19cd58 in dofilewrite (td=0x1bcb5e680, fd=17, fp=0xffffffd0097b5f50, 
+      auio=0x1def87ae8, offset=-1, flags=0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/sys_generic.cpp:558
+  #6  0x000000010c19c998 in kern_writev (td=0x1bcb5e680, fd=17, auio=0x1def87ae8)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/sys_generic.cpp:485
+  #7  0x000000010c19c90e in sys_write (td=0x1bcb5e680, uap=0x1bcb5ea68)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/sys_generic.cpp:400
+  #8  0x000000010c0191b6 in syscallenter (td=0x1bcb5e680)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/../../kernel/subr_syscall:189
+  #9  0x000000010c018ab4 in ecall_handler ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/trap.cpp:167
+  #10 0x000000010c004fc0 in system_call ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/swtch.S:601
+  Backtrace stopped: frame did not save the PC
+  (gdb) n
+
+  Thread 2 hit Breakpoint 2, TTYLineDiscipline::ttydisc_write (this=0x1100dafa0 <ttyLineDiscipline>, 
+      tp=0xffffffd000fb2808, uio=0x1def87ae8, ioflag=0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/TTYLineDiscipline.cpp:445
+  445	    int error = 0;
+  (gdb) n
+  446	    unsigned int oblen = 0;
+  (gdb) p uio
+  $1 = (uio *) 0x1def87ae8
+  (gdb) p* uio
+  $2 = {
+    uio_iov = 0x1def87ad8,
+    uio_iovcnt = 1,
+    uio_offset = 0,
+    uio_resid = 47,
+    uio_segflg = UIO_USERSPACE,
+    uio_rw = UIO_WRITE,
+    uio_td = 0x1bcb5e680
+  }
+  (gdb) p* uio->uio_iov
+  $3 = {
+    iov_base = 0x9031b630 <linbuf>,
+    iov_len = 47
+  }
+
+start init
+2022-08-16T02:12:39.624975+00:00 - init 26 - - login_getclass: unknown class 'daemon'
+2022-08-16T02:12:40.009937+00:00 - init 26 - - _secure_path: /etc/login.conf is not owned by root
+2022-08-16T02:12:40.351869+00:00 - init 26 - - can't directly exec /etc/rc: Operation not permitted
+sh: The terminal database could not be opened.
+sh: using dumb terminal settings.
+# ls
+random: unblocking device.
+.cshrc		FilesRecord.txt	bin		dev		etc
+# cd dev
+dev: No such file or directory.
+# cd etc
+etc: No such file or directory.
+# ls etc
+ls: etc: No such file or directory
+# 
+
+
+#0  login_getclassbyname (name=0x90014768 <user_lib_data_start+83816> "me", pwd=0x0)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/libc/libutil/login_cap.c:195
+#1  0x000000010cac9394 in login_getuserclass (pwd=0x0)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/libc/libutil/login_cap.c:348
+#2  0x000000010cacb7a6 in setusercontext (lc=0x40203040, pwd=0x0, uid=0, flags=1688)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/libc/libutil/login_class.c:546
+#3  0x000000010c8ba43e in setprocresources (cname=0x90021abe <user_lib_data_start+137918> "daemon")
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/init/init.c:2034
+#4  0x000000010c8bb24a in execute_script (argv=0xffffe4b0)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/init/init.c:1051
+#5  0x000000010c8b9364 in run_script (
+    script=0x90000d68 <user_lib_data_start+3432> <error: Cannot access memory at address 0x90000d68>)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/init/init.c:1118
+#6  0x000000010c8b8654 in runcom ()
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/init/init.c:1027
+#7  0x000000010c8b963e in transition (s=0x10c8b863c <runcom>)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/init/init.c:580
+#8  0x000000010c8b8618 in init_main (argc=1, argv=0xffffecd8)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/init/init.c:414
+#9  0x000000010cb70836 in main (argc=1, argv=0xffffecd8, env=0xffffece8)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/csu/riscv/crt1_c.c:83
+
+
+login_getclassbyname (name=0x90021abe <user_lib_data_start+137918> "daemon", pwd=0x0)
+  at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/libc/libutil/login_cap.c:227
+227		    login_dbarray[i++] = path_login_conf;
+(gdb) 
+228		login_dbarray[i] = NULL;
+(gdb) p login_dbarray 
+$4 = {0x90055748 <path_login_conf> "/etc/login.conf", 0x0, 0x0}
+(gdb) p login_dbarray[1] 
+$5 = 0x0
+(gdb) p login_dbarray[0] 
+$6 = 0x90055748 <path_login_conf> "/etc/login.conf"
+(gdb) n
+230		memset(lc, 0, sizeof(login_cap_t));
+(gdb) 
+231		lc->lc_cap = lc->lc_class = lc->lc_style = NULL;
+(gdb) 
+233		if (name == NULL || *name == '\0')
+(gdb) 
+236		switch (cgetent(&lc->lc_cap, login_dbarray, name)) {
+(gdb) 
+258		    if ((lc->lc_class = strdup(name)) != NULL) {
+(gdb) p name
+$7 = 0x90021abe <user_lib_data_start+137918> "daemon"
+(gdb) p lc
+$8 = (login_cap_t *) 0x40203040
+(gdb) p* lc
+$9 = {
+  lc_class = 0x0,
+  lc_cap = 0x4021f300 "daemon:\t:path=/sbin /bin /usr/sbin /usr/bin /usr/local/sbin /usr/local/bin:\t:mail@:\t:memorylocked=128M:\t:\t:passwd_format=sha512:\t:copyright=/etc/COPYRIGHT:\t:welcome=/var/run/motd:\t:setenv=BLOCKSIZE=K:"...,
+  lc_style = 0x0
+}
+
+
+login_getclassbyname (name=0x90021abe <user_lib_data_start+137918> "daemon", pwd=0x0)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/libc/libutil/login_cap.c:227
+227		    login_dbarray[i++] = path_login_conf;
+(gdb) 
+228		login_dbarray[i] = NULL;
+(gdb) 
+230		memset(lc, 0, sizeof(login_cap_t));
+(gdb) 
+231		lc->lc_cap = lc->lc_class = lc->lc_style = NULL;
+(gdb) 
+233		if (name == NULL || *name == '\0')
+(gdb) 
+236		switch (cgetent(&lc->lc_cap, login_dbarray, name)) {
+(gdb) 
+238		    if (me)
+(gdb) p me
+$3 = 0
+(gdb) p lc
+$4 = (login_cap_t *) 0x40203040
+(gdb) p* lc
+$5 = {
+  lc_class = 0x0,
+  lc_cap = 0x0,
+  lc_style = 0x0
+}
+
+从打印结果可以看出，tptfs 作为根文件系统时，lc 中的数据全是空的，会导致无法获取 name class
+
+
+////////////// 20220817 //////////////
+  还是要时常看看工作原则，每次看完都会有新的体会和认识
+
+  对于有些自己花了很长时间都没有解决的 bug，一定要及时向小组成员寻求帮助，不要让自己一直陷入到某个旋涡当中。
+但也绝对不是浅尝辄止，而是要自己已经竭尽全力、试过各种方法之后再去请教组员，让他们从一个新的角度帮助自己思考
+这个问题可能产生的原因
+
+  老东家其实有一个比较好的解决 bug 的方法，就是把所有可能导致这个问题的原因写出来，然后一个一个尝试。自己
+还是比较懒惰，不想这么麻烦的搞这些东西，导致对于一些问题的解决思路受限。从今天开始尝试一下这种工作方式，毕竟
+在全公司推广，肯定是经过实践检验出来的。那就从昨天问题开始吧。
+以 * 表示 bug 产生原因的调查优先级，+ 表示已经完成的测试次数
+
+  init_main:
+    - openlog(): 应该是打开 log 输出功能
+    - setsid(): 建立初始会话(io / socket?)
+    - setlogin("root"): 判断是否以 root 登录系统
+    - getopt(argc, argv, "dsfr"): 获取属性信息，并做出相应的初始化动作
+    - handle signals
+    - 处理环境变量
+    - 判断 devfs 当前是不是根文件系统，并根据结果进一步处理
+    - transition(initial_transition): Start the state machine
+
+riscv 实际调试发现，initial_transition = runcom(): Run the system startup script.
+  - run_script(_PATH_RUNCOM): /etc/rc
+  - read_ttys
+
+scp root@192.168.2.213:/work/formatTool/test.img ./
+
+start_init() 函数产生 bug 可能的原因：
+  1、配置文件缺失，或者是非 riscv 版本 *
+    - 利用 buildworld 生成的纯净版本 riscv.img 构建 rootfs
+    - 修改文件的访问属性
+  
+  2、login.conf.db 文件中没有数据，导致 logingetclass() 函数无法完成属性匹配 **
+    - format tool 数据写入异常
+      -- 单独对 login.conf.db 进行写入测试
+  
+  3、该过程会调用 open() 等函数，可能是 tptfs lookup() 异常导致 ***
+    - 貌似是文件节点构造与查找的匹配出现了问题。原来的方案是在一个文件类中既包含路径信息，又包含名称信息。
+      但是后面改成了只包含路径信息。但是对应的 lookupFile() 和 handleNameiOpts() 函数中的逻辑并没有
+      改过来，导致一些文件的查找失败
+
+  4、文件树的构造出现问题，导致找不到注册的 element **
+    - 大概率是 hash key 计算错误导致
+
+  5、排除 start_init() 及其调用函数出现 bug (ufs 作为根文件系统启动完全没有问题)
+
+
+  实际调试发现，是原有的以 /tpt 作为根挂载点的一些代码逻辑没有改变，所以导致一些文件没有办法查找。修改实现逻辑之后
+可以正常进入到 shell 当中，虽然仍会提示如下错误
+  goldfish_rtc0: providing initial system time
+  start init
+  2022-08-17T06:00:50.628201+00:00 - init 26 - - login_getclass: unknown class 'daemon'
+  2022-08-17T06:00:50.676861+00:00 - init 26 - - login_getclass: no default/fallback class 'default'
+  2022-08-17T06:00:50.706369+00:00 - init 26 - - can't directly exec /etc/rc: Operation not permitted
+  sh: The terminal database could not be opened.
+  sh: using dumb terminal settings.
+  # ls
+  random: unblocking device.
+  .cshrc		FilesRecord.txt	dev		etc
+  # ls -al
+  total 32
+  drwxr-xr-x  2 0  0  1536 Jan  1  1970 .
+  drwxr-xr-x  2 0  0  1536 Jan  1  1970 ..
+  -rw-r--r--  1 0  0  1464 Aug 16 02:36 .cshrc
+  -rw-r--r--  1 0  0    94 Aug 17 03:55 FilesRecord.txt
+  drwxr-xr-x  2 0  0   512 Aug 17 03:50 dev
+  drwxr-xr-x  2 0  0  1536 Aug 17 03:52 etc
+  # cd etc
+  # pwd
+  /etc
+  # ls 
+  login.access	login.conf	login.conf.db	rc
+  # cat login.conf
+  # ll
+  /sbin/ll: Operation not permitted.
+
+
+虽然可以进入 shell，但是仍然存在其他的一些问题：
+  1、在根目录下执行 ls -al 命令是可以正确显示文件属性，但是 cd etc & ls -al 就会报错。dev 目录与之类似
+
+  2、cat /etc/login.conf 文件，发现其中的数据是空的
+    - 现在可以查找到这个文件，基本可以排除 lookup() 函数的逻辑错误。要考虑是 format tool 造成的
+    - 数据写入镜像文件出现异常，写错位置了或者是根本就没有写入
+    - 数据写入正常，index array 中的磁盘块映射异常
+
+  3、/etc/rc 文件的可执行权限有问题
+    - 权限获取操作异常 (stat() 函数的使用)
+    - struct tpt_inode 权限设置异常
+
+
+  对于 /dev 处理，还是跨文件系统访问的问题，其实就是要考虑所有的可能的情况。就比如说用户通过 nameidata 传入的
+路径信息可能是绝对路径，也可能是相对路径。或者用户首先 cd dev，然后在接着执行其他的命令，这个时候其实就要判断
+startdir 是哪种类型的 vnode
+
+  目前先用笨方法来做，把基本的功能实现，然后在考虑如何将 lookup() 完全融入到 tptfs_lookup() 当中，以及如何在
+路径处理中判断是否会经过挂载点
+
+  # cd dev
+  # pwd
+  random: unblocking device.
+  /dev
+  # ls
+  audit		devctl		klog		stdin		vtbd0
+  auditpipe	devctl2		mdctl		stdout		vtbd1
+  bpf		devstat		null		ttyu0		vtbd2
+  bpf0		fd		openfirm	ttyu0.init	xpt0
+  console		fido		pci		ttyu0.lock	zero
+  ctty		full		pfil		ufsid
+  cuau0		geom.ctl	random		ufssuspend
+  cuau0.init	kbd0		reroot		urandom
+  cuau0.lock	kbdmux0		stderr		usbctl
+  # cd ..
+  ..: Not a directory.
+  # ls -al
+  ls: ..: Not a directory
+  total 7
+  dr-xr-xr-x  5 0   0    512 Aug 17 07:12 .
+  crw-------  1 0   2   0x1a Aug 17 07:12 audit
+  crw-------  1 0   0   0x18 Aug 17 07:12 auditpipe
+  crw-------  1 0   0    0xc Aug 17 07:12 bpf
+  lrwxr-xr-x  1 0   0      3 Aug 17 07:12 bpf0 -> bpf
+  crw-------  1 0   0    0x6 Aug 17 07:22 console
+  crw-rw-rw-  1 0   0    0xa Aug 17 07:12 ctty
+  crw-rw----  1 66  68  0x21 Aug 17 07:12 cuau0
+  crw-rw----  1 66  68  0x22 Aug 17 07:12 cuau0.init
+  crw-rw----  1 66  68  0x23 Aug 17 07:12 cuau0.lock
+  dr-xr-xr-x  5 0   0    512 Aug 17 07:12 devctl
+  dr-xr-xr-x  5 0   0    512 Aug 17 07:12 devctl2
+  dr-xr-xr-x  5 0   0    512 Aug 17 07:12 devstat
+  dr-xr-xr-x  2 0   0    512 Aug 17 07:12 fd
+  crw-------  1 0   0    0xb Aug 17 07:12 fido
+  crw-rw-rw-  1 0   0    0xe Aug 17 07:12 full
+  crw-r-----  1 0   5    0x9 Aug 17 07:12 geom.ctl
+  lrwxr-xr-x  1 0   0      7 Aug 17 07:12 kbd0 -> kbdmux0
+  crw-------  1 0   0   0x1c Aug 17 07:12 kbdmux0
+  crw-------  1 0   0   0x1b Aug 17 07:12 klog
+  crw-------  1 0   0   0x29 Aug 17 07:12 mdctl
+  crw-rw-rw-  1 0   0    0xf Aug 17 07:12 null
+  crw-------  1 0   0   0x17 Aug 17 07:12 openfirm
+  crw-r--r--  1 0   0   0x19 Aug 17 07:12 pci
+  crw-------  1 0   0   0x28 Aug 17 07:12 pfil
+  crw-r--r--  1 0   0    0x4 Aug 17 07:12 random
+  dr-xr-xr-x  2 0   0    512 Aug 17 07:12 reroot
+  lrwxr-xr-x  1 0   0      4 Aug 17 07:12 stderr -> fd/2
+  lrwxr-xr-x  1 0   0      4 Aug 17 07:12 stdin -> fd/0
+  lrwxr-xr-x  1 0   0      4 Aug 17 07:12 stdout -> fd/1
+  crw-------  1 0   0   0x1e Aug 17 07:12 ttyu0
+  crw-------  1 0   0   0x1f Aug 17 07:12 ttyu0.init
+  crw-------  1 0   0   0x20 Aug 17 07:12 ttyu0.lock
+  dr-xr-xr-x  2 0   0    512 Aug 17 07:12 ufsid
+  crw-------  1 0   0   0x25 Aug 17 07:12 ufssuspend
+  lrwxr-xr-x  1 0   0      6 Aug 17 07:12 urandom -> random
+  crw-r--r--  1 0   5   0x2a Aug 17 07:12 usbctl
+  crw-r-----  1 0   5   0x2e Aug 17 07:12 vtbd0
+  crw-r-----  1 0   5   0x30 Aug 17 07:12 vtbd1
+  crw-r-----  1 0   5   0x31 Aug 17 07:12 vtbd2
+  crw-------  1 0   5   0x2b Aug 17 07:12 xpt0
+  crw-rw-rw-  1 0   0   0x10 Aug 17 07:12 zero
+
+  基本功能感觉还算正常，但是当遇到 .. 时如何退出将是一个比较棘手的问题。一个可行的办法就是通过绝对路径退出，即 cd /
+
+  执行 cd .. 之前跟现在都会在某些情况下造成系统阻塞，我感觉应该是处理 .. 路径时对 vnode 的锁对象处理出现了异常。可能某次
+操作之后，该 vnode 对应的锁应该被释放，但是此时可能还没有被释放，导致阻塞
+
+
+////////////// 20220819 //////////////
+上述问题描述的不是特别的具体，其实最大概率发生的情况是当 cd .. 操作是回退到根目录的时候，会发生阻塞的现象。
+  1、多次测试这一个场景，看看是不是每次都会出现这样的状况。如果每次都会出现，那么应该就是对 .. 处理出现了问题，或者是对于
+    跳转到根目录时出现异常
+    - 多次测试发现，跳转到根目录是正常的，执行 ls 也正常，但是执行 ls -al 就会发生阻塞
+
+  2、大概率是根目录 vnode 加解锁异常导致 ***
+    - 实际测试过程发现，貌似是因为 /dev 处理异常导致的这种情况。推测是因为根目录下存在挂载点导致的
+    - 进一步测试发现，从 /dev 回退到 / 的时候，如果使用 cd .. 命令，会提示：
+        # cd ..
+        ..: Not a directory.
+      只能使用 cd / 返回到根目录。但是返回之后其他操作是可以正常执行的。可能根本原因还是 tptfs 对于 .. 的处理存在异常，
+      而不是说跨文件系统导致的问题。tptfs 默认应该是只要是挂载点，都应该采用跨文件系统访问的方式查找文件
+    - 原因貌似是 setMountPoint() 函数里边的。因为我们会多次利用 allocVnode() 函数获取根目录对应的 vnode，可能就会
+      导致该 vnode 被对此加锁。这个 vnode 应该是会一直存在的，所以挂载之后直接拿来用就好了吧？所以还是要好好理解 vput /
+      vrele 等等函数的使用场景，才能同根本上杜绝这类现象的发生
+
+    # cd ..
+    # ls
+    .cshrc		FilesRecord.txt	dev		etc
+    # ls -al
+    (阻塞ing。。。)
+
+
+    Thread 3 hit Breakpoint 1, TptLookup::lookupFile (this=0xffffffd00c628c60, NameiData=0x1def96918)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/tptfs/TptLookup.cpp:31
+    31	  if (kc_strncmp(NameiData->ni_dirp, "/dev", 4) == 0 ||
+    (gdb) p *NameiData 
+    $9 = {
+      ni_dirp = 0x402265f8 "dev",
+      ni_segflg = UIO_USERSPACE,
+      ni_rightsneeded = 0x110088278 <cap_fstat_rights>,
+      ni_startdir = 0xffffffd00a8097a0,
+      ni_rootdir = 0xffffffd00a8097a0,
+      ni_topdir = 0x0,
+      ni_dirfd = -100,
+      ni_lcf = 0,
+      ni_filecaps = {
+        fc_rights = {
+          cr_rights = {0, 0}
+        },
+        fc_ioctls = 0x0,
+        fc_nioctls = -1,
+        fc_fcntls = 0
+      },
+      ni_vp = 0x0,
+      ni_dvp = 0x10c012af8 <spinlock_exit()+84>,
+      ni_resflags = 0,
+      ni_debugflags = 0,
+      ni_loopcnt = 0,
+      ni_pathlen = 4,
+      ni_next = 0x1def96a50 "\003",
+      ni_cnd = {
+        cn_origflags = 4496757310,
+        cn_flags = 262404,
+        cn_thread = 0x1bcb6b680,
+        cn_cred = 0xffffffd000c94900,
+        cn_nameiop = LOOKUP,
+        cn_lkflags = 6614,
+        cn_pnbuf = 0xffffffd00c699c00 "dev",
+        cn_nameptr = 0xffffffd00c699c00 "dev",
+        cn_namelen = 0
+      },
+      ni_cap_tracker = {
+        tqh_first = 0x0,
+        tqh_last = 0x1def969d8
+      }
+    }
+    (gdb) c
+    Continuing.
+
+
+在系统启动的过程中，会提示一下几个错误：
+
+  2022-08-18T05:15:59.657012+00:00 - init 26 - - _secure_path: /etc/login.conf is not owned by root
+  2022-08-18T05:15:59.712220+00:00 - init 26 - - login_getclass: unknown class 'daemon'
+  2022-08-18T05:15:59.727254+00:00 - init 26 - - _secure_path: /etc/login.conf is not owned by root
+  2022-08-18T05:15:59.761120+00:00 - init 26 - - can't directly exec /etc/rc: Operation not permitted
+
+  其中 “not owned by root” 是由于文件的 gid 和 uid 设置错误导致的，freebsd 中 root 和 wheel 对应的值都是0。所以
+目前的处理办法是在 format tool 当中将所有文件的这两个值都设置为0。
+  login_getclass() 出错的原因应该是持久化内存初始状态没设置好，导致对应内存区域的数据都是0。所以读取 login.conf 文件
+的时候是没有任何数据的，可能是提示 unknown class 'daemon' 的原因。目前可以先用 getblock() 测试一下。
+
+  start init
+  2022-08-18T05:53:49.079178+00:00 - init 26 - - can't directly exec /etc/rc: Operation not permitted
+  sh: The terminal database could not be opened.
+  sh: using dumb terminal settings.
+  # cat etc/login.conf
+  random: unblocking device.
+  # login.conf - login class capabilities database.
+  #
+  # Remember to rebuild the database after each change to this file:
+  #
+  #	cap_mkdb /etc/login.conf
+  #
+  # This file controls resource limits, accounting limits and
+  # default user environment settings.
+  #
+  # $FreeBSD$
+  #
+
+从测试结果来看，对 login.conf 的文件数据进行读取之后， login_getclass() 函数报错消失
+
+
+一个有意思的现象，当我在 /etc 下 新建一个目录 a 时，FileRecord.txt 竟然变成了一个目录！！
+
+  # cd etc/a
+  # ls
+  # pwd
+  /etc/a
+  # cd ../..
+  # ls
+  .cshrc		FilesRecord.txt	dev		etc
+  # ll
+  /sbin/ll: Operation not permitted.
+  # cat FilesRecord.txt/
+  cat: FilesRecord.txt/: Is a directory
+  # ls -li
+  total 36
+  3 drwxr-xr-x  2 0  0    512 Aug 18 06:19 a
+  7 -rw-rw-r--  1 0  0   1785 Aug 18 05:13 login.access
+  8 -rw-rw-r--  1 0  0   7106 Aug 18 05:13 login.conf
+  9 -rw-rw-r--  1 0  0  16384 Aug 18 05:13 login.conf.db
+  10 -rwxrwxr-x  1 0  0   5042 Aug 18 05:13 rc
+
+  其实遇到这种问题，首先要考虑的就是 inode 不小心被损坏的问题。大概率就是两个文件指向了同一个
+inode entry，导致其属性或者其他字段被错误修改。通常可以利用 ls -li 命令看一看新创建的文件分配
+的 inode number 是不是跟之前的以后文件的冲突了
+
+  实际测试发现，两个却是冲突了，因为系统默认给 FileRecord.txt 文件分配的是 inode number = 3，
+结果这里却把 3 重新分配给了新创建的文件 a。感觉有可能是 format tool 对 inode bitmap 的处理存在
+异常，或者是 getblcok() 的问题。
+
+  tptfs 在构建目录树的过程中没有将 bitmap 数据读取到内存当中。所以，当前状态下所有的 bit 都是可用的，
+然后文件系统就给记录文件分配了 3，导致其与新创建的文件 a 冲突
+
+  rootfs read only 产生的原因首先是 freebsd 本身的机制设计，貌似是在挂载根文件系统的时候，首先会以
+只读模式进行挂载，这样做的好处就是防止操作系统在启动的时候所有文件都不会被意外修改，保证系统能够正常启动。
+之后在利用 
+  /rescue/mount -rw /
+命令将文件系统重新挂载成可读可写的模式。奇海中的修改可以是在 vfs_domount_first() 函数中将 MNT_RDONLY
+属性设置直接丢掉，应该所有类型的根文件系统挂载的时候都不会再采用只读模式
+
+可以将 tptfs format tool 和持久化内存格式化的两个工具合并成一个，最后就是直接生成一个文件系统持久化区域

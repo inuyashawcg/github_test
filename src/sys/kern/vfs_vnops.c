@@ -154,8 +154,8 @@ do_vn_io_fault(struct vnode *vp, struct uio *uio)
  */
 struct vn_io_fault_args {
 	enum {
-		VN_IO_FAULT_FOP,
-		VN_IO_FAULT_VOP
+		VN_IO_FAULT_FOP,	// vnode io fault file operations.
+		VN_IO_FAULT_VOP		// vnode io fault vnode operations.
 	} kind;
 	struct ucred *cred;
 	int flags;

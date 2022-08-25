@@ -55,6 +55,9 @@ refcount_acquire(volatile u_int *count)
 	atomic_add_int(count, 1);
 }
 
+/*
+	如果是最后一次引用的话，返回1；否则，返回0
+*/
 static __inline int
 refcount_release(volatile u_int *count)
 {

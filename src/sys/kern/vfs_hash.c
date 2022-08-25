@@ -107,7 +107,12 @@ vfs_hash_get(const struct mount *mp, u_int hash, int flags, struct thread *td,
 			if (fn != NULL && fn(vp, arg))
 				continue;
 
-			/* 遍历整个 vnode list，找到符合上述条件的 vnode */
+			/*
+				遍历整个 vnode list，找到符合上述条件的 vnode。底层调用的还是 vget() 函数。
+				vhold() 传入的 interlock locked 为 0，说明此时 vnode interlock 应该是
+				处于解锁状态。
+				这里就有说法了，
+			*/
 			vhold(vp);
 			rw_runlock(&vfs_hash_lock);
 			error = vget(vp, flags | LK_VNHELD, td);	// 从 freelist 中移除 vp

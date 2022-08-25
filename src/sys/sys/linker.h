@@ -80,7 +80,6 @@ struct common_symbol {
 struct linker_file {
     /* kernel object，类型强转 */
     KOBJ_FIELDS;
-
     /*
         从 kern_kldunload函数的注释可以看到，linker file加载分为用户加载和内核加载，
         用户加载部分就对应userrefs，内核加载部分就对应refs。用户执行kldunload时会检查
