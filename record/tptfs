@@ -1,21 +1,24 @@
 v_lock = {
   lock_object = {
-    lo_name = 0x10d0b5919,
-    lo_flags = 0x6f30008,
-    lo_data = 0x0,
+    lo_name = 0x10d0b66e2 "devfs",
+    lo_flags = 116588544,
+    lo_data = 0,
     lo_witness = 0x0
   },
-  lk_lock = 0xfffffffffffffec1,
-  lk_exslpfail = 0x0,
-  lk_timo = 0x6,
-  lk_pri = 0x60
+  lk_lock = 1,
+  lk_exslpfail = 0,
+  lk_timo = 6,
+  lk_pri = 96
 },
 v_interlock = {
   lock_object = {
-    lo_name = 0x10d10b58e,
-    lo_flags = 0x1030000,
-    lo_data = 0x0,
+    lo_name = 0x10d10bb7b "vnode interlock",
+    lo_flags = 16973824,
+    lo_data = 0,
     lo_witness = 0x0
   },
-  mtx_lock = 0x0
+  mtx_lock = 0
 },
+
+
+

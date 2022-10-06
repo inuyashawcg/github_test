@@ -111,10 +111,17 @@ vfs_hash_get(const struct mount *mp, u_int hash, int flags, struct thread *td,
 				遍历整个 vnode list，找到符合上述条件的 vnode。底层调用的还是 vget() 函数。
 				vhold() 传入的 interlock locked 为 0，说明此时 vnode interlock 应该是
 				处于解锁状态。
-				这里就有说法了，
+				这里就有说法了，当我们在根目录下进行文件操作的时候，dir vnode 其实就是 root vnode。
+				我们每次获取 root vnode 的时候是否能够正确处理 lock status，感觉挺重要的，否则很有
+				可能就导致了系统阻塞。所以，tptfs lookup() 对于 vnode 的处理一定要理清
 			*/
 			vhold(vp);
 			rw_runlock(&vfs_hash_lock);
+			/*
+				LK_VNHELD 其实就是表示 vnode holdcount 一定要是大于0的，所以可能才会有上面 vhold()
+				的操作，因为 freelist 中的 vnode 应该是没人去引用的，所以 holdcount 是 0 或者 1？
+				调用 vhold() 保证其绝对不会为0  
+			*/
 			error = vget(vp, flags | LK_VNHELD, td);	// 从 freelist 中移除 vp
 			if (error == ENOENT && (flags & LK_NOWAIT) == 0)
 				break;

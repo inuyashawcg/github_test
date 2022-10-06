@@ -71,26 +71,26 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/vfs_mount.c 333263 2018-05-04 20:54:27Z
 #include <security/audit/audit.h>
 #include <security/mac/mac_framework.h>
 
-#define	VFS_MOUNTARG_SIZE_MAX	(1024 * 64)
+#define VFS_MOUNTARG_SIZE_MAX (1024 * 64)
 
-static int	vfs_domount(struct thread *td, const char *fstype, char *fspath,
-		    uint64_t fsflags, struct vfsoptlist **optlist);
-static void	free_mntarg(struct mntarg *ma);
+static int vfs_domount(struct thread *td, const char *fstype, char *fspath,
+											 uint64_t fsflags, struct vfsoptlist **optlist);
+static void free_mntarg(struct mntarg *ma);
 
-static int	usermount = 0;
+static int usermount = 0;
 SYSCTL_INT(_vfs, OID_AUTO, usermount, CTLFLAG_RW, &usermount, 0,
-    "Unprivileged users may mount and unmount file systems");
+					 "Unprivileged users may mount and unmount file systems");
 
 // default automatic read only?
-static bool	default_autoro = false;
+static bool default_autoro = false;
 SYSCTL_BOOL(_vfs, OID_AUTO, default_autoro, CTLFLAG_RW, &default_autoro, 0,
-    "Retry failed r/w mount as r/o if no explicit ro/rw option is specified");
+						"Retry failed r/w mount as r/o if no explicit ro/rw option is specified");
 
 MALLOC_DEFINE(M_MOUNT, "mount", "vfs mount structure");
 MALLOC_DEFINE(M_STATFS, "statfs", "statfs structure");
 static uma_zone_t mount_zone;
 
-/* List of mounted filesystems. 
+/* List of mounted filesystems.
 	管理系统中所有已经挂载的文件系统
 */
 struct mntlist mountlist = TAILQ_HEAD_INITIALIZER(mountlist);
@@ -104,18 +104,17 @@ EVENTHANDLER_LIST_DEFINE(vfs_unmounted);
 
 /*
  * Global opts, taken by all filesystems
- 		全局选项，由所有文件系统执行
+		全局选项，由所有文件系统执行
  */
 static const char *global_opts[] = {
-	"errmsg",
-	"fstype",
-	"fspath",
-	"ro",
-	"rw",
-	"nosuid",
-	"noexec",
-	NULL
-};
+		"errmsg",
+		"fstype",
+		"fspath",
+		"ro",
+		"rw",
+		"nosuid",
+		"noexec",
+		NULL};
 
 static int
 mount_init(void *mem, int size, int flags)
@@ -146,7 +145,7 @@ vfs_mount_init(void *dummy __unused)
 {
 
 	mount_zone = uma_zcreate("Mountpoints", sizeof(struct mount), NULL,
-	    NULL, mount_init, mount_fini, UMA_ALIGN_PTR, UMA_ZONE_NOFREE);
+													 NULL, mount_init, mount_fini, UMA_ALIGN_PTR, UMA_ZONE_NOFREE);
 }
 SYSINIT(vfs_mount, SI_SUB_VFS, SI_ORDER_ANY, vfs_mount_init, NULL);
 
@@ -156,7 +155,7 @@ SYSINIT(vfs_mount, SI_SUB_VFS, SI_ORDER_ANY, vfs_mount_init, NULL);
  * 用于构建和清理 mount 选项的函数
  */
 
-/* Remove one mount option. 
+/* Remove one mount option.
 	清除某一个 mount 选项
 */
 static void
@@ -170,15 +169,15 @@ vfs_freeopt(struct vfsoptlist *opts, struct vfsopt *opt)
 	free(opt, M_MOUNT);
 }
 
-/* Release all resources related to the mount options. 
-	对应上面描述，这里是清除所有 
+/* Release all resources related to the mount options.
+	对应上面描述，这里是清除所有
 */
-void
-vfs_freeopts(struct vfsoptlist *opts)
+void vfs_freeopts(struct vfsoptlist *opts)
 {
 	struct vfsopt *opt;
 
-	while (!TAILQ_EMPTY(opts)) {
+	while (!TAILQ_EMPTY(opts))
+	{
 		opt = TAILQ_FIRST(opts);
 		vfs_freeopt(opts, opt);
 	}
@@ -186,26 +185,26 @@ vfs_freeopts(struct vfsoptlist *opts)
 }
 
 /* 通过对比名称删除掉一些 mount 选项 */
-void
-vfs_deleteopt(struct vfsoptlist *opts, const char *name)
+void vfs_deleteopt(struct vfsoptlist *opts, const char *name)
 {
 	struct vfsopt *opt, *temp;
 
 	if (opts == NULL)
 		return;
-	TAILQ_FOREACH_SAFE(opt, opts, link, temp)  {
+	TAILQ_FOREACH_SAFE(opt, opts, link, temp)
+	{
 		if (strcmp(opt->name, name) == 0)
 			vfs_freeopt(opts, opt);
 	}
 }
 
-/* 判断 mount 选项是否为只读类型 */ 
+/* 判断 mount 选项是否为只读类型 */
 static int
 vfs_isopt_ro(const char *opt)
 {
 
 	if (strcmp(opt, "ro") == 0 || strcmp(opt, "rdonly") == 0 ||
-	    strcmp(opt, "norw") == 0)
+			strcmp(opt, "norw") == 0)
 		return (1);
 	return (0);
 }
@@ -238,7 +237,8 @@ vfs_equalopts(const char *opt1, const char *opt2)
 	if (strncmp(opt2, "no", 2) == 0 && strcmp(opt1, opt2 + 2) == 0)
 		return (1);
 	while ((p = strchr(opt1, '.')) != NULL &&
-	    !strncmp(opt1, opt2, ++p - opt1)) {
+				 !strncmp(opt1, opt2, ++p - opt1))
+	{
 		opt2 += p - opt1;
 		opt1 = p;
 		/* "foo.noopt" vs. "foo.opt" */
@@ -250,7 +250,7 @@ vfs_equalopts(const char *opt1, const char *opt2)
 	}
 	/* "ro" / "rdonly" / "norw" / "rw" / "noro" */
 	if ((vfs_isopt_ro(opt1) || vfs_isopt_rw(opt1)) &&
-	    (vfs_isopt_ro(opt2) || vfs_isopt_rw(opt2)))
+			(vfs_isopt_ro(opt2) || vfs_isopt_rw(opt2)))
 		return (1);
 	return (0);
 }
@@ -266,14 +266,19 @@ vfs_sanitizeopts(struct vfsoptlist *opts)
 {
 	struct vfsopt *opt, *opt2, *tmp;
 
-	TAILQ_FOREACH_REVERSE(opt, opts, vfsoptlist, link) {
+	TAILQ_FOREACH_REVERSE(opt, opts, vfsoptlist, link)
+	{
 		opt2 = TAILQ_PREV(opt, vfsoptlist, link);
-		while (opt2 != NULL) {
-			if (vfs_equalopts(opt->name, opt2->name)) {
+		while (opt2 != NULL)
+		{
+			if (vfs_equalopts(opt->name, opt2->name))
+			{
 				tmp = TAILQ_PREV(opt2, vfsoptlist, link);
 				vfs_freeopt(opts, opt2);
 				opt2 = tmp;
-			} else {
+			}
+			else
+			{
 				opt2 = TAILQ_PREV(opt2, vfsoptlist, link);
 			}
 		}
@@ -285,11 +290,10 @@ vfs_sanitizeopts(struct vfsoptlist *opts)
  * 依据 uio 发送的过来的信息，构建一个挂载选项的链表
  * uio 涉及到了用户态操作，新系统是要舍弃的，统一为内核态
  */
-int
-vfs_buildopts(struct uio *auio, struct vfsoptlist **options)
+int vfs_buildopts(struct uio *auio, struct vfsoptlist **options)
 {
-	struct vfsoptlist *opts;	// 挂载选项链表
-	struct vfsopt *opt;	// 表示某一个挂载选项
+	struct vfsoptlist *opts; // 挂载选项链表
+	struct vfsopt *opt;			 // 表示某一个挂载选项
 	size_t memused, namelen, optlen;
 	unsigned int i, iovcnt;
 	int error;
@@ -304,7 +308,8 @@ vfs_buildopts(struct uio *auio, struct vfsoptlist **options)
 		每两个元素一组，每组第一个元素表示name length，第二个元素表示 option length，
 		memused 就表示需要分配的内存的大小
 	*/
-	for (i = 0; i < iovcnt; i += 2) {
+	for (i = 0; i < iovcnt; i += 2)
+	{
 		namelen = auio->uio_iov[i].iov_len;
 		optlen = auio->uio_iov[i + 1].iov_len;
 		memused += sizeof(struct vfsopt) + optlen + namelen;
@@ -314,8 +319,9 @@ vfs_buildopts(struct uio *auio, struct vfsoptlist **options)
 		 * 防止内存溢出，给定大小范围
 		 */
 		if (memused > VFS_MOUNTARG_SIZE_MAX ||
-		    optlen > VFS_MOUNTARG_SIZE_MAX ||
-		    namelen > VFS_MOUNTARG_SIZE_MAX) {
+				optlen > VFS_MOUNTARG_SIZE_MAX ||
+				namelen > VFS_MOUNTARG_SIZE_MAX)
+		{
 			error = EINVAL;
 			goto bad;
 		}
@@ -335,34 +341,42 @@ vfs_buildopts(struct uio *auio, struct vfsoptlist **options)
 		TAILQ_INSERT_TAIL(opts, opt, link);
 
 		// 判断uio是否存在于内核空间
-		if (auio->uio_segflg == UIO_SYSSPACE) {
+		if (auio->uio_segflg == UIO_SYSSPACE)
+		{
 			bcopy(auio->uio_iov[i].iov_base, opt->name, namelen);
-		} else {
+		}
+		else
+		{
 			error = copyin(auio->uio_iov[i].iov_base, opt->name,
-			    namelen);
+										 namelen);
 			if (error)
 				goto bad;
 		}
 		/* Ensure names are null-terminated strings. */
-		if (namelen == 0 || opt->name[namelen - 1] != '\0') {
+		if (namelen == 0 || opt->name[namelen - 1] != '\0')
+		{
 			error = EINVAL;
 			goto bad;
 		}
-		if (optlen != 0) {
+		if (optlen != 0)
+		{
 			opt->len = optlen;
 			opt->value = malloc(optlen, M_MOUNT, M_WAITOK);
-			if (auio->uio_segflg == UIO_SYSSPACE) {
+			if (auio->uio_segflg == UIO_SYSSPACE)
+			{
 				bcopy(auio->uio_iov[i + 1].iov_base, opt->value,
-				    optlen);
-			} else {
+							optlen);
+			}
+			else
+			{
 				error = copyin(auio->uio_iov[i + 1].iov_base,
-				    opt->value, optlen);
+											 opt->value, optlen);
 				if (error)
 					goto bad;
 			}
 		}
 	}
-	vfs_sanitizeopts(opts);	// 判断属性是否为多次出现，如果是，只保留最后一次
+	vfs_sanitizeopts(opts); // 判断属性是否为多次出现，如果是，只保留最后一次
 	*options = opts;
 	return (0);
 bad:
@@ -387,13 +401,16 @@ vfs_mergeopts(struct vfsoptlist *toopts, struct vfsoptlist *oldopts)
 	/*
 		遍历旧的挂载选项链表，将每个挂载选项更新，然后插入到新的挂载选项链表当中
 	*/
-	TAILQ_FOREACH(opt, oldopts, link) {
+	TAILQ_FOREACH(opt, oldopts, link)
+	{
 		new = malloc(sizeof(struct vfsopt), M_MOUNT, M_WAITOK);
 		new->name = strdup(opt->name, M_MOUNT);
-		if (opt->len != 0) {
+		if (opt->len != 0)
+		{
 			new->value = malloc(opt->len, M_MOUNT, M_WAITOK);
 			bcopy(opt->value, new->value, opt->len);
-		} else
+		}
+		else
 			new->value = NULL;
 		new->len = opt->len;
 		new->seen = opt->seen;
@@ -406,16 +423,16 @@ vfs_mergeopts(struct vfsoptlist *toopts, struct vfsoptlist *oldopts)
  * Mount a filesystem.
  */
 #ifndef _SYS_SYSPROTO_H_
-struct nmount_args {
+struct nmount_args
+{
 	struct iovec *iovp;
 	unsigned int iovcnt;
 	int flags;
 };
 #endif
-int
-sys_nmount(struct thread *td, struct nmount_args *uap)
+int sys_nmount(struct thread *td, struct nmount_args *uap)
 {
-	struct uio *auio;	// uio 中存放的都是从用户空间传入的挂载选项
+	struct uio *auio; // uio 中存放的都是从用户空间传入的挂载选项
 	int error;
 	u_int iovcnt;
 	uint64_t flags;
@@ -431,7 +448,7 @@ sys_nmount(struct thread *td, struct nmount_args *uap)
 
 	AUDIT_ARG_FFLAGS(flags);
 	CTR4(KTR_VFS, "%s: iovp %p with iovcnt %d and flags %d", __func__,
-	    uap->iovp, uap->iovcnt, flags);
+			 uap->iovp, uap->iovcnt, flags);
 
 	/*
 	 * Filter out MNT_ROOTFS.  We do not want clients of nmount() in
@@ -447,19 +464,21 @@ sys_nmount(struct thread *td, struct nmount_args *uap)
 	iovcnt = uap->iovcnt;
 	/*
 	 * Check that we have an even number of iovec's
-	 * and that we have at least two options. 
+	 * and that we have at least two options.
 	 * 检查是否有偶数个 iovec，并且至少有两个选项
 	 */
-	if ((iovcnt & 1) || (iovcnt < 4)) {
+	if ((iovcnt & 1) || (iovcnt < 4))
+	{
 		CTR2(KTR_VFS, "%s: failed for invalid iovcnt %d", __func__,
-		    uap->iovcnt);
+				 uap->iovcnt);
 		return (EINVAL);
 	}
 
 	error = copyinuio(uap->iovp, iovcnt, &auio);
-	if (error) {
+	if (error)
+	{
 		CTR2(KTR_VFS, "%s: failed for invalid uio op with %d errno",
-		    __func__, error);
+				 __func__, error);
 		return (error);
 	}
 	error = vfs_donmount(td, flags, auio);
@@ -473,8 +492,7 @@ sys_nmount(struct thread *td, struct nmount_args *uap)
  * Various utility functions
  */
 
-void
-vfs_ref(struct mount *mp)
+void vfs_ref(struct mount *mp)
 {
 
 	CTR2(KTR_VFS, "%s: mp %p", __func__, mp);
@@ -483,8 +501,7 @@ vfs_ref(struct mount *mp)
 	MNT_IUNLOCK(mp);
 }
 
-void
-vfs_rel(struct mount *mp)
+void vfs_rel(struct mount *mp)
 {
 
 	CTR2(KTR_VFS, "%s: mp %p", __func__, mp);
@@ -497,31 +514,34 @@ vfs_rel(struct mount *mp)
  * Allocate and initialize the mount point struct.
  * 每个挂载的文件系统都会有一个 mount 结构体来进行管理，注意其中有几个 vnode 队列，功能类似与内存页管理机制
  * 每个文件系统也会为自身创建一个 *_mount 结构，这里是创建 mount，两个结构是不一样的
+ *
+ * 该函数只在代码中两个位置出现过，第一个位置就是创建 devfs mount，第二个地方就是这里。所以拆分 tptfs mount
+ * 过程一定是要在该函数调用之后，这样 vfs mountlist 中才会出现 tptfs mount 对象
  */
 struct mount *
 vfs_mount_alloc(struct vnode *vp, struct vfsconf *vfsp, const char *fspath,
-    struct ucred *cred)
+								struct ucred *cred)
 {
 	struct mount *mp;
 	// 重新创建一个 mount 结构，并清空挂载链表
 	mp = uma_zalloc(mount_zone, M_WAITOK);
 	bzero(&mp->mnt_startzero,
-	    __rangeof(struct mount, mnt_startzero, mnt_endzero));
+				__rangeof(struct mount, mnt_startzero, mnt_endzero));
 
 	// 初始化 mount 所管理的 vnode 链表
 	TAILQ_INIT(&mp->mnt_nvnodelist); // 初始化vnode list
 	mp->mnt_nvnodelistsize = 0;
 
 	/* 活跃的 vnode 链表 */
-	TAILQ_INIT(&mp->mnt_activevnodelist);	// active vnode list
+	TAILQ_INIT(&mp->mnt_activevnodelist); // active vnode list
 	mp->mnt_activevnodelistsize = 0;
 
 	/* 初始化空闲 vnode 链表 */
-	TAILQ_INIT(&mp->mnt_tmpfreevnodelist);	// free vnode list
+	TAILQ_INIT(&mp->mnt_tmpfreevnodelist); // free vnode list
 	mp->mnt_tmpfreevnodelistsize = 0;
-	mp->mnt_ref = 0;	/* mount引用计数初始化为0 */
+	mp->mnt_ref = 0; /* mount引用计数初始化为0 */
 
-	(void) vfs_busy(mp, MBF_NOWAIT);
+	(void)vfs_busy(mp, MBF_NOWAIT);
 	atomic_add_acq_int(&vfsp->vfc_refcount, 1); // vfsconf 结构体的引用计数+1
 
 	mp->mnt_op = vfsp->vfc_vfsops;
@@ -551,31 +571,32 @@ vfs_mount_alloc(struct vnode *vp, struct vfsconf *vfsp, const char *fspath,
 /*
  * Destroy the mount struct previously allocated by vfs_mount_alloc().
  */
-void
-vfs_mount_destroy(struct mount *mp)
+void vfs_mount_destroy(struct mount *mp)
 {
 
 	MNT_ILOCK(mp);
 	mp->mnt_kern_flag |= MNTK_REFEXPIRE;
-	if (mp->mnt_kern_flag & MNTK_MWAIT) {
+	if (mp->mnt_kern_flag & MNTK_MWAIT)
+	{
 		mp->mnt_kern_flag &= ~MNTK_MWAIT;
 		wakeup(mp);
 	}
 	while (mp->mnt_ref)
 		msleep(mp, MNT_MTX(mp), PVFS, "mntref", 0);
 	KASSERT(mp->mnt_ref == 0,
-	    ("%s: invalid refcount in the drain path @ %s:%d", __func__,
-	    __FILE__, __LINE__));
+					("%s: invalid refcount in the drain path @ %s:%d", __func__,
+					 __FILE__, __LINE__));
 	if (mp->mnt_writeopcount != 0)
 		panic("vfs_mount_destroy: nonzero writeopcount");
 	if (mp->mnt_secondary_writes != 0)
 		panic("vfs_mount_destroy: nonzero secondary_writes");
 	atomic_subtract_rel_int(&mp->mnt_vfc->vfc_refcount, 1);
-	if (!TAILQ_EMPTY(&mp->mnt_nvnodelist)) {
+	if (!TAILQ_EMPTY(&mp->mnt_nvnodelist))
+	{
 		struct vnode *vp;
 
 		TAILQ_FOREACH(vp, &mp->mnt_nvnodelist, v_nmntvnodes)
-			vn_printf(vp, "dangling vnode ");
+		vn_printf(vp, "dangling vnode ");
 		panic("unmount: dangling vnode");
 	}
 	KASSERT(TAILQ_EMPTY(&mp->mnt_uppers), ("mnt_uppers"));
@@ -609,10 +630,11 @@ vfs_should_downgrade_to_ro_mount(uint64_t fsflags, int error)
 	if ((fsflags & MNT_RDONLY) != 0)
 		return (false);
 
-	switch (error) {
-	case ENODEV:	/* generic, geom, ... */
-	case EACCES:	/* cam/scsi, ... */
-	case EROFS:	/* md, mmcsd, ... */
+	switch (error)
+	{
+	case ENODEV: /* generic, geom, ... */
+	case EACCES: /* cam/scsi, ... */
+	case EROFS:	 /* md, mmcsd, ... */
 		/*
 		 * These errors can be returned by the storage layer to signal
 		 * that the media is read-only.  No harm in the R/O mount
@@ -630,20 +652,19 @@ vfs_should_downgrade_to_ro_mount(uint64_t fsflags, int error)
 	函数执行具体的操作。
 	一直不太理解为什么该函数的名字是 do not mount，因为此时系统还没有将挂载选项解析完毕，所以还不能
 	直接去挂载，所以这个函数主要是对这些数据的解析。处理完之后调用 vfs_domount 函数真正开始挂载操作
-*/ 
-int
-vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
+*/
+int vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 {
-	struct vfsoptlist *optlist;	// 挂载选型链表
+	struct vfsoptlist *optlist; // 挂载选型链表
 	struct vfsopt *opt, *tmp_opt;
 	char *fstype, *fspath, *errmsg;
 	int error, fstypelen, fspathlen, errmsg_len, errmsg_pos;
 	bool autoro;
 
-	errmsg = fspath = NULL;	// 挂载路径
-	errmsg_len = fspathlen = 0;	// 挂载路径数据长度
-	errmsg_pos = -1;	// 判断是否包含挂载出错信息？
-	autoro = default_autoro;	// automatic read only?
+	errmsg = fspath = NULL;			// 挂载路径
+	errmsg_len = fspathlen = 0; // 挂载路径数据长度
+	errmsg_pos = -1;						// 判断是否包含挂载出错信息？
+	autoro = default_autoro;		// automatic read only?
 
 	// 获取 mount 的挂载选项链表
 	error = vfs_buildopts(fsoptions, &optlist);
@@ -658,22 +679,24 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 	 * We need these two options before the others,
 	 * and they are mandatory for any filesystem.
 	 * Ensure they are NUL terminated as well.
-	 * 
+	 *
 	 * mount options 中有两个是比较重要的，一个是 fstype，另外一个是 fspath，必须确保
 	 * 这两个参数是可用的
 	 */
-	fstypelen = 0;	// 获取文件系统类型
+	fstypelen = 0; // 获取文件系统类型
 	error = vfs_getopt(optlist, "fstype", (void **)&fstype, &fstypelen);
-	if (error || fstype[fstypelen - 1] != '\0') {
+	if (error || fstype[fstypelen - 1] != '\0')
+	{
 		error = EINVAL;
 		if (errmsg != NULL)
 			strncpy(errmsg, "Invalid fstype", errmsg_len);
 		goto bail;
 	}
 
-	fspathlen = 0;	// 获取挂载路径长度
+	fspathlen = 0; // 获取挂载路径长度
 	error = vfs_getopt(optlist, "fspath", (void **)&fspath, &fspathlen);
-	if (error || fspath[fspathlen - 1] != '\0') {
+	if (error || fspath[fspathlen - 1] != '\0')
+	{
 		error = EINVAL;
 		if (errmsg != NULL)
 			strncpy(errmsg, "Invalid fspath", errmsg_len);
@@ -685,21 +708,25 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 	 * before we call vfs_domount(), since vfs_domount() has special
 	 * logic based on MNT_UPDATE.  This is very important
 	 * when we want to update the root filesystem.
-	 * 
+	 *
 	 * update 属性好像也是比较重要的，vfs_domount 函数执行之前要确认是否有 update 选项
 	 */
-	TAILQ_FOREACH_SAFE(opt, optlist, link, tmp_opt) {
-		if (strcmp(opt->name, "update") == 0) {
+	TAILQ_FOREACH_SAFE(opt, optlist, link, tmp_opt)
+	{
+		if (strcmp(opt->name, "update") == 0)
+		{
 			fsflags |= MNT_UPDATE;
 			vfs_freeopt(optlist, opt);
 		}
 		else if (strcmp(opt->name, "async") == 0)
 			fsflags |= MNT_ASYNC;
-		else if (strcmp(opt->name, "force") == 0) {
+		else if (strcmp(opt->name, "force") == 0)
+		{
 			fsflags |= MNT_FORCE;
 			vfs_freeopt(optlist, opt);
 		}
-		else if (strcmp(opt->name, "reload") == 0) {
+		else if (strcmp(opt->name, "reload") == 0)
+		{
 			fsflags |= MNT_RELOAD;
 			vfs_freeopt(optlist, opt);
 		}
@@ -709,59 +736,70 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 			fsflags &= ~MNT_ASYNC;
 		else if (strcmp(opt->name, "noatime") == 0)
 			fsflags |= MNT_NOATIME;
-		else if (strcmp(opt->name, "atime") == 0) {
+		else if (strcmp(opt->name, "atime") == 0)
+		{
 			free(opt->name, M_MOUNT);
 			opt->name = strdup("nonoatime", M_MOUNT);
 		}
 		else if (strcmp(opt->name, "noclusterr") == 0)
 			fsflags |= MNT_NOCLUSTERR;
-		else if (strcmp(opt->name, "clusterr") == 0) {
+		else if (strcmp(opt->name, "clusterr") == 0)
+		{
 			free(opt->name, M_MOUNT);
 			opt->name = strdup("nonoclusterr", M_MOUNT);
 		}
 		else if (strcmp(opt->name, "noclusterw") == 0)
 			fsflags |= MNT_NOCLUSTERW;
-		else if (strcmp(opt->name, "clusterw") == 0) {
+		else if (strcmp(opt->name, "clusterw") == 0)
+		{
 			free(opt->name, M_MOUNT);
 			opt->name = strdup("nonoclusterw", M_MOUNT);
 		}
 		else if (strcmp(opt->name, "noexec") == 0)
 			fsflags |= MNT_NOEXEC;
-		else if (strcmp(opt->name, "exec") == 0) {
+		else if (strcmp(opt->name, "exec") == 0)
+		{
 			free(opt->name, M_MOUNT);
 			opt->name = strdup("nonoexec", M_MOUNT);
 		}
 		else if (strcmp(opt->name, "nosuid") == 0)
 			fsflags |= MNT_NOSUID;
-		else if (strcmp(opt->name, "suid") == 0) {
+		else if (strcmp(opt->name, "suid") == 0)
+		{
 			free(opt->name, M_MOUNT);
 			opt->name = strdup("nonosuid", M_MOUNT);
 		}
 		else if (strcmp(opt->name, "nosymfollow") == 0)
 			fsflags |= MNT_NOSYMFOLLOW;
-		else if (strcmp(opt->name, "symfollow") == 0) {
+		else if (strcmp(opt->name, "symfollow") == 0)
+		{
 			free(opt->name, M_MOUNT);
 			opt->name = strdup("nonosymfollow", M_MOUNT);
 		}
-		else if (strcmp(opt->name, "noro") == 0) {
+		else if (strcmp(opt->name, "noro") == 0)
+		{
 			fsflags &= ~MNT_RDONLY;
 			autoro = false;
 		}
-		else if (strcmp(opt->name, "rw") == 0) {
+		else if (strcmp(opt->name, "rw") == 0)
+		{
 			fsflags &= ~MNT_RDONLY;
 			autoro = false;
 		}
-		else if (strcmp(opt->name, "ro") == 0) {
+		else if (strcmp(opt->name, "ro") == 0)
+		{
 			fsflags |= MNT_RDONLY;
 			autoro = false;
 		}
-		else if (strcmp(opt->name, "rdonly") == 0) {
+		else if (strcmp(opt->name, "rdonly") == 0)
+		{
 			free(opt->name, M_MOUNT);
 			opt->name = strdup("ro", M_MOUNT);
 			fsflags |= MNT_RDONLY;
 			autoro = false;
 		}
-		else if (strcmp(opt->name, "autoro") == 0) {
+		else if (strcmp(opt->name, "autoro") == 0)
+		{
 			vfs_freeopt(optlist, opt);
 			autoro = true;
 		}
@@ -771,7 +809,8 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 			fsflags |= MNT_SYNCHRONOUS;
 		else if (strcmp(opt->name, "union") == 0)
 			fsflags |= MNT_UNION;
-		else if (strcmp(opt->name, "automounted") == 0) {
+		else if (strcmp(opt->name, "automounted") == 0)
+		{
 			fsflags |= MNT_AUTOMOUNTED;
 			vfs_freeopt(optlist, opt);
 		}
@@ -787,7 +826,8 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 	 * terminating NUL.
 	 * 在确保 type 和 fspath 变量适合我们的 mp 缓冲区(包括终止NUL)时，要极端偏执
 	 */
-	if (fstypelen > MFSNAMELEN || fspathlen > MNAMELEN) {
+	if (fstypelen > MFSNAMELEN || fspathlen > MNAMELEN)
+	{
 		error = ENAMETOOLONG;
 		goto bail;
 	}
@@ -802,31 +842,36 @@ vfs_donmount(struct thread *td, uint64_t fsflags, struct uio *fsoptions)
 	 * overridden by "autoro".
 	 * 如果错误代码表明可能，并且装载选项允许，请查看是否可以以只读模式装载。
 	 * 如果“[no]{ro | rw}”已被明确请求且未被“autoro”覆盖，则千万不要尝试。
-	 * 
+	 *
 	 * 从注释信息来看，如果文件系统挂载出现错误的时候，错误信息中可能会提示以只读的方式挂载文件系统。
 	 * 但是如果已经明确表明不允许这样做，那就绝对不要尝试。下面的代码分支应该就是处理允许自动挂载成
 	 * 只读模式的情况
 	 */
-	if (autoro && vfs_should_downgrade_to_ro_mount(fsflags, error)) {
+	if (autoro && vfs_should_downgrade_to_ro_mount(fsflags, error))
+	{
 		printf("%s: R/W mount failed, possibly R/O media,"
-		    " trying R/O mount\n", __func__);
+					 " trying R/O mount\n",
+					 __func__);
 		fsflags |= MNT_RDONLY;
 		error = vfs_domount(td, fstype, fspath, fsflags, &optlist);
 	}
 bail:
 	/* copyout the errmsg 将错误信息拷贝至 uio，并返回进程用户空间 */
-	if (errmsg_pos != -1 && ((2 * errmsg_pos + 1) < fsoptions->uio_iovcnt)
-	    && errmsg_len > 0 && errmsg != NULL) {
-		if (fsoptions->uio_segflg == UIO_SYSSPACE) {
+	if (errmsg_pos != -1 && ((2 * errmsg_pos + 1) < fsoptions->uio_iovcnt) && errmsg_len > 0 && errmsg != NULL)
+	{
+		if (fsoptions->uio_segflg == UIO_SYSSPACE)
+		{
 			bcopy(errmsg,
-			    fsoptions->uio_iov[2 * errmsg_pos + 1].iov_base,
-			    fsoptions->uio_iov[2 * errmsg_pos + 1].iov_len);
-		} else {
-			copyout(errmsg,
-			    fsoptions->uio_iov[2 * errmsg_pos + 1].iov_base,
-			    fsoptions->uio_iov[2 * errmsg_pos + 1].iov_len);
+						fsoptions->uio_iov[2 * errmsg_pos + 1].iov_base,
+						fsoptions->uio_iov[2 * errmsg_pos + 1].iov_len);
 		}
-	}	// end if
+		else
+		{
+			copyout(errmsg,
+							fsoptions->uio_iov[2 * errmsg_pos + 1].iov_base,
+							fsoptions->uio_iov[2 * errmsg_pos + 1].iov_len);
+		}
+	} // end if
 
 	if (optlist != NULL)
 		vfs_freeopts(optlist);
@@ -837,16 +882,16 @@ bail:
  * Old mount API.
  */
 #ifndef _SYS_SYSPROTO_H_
-struct mount_args {
-	char	*type;
-	char	*path;
-	int	flags;
-	caddr_t	data;
+struct mount_args
+{
+	char *type;
+	char *path;
+	int flags;
+	caddr_t data;
 };
 #endif
 /* ARGSUSED */
-int
-sys_mount(struct thread *td, struct mount_args *uap)
+int sys_mount(struct thread *td, struct mount_args *uap)
 {
 	char *fstype;
 	struct vfsconf *vfsp = NULL;
@@ -875,10 +920,11 @@ sys_mount(struct thread *td, struct mount_args *uap)
 
 	fstype = malloc(MFSNAMELEN, M_TEMP, M_WAITOK);
 	error = copyinstr(uap->type, fstype, MFSNAMELEN, NULL);
-	if (error) {
+	if (error)
+	{
 		free(fstype, M_TEMP);
 		return (error);
-	}	// 获取文件系统类型
+	} // 获取文件系统类型
 
 	AUDIT_ARG_TEXT(fstype);
 	/*
@@ -913,16 +959,15 @@ sys_mount(struct thread *td, struct mount_args *uap)
  */
 static int
 vfs_domount_first(
-	struct thread *td,		/* Calling thread. */
-	struct vfsconf *vfsp,		/* File system type. */
-	char *fspath,			/* Mount path. */
-	struct vnode *vp,		/* Vnode to be covered. */
-	uint64_t fsflags,		/* Flags common to all filesystems. */
-	struct vfsoptlist **optlist	/* Options local to the filesystem. */
-	)
+		struct thread *td,					/* Calling thread. */
+		struct vfsconf *vfsp,				/* File system type. */
+		char *fspath,								/* Mount path. */
+		struct vnode *vp,						/* Vnode to be covered. */
+		uint64_t fsflags,						/* Flags common to all filesystems. */
+		struct vfsoptlist **optlist /* Options local to the filesystem. */
+)
 {
-	struct vattr v
-	struct mount *mp;
+	struct vattr v struct mount *mp;
 	struct vnode *newdp;
 	int error;
 
@@ -935,7 +980,8 @@ vfs_domount_first(
 	 * 如果调用线程的线程缺少对此类文件系统的权限，请立即拒绝
 	 */
 	if (jailed(td->td_ucred) && !prison_allow(td->td_ucred,
-	    vfsp->vfc_prison_flag)) {
+																						vfsp->vfc_prison_flag))
+	{
 		vput(vp);
 		return (EPERM);
 	}
@@ -946,14 +992,15 @@ vfs_domount_first(
 	 * 如果用户不是 root 用户，请确保他们拥有我们试图装载到的目录。进一步说明roofs也是
 	 * 通过这个函数挂载的
 	 */
-	error = VOP_GETATTR(vp, &va, td->td_ucred);	// 获取 vnode 属性
+	error = VOP_GETATTR(vp, &va, td->td_ucred); // 获取 vnode 属性
 	if (error == 0 && va.va_uid != td->td_ucred->cr_uid)
 		error = priv_check_cred(td->td_ucred, PRIV_VFS_ADMIN, 0);
 	if (error == 0)
 		error = vinvalbuf(vp, V_SAVE, 0, 0);
 	if (error == 0 && vp->v_type != VDIR)
 		error = ENOTDIR;
-	if (error == 0) {
+	if (error == 0)
+	{
 		VI_LOCK(vp);
 		if ((vp->v_iflag & VI_MOUNT) == 0 && vp->v_mountedhere == NULL)
 			vp->v_iflag |= VI_MOUNT;
@@ -961,13 +1008,14 @@ vfs_domount_first(
 			error = EBUSY;
 		VI_UNLOCK(vp);
 	}
-	if (error != 0) {
+	if (error != 0)
+	{
 		vput(vp);
 		return (error);
 	}
 	VOP_UNLOCK(vp, 0);
 
-	/* Allocate and initialize the filesystem. 
+	/* Allocate and initialize the filesystem.
 		每个挂载的文件系统都会对应一个 mount，这里申请一块内存给 mount 结构体，并且
 		利用 vfs 相关信息对其进行填充。后面做完相应的处理后，添加到 mount 队列当中
 	*/
@@ -985,7 +1033,8 @@ vfs_domount_first(
 	 * 文件系统的具体实现方式应该是不一样的
 	 */
 	error = VFS_MOUNT(mp);
-	if (error != 0) {
+	if (error != 0)
+	{
 		vfs_unbusy(mp);
 		mp->mnt_vnodecovered = NULL;
 		vfs_mount_destroy(mp);
@@ -1009,7 +1058,7 @@ vfs_domount_first(
 
 	MNT_ILOCK(mp);
 	if ((mp->mnt_flag & MNT_ASYNC) != 0 &&
-	    (mp->mnt_kern_flag & MNTK_NOASYNC) == 0)
+			(mp->mnt_kern_flag & MNTK_NOASYNC) == 0)
 		mp->mnt_kern_flag |= MNTK_ASYNC;
 	else
 		mp->mnt_kern_flag &= ~MNTK_ASYNC;
@@ -1044,11 +1093,11 @@ vfs_domount_first(
  */
 static int
 vfs_domount_update(
-	struct thread *td,		/* Calling thread. */
-	struct vnode *vp,		/* Mount point vnode. */
-	uint64_t fsflags,		/* Flags common to all filesystems. */
-	struct vfsoptlist **optlist	/* Options local to the filesystem. */
-	)
+		struct thread *td,					/* Calling thread. */
+		struct vnode *vp,						/* Mount point vnode. */
+		uint64_t fsflags,						/* Flags common to all filesystems. */
+		struct vfsoptlist **optlist /* Options local to the filesystem. */
+)
 {
 	struct export_args export;
 	void *bufp;
@@ -1060,9 +1109,9 @@ vfs_domount_update(
 	KASSERT((fsflags & MNT_UPDATE) != 0, ("MNT_UPDATE should be here"));
 	mp = vp->v_mount;
 
-	if ((vp->v_vflag & VV_ROOT) == 0) {
-		if (vfs_copyopt(*optlist, "export", &export, sizeof(export))
-		    == 0)
+	if ((vp->v_vflag & VV_ROOT) == 0)
+	{
+		if (vfs_copyopt(*optlist, "export", &export, sizeof(export)) == 0)
 			error = EXDEV;
 		else
 			error = EINVAL;
@@ -1075,25 +1124,29 @@ vfs_domount_update(
 	 * is currently mounted read-only.
 	 */
 	flag = mp->mnt_flag;
-	if ((fsflags & MNT_RELOAD) != 0 && (flag & MNT_RDONLY) == 0) {
+	if ((fsflags & MNT_RELOAD) != 0 && (flag & MNT_RDONLY) == 0)
+	{
 		vput(vp);
-		return (EOPNOTSUPP);	/* Needs translation */
+		return (EOPNOTSUPP); /* Needs translation */
 	}
 	/*
 	 * Only privileged root, or (if MNT_USER is set) the user that
 	 * did the original mount is permitted to update it.
 	 */
 	error = vfs_suser(mp, td);
-	if (error != 0) {
+	if (error != 0)
+	{
 		vput(vp);
 		return (error);
 	}
-	if (vfs_busy(mp, MBF_NOWAIT)) {
+	if (vfs_busy(mp, MBF_NOWAIT))
+	{
 		vput(vp);
 		return (EBUSY);
 	}
 	VI_LOCK(vp);
-	if ((vp->v_iflag & VI_MOUNT) != 0 || vp->v_mountedhere != NULL) {
+	if ((vp->v_iflag & VI_MOUNT) != 0 || vp->v_mountedhere != NULL)
+	{
 		VI_UNLOCK(vp);
 		vfs_unbusy(mp);
 		vput(vp);
@@ -1104,14 +1157,15 @@ vfs_domount_update(
 	VOP_UNLOCK(vp, 0);
 
 	MNT_ILOCK(mp);
-	if ((mp->mnt_kern_flag & MNTK_UNMOUNT) != 0) {
+	if ((mp->mnt_kern_flag & MNTK_UNMOUNT) != 0)
+	{
 		MNT_IUNLOCK(mp);
 		error = EBUSY;
 		goto end;
 	}
 	mp->mnt_flag &= ~MNT_UPDATEMASK;
 	mp->mnt_flag |= fsflags & (MNT_RELOAD | MNT_FORCE | MNT_UPDATE |
-	    MNT_SNAPSHOT | MNT_ROOTFS | MNT_UPDATEMASK | MNT_RDONLY);
+														 MNT_SNAPSHOT | MNT_ROOTFS | MNT_UPDATEMASK | MNT_RDONLY);
 	if ((mp->mnt_flag & MNT_ASYNC) == 0)
 		mp->mnt_kern_flag &= ~MNTK_ASYNC;
 	MNT_IUNLOCK(mp);
@@ -1128,9 +1182,11 @@ vfs_domount_update(
 	export_error = 0;
 	/* Process the export option. */
 	if (error == 0 && vfs_getopt(mp->mnt_optnew, "export", &bufp,
-	    &len) == 0) {
+															 &len) == 0)
+	{
 		/* Assume that there is only 1 ABI for each length. */
-		switch (len) {
+		switch (len)
+		{
 		case (sizeof(struct oexport_args)):
 			bzero(&export, sizeof(export));
 			/* FALLTHROUGH */
@@ -1145,10 +1201,13 @@ vfs_domount_update(
 	}
 
 	MNT_ILOCK(mp);
-	if (error == 0) {
-		mp->mnt_flag &=	~(MNT_UPDATE | MNT_RELOAD | MNT_FORCE |
-		    MNT_SNAPSHOT);
-	} else {
+	if (error == 0)
+	{
+		mp->mnt_flag &= ~(MNT_UPDATE | MNT_RELOAD | MNT_FORCE |
+											MNT_SNAPSHOT);
+	}
+	else
+	{
 		/*
 		 * If we fail, restore old mount flags. MNT_QUOTA is special,
 		 * because it is not part of MNT_UPDATEMASK, but it could have
@@ -1159,7 +1218,7 @@ vfs_domount_update(
 		mp->mnt_flag = (mp->mnt_flag & MNT_QUOTA) | (flag & ~MNT_QUOTA);
 	}
 	if ((mp->mnt_flag & MNT_ASYNC) != 0 &&
-	    (mp->mnt_kern_flag & MNTK_NOASYNC) == 0)
+			(mp->mnt_kern_flag & MNTK_NOASYNC) == 0)
 		mp->mnt_kern_flag |= MNTK_ASYNC;
 	else
 		mp->mnt_kern_flag &= ~MNTK_ASYNC;
@@ -1198,12 +1257,12 @@ end:
  */
 static int
 vfs_domount(
-	struct thread *td,		/* Calling thread. */
-	const char *fstype,		/* Filesystem type. */
-	char *fspath,			/* Mount path. */
-	uint64_t fsflags,		/* Flags common to all filesystems. 所有文件系统相同的flags(基类成员？) */
-	struct vfsoptlist **optlist	/* Options local to the filesystem. */
-	)
+		struct thread *td,					/* Calling thread. */
+		const char *fstype,					/* Filesystem type. */
+		char *fspath,								/* Mount path. */
+		uint64_t fsflags,						/* Flags common to all filesystems. 所有文件系统相同的flags(基类成员？) */
+		struct vfsoptlist **optlist /* Options local to the filesystem. */
+)
 {
 	struct vfsconf *vfsp;
 	struct nameidata nd;
@@ -1219,7 +1278,8 @@ vfs_domount(
 	if (strlen(fstype) >= MFSNAMELEN || strlen(fspath) >= MNAMELEN)
 		return (ENAMETOOLONG);
 
-	if (jailed(td->td_ucred) || usermount == 0) {
+	if (jailed(td->td_ucred) || usermount == 0)
+	{
 		if ((error = priv_check(td, PRIV_VFS_MOUNT)) != 0)
 			return (error);
 	}
@@ -1230,12 +1290,14 @@ vfs_domount(
 	 * 进行检查，如果包含有上述宏标识，那么就要进行权限检查，一旦不符合权限，就
 	 * 直接报错
 	 */
-	if (fsflags & MNT_EXPORTED) {
+	if (fsflags & MNT_EXPORTED)
+	{
 		error = priv_check(td, PRIV_VFS_MOUNT_EXPORTED);
 		if (error)
 			return (error);
 	}
-	if (fsflags & MNT_SUIDDIR) {
+	if (fsflags & MNT_SUIDDIR)
+	{
 		error = priv_check(td, PRIV_VFS_MOUNT_SUIDDIR);
 		if (error)
 			return (error);
@@ -1244,17 +1306,19 @@ vfs_domount(
 	 * Silently enforce MNT_NOSUID and MNT_USER for unprivileged users.
 	 * 默认为非特权用户强制标识 MNT_NOSUID 和 MNT_USER
 	 */
-	if ((fsflags & (MNT_NOSUID | MNT_USER)) != (MNT_NOSUID | MNT_USER)) {
+	if ((fsflags & (MNT_NOSUID | MNT_USER)) != (MNT_NOSUID | MNT_USER))
+	{
 		if (priv_check(td, PRIV_VFS_MOUNT_NONUSER) != 0)
 			fsflags |= MNT_NOSUID | MNT_USER;
 	}
 
-	/* Load KLDs before we lock the covered vnode to avoid reversals. 
+	/* Load KLDs before we lock the covered vnode to avoid reversals.
 		在锁定覆盖的vnode之前加载kld以避免反转？？
 	*/
-	vfsp = NULL;	// 获取到 vfscnof 结构体指针，也就是要获取文件系统注册信息
-	if ((fsflags & MNT_UPDATE) == 0) {
-		/* Don't try to load KLDs if we're mounting the root. 
+	vfsp = NULL; // 获取到 vfscnof 结构体指针，也就是要获取文件系统注册信息
+	if ((fsflags & MNT_UPDATE) == 0)
+	{
+		/* Don't try to load KLDs if we're mounting the root.
 			首先判断是否有update这个选项，如果没有的话，再判断文件系统的类型。如果是
 			rootfs，执行vfs_byname。否则就执行 vfs_byname_kld 函数，这个是找到
 			对应生成的.ko文件，然后 load
@@ -1269,10 +1333,10 @@ vfs_domount(
 
 	/*
 	 * Get vnode to be covered or mount point's vnode in case of MNT_UPDATE.
-	 		获取要覆盖的 vnode 或挂载点的 vnode，以防 MNT_UPDATE
+			获取要覆盖的 vnode 或挂载点的 vnode，以防 MNT_UPDATE
 	 */
 	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF | AUDITVNODE1,
-	    UIO_SYSSPACE, fspath, td);
+				 UIO_SYSSPACE, fspath, td);
 	/*
 		查找挂载点目录所对应的 vnode，获取到的 vnode 存放在 ni_vp 当中
 	*/
@@ -1284,18 +1348,21 @@ vfs_domount(
 	/*
 		这里要判断我们所执行的操作是不是要升级
 	*/
-	if ((fsflags & MNT_UPDATE) == 0) {
+	if ((fsflags & MNT_UPDATE) == 0)
+	{
 		pathbuf = malloc(MNAMELEN, M_TEMP, M_WAITOK);
 		strcpy(pathbuf, fspath);
 		// 将 vnode 路径转换为全局路径，并且检查路径是否满足要求
 		error = vn_path_to_global_path(td, vp, pathbuf, MNAMELEN);
 		/* debug.disablefullpath == 1 results in ENODEV */
-		if (error == 0 || error == ENODEV) {
+		if (error == 0 || error == ENODEV)
+		{
 			error = vfs_domount_first(td, vfsp, pathbuf, vp,
-			    fsflags, optlist);
+																fsflags, optlist);
 		}
 		free(pathbuf, M_TEMP);
-	} else
+	}
+	else
 		error = vfs_domount_update(td, vp, fsflags, optlist);
 
 	return (error);
@@ -1308,14 +1375,14 @@ vfs_domount(
  * special file (as before).
  */
 #ifndef _SYS_SYSPROTO_H_
-struct unmount_args {
-	char	*path;
-	int	flags;
+struct unmount_args
+{
+	char *path;
+	int flags;
 };
 #endif
 /* ARGSUSED */
-int
-sys_unmount(struct thread *td, struct unmount_args *uap)
+int sys_unmount(struct thread *td, struct unmount_args *uap)
 {
 	struct nameidata nd;
 	struct mount *mp;
@@ -1323,7 +1390,8 @@ sys_unmount(struct thread *td, struct unmount_args *uap)
 	int error, id0, id1;
 
 	AUDIT_ARG_VALUE(uap->flags);
-	if (jailed(td->td_ucred) || usermount == 0) {
+	if (jailed(td->td_ucred) || usermount == 0)
+	{
 		error = priv_check(td, PRIV_VFS_UNMOUNT);
 		if (error)
 			return (error);
@@ -1331,43 +1399,53 @@ sys_unmount(struct thread *td, struct unmount_args *uap)
 
 	pathbuf = malloc(MNAMELEN, M_TEMP, M_WAITOK);
 	error = copyinstr(uap->path, pathbuf, MNAMELEN, NULL);
-	if (error) {
+	if (error)
+	{
 		free(pathbuf, M_TEMP);
 		return (error);
 	}
-	if (uap->flags & MNT_BYFSID) {
+	if (uap->flags & MNT_BYFSID)
+	{
 		AUDIT_ARG_TEXT(pathbuf);
 		/* Decode the filesystem ID. */
-		if (sscanf(pathbuf, "FSID:%d:%d", &id0, &id1) != 2) {
+		if (sscanf(pathbuf, "FSID:%d:%d", &id0, &id1) != 2)
+		{
 			free(pathbuf, M_TEMP);
 			return (EINVAL);
 		}
 
 		mtx_lock(&mountlist_mtx);
-		TAILQ_FOREACH_REVERSE(mp, &mountlist, mntlist, mnt_list) {
+		TAILQ_FOREACH_REVERSE(mp, &mountlist, mntlist, mnt_list)
+		{
 			if (mp->mnt_stat.f_fsid.val[0] == id0 &&
-			    mp->mnt_stat.f_fsid.val[1] == id1) {
+					mp->mnt_stat.f_fsid.val[1] == id1)
+			{
 				vfs_ref(mp);
 				break;
 			}
 		}
 		mtx_unlock(&mountlist_mtx);
-	} else {
+	}
+	else
+	{
 		/*
 		 * Try to find global path for path argument.
 		 */
 		NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF | AUDITVNODE1,
-		    UIO_SYSSPACE, pathbuf, td);
-		if (namei(&nd) == 0) {
+					 UIO_SYSSPACE, pathbuf, td);
+		if (namei(&nd) == 0)
+		{
 			NDFREE(&nd, NDF_ONLY_PNBUF);
 			error = vn_path_to_global_path(td, nd.ni_vp, pathbuf,
-			    MNAMELEN);
+																		 MNAMELEN);
 			if (error == 0 || error == ENODEV)
 				vput(nd.ni_vp);
 		}
 		mtx_lock(&mountlist_mtx);
-		TAILQ_FOREACH_REVERSE(mp, &mountlist, mntlist, mnt_list) {
-			if (strcmp(mp->mnt_stat.f_mntonname, pathbuf) == 0) {
+		TAILQ_FOREACH_REVERSE(mp, &mountlist, mntlist, mnt_list)
+		{
+			if (strcmp(mp->mnt_stat.f_mntonname, pathbuf) == 0)
+			{
 				vfs_ref(mp);
 				break;
 			}
@@ -1375,7 +1453,8 @@ sys_unmount(struct thread *td, struct unmount_args *uap)
 		mtx_unlock(&mountlist_mtx);
 	}
 	free(pathbuf, M_TEMP);
-	if (mp == NULL) {
+	if (mp == NULL)
+	{
 		/*
 		 * Previously we returned ENOENT for a nonexistent path and
 		 * EINVAL for a non-mountpoint.  We cannot tell these apart
@@ -1388,7 +1467,8 @@ sys_unmount(struct thread *td, struct unmount_args *uap)
 	/*
 	 * Don't allow unmounting the root filesystem.
 	 */
-	if (mp->mnt_flag & MNT_ROOTFS) {
+	if (mp->mnt_flag & MNT_ROOTFS)
+	{
 		vfs_rel(mp);
 		return (EINVAL);
 	}
@@ -1408,9 +1488,11 @@ vfs_check_usecounts(struct mount *mp)
 {
 	struct vnode *vp, *mvp;
 
-	MNT_VNODE_FOREACH_ALL(vp, mp, mvp) {
+	MNT_VNODE_FOREACH_ALL(vp, mp, mvp)
+	{
 		if ((vp->v_vflag & VV_ROOT) == 0 && vp->v_type != VNON &&
-		    vp->v_usecount != 0) {
+				vp->v_usecount != 0)
+		{
 			VI_UNLOCK(vp);
 			MNT_VNODE_FOREACH_ALL_ABORT(mp, mvp);
 			return (EBUSY);
@@ -1427,12 +1509,14 @@ dounmount_cleanup(struct mount *mp, struct vnode *coveredvp, int mntkflags)
 
 	mtx_assert(MNT_MTX(mp), MA_OWNED);
 	mp->mnt_kern_flag &= ~mntkflags;
-	if ((mp->mnt_kern_flag & MNTK_MWAIT) != 0) {
+	if ((mp->mnt_kern_flag & MNTK_MWAIT) != 0)
+	{
 		mp->mnt_kern_flag &= ~MNTK_MWAIT;
 		wakeup(mp);
 	}
 	MNT_IUNLOCK(mp);
-	if (coveredvp != NULL) {
+	if (coveredvp != NULL)
+	{
 		VOP_UNLOCK(coveredvp, 0);
 		vdrop(coveredvp);
 	}
@@ -1442,15 +1526,15 @@ dounmount_cleanup(struct mount *mp, struct vnode *coveredvp, int mntkflags)
 /*
  * Do the actual filesystem unmount.
  */
-int
-dounmount(struct mount *mp, int flags, struct thread *td)
+int dounmount(struct mount *mp, int flags, struct thread *td)
 {
 	struct vnode *coveredvp;
 	int error;
 	uint64_t async_flag;
 	int mnt_gen_r;
 
-	if ((coveredvp = mp->mnt_vnodecovered) != NULL) {
+	if ((coveredvp = mp->mnt_vnodecovered) != NULL)
+	{
 		mnt_gen_r = mp->mnt_gen;
 		VI_LOCK(coveredvp);
 		vholdl(coveredvp);
@@ -1460,7 +1544,8 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 		 * covered vnode lock.
 		 */
 		if (coveredvp->v_mountedhere != mp ||
-		    coveredvp->v_mountedhere->mnt_gen != mnt_gen_r) {
+				coveredvp->v_mountedhere->mnt_gen != mnt_gen_r)
+		{
 			VOP_UNLOCK(coveredvp, 0);
 			vdrop(coveredvp);
 			vfs_rel(mp);
@@ -1473,8 +1558,10 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 	 * original mount is permitted to unmount this filesystem.
 	 */
 	error = vfs_suser(mp, td);
-	if (error != 0) {
-		if (coveredvp != NULL) {
+	if (error != 0)
+	{
+		if (coveredvp != NULL)
+		{
 			VOP_UNLOCK(coveredvp, 0);
 			vdrop(coveredvp);
 		}
@@ -1485,24 +1572,27 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 	vn_start_write(NULL, &mp, V_WAIT | V_MNTREF);
 	MNT_ILOCK(mp);
 	if ((mp->mnt_kern_flag & MNTK_UNMOUNT) != 0 ||
-	    (mp->mnt_flag & MNT_UPDATE) != 0 ||
-	    !TAILQ_EMPTY(&mp->mnt_uppers)) {
+			(mp->mnt_flag & MNT_UPDATE) != 0 ||
+			!TAILQ_EMPTY(&mp->mnt_uppers))
+	{
 		dounmount_cleanup(mp, coveredvp, 0);
 		return (EBUSY);
 	}
 	mp->mnt_kern_flag |= MNTK_UNMOUNT | MNTK_NOINSMNTQ;
-	if (flags & MNT_NONBUSY) {
+	if (flags & MNT_NONBUSY)
+	{
 		MNT_IUNLOCK(mp);
 		error = vfs_check_usecounts(mp);
 		MNT_ILOCK(mp);
-		if (error != 0) {
-			dounmount_cleanup(mp, coveredvp, MNTK_UNMOUNT |
-			    MNTK_NOINSMNTQ);
+		if (error != 0)
+		{
+			dounmount_cleanup(mp, coveredvp, MNTK_UNMOUNT | MNTK_NOINSMNTQ);
 			return (error);
 		}
 	}
 	/* Allow filesystems to detect that a forced unmount is in progress. */
-	if (flags & MNT_FORCE) {
+	if (flags & MNT_FORCE)
+	{
 		mp->mnt_kern_flag |= MNTK_UNMOUNTF;
 		MNT_IUNLOCK(mp);
 		/*
@@ -1513,18 +1603,19 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 		MNT_ILOCK(mp);
 	}
 	error = 0;
-	if (mp->mnt_lockref) {
+	if (mp->mnt_lockref)
+	{
 		mp->mnt_kern_flag |= MNTK_DRAINING;
 		error = msleep(&mp->mnt_lockref, MNT_MTX(mp), PVFS,
-		    "mount drain", 0);
+									 "mount drain", 0);
 	}
 	MNT_IUNLOCK(mp);
 	KASSERT(mp->mnt_lockref == 0,
-	    ("%s: invalid lock refcount in the drain path @ %s:%d",
-	    __func__, __FILE__, __LINE__));
+					("%s: invalid lock refcount in the drain path @ %s:%d",
+					 __func__, __FILE__, __LINE__));
 	KASSERT(error == 0,
-	    ("%s: invalid return value for msleep in the drain path @ %s:%d",
-	    __func__, __FILE__, __LINE__));
+					("%s: invalid return value for msleep in the drain path @ %s:%d",
+					 __func__, __FILE__, __LINE__));
 
 	if (mp->mnt_flag & MNT_EXPUBLIC)
 		vfs_setpublicfs(NULL, NULL, NULL);
@@ -1548,7 +1639,7 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 	cache_purgevfs(mp, false); /* remove cache entries for this file sys */
 	vfs_deallocate_syncvnode(mp);
 	if ((mp->mnt_flag & MNT_RDONLY) != 0 || (flags & MNT_FORCE) != 0 ||
-	    (error = VFS_SYNC(mp, MNT_WAIT)) == 0)
+			(error = VFS_SYNC(mp, MNT_WAIT)) == 0)
 		error = VFS_UNMOUNT(mp, flags);
 	vn_finished_write(mp);
 	/*
@@ -1557,10 +1648,12 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 	 * Unless we failed to do so because the device is reporting that
 	 * it doesn't exist anymore.
 	 */
-	if (error && error != ENXIO) {
+	if (error && error != ENXIO)
+	{
 		MNT_ILOCK(mp);
 		mp->mnt_kern_flag &= ~MNTK_NOINSMNTQ;
-		if ((mp->mnt_flag & MNT_RDONLY) == 0) {
+		if ((mp->mnt_flag & MNT_RDONLY) == 0)
+		{
 			MNT_IUNLOCK(mp);
 			vfs_allocate_syncvnode(mp);
 			MNT_ILOCK(mp);
@@ -1568,9 +1661,10 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 		mp->mnt_kern_flag &= ~(MNTK_UNMOUNT | MNTK_UNMOUNTF);
 		mp->mnt_flag |= async_flag;
 		if ((mp->mnt_flag & MNT_ASYNC) != 0 &&
-		    (mp->mnt_kern_flag & MNTK_NOASYNC) == 0)
+				(mp->mnt_kern_flag & MNTK_NOASYNC) == 0)
 			mp->mnt_kern_flag |= MNTK_ASYNC;
-		if (mp->mnt_kern_flag & MNTK_MWAIT) {
+		if (mp->mnt_kern_flag & MNTK_MWAIT)
+		{
 			mp->mnt_kern_flag &= ~MNTK_MWAIT;
 			wakeup(mp);
 		}
@@ -1583,12 +1677,14 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 	TAILQ_REMOVE(&mountlist, mp, mnt_list);
 	mtx_unlock(&mountlist_mtx);
 	EVENTHANDLER_DIRECT_INVOKE(vfs_unmounted, mp, td);
-	if (coveredvp != NULL) {
+	if (coveredvp != NULL)
+	{
 		coveredvp->v_mountedhere = NULL;
 		VOP_UNLOCK(coveredvp, 0);
 	}
 	vfs_event_signal(NULL, VQ_UNMOUNT, 0);
-	if (rootvnode != NULL && mp == rootvnode->v_mount) {
+	if (rootvnode != NULL && mp == rootvnode->v_mount)
+	{
 		vrele(rootvnode);
 		rootvnode = NULL;
 	}
@@ -1601,8 +1697,7 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 /*
  * Report errors during filesystem mounting.
  */
-void
-vfs_mount_error(struct mount *mp, const char *fmt, ...)
+void vfs_mount_error(struct mount *mp, const char *fmt, ...)
 {
 	struct vfsoptlist *moptlist = mp->mnt_optnew;
 	va_list ap;
@@ -1618,8 +1713,7 @@ vfs_mount_error(struct mount *mp, const char *fmt, ...)
 	va_end(ap);
 }
 
-void
-vfs_opterror(struct vfsoptlist *opts, const char *fmt, ...)
+void vfs_opterror(struct vfsoptlist *opts, const char *fmt, ...)
 {
 	va_list ap;
 	int error, len;
@@ -1642,33 +1736,37 @@ vfs_opterror(struct vfsoptlist *opts, const char *fmt, ...)
 /*
  * Check that no unknown options are given
  */
-int
-vfs_filteropt(struct vfsoptlist *opts, const char **legal)
+int vfs_filteropt(struct vfsoptlist *opts, const char **legal)
 {
 	struct vfsopt *opt;
 	char errmsg[255];
 	const char **t, *p, *q;
 	int ret = 0;
 
-	TAILQ_FOREACH(opt, opts, link) {
+	TAILQ_FOREACH(opt, opts, link)
+	{
 		p = opt->name;
 		q = NULL;
 		if (p[0] == 'n' && p[1] == 'o')
 			q = p + 2;
-		for(t = global_opts; *t != NULL; t++) {
+		for (t = global_opts; *t != NULL; t++)
+		{
 			if (strcmp(*t, p) == 0)
 				break;
-			if (q != NULL) {
+			if (q != NULL)
+			{
 				if (strcmp(*t, q) == 0)
 					break;
 			}
 		}
 		if (*t != NULL)
 			continue;
-		for(t = legal; *t != NULL; t++) {
+		for (t = legal; *t != NULL; t++)
+		{
 			if (strcmp(*t, p) == 0)
 				break;
-			if (q != NULL) {
+			if (q != NULL)
+			{
 				if (strcmp(*t, q) == 0)
 					break;
 			}
@@ -1676,12 +1774,15 @@ vfs_filteropt(struct vfsoptlist *opts, const char **legal)
 		if (*t != NULL)
 			continue;
 		snprintf(errmsg, sizeof(errmsg),
-		    "mount option <%s> is unknown", p);
+						 "mount option <%s> is unknown", p);
 		ret = EINVAL;
 	}
-	if (ret != 0) {
-		TAILQ_FOREACH(opt, opts, link) {
-			if (strcmp(opt->name, "errmsg") == 0) {
+	if (ret != 0)
+	{
+		TAILQ_FOREACH(opt, opts, link)
+		{
+			if (strcmp(opt->name, "errmsg") == 0)
+			{
 				strncpy((char *)opt->value, errmsg, opt->len);
 				break;
 			}
@@ -1700,15 +1801,16 @@ vfs_filteropt(struct vfsoptlist *opts, const char **legal)
  * of the option. If buf is non-NULL, it will be filled
  * with the address of the option.
  */
-int
-vfs_getopt(struct vfsoptlist *opts, const char *name, void **buf, int *len)
+int vfs_getopt(struct vfsoptlist *opts, const char *name, void **buf, int *len)
 {
 	struct vfsopt *opt;
 
 	KASSERT(opts != NULL, ("vfs_getopt: caller passed 'opts' as NULL"));
 
-	TAILQ_FOREACH(opt, opts, link) {
-		if (strcmp(name, opt->name) == 0) {
+	TAILQ_FOREACH(opt, opts, link)
+	{
+		if (strcmp(name, opt->name) == 0)
+		{
 			opt->seen = 1;
 			if (len != NULL)
 				*len = opt->len;
@@ -1720,16 +1822,17 @@ vfs_getopt(struct vfsoptlist *opts, const char *name, void **buf, int *len)
 	return (ENOENT);
 }
 
-int
-vfs_getopt_pos(struct vfsoptlist *opts, const char *name)
+int vfs_getopt_pos(struct vfsoptlist *opts, const char *name)
 {
 	struct vfsopt *opt;
 
 	if (opts == NULL)
 		return (-1);
 
-	TAILQ_FOREACH(opt, opts, link) {
-		if (strcmp(name, opt->name) == 0) {
+	TAILQ_FOREACH(opt, opts, link)
+	{
+		if (strcmp(name, opt->name) == 0)
+		{
 			opt->seen = 1;
 			return (opt->pos);
 		}
@@ -1737,8 +1840,7 @@ vfs_getopt_pos(struct vfsoptlist *opts, const char *name)
 	return (-1);
 }
 
-int
-vfs_getopt_size(struct vfsoptlist *opts, const char *name, off_t *value)
+int vfs_getopt_size(struct vfsoptlist *opts, const char *name, off_t *value)
 {
 	char *opt_value, *vtp;
 	quad_t iv;
@@ -1756,7 +1858,8 @@ vfs_getopt_size(struct vfsoptlist *opts, const char *name, off_t *value)
 		return (EINVAL);
 	if (iv < 0)
 		return (EINVAL);
-	switch (vtp[0]) {
+	switch (vtp[0])
+	{
 	case 't':
 	case 'T':
 		iv *= 1024;
@@ -1785,12 +1888,14 @@ vfs_getopts(struct vfsoptlist *opts, const char *name, int *error)
 	struct vfsopt *opt;
 
 	*error = 0;
-	TAILQ_FOREACH(opt, opts, link) {
+	TAILQ_FOREACH(opt, opts, link)
+	{
 		if (strcmp(name, opt->name) != 0)
 			continue;
 		opt->seen = 1;
 		if (opt->len == 0 ||
-		    ((char *)opt->value)[opt->len - 1] != '\0') {
+				((char *)opt->value)[opt->len - 1] != '\0')
+		{
 			*error = EINVAL;
 			return (NULL);
 		}
@@ -1806,9 +1911,8 @@ vfs_getopts(struct vfsoptlist *opts, const char *name, int *error)
 	系统属性的时候，会调用这个函数来检查新添加的操作是不是在文件系统所支持的操作列表的
 	范围内，如果是的话，属性升级才能完成
 */
-int
-vfs_flagopt(struct vfsoptlist *opts, const char *name, uint64_t *w,
-	uint64_t val)
+int vfs_flagopt(struct vfsoptlist *opts, const char *name, uint64_t *w,
+								uint64_t val)
 {
 	struct vfsopt *opt;
 
@@ -1816,8 +1920,10 @@ vfs_flagopt(struct vfsoptlist *opts, const char *name, uint64_t *w,
 		遍历操作链表，通过名字进行匹配对应属性的操作。如果匹配到了，就对 w 做相应的操作，
 		即把 val 表示的属性信息添加到 w 当中
 	*/
-	TAILQ_FOREACH(opt, opts, link) {
-		if (strcmp(name, opt->name) == 0) {
+	TAILQ_FOREACH(opt, opts, link)
+	{
+		if (strcmp(name, opt->name) == 0)
+		{
 			opt->seen = 1;
 			if (w != NULL)
 				*w |= val;
@@ -1829,8 +1935,7 @@ vfs_flagopt(struct vfsoptlist *opts, const char *name, uint64_t *w,
 	return (0);
 }
 
-int
-vfs_scanopt(struct vfsoptlist *opts, const char *name, const char *fmt, ...)
+int vfs_scanopt(struct vfsoptlist *opts, const char *name, const char *fmt, ...)
 {
 	va_list ap;
 	struct vfsopt *opt;
@@ -1838,7 +1943,8 @@ vfs_scanopt(struct vfsoptlist *opts, const char *name, const char *fmt, ...)
 
 	KASSERT(opts != NULL, ("vfs_getopt: caller passed 'opts' as NULL"));
 
-	TAILQ_FOREACH(opt, opts, link) {
+	TAILQ_FOREACH(opt, opts, link)
+	{
 		if (strcmp(name, opt->name) != 0)
 			continue;
 		opt->seen = 1;
@@ -1854,18 +1960,19 @@ vfs_scanopt(struct vfsoptlist *opts, const char *name, const char *fmt, ...)
 	return (0);
 }
 
-int
-vfs_setopt(struct vfsoptlist *opts, const char *name, void *value, int len)
+int vfs_setopt(struct vfsoptlist *opts, const char *name, void *value, int len)
 {
 	struct vfsopt *opt;
 
-	TAILQ_FOREACH(opt, opts, link) {
+	TAILQ_FOREACH(opt, opts, link)
+	{
 		if (strcmp(name, opt->name) != 0)
 			continue;
 		opt->seen = 1;
 		if (opt->value == NULL)
 			opt->len = len;
-		else {
+		else
+		{
 			if (opt->len != len)
 				return (EINVAL);
 			bcopy(value, opt->value, len);
@@ -1875,18 +1982,19 @@ vfs_setopt(struct vfsoptlist *opts, const char *name, void *value, int len)
 	return (ENOENT);
 }
 
-int
-vfs_setopt_part(struct vfsoptlist *opts, const char *name, void *value, int len)
+int vfs_setopt_part(struct vfsoptlist *opts, const char *name, void *value, int len)
 {
 	struct vfsopt *opt;
 
-	TAILQ_FOREACH(opt, opts, link) {
+	TAILQ_FOREACH(opt, opts, link)
+	{
 		if (strcmp(name, opt->name) != 0)
 			continue;
 		opt->seen = 1;
 		if (opt->value == NULL)
 			opt->len = len;
-		else {
+		else
+		{
 			if (opt->len < len)
 				return (EINVAL);
 			opt->len = len;
@@ -1897,12 +2005,12 @@ vfs_setopt_part(struct vfsoptlist *opts, const char *name, void *value, int len)
 	return (ENOENT);
 }
 
-int
-vfs_setopts(struct vfsoptlist *opts, const char *name, const char *value)
+int vfs_setopts(struct vfsoptlist *opts, const char *name, const char *value)
 {
 	struct vfsopt *opt;
 
-	TAILQ_FOREACH(opt, opts, link) {
+	TAILQ_FOREACH(opt, opts, link)
+	{
 		if (strcmp(name, opt->name) != 0)
 			continue;
 		opt->seen = 1;
@@ -1923,15 +2031,16 @@ vfs_setopts(struct vfsoptlist *opts, const char *name, const char *value)
  * mount option, EINVAL is returned.
  * Returns ENOENT if the option is not found.
  */
-int
-vfs_copyopt(struct vfsoptlist *opts, const char *name, void *dest, int len)
+int vfs_copyopt(struct vfsoptlist *opts, const char *name, void *dest, int len)
 {
 	struct vfsopt *opt;
 
 	KASSERT(opts != NULL, ("vfs_copyopt: caller passed 'opts' as NULL"));
 
-	TAILQ_FOREACH(opt, opts, link) {
-		if (strcmp(name, opt->name) == 0) {
+	TAILQ_FOREACH(opt, opts, link)
+	{
+		if (strcmp(name, opt->name) == 0)
+		{
 			opt->seen = 1;
 			if (len != opt->len)
 				return (EINVAL);
@@ -1942,8 +2051,7 @@ vfs_copyopt(struct vfsoptlist *opts, const char *name, void *dest, int len)
 	return (ENOENT);
 }
 
-int
-__vfs_statfs(struct mount *mp, struct statfs *sbp)
+int __vfs_statfs(struct mount *mp, struct statfs *sbp)
 {
 	int error;
 
@@ -1953,13 +2061,12 @@ __vfs_statfs(struct mount *mp, struct statfs *sbp)
 	return (error);
 }
 
-void
-vfs_mountedfrom(struct mount *mp, const char *from)
+void vfs_mountedfrom(struct mount *mp, const char *from)
 {
 
 	bzero(mp->mnt_stat.f_mntfromname, sizeof mp->mnt_stat.f_mntfromname);
 	strlcpy(mp->mnt_stat.f_mntfromname, from,
-	    sizeof mp->mnt_stat.f_mntfromname);
+					sizeof mp->mnt_stat.f_mntfromname);
 }
 
 /*
@@ -1974,18 +2081,22 @@ vfs_mountedfrom(struct mount *mp, const char *from)
  */
 
 /* A memory allocation which must be freed when we are done */
-struct mntaarg {
-	SLIST_ENTRY(mntaarg)	next;
+struct mntaarg
+{
+	SLIST_ENTRY(mntaarg)
+	next;
 };
 
-/* The header for the mount arguments 
+/* The header for the mount arguments
 	mntarg: mount arguments
 */
-struct mntarg {
+struct mntarg
+{
 	struct iovec *v;
 	int len;
 	int error;
-	SLIST_HEAD(, mntaarg)	list;
+	SLIST_HEAD(, mntaarg)
+	list;
 };
 
 /*
@@ -1999,7 +2110,7 @@ mount_argb(struct mntarg *ma, int flag, const char *name)
 {
 
 	KASSERT(name[0] == 'n' && name[1] == 'o',
-	    ("mount_argb(...,%s): name must start with 'no'", name));
+					("mount_argb(...,%s): name must start with 'no'", name));
 
 	return (mount_arg(ma, name + (flag ? 2 : 0), NULL, 0));
 }
@@ -2015,7 +2126,8 @@ mount_argf(struct mntarg *ma, const char *name, const char *fmt, ...)
 	struct sbuf *sb;
 	int len;
 
-	if (ma == NULL) {
+	if (ma == NULL)
+	{
 		ma = malloc(sizeof *ma, M_MOUNT, M_WAITOK | M_ZERO);
 		SLIST_INIT(&ma->list);
 	}
@@ -2023,7 +2135,7 @@ mount_argf(struct mntarg *ma, const char *name, const char *fmt, ...)
 		return (ma);
 
 	ma->v = realloc(ma->v, sizeof *ma->v * (ma->len + 2),
-	    M_MOUNT, M_WAITOK);
+									M_MOUNT, M_WAITOK);
 	ma->v[ma->len].iov_base = (void *)(uintptr_t)name;
 	ma->v[ma->len].iov_len = strlen(name) + 1;
 	ma->len++;
@@ -2057,7 +2169,8 @@ mount_argsu(struct mntarg *ma, const char *name, const void *val, int len)
 
 	if (val == NULL)
 		return (ma);
-	if (ma == NULL) {
+	if (ma == NULL)
+	{
 		ma = malloc(sizeof *ma, M_MOUNT, M_WAITOK | M_ZERO);
 		SLIST_INIT(&ma->list);
 	}
@@ -2079,7 +2192,8 @@ struct mntarg *
 mount_arg(struct mntarg *ma, const char *name, const void *val, int len)
 {
 
-	if (ma == NULL) {
+	if (ma == NULL)
+	{
 		ma = malloc(sizeof *ma, M_MOUNT, M_WAITOK | M_ZERO);
 		SLIST_INIT(&ma->list);
 	}
@@ -2087,7 +2201,7 @@ mount_arg(struct mntarg *ma, const char *name, const void *val, int len)
 		return (ma);
 
 	ma->v = realloc(ma->v, sizeof *ma->v * (ma->len + 2),
-	    M_MOUNT, M_WAITOK);
+									M_MOUNT, M_WAITOK);
 	ma->v[ma->len].iov_base = (void *)(uintptr_t)name;
 	ma->v[ma->len].iov_len = strlen(name) + 1;
 	ma->len++;
@@ -2109,7 +2223,8 @@ free_mntarg(struct mntarg *ma)
 {
 	struct mntaarg *maa;
 
-	while (!SLIST_EMPTY(&ma->list)) {
+	while (!SLIST_EMPTY(&ma->list))
+	{
 		maa = SLIST_FIRST(&ma->list);
 		SLIST_REMOVE_HEAD(&ma->list, next);
 		free(maa, M_MOUNT);
@@ -2121,8 +2236,7 @@ free_mntarg(struct mntarg *ma)
 /*
  * Mount a filesystem
  */
-int
-kernel_mount(struct mntarg *ma, uint64_t flags)
+int kernel_mount(struct mntarg *ma, uint64_t flags)
 {
 	struct uio auio;
 	int error;
@@ -2146,8 +2260,7 @@ kernel_mount(struct mntarg *ma, uint64_t flags)
  * A printflike function to mount a filesystem.
  * 跟printf比较类似的文件系统装载函数
  */
-int
-kernel_vmount(int flags, ...)
+int kernel_vmount(int flags, ...)
 {
 	struct mntarg *ma = NULL;
 	va_list ap;
@@ -2156,7 +2269,8 @@ kernel_vmount(int flags, ...)
 	int error;
 
 	va_start(ap, flags);
-	for (;;) {
+	for (;;)
+	{
 		cp = va_arg(ap, const char *);
 		if (cp == NULL)
 			break;
@@ -2169,8 +2283,7 @@ kernel_vmount(int flags, ...)
 	return (error);
 }
 
-void
-vfs_oexport_conv(const struct oexport_args *oexp, struct export_args *exp)
+void vfs_oexport_conv(const struct oexport_args *oexp, struct export_args *exp)
 {
 
 	bcopy(oexp, exp, sizeof(*oexp));

@@ -78,33 +78,33 @@ SX_SYSINIT(tty_list, &tty_list_sx, "tty list");
 static unsigned int tty_list_count = 0;
 
 /* Character device of /dev/console. */
-static struct cdev	*dev_console;
-static const char	*dev_console_filename;
+static struct cdev *dev_console;
+static const char *dev_console_filename;
 
 /*
  * Flags that are supported and stored by this implementation.
  */
-#define TTYSUP_IFLAG	(IGNBRK|BRKINT|IGNPAR|PARMRK|INPCK|ISTRIP|\
-			INLCR|IGNCR|ICRNL|IXON|IXOFF|IXANY|IMAXBEL)
-#define TTYSUP_OFLAG	(OPOST|ONLCR|TAB3|ONOEOT|OCRNL|ONOCR|ONLRET)
-#define TTYSUP_LFLAG	(ECHOKE|ECHOE|ECHOK|ECHO|ECHONL|ECHOPRT|\
-			ECHOCTL|ISIG|ICANON|ALTWERASE|IEXTEN|TOSTOP|\
-			FLUSHO|NOKERNINFO|NOFLSH)
-#define TTYSUP_CFLAG	(CIGNORE|CSIZE|CSTOPB|CREAD|PARENB|PARODD|\
-			HUPCL|CLOCAL|CCTS_OFLOW|CRTS_IFLOW|CDTR_IFLOW|\
-			CDSR_OFLOW|CCAR_OFLOW)
+#define TTYSUP_IFLAG (IGNBRK | BRKINT | IGNPAR | PARMRK | INPCK | ISTRIP | \
+											INLCR | IGNCR | ICRNL | IXON | IXOFF | IXANY | IMAXBEL)
+#define TTYSUP_OFLAG (OPOST | ONLCR | TAB3 | ONOEOT | OCRNL | ONOCR | ONLRET)
+#define TTYSUP_LFLAG (ECHOKE | ECHOE | ECHOK | ECHO | ECHONL | ECHOPRT |      \
+											ECHOCTL | ISIG | ICANON | ALTWERASE | IEXTEN | TOSTOP | \
+											FLUSHO | NOKERNINFO | NOFLSH)
+#define TTYSUP_CFLAG (CIGNORE | CSIZE | CSTOPB | CREAD | PARENB | PARODD |    \
+											HUPCL | CLOCAL | CCTS_OFLOW | CRTS_IFLOW | CDTR_IFLOW | \
+											CDSR_OFLOW | CCAR_OFLOW)
 
-#define	TTY_CALLOUT(tp,d) (dev2unit(d) & TTYUNIT_CALLOUT)
+#define TTY_CALLOUT(tp, d) (dev2unit(d) & TTYUNIT_CALLOUT)
 
-static int  tty_drainwait = 5 * 60;
+static int tty_drainwait = 5 * 60;
 SYSCTL_INT(_kern, OID_AUTO, tty_drainwait, CTLFLAG_RWTUN,
-    &tty_drainwait, 0, "Default output drain timeout in seconds");
+					 &tty_drainwait, 0, "Default output drain timeout in seconds");
 
 /*
  * Set TTY buffer sizes.
  */
 
-#define	TTYBUF_MAX	65536
+#define TTYBUF_MAX 65536
 
 /*
  * Allocate buffer space if necessary, and set low watermarks, based on speed.
@@ -173,7 +173,8 @@ tty_drain(struct tty *tp, int leaving)
 	 */
 	error = 0;
 	bytes = ttyoutq_bytesused(&tp->t_outq);
-	for (;;) {
+	for (;;)
+	{
 		if (ttyoutq_bytesused(&tp->t_outq) == 0 && !ttydevsw_busy(tp))
 			return (0);
 		if (error != 0)
@@ -184,7 +185,8 @@ tty_drain(struct tty *tp, int leaving)
 			return (error);
 		else if (timeout_at == 0 || getsbinuptime() < timeout_at)
 			error = 0;
-		else if (leaving && ttyoutq_bytesused(&tp->t_outq) < bytes) {
+		else if (leaving && ttyoutq_bytesused(&tp->t_outq) < bytes)
+		{
 			/* In close, making progress, grant an extra second. */
 			error = 0;
 			timeout_at += SBT_1S;
@@ -208,7 +210,8 @@ ttydev_enter(struct tty *tp)
 
 	tty_lock(tp);
 
-	if (tty_gone(tp) || !tty_opened(tp)) {
+	if (tty_gone(tp) || !tty_opened(tp))
+	{
 		/* Device is already gone. */
 		tty_unlock(tp);
 		return (ENXIO);
@@ -223,7 +226,8 @@ ttydev_leave(struct tty *tp)
 
 	tty_lock_assert(tp, MA_OWNED);
 
-	if (tty_opened(tp) || tp->t_flags & TF_OPENCLOSE) {
+	if (tty_opened(tp) || tp->t_flags & TF_OPENCLOSE)
+	{
 		/* Device is still opened somewhere. */
 		tty_unlock(tp);
 		return;
@@ -266,7 +270,7 @@ ttydev_leave(struct tty *tp)
  */
 static int
 ttydev_open(struct cdev *dev, int oflags, int devtype __unused,
-    struct thread *td)
+						struct thread *td)
 {
 	struct tty *tp;
 	int error;
@@ -274,7 +278,8 @@ ttydev_open(struct cdev *dev, int oflags, int devtype __unused,
 	tp = dev->si_drv1;
 	error = 0;
 	tty_lock(tp);
-	if (tty_gone(tp)) {
+	if (tty_gone(tp))
+	{
 		/* Device is already gone. */
 		tty_unlock(tp);
 		return (ENXIO);
@@ -284,9 +289,11 @@ ttydev_open(struct cdev *dev, int oflags, int devtype __unused,
 	 * Block when other processes are currently opening or closing
 	 * the TTY.
 	 */
-	while (tp->t_flags & TF_OPENCLOSE) {
+	while (tp->t_flags & TF_OPENCLOSE)
+	{
 		error = tty_wait(tp, &tp->t_dcdwait);
-		if (error != 0) {
+		if (error != 0)
+		{
 			tty_unlock(tp);
 			return (error);
 		}
@@ -297,24 +304,31 @@ ttydev_open(struct cdev *dev, int oflags, int devtype __unused,
 	 * Make sure the "tty" and "cua" device cannot be opened at the
 	 * same time.  The console is a "tty" device.
 	 */
-	if (TTY_CALLOUT(tp, dev)) {
-		if (tp->t_flags & (TF_OPENED_CONS | TF_OPENED_IN)) {
+	if (TTY_CALLOUT(tp, dev))
+	{
+		if (tp->t_flags & (TF_OPENED_CONS | TF_OPENED_IN))
+		{
 			error = EBUSY;
 			goto done;
 		}
-	} else {
-		if (tp->t_flags & TF_OPENED_OUT) {
+	}
+	else
+	{
+		if (tp->t_flags & TF_OPENED_OUT)
+		{
 			error = EBUSY;
 			goto done;
 		}
 	}
 
-	if (tp->t_flags & TF_EXCLUDE && priv_check(td, PRIV_TTY_EXCLUSIVE)) {
+	if (tp->t_flags & TF_EXCLUDE && priv_check(td, PRIV_TTY_EXCLUSIVE))
+	{
 		error = EBUSY;
 		goto done;
 	}
 
-	if (!tty_opened(tp)) {
+	if (!tty_opened(tp))
+	{
 		/* Set proper termios flags. */
 		if (TTY_CALLOUT(tp, dev))
 			tp->t_termios = tp->t_termios_init_out;
@@ -325,7 +339,7 @@ ttydev_open(struct cdev *dev, int oflags, int devtype __unused,
 		if (TTY_CALLOUT(tp, dev) || dev == dev_console)
 			tp->t_termios.c_cflag |= CLOCAL;
 
-		ttydevsw_modem(tp, SER_DTR|SER_RTS, 0);
+		ttydevsw_modem(tp, SER_DTR | SER_RTS, 0);
 
 		error = ttydevsw_open(tp);
 		if (error != 0)
@@ -339,8 +353,10 @@ ttydev_open(struct cdev *dev, int oflags, int devtype __unused,
 
 	/* Wait for Carrier Detect. */
 	if ((oflags & O_NONBLOCK) == 0 &&
-	    (tp->t_termios.c_cflag & CLOCAL) == 0) {
-		while ((ttydevsw_modem(tp, 0, 0) & SER_DCD) == 0) {
+			(tp->t_termios.c_cflag & CLOCAL) == 0)
+	{
+		while ((ttydevsw_modem(tp, 0, 0) & SER_DCD) == 0)
+		{
 			error = tty_wait(tp, &tp->t_dcdwait);
 			if (error != 0)
 				goto done;
@@ -354,9 +370,10 @@ ttydev_open(struct cdev *dev, int oflags, int devtype __unused,
 	else
 		tp->t_flags |= TF_OPENED_IN;
 	MPASS((tp->t_flags & (TF_OPENED_CONS | TF_OPENED_IN)) == 0 ||
-	    (tp->t_flags & TF_OPENED_OUT) == 0);
+				(tp->t_flags & TF_OPENED_OUT) == 0);
 
-done:	tp->t_flags &= ~TF_OPENCLOSE;
+done:
+	tp->t_flags &= ~TF_OPENCLOSE;
 	cv_broadcast(&tp->t_dcdwait);
 	ttydev_leave(tp);
 
@@ -365,7 +382,7 @@ done:	tp->t_flags &= ~TF_OPENCLOSE;
 
 static int
 ttydev_close(struct cdev *dev, int fflag, int devtype __unused,
-    struct thread *td __unused)
+						 struct thread *td __unused)
 {
 	struct tty *tp = dev->si_drv1;
 
@@ -376,13 +393,14 @@ ttydev_close(struct cdev *dev, int fflag, int devtype __unused,
 	 * console.
 	 */
 	MPASS((tp->t_flags & (TF_OPENED_CONS | TF_OPENED_IN)) == 0 ||
-	    (tp->t_flags & TF_OPENED_OUT) == 0);
+				(tp->t_flags & TF_OPENED_OUT) == 0);
 	if (dev == dev_console)
 		tp->t_flags &= ~TF_OPENED_CONS;
 	else
-		tp->t_flags &= ~(TF_OPENED_IN|TF_OPENED_OUT);
+		tp->t_flags &= ~(TF_OPENED_IN | TF_OPENED_OUT);
 
-	if (tp->t_flags & TF_OPENED) {
+	if (tp->t_flags & TF_OPENED)
+	{
 		tty_unlock(tp);
 		return (0);
 	}
@@ -395,7 +413,7 @@ ttydev_close(struct cdev *dev, int fflag, int devtype __unused,
 
 	/* Properly wake up threads that are stuck - revoke(). */
 	tp->t_revokecnt++;
-	tty_wakeup(tp, FREAD|FWRITE);
+	tty_wakeup(tp, FREAD | FWRITE);
 	cv_broadcast(&tp->t_bgwait);
 	cv_broadcast(&tp->t_dcdwait);
 
@@ -413,8 +431,7 @@ tty_is_ctty(struct tty *tp, struct proc *p)
 	return (p->p_session == tp->t_session && p->p_flag & P_CONTROLT);
 }
 
-int
-tty_wait_background(struct tty *tp, struct thread *td, int sig)
+int tty_wait_background(struct tty *tp, struct thread *td, int sig)
 {
 	struct proc *p = td->td_proc;
 	struct pgrp *pg;
@@ -424,7 +441,8 @@ tty_wait_background(struct tty *tp, struct thread *td, int sig)
 	MPASS(sig == SIGTTIN || sig == SIGTTOU);
 	tty_lock_assert(tp, MA_OWNED);
 
-	for (;;) {
+	for (;;)
+	{
 		PROC_LOCK(p);
 		/*
 		 * The process should only sleep, when:
@@ -435,21 +453,24 @@ tty_wait_background(struct tty *tp, struct thread *td, int sig)
 		 *   exit
 		 * - the signal to send to the process isn't masked
 		 */
-		if (!tty_is_ctty(tp, p) || p->p_pgrp == tp->t_pgrp) {
+		if (!tty_is_ctty(tp, p) || p->p_pgrp == tp->t_pgrp)
+		{
 			/* Allow the action to happen. */
 			PROC_UNLOCK(p);
 			return (0);
 		}
 
 		if (SIGISMEMBER(p->p_sigacts->ps_sigignore, sig) ||
-		    SIGISMEMBER(td->td_sigmask, sig)) {
+				SIGISMEMBER(td->td_sigmask, sig))
+		{
 			/* Only allow them in write()/ioctl(). */
 			PROC_UNLOCK(p);
 			return (sig == SIGTTOU ? 0 : EIO);
 		}
 
 		pg = p->p_pgrp;
-		if (p->p_flag & P_PPWAIT || pg->pg_jobc == 0) {
+		if (p->p_flag & P_PPWAIT || pg->pg_jobc == 0)
+		{
 			/* Don't allow the action to happen. */
 			PROC_UNLOCK(p);
 			return (EIO);
@@ -460,7 +481,8 @@ tty_wait_background(struct tty *tp, struct thread *td, int sig)
 		 * Send the signal and sleep until we're the new
 		 * foreground process group.
 		 */
-		if (sig != 0) {
+		if (sig != 0)
+		{
 			ksiginfo_init(&ksi);
 			ksi.ksi_code = SI_KERNEL;
 			ksi.ksi_signo = sig;
@@ -492,7 +514,8 @@ ttydev_read(struct cdev *dev, struct uio *uio, int ioflag)
 	 * The read() call should not throw an error when the device is
 	 * being destroyed. Silently convert it to an EOF.
 	 */
-done:	if (error == ENXIO)
+done:
+	if (error == ENXIO)
 		error = 0;
 	return (error);
 }
@@ -507,18 +530,23 @@ ttydev_write(struct cdev *dev, struct uio *uio, int ioflag)
 	if (error)
 		return (error);
 
-	if (tp->t_termios.c_lflag & TOSTOP) {
+	if (tp->t_termios.c_lflag & TOSTOP)
+	{
 		error = tty_wait_background(tp, curthread, SIGTTOU);
 		if (error)
 			goto done;
 	}
 
-	if (ioflag & IO_NDELAY && tp->t_flags & TF_BUSY_OUT) {
+	if (ioflag & IO_NDELAY && tp->t_flags & TF_BUSY_OUT)
+	{
 		/* Allow non-blocking writes to bypass serialization. */
 		error = ttydisc_write(tp, uio, ioflag);
-	} else {
+	}
+	else
+	{
 		/* Serialize write() calls. */
-		while (tp->t_flags & TF_BUSY_OUT) {
+		while (tp->t_flags & TF_BUSY_OUT)
+		{
 			error = tty_wait(tp, &tp->t_outserwait);
 			if (error)
 				goto done;
@@ -530,13 +558,14 @@ ttydev_write(struct cdev *dev, struct uio *uio, int ioflag)
 		cv_signal(&tp->t_outserwait);
 	}
 
-done:	tty_unlock(tp);
+done:
+	tty_unlock(tp);
 	return (error);
 }
 
 static int
 ttydev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
-    struct thread *td)
+						 struct thread *td)
 {
 	struct tty *tp = dev->si_drv1;
 	int error;
@@ -545,7 +574,8 @@ ttydev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 	if (error)
 		return (error);
 
-	switch (cmd) {
+	switch (cmd)
+	{
 	case TIOCCBRK:
 	case TIOCCONS:
 	case TIOCDRAIN:
@@ -568,14 +598,14 @@ ttydev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 	case TIOCSETD:
 #endif
 #ifdef COMPAT_43TTY
-	case  TIOCLBIC:
-	case  TIOCLBIS:
-	case  TIOCLSET:
-	case  TIOCSETC:
+	case TIOCLBIC:
+	case TIOCLBIS:
+	case TIOCLSET:
+	case TIOCSETC:
 	case OTIOCSETD:
-	case  TIOCSETN:
-	case  TIOCSETP:
-	case  TIOCSLTC:
+	case TIOCSETN:
+	case TIOCSETP:
+	case TIOCSLTC:
 #endif /* COMPAT_43TTY */
 		/*
 		 * If the ioctl() causes the TTY to be modified, let it
@@ -586,11 +616,11 @@ ttydev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 			goto done;
 	}
 
-	if (cmd == TIOCSETA || cmd == TIOCSETAW || cmd == TIOCSETAF) {
+	if (cmd == TIOCSETA || cmd == TIOCSETAW || cmd == TIOCSETAF)
+	{
 		struct termios *old = &tp->t_termios;
 		struct termios *new = (struct termios *)data;
-		struct termios *lock = TTY_CALLOUT(tp, dev) ?
-		    &tp->t_termios_lock_out : &tp->t_termios_lock_in;
+		struct termios *lock = TTY_CALLOUT(tp, dev) ? &tp->t_termios_lock_out : &tp->t_termios_lock_in;
 		int cc;
 
 		/*
@@ -598,13 +628,13 @@ ttydev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 		 * commands that are currently in use.
 		 */
 		new->c_iflag = (old->c_iflag & lock->c_iflag) |
-		    (new->c_iflag & ~lock->c_iflag);
+									 (new->c_iflag & ~lock->c_iflag);
 		new->c_oflag = (old->c_oflag & lock->c_oflag) |
-		    (new->c_oflag & ~lock->c_oflag);
+									 (new->c_oflag & ~lock->c_oflag);
 		new->c_cflag = (old->c_cflag & lock->c_cflag) |
-		    (new->c_cflag & ~lock->c_cflag);
+									 (new->c_cflag & ~lock->c_cflag);
 		new->c_lflag = (old->c_lflag & lock->c_lflag) |
-		    (new->c_lflag & ~lock->c_lflag);
+									 (new->c_lflag & ~lock->c_lflag);
 		for (cc = 0; cc < NCCS; ++cc)
 			if (lock->c_cc[cc])
 				new->c_cc[cc] = old->c_cc[cc];
@@ -615,7 +645,8 @@ ttydev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 	}
 
 	error = tty_ioctl(tp, cmd, data, fflag, td);
-done:	tty_unlock(tp);
+done:
+	tty_unlock(tp);
 
 	return (error);
 }
@@ -628,27 +659,32 @@ ttydev_poll(struct cdev *dev, int events, struct thread *td)
 
 	error = ttydev_enter(tp);
 	if (error)
-		return ((events & (POLLIN|POLLRDNORM)) | POLLHUP);
+		return ((events & (POLLIN | POLLRDNORM)) | POLLHUP);
 
-	if (events & (POLLIN|POLLRDNORM)) {
+	if (events & (POLLIN | POLLRDNORM))
+	{
 		/* See if we can read something. */
 		if (ttydisc_read_poll(tp) > 0)
-			revents |= events & (POLLIN|POLLRDNORM);
+			revents |= events & (POLLIN | POLLRDNORM);
 	}
 
-	if (tp->t_flags & TF_ZOMBIE) {
+	if (tp->t_flags & TF_ZOMBIE)
+	{
 		/* Hangup flag on zombie state. */
 		revents |= POLLHUP;
-	} else if (events & (POLLOUT|POLLWRNORM)) {
+	}
+	else if (events & (POLLOUT | POLLWRNORM))
+	{
 		/* See if we can write something. */
 		if (ttydisc_write_poll(tp) > 0)
-			revents |= events & (POLLOUT|POLLWRNORM);
+			revents |= events & (POLLOUT | POLLWRNORM);
 	}
 
-	if (revents == 0) {
-		if (events & (POLLIN|POLLRDNORM))
+	if (revents == 0)
+	{
+		if (events & (POLLIN | POLLRDNORM))
 			selrecord(td, &tp->t_inpoll);
-		if (events & (POLLOUT|POLLWRNORM))
+		if (events & (POLLOUT | POLLWRNORM))
 			selrecord(td, &tp->t_outpoll);
 	}
 
@@ -659,7 +695,7 @@ ttydev_poll(struct cdev *dev, int events, struct thread *td)
 
 static int
 ttydev_mmap(struct cdev *dev, vm_ooffset_t offset, vm_paddr_t *paddr,
-    int nprot, vm_memattr_t *memattr)
+						int nprot, vm_memattr_t *memattr)
 {
 	struct tty *tp = dev->si_drv1;
 	int error;
@@ -694,10 +730,13 @@ tty_kqops_read_event(struct knote *kn, long hint __unused)
 
 	tty_lock_assert(tp, MA_OWNED);
 
-	if (tty_gone(tp) || tp->t_flags & TF_ZOMBIE) {
+	if (tty_gone(tp) || tp->t_flags & TF_ZOMBIE)
+	{
 		kn->kn_flags |= EV_EOF;
 		return (1);
-	} else {
+	}
+	else
+	{
 		kn->kn_data = ttydisc_read_poll(tp);
 		return (kn->kn_data > 0);
 	}
@@ -718,25 +757,28 @@ tty_kqops_write_event(struct knote *kn, long hint __unused)
 
 	tty_lock_assert(tp, MA_OWNED);
 
-	if (tty_gone(tp)) {
+	if (tty_gone(tp))
+	{
 		kn->kn_flags |= EV_EOF;
 		return (1);
-	} else {
+	}
+	else
+	{
 		kn->kn_data = ttydisc_write_poll(tp);
 		return (kn->kn_data > 0);
 	}
 }
 
 static struct filterops tty_kqops_read = {
-	.f_isfd = 1,
-	.f_detach = tty_kqops_read_detach,
-	.f_event = tty_kqops_read_event,
+		.f_isfd = 1,
+		.f_detach = tty_kqops_read_detach,
+		.f_event = tty_kqops_read_event,
 };
 
 static struct filterops tty_kqops_write = {
-	.f_isfd = 1,
-	.f_detach = tty_kqops_write_detach,
-	.f_event = tty_kqops_write_event,
+		.f_isfd = 1,
+		.f_detach = tty_kqops_write_detach,
+		.f_event = tty_kqops_write_event,
 };
 
 static int
@@ -749,7 +791,8 @@ ttydev_kqfilter(struct cdev *dev, struct knote *kn)
 	if (error)
 		return (error);
 
-	switch (kn->kn_filter) {
+	switch (kn->kn_filter)
+	{
 	case EVFILT_READ:
 		kn->kn_hook = tp;
 		kn->kn_fop = &tty_kqops_read;
@@ -770,17 +813,17 @@ ttydev_kqfilter(struct cdev *dev, struct knote *kn)
 }
 
 static struct cdevsw ttydev_cdevsw = {
-	.d_version	= D_VERSION,
-	.d_open		= ttydev_open,
-	.d_close	= ttydev_close,
-	.d_read		= ttydev_read,
-	.d_write	= ttydev_write,
-	.d_ioctl	= ttydev_ioctl,
-	.d_kqfilter	= ttydev_kqfilter,
-	.d_poll		= ttydev_poll,
-	.d_mmap		= ttydev_mmap,
-	.d_name		= "ttydev",
-	.d_flags	= D_TTY,
+		.d_version = D_VERSION,
+		.d_open = ttydev_open,
+		.d_close = ttydev_close,
+		.d_read = ttydev_read,
+		.d_write = ttydev_write,
+		.d_ioctl = ttydev_ioctl,
+		.d_kqfilter = ttydev_kqfilter,
+		.d_poll = ttydev_poll,
+		.d_mmap = ttydev_mmap,
+		.d_name = "ttydev",
+		.d_flags = D_TTY,
 };
 
 /*
@@ -789,7 +832,7 @@ static struct cdevsw ttydev_cdevsw = {
 
 static int
 ttyil_open(struct cdev *dev, int oflags __unused, int devtype __unused,
-    struct thread *td)
+					 struct thread *td)
 {
 	struct tty *tp;
 	int error;
@@ -806,7 +849,7 @@ ttyil_open(struct cdev *dev, int oflags __unused, int devtype __unused,
 
 static int
 ttyil_close(struct cdev *dev __unused, int flag __unused, int mode __unused,
-    struct thread *td __unused)
+						struct thread *td __unused)
 {
 
 	return (0);
@@ -814,7 +857,7 @@ ttyil_close(struct cdev *dev __unused, int flag __unused, int mode __unused,
 
 static int
 ttyil_rdwr(struct cdev *dev __unused, struct uio *uio __unused,
-    int ioflag __unused)
+					 int ioflag __unused)
 {
 
 	return (ENODEV);
@@ -822,13 +865,14 @@ ttyil_rdwr(struct cdev *dev __unused, struct uio *uio __unused,
 
 static int
 ttyil_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
-    struct thread *td)
+						struct thread *td)
 {
 	struct tty *tp = dev->si_drv1;
 	int error;
 
 	tty_lock(tp);
-	if (tty_gone(tp)) {
+	if (tty_gone(tp))
+	{
 		error = ENODEV;
 		goto done;
 	}
@@ -838,17 +882,18 @@ ttyil_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 		goto done;
 	error = 0;
 
-	switch (cmd) {
+	switch (cmd)
+	{
 	case TIOCGETA:
 		/* Obtain terminal flags through tcgetattr(). */
-		*(struct termios*)data = *(struct termios*)dev->si_drv2;
+		*(struct termios *)data = *(struct termios *)dev->si_drv2;
 		break;
 	case TIOCSETA:
 		/* Set terminal flags through tcsetattr(). */
 		error = priv_check(td, PRIV_TTY_SETA);
 		if (error)
 			break;
-		*(struct termios*)dev->si_drv2 = *(struct termios*)data;
+		*(struct termios *)dev->si_drv2 = *(struct termios *)data;
 		break;
 	case TIOCGETD:
 		*(int *)data = TTYDISC;
@@ -860,19 +905,20 @@ ttyil_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 		error = ENOTTY;
 	}
 
-done:	tty_unlock(tp);
+done:
+	tty_unlock(tp);
 	return (error);
 }
 
 static struct cdevsw ttyil_cdevsw = {
-	.d_version	= D_VERSION,
-	.d_open		= ttyil_open,
-	.d_close	= ttyil_close,
-	.d_read		= ttyil_rdwr,
-	.d_write	= ttyil_rdwr,
-	.d_ioctl	= ttyil_ioctl,
-	.d_name		= "ttyil",
-	.d_flags	= D_TTY,
+		.d_version = D_VERSION,
+		.d_open = ttyil_open,
+		.d_close = ttyil_close,
+		.d_read = ttyil_rdwr,
+		.d_write = ttyil_rdwr,
+		.d_ioctl = ttyil_ioctl,
+		.d_name = "ttyil",
+		.d_flags = D_TTY,
 };
 
 static void
@@ -891,13 +937,13 @@ tty_init_termios(struct tty *tp)
 	tp->t_termios_init_out = *t;
 }
 
-void
-tty_init_console(struct tty *tp, speed_t s)
+void tty_init_console(struct tty *tp, speed_t s)
 {
 	struct termios *ti = &tp->t_termios_init_in;
 	struct termios *to = &tp->t_termios_init_out;
 
-	if (s != 0) {
+	if (s != 0)
+	{
 		ti->c_ispeed = ti->c_ospeed = s;
 		to->c_ispeed = to->c_ospeed = s;
 	}
@@ -922,7 +968,6 @@ ttydevsw_defopen(struct tty *tp __unused)
 static void
 ttydevsw_defclose(struct tty *tp __unused)
 {
-
 }
 
 static void
@@ -935,12 +980,11 @@ ttydevsw_defoutwakeup(struct tty *tp __unused)
 static void
 ttydevsw_definwakeup(struct tty *tp __unused)
 {
-
 }
 
 static int
 ttydevsw_defioctl(struct tty *tp __unused, u_long cmd __unused,
-    caddr_t data __unused, struct thread *td __unused)
+									caddr_t data __unused, struct thread *td __unused)
 {
 
 	return (ENOIOCTL);
@@ -948,7 +992,7 @@ ttydevsw_defioctl(struct tty *tp __unused, u_long cmd __unused,
 
 static int
 ttydevsw_defcioctl(struct tty *tp __unused, int unit __unused,
-    u_long cmd __unused, caddr_t data __unused, struct thread *td __unused)
+									 u_long cmd __unused, caddr_t data __unused, struct thread *td __unused)
 {
 
 	return (ENOIOCTL);
@@ -978,7 +1022,7 @@ ttydevsw_defparam(struct tty *tp __unused, struct termios *t)
 
 static int
 ttydevsw_defmodem(struct tty *tp __unused, int sigon __unused,
-    int sigoff __unused)
+									int sigoff __unused)
 {
 
 	/* Simulate a carrier to make the TTY layer happy. */
@@ -987,8 +1031,8 @@ ttydevsw_defmodem(struct tty *tp __unused, int sigon __unused,
 
 static int
 ttydevsw_defmmap(struct tty *tp __unused, vm_ooffset_t offset __unused,
-    vm_paddr_t *paddr __unused, int nprot __unused,
-    vm_memattr_t *memattr __unused)
+								 vm_paddr_t *paddr __unused, int nprot __unused,
+								 vm_memattr_t *memattr __unused)
 {
 
 	return (-1);
@@ -997,7 +1041,6 @@ ttydevsw_defmmap(struct tty *tp __unused, vm_ooffset_t offset __unused,
 static void
 ttydevsw_defpktnotify(struct tty *tp __unused, char event __unused)
 {
-
 }
 
 static void
@@ -1033,10 +1076,12 @@ tty_alloc_mutex(struct ttydevsw *tsw, void *sc, struct mtx *mutex)
 	struct tty *tp;
 
 	/* Make sure the driver defines all routines. */
-#define PATCH_FUNC(x) do {				\
-	if (tsw->tsw_ ## x == NULL)			\
-		tsw->tsw_ ## x = ttydevsw_def ## x;	\
-} while (0)
+#define PATCH_FUNC(x)                 \
+	do                                  \
+	{                                   \
+		if (tsw->tsw_##x == NULL)         \
+			tsw->tsw_##x = ttydevsw_def##x; \
+	} while (0)
 	PATCH_FUNC(open);
 	PATCH_FUNC(close);
 	PATCH_FUNC(outwakeup);
@@ -1051,7 +1096,7 @@ tty_alloc_mutex(struct ttydevsw *tsw, void *sc, struct mtx *mutex)
 	PATCH_FUNC(busy);
 #undef PATCH_FUNC
 
-	tp = malloc(sizeof(struct tty), M_TTY, M_WAITOK|M_ZERO);
+	tp = malloc(sizeof(struct tty), M_TTY, M_WAITOK | M_ZERO);
 	tp->t_devsw = tsw;
 	tp->t_devswsoftc = sc;
 	tp->t_flags = tsw->tsw_flags;
@@ -1066,9 +1111,12 @@ tty_alloc_mutex(struct ttydevsw *tsw, void *sc, struct mtx *mutex)
 	cv_init(&tp->t_dcdwait, "ttydcd");
 
 	/* Allow drivers to use a custom mutex to lock the TTY. */
-	if (mutex != NULL) {
+	if (mutex != NULL)
+	{
 		tp->t_mtx = mutex;
-	} else {
+	}
+	else
+	{
 		tp->t_mtx = &tp->t_mtxobj;
 		mtx_init(&tp->t_mtxobj, "ttymtx", NULL, MTX_DEF);
 	}
@@ -1117,8 +1165,9 @@ tty_rel_free(struct tty *tp)
 
 	tty_lock_assert(tp, MA_OWNED);
 
-#define	TF_ACTIVITY	(TF_GONE|TF_OPENED|TF_HOOK|TF_OPENCLOSE)
-	if (tp->t_sessioncnt != 0 || (tp->t_flags & TF_ACTIVITY) != TF_GONE) {
+#define TF_ACTIVITY (TF_GONE | TF_OPENED | TF_HOOK | TF_OPENCLOSE)
+	if (tp->t_sessioncnt != 0 || (tp->t_flags & TF_ACTIVITY) != TF_GONE)
+	{
 		/* TTY is still in use. */
 		tty_unlock(tp);
 		return;
@@ -1129,7 +1178,8 @@ tty_rel_free(struct tty *tp)
 	tp->t_dev = NULL;
 	tty_unlock(tp);
 
-	if (dev != NULL) {
+	if (dev != NULL)
+	{
 		sx_xlock(&tty_list_sx);
 		TAILQ_REMOVE(&tty_list, tp, t_list);
 		tty_list_count--;
@@ -1138,8 +1188,7 @@ tty_rel_free(struct tty *tp)
 	}
 }
 
-void
-tty_rel_pgrp(struct tty *tp, struct pgrp *pg)
+void tty_rel_pgrp(struct tty *tp, struct pgrp *pg)
 {
 
 	MPASS(tp->t_sessioncnt > 0);
@@ -1151,14 +1200,14 @@ tty_rel_pgrp(struct tty *tp, struct pgrp *pg)
 	tty_unlock(tp);
 }
 
-void
-tty_rel_sess(struct tty *tp, struct session *sess)
+void tty_rel_sess(struct tty *tp, struct session *sess)
 {
 
 	MPASS(tp->t_sessioncnt > 0);
 
 	/* Current session has left. */
-	if (tp->t_session == sess) {
+	if (tp->t_session == sess)
+	{
 		tp->t_session = NULL;
 		MPASS(tp->t_pgrp == NULL);
 	}
@@ -1166,8 +1215,7 @@ tty_rel_sess(struct tty *tp, struct session *sess)
 	tty_rel_free(tp);
 }
 
-void
-tty_rel_gone(struct tty *tp)
+void tty_rel_gone(struct tty *tp)
 {
 
 	MPASS(!tty_gone(tp));
@@ -1176,7 +1224,7 @@ tty_rel_gone(struct tty *tp)
 	ttydisc_modem(tp, 0);
 
 	/* Wake up all blocked threads. */
-	tty_wakeup(tp, FREAD|FWRITE);
+	tty_wakeup(tp, FREAD | FWRITE);
 	cv_broadcast(&tp->t_bgwait);
 	cv_broadcast(&tp->t_dcdwait);
 
@@ -1219,14 +1267,16 @@ sysctl_kern_ttys(SYSCTL_HANDLER_ARGS)
 
 	sx_slock(&tty_list_sx);
 	lsize = tty_list_count * sizeof(struct xtty);
-	if (lsize == 0) {
+	if (lsize == 0)
+	{
 		sx_sunlock(&tty_list_sx);
 		return (0);
 	}
 
 	xtlist = xt = malloc(lsize, M_TTY, M_WAITOK);
 
-	TAILQ_FOREACH(tp, &tty_list, t_list) {
+	TAILQ_FOREACH(tp, &tty_list, t_list)
+	{
 		tty_lock(tp);
 		tty_to_xtty(tp, xt);
 		tty_unlock(tp);
@@ -1239,17 +1289,16 @@ sysctl_kern_ttys(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
-SYSCTL_PROC(_kern, OID_AUTO, ttys, CTLTYPE_OPAQUE|CTLFLAG_RD|CTLFLAG_MPSAFE,
-	0, 0, sysctl_kern_ttys, "S,xtty", "List of TTYs");
+SYSCTL_PROC(_kern, OID_AUTO, ttys, CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_MPSAFE,
+						0, 0, sysctl_kern_ttys, "S,xtty", "List of TTYs");
 
 /*
  * Device node creation. Device has been set up, now we can expose it to
  * the user.
  */
 
-int
-tty_makedevf(struct tty *tp, struct ucred *cred, int flags,
-    const char *fmt, ...)
+int tty_makedevf(struct tty *tp, struct ucred *cred, int flags,
+								 const char *fmt, ...)
 {
 	va_list ap;
 	struct make_dev_args args;
@@ -1269,16 +1318,19 @@ tty_makedevf(struct tty *tp, struct ucred *cred, int flags,
 	vsnrprintf(name, sizeof name, 32, fmt, ap);
 	va_end(ap);
 
-	if (cred == NULL) {
+	if (cred == NULL)
+	{
 		/* System device. */
 		uid = UID_ROOT;
 		gid = GID_WHEEL;
-		mode = S_IRUSR|S_IWUSR;
-	} else {
+		mode = S_IRUSR | S_IWUSR;
+	}
+	else
+	{
 		/* User device. */
 		uid = cred->cr_ruid;
 		gid = GID_TTY;
-		mode = S_IRUSR|S_IWUSR|S_IWGRP;
+		mode = S_IRUSR | S_IWUSR | S_IWGRP;
 	}
 
 	flags = flags & TTYMK_CLONING ? MAKEDEV_REF : 0;
@@ -1301,7 +1353,8 @@ tty_makedevf(struct tty *tp, struct ucred *cred, int flags,
 	init = lock = cua = cinit = clock = NULL;
 
 	/* Slave call-in devices. */
-	if (tp->t_flags & TF_INITLOCK) {
+	if (tp->t_flags & TF_INITLOCK)
+	{
 		args.mda_devsw = &ttyil_cdevsw;
 		args.mda_unit = TTYUNIT_INIT;
 		args.mda_si_drv1 = tp;
@@ -1320,7 +1373,8 @@ tty_makedevf(struct tty *tp, struct ucred *cred, int flags,
 	}
 
 	/* Call-out devices. */
-	if (tp->t_flags & TF_CALLOUT) {
+	if (tp->t_flags & TF_CALLOUT)
+	{
 		make_dev_args_init(&args);
 		args.mda_flags = flags;
 		args.mda_devsw = &ttydev_cdevsw;
@@ -1336,7 +1390,8 @@ tty_makedevf(struct tty *tp, struct ucred *cred, int flags,
 		dev_depends(dev, cua);
 
 		/* Slave call-out devices. */
-		if (tp->t_flags & TF_INITLOCK) {
+		if (tp->t_flags & TF_INITLOCK)
+		{
 			args.mda_devsw = &ttyil_cdevsw;
 			args.mda_unit = TTYUNIT_CALLOUT | TTYUNIT_INIT;
 			args.mda_si_drv2 = &tp->t_termios_init_out;
@@ -1379,8 +1434,7 @@ fail:
  * Signalling processes.
  */
 
-void
-tty_signal_sessleader(struct tty *tp, int sig)
+void tty_signal_sessleader(struct tty *tp, int sig)
 {
 	struct proc *p;
 
@@ -1390,7 +1444,8 @@ tty_signal_sessleader(struct tty *tp, int sig)
 	/* Make signals start output again. */
 	tp->t_flags &= ~TF_STOPPED;
 
-	if (tp->t_session != NULL && tp->t_session->s_leader != NULL) {
+	if (tp->t_session != NULL && tp->t_session->s_leader != NULL)
+	{
 		p = tp->t_session->s_leader;
 		PROC_LOCK(p);
 		kern_psignal(p, sig);
@@ -1398,8 +1453,7 @@ tty_signal_sessleader(struct tty *tp, int sig)
 	}
 }
 
-void
-tty_signal_pgrp(struct tty *tp, int sig)
+void tty_signal_pgrp(struct tty *tp, int sig)
 {
 	ksiginfo_t ksi;
 
@@ -1411,7 +1465,8 @@ tty_signal_pgrp(struct tty *tp, int sig)
 
 	if (sig == SIGINFO && !(tp->t_termios.c_lflag & NOKERNINFO))
 		tty_info(tp);
-	if (tp->t_pgrp != NULL) {
+	if (tp->t_pgrp != NULL)
+	{
 		ksiginfo_init(&ksi);
 		ksi.ksi_signo = sig;
 		ksi.ksi_code = SI_KERNEL;
@@ -1421,32 +1476,32 @@ tty_signal_pgrp(struct tty *tp, int sig)
 	}
 }
 
-void
-tty_wakeup(struct tty *tp, int flags)
+void tty_wakeup(struct tty *tp, int flags)
 {
 
 	if (tp->t_flags & TF_ASYNC && tp->t_sigio != NULL)
 		pgsigio(&tp->t_sigio, SIGIO, (tp->t_session != NULL));
 
-	if (flags & FWRITE) {
+	if (flags & FWRITE)
+	{
 		cv_broadcast(&tp->t_outwait);
 		selwakeup(&tp->t_outpoll);
 		KNOTE_LOCKED(&tp->t_outpoll.si_note, 0);
 	}
-	if (flags & FREAD) {
+	if (flags & FREAD)
+	{
 		cv_broadcast(&tp->t_inwait);
 		selwakeup(&tp->t_inpoll);
 		KNOTE_LOCKED(&tp->t_inpoll.si_note, 0);
 	}
 }
 
-int
-tty_wait(struct tty *tp, struct cv *cv)
+int tty_wait(struct tty *tp, struct cv *cv)
 {
 	int error;
 	int revokecnt = tp->t_revokecnt;
 
-	tty_lock_assert(tp, MA_OWNED|MA_NOTRECURSED);
+	tty_lock_assert(tp, MA_OWNED | MA_NOTRECURSED);
 	MPASS(!tty_gone(tp));
 
 	error = cv_wait_sig(cv, tp->t_mtx);
@@ -1462,13 +1517,12 @@ tty_wait(struct tty *tp, struct cv *cv)
 	return (error);
 }
 
-int
-tty_timedwait(struct tty *tp, struct cv *cv, int hz)
+int tty_timedwait(struct tty *tp, struct cv *cv, int hz)
 {
 	int error;
 	int revokecnt = tp->t_revokecnt;
 
-	tty_lock_assert(tp, MA_OWNED|MA_NOTRECURSED);
+	tty_lock_assert(tp, MA_OWNED | MA_NOTRECURSED);
 	MPASS(!tty_gone(tp));
 
 	error = cv_timedwait_sig(cv, tp->t_mtx, hz);
@@ -1484,32 +1538,34 @@ tty_timedwait(struct tty *tp, struct cv *cv, int hz)
 	return (error);
 }
 
-void
-tty_flush(struct tty *tp, int flags)
+void tty_flush(struct tty *tp, int flags)
 {
 
-	if (flags & FWRITE) {
+	if (flags & FWRITE)
+	{
 		tp->t_flags &= ~TF_HIWAT_OUT;
 		ttyoutq_flush(&tp->t_outq);
 		tty_wakeup(tp, FWRITE);
-		if (!tty_gone(tp)) {
+		if (!tty_gone(tp))
+		{
 			ttydevsw_outwakeup(tp);
 			ttydevsw_pktnotify(tp, TIOCPKT_FLUSHWRITE);
 		}
 	}
-	if (flags & FREAD) {
+	if (flags & FREAD)
+	{
 		tty_hiwat_in_unblock(tp);
 		ttyinq_flush(&tp->t_inq);
 		tty_wakeup(tp, FREAD);
-		if (!tty_gone(tp)) {
+		if (!tty_gone(tp))
+		{
 			ttydevsw_inwakeup(tp);
 			ttydevsw_pktnotify(tp, TIOCPKT_FLUSHREAD);
 		}
 	}
 }
 
-void
-tty_set_winsize(struct tty *tp, const struct winsize *wsz)
+void tty_set_winsize(struct tty *tp, const struct winsize *wsz)
 {
 
 	if (memcmp(&tp->t_winsize, wsz, sizeof(*wsz)) == 0)
@@ -1520,11 +1576,12 @@ tty_set_winsize(struct tty *tp, const struct winsize *wsz)
 
 static int
 tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
-    struct thread *td)
+									struct thread *td)
 {
 	int error;
 
-	switch (cmd) {
+	switch (cmd)
+	{
 	/*
 	 * Modem commands.
 	 * The SER_* and TIOCM_* flags are the same, but one bit
@@ -1536,19 +1593,22 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 	case TIOCCDTR:
 		ttydevsw_modem(tp, 0, SER_DTR);
 		return (0);
-	case TIOCMSET: {
+	case TIOCMSET:
+	{
 		int bits = *(int *)data;
 		ttydevsw_modem(tp,
-		    (bits & (TIOCM_DTR | TIOCM_RTS)) >> 1,
-		    ((~bits) & (TIOCM_DTR | TIOCM_RTS)) >> 1);
+									 (bits & (TIOCM_DTR | TIOCM_RTS)) >> 1,
+									 ((~bits) & (TIOCM_DTR | TIOCM_RTS)) >> 1);
 		return (0);
 	}
-	case TIOCMBIS: {
+	case TIOCMBIS:
+	{
 		int bits = *(int *)data;
 		ttydevsw_modem(tp, (bits & (TIOCM_DTR | TIOCM_RTS)) >> 1, 0);
 		return (0);
 	}
-	case TIOCMBIC: {
+	case TIOCMBIC:
+	{
 		int bits = *(int *)data;
 		ttydevsw_modem(tp, 0, (bits & (TIOCM_DTR | TIOCM_RTS)) >> 1);
 		return (0);
@@ -1593,11 +1653,12 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		return (0);
 	case TIOCGETA:
 		/* Obtain terminal flags through tcgetattr(). */
-		*(struct termios*)data = tp->t_termios;
+		*(struct termios *)data = tp->t_termios;
 		return (0);
 	case TIOCSETA:
 	case TIOCSETAW:
-	case TIOCSETAF: {
+	case TIOCSETAF:
+	{
 		struct termios *t = data;
 
 		/*
@@ -1615,7 +1676,8 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		t->c_cflag &= TTYSUP_CFLAG;
 
 		/* Set terminal flags through tcsetattr(). */
-		if (cmd == TIOCSETAW || cmd == TIOCSETAF) {
+		if (cmd == TIOCSETAW || cmd == TIOCSETAF)
+		{
 			error = tty_drain(tp, 0);
 			if (error)
 				return (error);
@@ -1627,11 +1689,12 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		 * Only call param() when the flags really change.
 		 */
 		if ((t->c_cflag & CIGNORE) == 0 &&
-		    (tp->t_termios.c_cflag != t->c_cflag ||
-		    ((tp->t_termios.c_iflag ^ t->c_iflag) &
-		    (IXON|IXOFF|IXANY)) ||
-		    tp->t_termios.c_ispeed != t->c_ispeed ||
-		    tp->t_termios.c_ospeed != t->c_ospeed)) {
+				(tp->t_termios.c_cflag != t->c_cflag ||
+				 ((tp->t_termios.c_iflag ^ t->c_iflag) &
+					(IXON | IXOFF | IXANY)) ||
+				 tp->t_termios.c_ispeed != t->c_ispeed ||
+				 tp->t_termios.c_ospeed != t->c_ospeed))
+		{
 			error = ttydevsw_param(tp, t);
 			if (error)
 				return (error);
@@ -1656,7 +1719,8 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 
 		ttydisc_optimize(tp);
 
-		if ((t->c_lflag & ICANON) == 0) {
+		if ((t->c_lflag & ICANON) == 0)
+		{
 			/*
 			 * When in non-canonical mode, wake up all
 			 * readers. Canonicalize any partial input. VMIN
@@ -1671,8 +1735,8 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		 * and VSTART may have been changed.
 		 */
 		if (tp->t_termios.c_iflag & IXON &&
-		    tp->t_termios.c_cc[VSTOP] == CTRL('S') &&
-		    tp->t_termios.c_cc[VSTART] == CTRL('Q'))
+				tp->t_termios.c_cc[VSTOP] == CTRL('S') &&
+				tp->t_termios.c_cc[VSTART] == CTRL('Q'))
 			ttydevsw_pktnotify(tp, TIOCPKT_DOSTOP);
 		else
 			ttydevsw_pktnotify(tp, TIOCPKT_NOSTOP);
@@ -1698,7 +1762,8 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		MPASS(tp->t_session);
 		*(int *)data = tp->t_session->s_sid;
 		return (0);
-	case TIOCSCTTY: {
+	case TIOCSCTTY:
+	{
 		struct proc *p = td->td_proc;
 
 		/* XXX: This looks awful. */
@@ -1706,21 +1771,24 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		sx_xlock(&proctree_lock);
 		tty_lock(tp);
 
-		if (!SESS_LEADER(p)) {
+		if (!SESS_LEADER(p))
+		{
 			/* Only the session leader may do this. */
 			sx_xunlock(&proctree_lock);
 			return (EPERM);
 		}
 
-		if (tp->t_session != NULL && tp->t_session == p->p_session) {
+		if (tp->t_session != NULL && tp->t_session == p->p_session)
+		{
 			/* This is already our controlling TTY. */
 			sx_xunlock(&proctree_lock);
 			return (0);
 		}
 
 		if (p->p_session->s_ttyp != NULL ||
-		    (tp->t_session != NULL && tp->t_session->s_ttyvp != NULL &&
-		    tp->t_session->s_ttyvp->v_type != VBAD)) {
+				(tp->t_session != NULL && tp->t_session->s_ttyvp != NULL &&
+				 tp->t_session->s_ttyvp->v_type != VBAD))
+		{
 			/*
 			 * There is already a relation between a TTY and
 			 * a session, or the caller is not the session
@@ -1750,7 +1818,8 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 
 		return (0);
 	}
-	case TIOCSPGRP: {
+	case TIOCSPGRP:
+	{
 		struct pgrp *pg;
 
 		/*
@@ -1763,7 +1832,8 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		pg = pgfind(*(int *)data);
 		if (pg != NULL)
 			PGRP_UNLOCK(pg);
-		if (pg == NULL || pg->pg_session != td->td_proc->p_session) {
+		if (pg == NULL || pg->pg_session != td->td_proc->p_session)
+		{
 			sx_sunlock(&proctree_lock);
 			tty_lock(tp);
 			return (EPERM);
@@ -1774,7 +1844,8 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		 * Determine if this TTY is the controlling TTY after
 		 * relocking the TTY.
 		 */
-		if (!tty_is_ctty(tp, td->td_proc)) {
+		if (!tty_is_ctty(tp, td->td_proc))
+		{
 			sx_sunlock(&proctree_lock);
 			return (ENOTTY);
 		}
@@ -1785,13 +1856,14 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		cv_broadcast(&tp->t_bgwait);
 		return (0);
 	}
-	case TIOCFLUSH: {
+	case TIOCFLUSH:
+	{
 		int flags = *(int *)data;
 
 		if (flags == 0)
-			flags = (FREAD|FWRITE);
+			flags = (FREAD | FWRITE);
 		else
-			flags &= (FREAD|FWRITE);
+			flags &= (FREAD | FWRITE);
 		tty_flush(tp, flags);
 		return (0);
 	}
@@ -1808,7 +1880,8 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		return (error);
 	case TIOCCONS:
 		/* Set terminal as console TTY. */
-		if (*(int *)data) {
+		if (*(int *)data)
+		{
 			error = priv_check(td, PRIV_TTY_CONSOLE);
 			if (error)
 				return (error);
@@ -1826,13 +1899,15 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 			tty_unlock(tp);
 			constty_set(tp);
 			tty_lock(tp);
-		} else if (constty == tp) {
+		}
+		else if (constty == tp)
+		{
 			constty_clear();
 		}
 		return (0);
 	case TIOCGWINSZ:
 		/* Obtain window size. */
-		*(struct winsize*)data = tp->t_winsize;
+		*(struct winsize *)data = tp->t_winsize;
 		return (0);
 	case TIOCSWINSZ:
 		/* Set window size. */
@@ -1860,7 +1935,7 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		if ((fflag & FREAD) == 0 && priv_check(td, PRIV_TTY_STI))
 			return (EPERM);
 		if (!tty_is_ctty(tp, td->td_proc) &&
-		    priv_check(td, PRIV_TTY_STI))
+				priv_check(td, PRIV_TTY_STI))
 			return (EACCES);
 		ttydisc_rint(tp, *(char *)data, 0);
 		ttydisc_rint_done(tp);
@@ -1869,13 +1944,12 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 
 #ifdef COMPAT_43TTY
 	return tty_ioctl_compat(tp, cmd, data, fflag, td);
-#else /* !COMPAT_43TTY */
+#else	 /* !COMPAT_43TTY */
 	return (ENOIOCTL);
 #endif /* COMPAT_43TTY */
 }
 
-int
-tty_ioctl(struct tty *tp, u_long cmd, void *data, int fflag, struct thread *td)
+int tty_ioctl(struct tty *tp, u_long cmd, void *data, int fflag, struct thread *td)
 {
 	int error;
 
@@ -1891,8 +1965,7 @@ tty_ioctl(struct tty *tp, u_long cmd, void *data, int fflag, struct thread *td)
 	return (error);
 }
 
-dev_t
-tty_udev(struct tty *tp)
+dev_t tty_udev(struct tty *tp)
 {
 
 	if (tp->t_dev)
@@ -1901,49 +1974,52 @@ tty_udev(struct tty *tp)
 		return (NODEV);
 }
 
-int
-tty_checkoutq(struct tty *tp)
+int tty_checkoutq(struct tty *tp)
 {
 
 	/* 256 bytes should be enough to print a log message. */
 	return (ttyoutq_bytesleft(&tp->t_outq) >= 256);
 }
 
-void
-tty_hiwat_in_block(struct tty *tp)
+void tty_hiwat_in_block(struct tty *tp)
 {
 
 	if ((tp->t_flags & TF_HIWAT_IN) == 0 &&
-	    tp->t_termios.c_iflag & IXOFF &&
-	    tp->t_termios.c_cc[VSTOP] != _POSIX_VDISABLE) {
+			tp->t_termios.c_iflag & IXOFF &&
+			tp->t_termios.c_cc[VSTOP] != _POSIX_VDISABLE)
+	{
 		/*
 		 * Input flow control. Only enter the high watermark when we
 		 * can successfully store the VSTOP character.
 		 */
 		if (ttyoutq_write_nofrag(&tp->t_outq,
-		    &tp->t_termios.c_cc[VSTOP], 1) == 0)
+														 &tp->t_termios.c_cc[VSTOP], 1) == 0)
 			tp->t_flags |= TF_HIWAT_IN;
-	} else {
+	}
+	else
+	{
 		/* No input flow control. */
 		tp->t_flags |= TF_HIWAT_IN;
 	}
 }
 
-void
-tty_hiwat_in_unblock(struct tty *tp)
+void tty_hiwat_in_unblock(struct tty *tp)
 {
 
 	if (tp->t_flags & TF_HIWAT_IN &&
-	    tp->t_termios.c_iflag & IXOFF &&
-	    tp->t_termios.c_cc[VSTART] != _POSIX_VDISABLE) {
+			tp->t_termios.c_iflag & IXOFF &&
+			tp->t_termios.c_cc[VSTART] != _POSIX_VDISABLE)
+	{
 		/*
 		 * Input flow control. Only leave the high watermark when we
 		 * can successfully store the VSTART character.
 		 */
 		if (ttyoutq_write_nofrag(&tp->t_outq,
-		    &tp->t_termios.c_cc[VSTART], 1) == 0)
+														 &tp->t_termios.c_cc[VSTART], 1) == 0)
 			tp->t_flags &= ~TF_HIWAT_IN;
-	} else {
+	}
+	else
+	{
 		/* No input flow control. */
 		tp->t_flags &= ~TF_HIWAT_IN;
 	}
@@ -1966,9 +2042,8 @@ ttyhook_defrint(struct tty *tp, char c, int flags)
 	return (0);
 }
 
-int
-ttyhook_register(struct tty **rtp, struct proc *p, int fd, struct ttyhook *th,
-    void *softc)
+int ttyhook_register(struct tty **rtp, struct proc *p, int fd, struct ttyhook *th,
+										 void *softc)
 {
 	struct tty *tp;
 	struct file *fp;
@@ -1981,10 +2056,11 @@ ttyhook_register(struct tty **rtp, struct proc *p, int fd, struct ttyhook *th,
 	/* Validate the file descriptor. */
 	fdp = p->p_fd;
 	error = fget_unlocked(fdp, fd, cap_rights_init(&rights, CAP_TTYHOOK),
-	    &fp, NULL);
+												&fp, NULL);
 	if (error != 0)
 		return (error);
-	if (fp->f_ops == &badfileops) {
+	if (fp->f_ops == &badfileops)
+	{
 		error = EBADF;
 		goto done1;
 	}
@@ -1995,22 +2071,26 @@ ttyhook_register(struct tty **rtp, struct proc *p, int fd, struct ttyhook *th,
 	 * only shall prevent calling devvn_refthread on the file that
 	 * never has been opened over a character device.
 	 */
-	if (fp->f_type != DTYPE_VNODE || fp->f_vnode->v_type != VCHR) {
+	if (fp->f_type != DTYPE_VNODE || fp->f_vnode->v_type != VCHR)
+	{
 		error = EINVAL;
 		goto done1;
 	}
 
 	/* Make sure it is a TTY. */
 	cdp = devvn_refthread(fp->f_vnode, &dev, &ref);
-	if (cdp == NULL) {
+	if (cdp == NULL)
+	{
 		error = ENXIO;
 		goto done1;
 	}
-	if (dev != fp->f_data) {
+	if (dev != fp->f_data)
+	{
 		error = ENXIO;
 		goto done2;
 	}
-	if (cdp != &ttydev_cdevsw) {
+	if (cdp != &ttydev_cdevsw)
+	{
 		error = ENOTTY;
 		goto done2;
 	}
@@ -2036,14 +2116,16 @@ ttyhook_register(struct tty **rtp, struct proc *p, int fd, struct ttyhook *th,
 	if (!ttyhook_hashook(tp, rint) && ttyhook_hashook(tp, rint_bypass))
 		th->th_rint = ttyhook_defrint;
 
-done3:	tty_unlock(tp);
-done2:	dev_relthread(dev, ref);
-done1:	fdrop(fp, curthread);
+done3:
+	tty_unlock(tp);
+done2:
+	dev_relthread(dev, ref);
+done1:
+	fdrop(fp, curthread);
 	return (error);
 }
 
-void
-ttyhook_unregister(struct tty *tp)
+void ttyhook_unregister(struct tty *tp)
 {
 
 	tty_lock_assert(tp, MA_OWNED);
@@ -2075,8 +2157,10 @@ ttyconsdev_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 
 	/* Look up corresponding TTY by device name. */
 	sx_slock(&tty_list_sx);
-	TAILQ_FOREACH(tp, &tty_list, t_list) {
-		if (strcmp(dev_console_filename, tty_devname(tp)) == 0) {
+	TAILQ_FOREACH(tp, &tty_list, t_list)
+	{
+		if (strcmp(dev_console_filename, tty_devname(tp)) == 0)
+		{
 			dev_console->si_drv1 = tp;
 			break;
 		}
@@ -2105,17 +2189,17 @@ ttyconsdev_write(struct cdev *dev, struct uio *uio, int ioflag)
  * will be logged in the kernel message buffer.
  */
 static struct cdevsw ttyconsdev_cdevsw = {
-	.d_version	= D_VERSION,
-	.d_open		= ttyconsdev_open,
-	.d_close	= ttydev_close,
-	.d_read		= ttydev_read,
-	.d_write	= ttyconsdev_write,
-	.d_ioctl	= ttydev_ioctl,
-	.d_kqfilter	= ttydev_kqfilter,
-	.d_poll		= ttydev_poll,
-	.d_mmap		= ttydev_mmap,
-	.d_name		= "ttyconsdev",
-	.d_flags	= D_TTY,
+		.d_version = D_VERSION,
+		.d_open = ttyconsdev_open,
+		.d_close = ttydev_close,
+		.d_read = ttydev_read,
+		.d_write = ttyconsdev_write,
+		.d_ioctl = ttydev_ioctl,
+		.d_kqfilter = ttydev_kqfilter,
+		.d_poll = ttydev_poll,
+		.d_mmap = ttydev_mmap,
+		.d_name = "ttyconsdev",
+		.d_flags = D_TTY,
 };
 
 static void
@@ -2123,13 +2207,12 @@ ttyconsdev_init(void *unused __unused)
 {
 
 	dev_console = make_dev_credf(MAKEDEV_ETERNAL, &ttyconsdev_cdevsw, 0,
-	    NULL, UID_ROOT, GID_WHEEL, 0600, "console");
+															 NULL, UID_ROOT, GID_WHEEL, 0600, "console");
 }
 
 SYSINIT(tty, SI_SUB_DRIVERS, SI_ORDER_FIRST, ttyconsdev_init, NULL);
 
-void
-ttyconsdev_select(const char *name)
+void ttyconsdev_select(const char *name)
 {
 
 	dev_console_filename = name;
@@ -2144,56 +2227,57 @@ ttyconsdev_select(const char *name)
 #include <ddb/ddb.h>
 #include <ddb/db_sym.h>
 
-static const struct {
+static const struct
+{
 	int flag;
 	char val;
 } ttystates[] = {
 #if 0
 	{ TF_NOPREFIX,		'N' },
 #endif
-	{ TF_INITLOCK,		'I' },
-	{ TF_CALLOUT,		'C' },
+		{TF_INITLOCK, 'I'},
+		{TF_CALLOUT, 'C'},
 
-	/* Keep these together -> 'Oi' and 'Oo'. */
-	{ TF_OPENED,		'O' },
-	{ TF_OPENED_IN,		'i' },
-	{ TF_OPENED_OUT,	'o' },
-	{ TF_OPENED_CONS,	'c' },
+		/* Keep these together -> 'Oi' and 'Oo'. */
+		{TF_OPENED, 'O'},
+		{TF_OPENED_IN, 'i'},
+		{TF_OPENED_OUT, 'o'},
+		{TF_OPENED_CONS, 'c'},
 
-	{ TF_GONE,		'G' },
-	{ TF_OPENCLOSE,		'B' },
-	{ TF_ASYNC,		'Y' },
-	{ TF_LITERAL,		'L' },
+		{TF_GONE, 'G'},
+		{TF_OPENCLOSE, 'B'},
+		{TF_ASYNC, 'Y'},
+		{TF_LITERAL, 'L'},
 
-	/* Keep these together -> 'Hi' and 'Ho'. */
-	{ TF_HIWAT,		'H' },
-	{ TF_HIWAT_IN,		'i' },
-	{ TF_HIWAT_OUT,		'o' },
+		/* Keep these together -> 'Hi' and 'Ho'. */
+		{TF_HIWAT, 'H'},
+		{TF_HIWAT_IN, 'i'},
+		{TF_HIWAT_OUT, 'o'},
 
-	{ TF_STOPPED,		'S' },
-	{ TF_EXCLUDE,		'X' },
-	{ TF_BYPASS,		'l' },
-	{ TF_ZOMBIE,		'Z' },
-	{ TF_HOOK,		's' },
+		{TF_STOPPED, 'S'},
+		{TF_EXCLUDE, 'X'},
+		{TF_BYPASS, 'l'},
+		{TF_ZOMBIE, 'Z'},
+		{TF_HOOK, 's'},
 
-	/* Keep these together -> 'bi' and 'bo'. */
-	{ TF_BUSY,		'b' },
-	{ TF_BUSY_IN,		'i' },
-	{ TF_BUSY_OUT,		'o' },
+		/* Keep these together -> 'bi' and 'bo'. */
+		{TF_BUSY, 'b'},
+		{TF_BUSY_IN, 'i'},
+		{TF_BUSY_OUT, 'o'},
 
-	{ 0,			'\0'},
+		{0, '\0'},
 };
 
-#define	TTY_FLAG_BITS \
+#define TTY_FLAG_BITS                           \
 	"\20\1NOPREFIX\2INITLOCK\3CALLOUT\4OPENED_IN" \
 	"\5OPENED_OUT\6OPENED_CONS\7GONE\10OPENCLOSE" \
-	"\11ASYNC\12LITERAL\13HIWAT_IN\14HIWAT_OUT" \
-	"\15STOPPED\16EXCLUDE\17BYPASS\20ZOMBIE" \
+	"\11ASYNC\12LITERAL\13HIWAT_IN\14HIWAT_OUT"   \
+	"\15STOPPED\16EXCLUDE\17BYPASS\20ZOMBIE"      \
 	"\21HOOK\22BUSY_IN\23BUSY_OUT"
 
-#define DB_PRINTSYM(name, addr) \
-	db_printf("%s  " #name ": ", sep); \
-	db_printsym((db_addr_t) addr, DB_STGY_ANY); \
+#define DB_PRINTSYM(name, addr)              \
+	db_printf("%s  " #name ": ", sep);         \
+	db_printsym((db_addr_t)addr, DB_STGY_ANY); \
 	db_printf("\n");
 
 static void
@@ -2239,9 +2323,10 @@ _db_show_termios(const char *name, const struct termios *t)
 {
 
 	db_printf("%s: iflag 0x%x oflag 0x%x cflag 0x%x "
-	    "lflag 0x%x ispeed %u ospeed %u\n", name,
-	    t->c_iflag, t->c_oflag, t->c_cflag, t->c_lflag,
-	    t->c_ispeed, t->c_ospeed);
+						"lflag 0x%x ispeed %u ospeed %u\n",
+						name,
+						t->c_iflag, t->c_oflag, t->c_cflag, t->c_lflag,
+						t->c_ispeed, t->c_ospeed);
 }
 
 /* DDB command to show TTY statistics. */
@@ -2249,7 +2334,8 @@ DB_SHOW_COMMAND(tty, db_show_tty)
 {
 	struct tty *tp;
 
-	if (!have_addr) {
+	if (!have_addr)
+	{
 		db_printf("usage: show tty <addr>\n");
 		return;
 	}
@@ -2262,18 +2348,19 @@ DB_SHOW_COMMAND(tty, db_show_tty)
 
 	/* Buffering mechanisms. */
 	db_printf("\tinq: %p begin %u linestart %u reprint %u end %u "
-	    "nblocks %u quota %u\n", &tp->t_inq, tp->t_inq.ti_begin,
-	    tp->t_inq.ti_linestart, tp->t_inq.ti_reprint, tp->t_inq.ti_end,
-	    tp->t_inq.ti_nblocks, tp->t_inq.ti_quota);
+						"nblocks %u quota %u\n",
+						&tp->t_inq, tp->t_inq.ti_begin,
+						tp->t_inq.ti_linestart, tp->t_inq.ti_reprint, tp->t_inq.ti_end,
+						tp->t_inq.ti_nblocks, tp->t_inq.ti_quota);
 	db_printf("\toutq: %p begin %u end %u nblocks %u quota %u\n",
-	    &tp->t_outq, tp->t_outq.to_begin, tp->t_outq.to_end,
-	    tp->t_outq.to_nblocks, tp->t_outq.to_quota);
+						&tp->t_outq, tp->t_outq.to_begin, tp->t_outq.to_end,
+						tp->t_outq.to_nblocks, tp->t_outq.to_quota);
 	db_printf("\tinlow: %zu\n", tp->t_inlow);
 	db_printf("\toutlow: %zu\n", tp->t_outlow);
 	_db_show_termios("\ttermios", &tp->t_termios);
 	db_printf("\twinsize: row %u col %u xpixel %u ypixel %u\n",
-	    tp->t_winsize.ws_row, tp->t_winsize.ws_col,
-	    tp->t_winsize.ws_xpixel, tp->t_winsize.ws_ypixel);
+						tp->t_winsize.ws_row, tp->t_winsize.ws_col,
+						tp->t_winsize.ws_xpixel, tp->t_winsize.ws_ypixel);
 	db_printf("\tcolumn: %u\n", tp->t_column);
 	db_printf("\twritepos: %u\n", tp->t_writepos);
 	db_printf("\tcompatflags: 0x%x\n", tp->t_compatflags);
@@ -2290,14 +2377,14 @@ DB_SHOW_COMMAND(tty, db_show_tty)
 
 	/* Process info. */
 	db_printf("\tpgrp: %p gid %d jobc %d\n", tp->t_pgrp,
-	    tp->t_pgrp ? tp->t_pgrp->pg_id : 0,
-	    tp->t_pgrp ? tp->t_pgrp->pg_jobc : 0);
+						tp->t_pgrp ? tp->t_pgrp->pg_id : 0,
+						tp->t_pgrp ? tp->t_pgrp->pg_jobc : 0);
 	db_printf("\tsession: %p", tp->t_session);
 	if (tp->t_session != NULL)
-	    db_printf(" count %u leader %p tty %p sid %d login %s",
-		tp->t_session->s_count, tp->t_session->s_leader,
-		tp->t_session->s_ttyp, tp->t_session->s_sid,
-		tp->t_session->s_login);
+		db_printf(" count %u leader %p tty %p sid %d login %s",
+							tp->t_session->s_count, tp->t_session->s_leader,
+							tp->t_session->s_ttyp, tp->t_session->s_sid,
+							tp->t_session->s_login);
 	db_printf("\n");
 	db_printf("\tsessioncnt: %u\n", tp->t_sessioncnt);
 	db_printf("\tdevswsoftc: %p\n", tp->t_devswsoftc);
@@ -2318,25 +2405,28 @@ DB_SHOW_ALL_COMMAND(ttys, db_show_all_ttys)
 	db_printf("        ");
 #endif
 	db_printf("      LINE   INQ  CAN  LIN  LOW  OUTQ  USE  LOW   "
-	    "COL  SESS  PGID STATE\n");
+						"COL  SESS  PGID STATE\n");
 
-	TAILQ_FOREACH(tp, &tty_list, t_list) {
+	TAILQ_FOREACH(tp, &tty_list, t_list)
+	{
 		isiz = tp->t_inq.ti_nblocks * TTYINQ_DATASIZE;
 		osiz = tp->t_outq.to_nblocks * TTYOUTQ_DATASIZE;
 
 		db_printf("%p %10s %5zu %4u %4u %4zu %5zu %4u %4zu %5u %5d "
-		    "%5d ", tp, tty_devname(tp), isiz,
-		    tp->t_inq.ti_linestart - tp->t_inq.ti_begin,
-		    tp->t_inq.ti_end - tp->t_inq.ti_linestart,
-		    isiz - tp->t_inlow, osiz,
-		    tp->t_outq.to_end - tp->t_outq.to_begin,
-		    osiz - tp->t_outlow, MIN(tp->t_column, 99999),
-		    tp->t_session ? tp->t_session->s_sid : 0,
-		    tp->t_pgrp ? tp->t_pgrp->pg_id : 0);
+							"%5d ",
+							tp, tty_devname(tp), isiz,
+							tp->t_inq.ti_linestart - tp->t_inq.ti_begin,
+							tp->t_inq.ti_end - tp->t_inq.ti_linestart,
+							isiz - tp->t_inlow, osiz,
+							tp->t_outq.to_end - tp->t_outq.to_begin,
+							osiz - tp->t_outlow, MIN(tp->t_column, 99999),
+							tp->t_session ? tp->t_session->s_sid : 0,
+							tp->t_pgrp ? tp->t_pgrp->pg_id : 0);
 
 		/* Flag bits. */
 		for (i = j = 0; ttystates[i].flag; i++)
-			if (tp->t_flags & ttystates[i].flag) {
+			if (tp->t_flags & ttystates[i].flag)
+			{
 				db_printf("%c", ttystates[i].val);
 				j++;
 			}

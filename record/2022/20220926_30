@@ -1,0 +1,249 @@
+////////////// 20220926 //////////////
+  Thread 3 hit Breakpoint 6, open_console ()
+      at /home/mercury/Documents/code/qihai/dev_rebuild/qihai/lib/init/init.c:572
+  572	    revoke(_PATH_CONSOLE);
+  (gdb) bt
+  #0  open_console () at /home/mercury/Documents/code/qihai/dev_rebuild/qihai/lib/init/init.c:572
+  #1  0x000000010c893bfa in execute_script (argv=0xffffe620)
+      at /home/mercury/Documents/code/qihai/dev_rebuild/qihai/lib/init/init.c:997
+  #2  0x000000010c891d36 in run_script (
+      script=0x90000c45 <user_lib_data_start+3141> <error: Cannot access memory at address 0x90000c45>)
+      at /home/mercury/Documents/code/qihai/dev_rebuild/qihai/lib/init/init.c:1063
+  #3  0x000000010c891026 in runcom ()
+      at /home/mercury/Documents/code/qihai/dev_rebuild/qihai/lib/init/init.c:979
+  #4  0x000000010c892010 in transition (s=0x10c89100e <runcom>)
+      at /home/mercury/Documents/code/qihai/dev_rebuild/qihai/lib/init/init.c:558
+  #5  0x000000010c890fea in init_main (argc=1, argv=0xffffecd8)
+      at /home/mercury/Documents/code/qihai/dev_rebuild/qihai/lib/init/init.c:412
+  #6  0x000000010cb49208 in main (argc=1, argv=0xffffecd8, env=0xffffece8)
+      at /home/mercury/Documents/code/qihai/dev_rebuild/qihai/lib/csu/riscv/crt1_c.c:83
+  (gdb) n
+  573	    if ((fd = open(_PATH_CONSOLE, O_RDWR | O_NONBLOCK)) != -1) {
+
+  Trying to mount root from tptfs:/dev/vtbd1 []...
+  goldfish_rtc0: providing initial system time
+  start init
+  panic: vm_fault_lookup: fault on nofault entry, addr: 0x1bfbab000
+  cpuid = 6
+  time = 1664168816
+  KDB: stack backtrace:
+  Uptime: 3s
+
+应该是没有给 device vnode 注册 open() 函数导致 panic
+
+  sh: The terminal database could not be opened.
+  sh: using dumb terminal settings.
+
+  Thread 6 hit Breakpoint 7, GetTermCaps ()
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/contrib/tcsh/ed.screen.c:1405
+1405	    sigemptyset(&set);
+(gdb) bt
+#0  GetTermCaps ()
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/contrib/tcsh/ed.screen.c:1405
+#1  0x000000010ceb8596 in ed_Init ()
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/contrib/tcsh/ed.init.c:317
+#2  0x000000010cec9676 in tcsh_main (argc=1, argv=0xffffecc0)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/contrib/tcsh/sh.c:1378
+#3  0x000000010cb4f9e2 in main (argc=3, argv=0xffffecc0, env=0xffffece0)
+    at /home/mercury/Documents/code/qihai/rebuild_last/qihai/lib/csu/riscv/crt1_c.c:83
+
+
+
+////////////// 20220927 //////////////
+正常情况下，ttyname() 返回 /dev/console
+
+    485	    setv(STRcdtohome, SAVE(""), VAR_READWRITE);
+    (gdb) 
+    490	    if ((ttyn = ttyname(SHINS)) != NULL) {
+    (gdb) n
+    496		if (strncmp(ttyn, "/dev/", 5) == 0)
+    (gdb) p ttyn
+    $11 = 0x902df330 <ttyname_buf> "/dev/console"
+    (gdb) n
+    497		    setv(STRtty, cp = SAVE(ttyn + 5), VAR_READWRITE);
+    (gdb) 
+    500	    }
+
+
+tptfs 下返回的是 null
+    479	    setv(STRcdtohome, SAVE(""), VAR_READWRITE);
+    (gdb) 
+    484	    if ((ttyn = ttyname(SHINS)) != NULL) {
+    (gdb) 
+    495	        setv(STRtty, cp = SAVE(""), VAR_READWRITE);
+    (gdb) 
+    537	    if (loginsh || (uid == 0)) {
+    (gdb) p ttyn
+    $2 = 0x0
+    (gdb) n
+    538	        if (*cp) {
+    (gdb) p ttyn
+    $3 = 0x0
+    (gdb) n
+    553	    }
+    (gdb) 
+
+通过函数引用可以发现，ttyname() 后续会调用到 _ioctl，尝试将 device ioctl 进行注册。测试结果显示阻塞问题已经被修复，
+但是又出现了如下错误：
+
+    pid 26 (/bin/sh), jid 0, uid 0: exited on signal 11 (SIGSEGV 11	/* segmentation violation */)
+
+应该是进程 26 在执行的过程中发生了段错误导致
+
+调试后发现，原因是因为使用了 xprintf() 进行 debug 导致，貌似只有在特定的调试模式下才能使用这个打印 (都是由宏定义包裹起来的)。
+删除之后可以正常进入 shell:
+
+    Trying to mount root from tptfs:/dev/vtbd1 []...
+    goldfish_rtc0: providing initial system time
+    start init
+    2022-09-27T03:50:09.250045+00:00 - init 26 - - login_getclass: unknown class 'daemon'
+    2022-09-27T03:50:09.317320+00:00 - init 26 - - can't access /etc/rc: No such file or directory
+    sh: The terminal database could not be opened.
+    sh: using dumb terminal settings.
+    # ls -al
+    #
+
+但是执行 ls -al 命令发生了阻塞，猜测是因为对于普通文件和设备文件混编存放的目录，readdir() 的处理存在异常
+
+
+////////////// 20220928 //////////////
+    
+crw-------  0 0   2    0x1c Sep 28 06:42 audit
+crw-------  0 0   0    0x1a Sep 28 06:42 auditpipe
+crw-------  0 0   0    0x13 Sep 28 06:42 bpf
+crw-------  0 0   0     0x8 Sep 28 06:43 console
+crw-rw-rw-  0 0   0    0x1d Sep 28 06:42 ctty
+crw-rw----  0 66  68   0x23 Sep 28 06:42 cuau0
+crw-rw----  0 66  68   0x24 Sep 28 06:42 cuau0.init
+crw-rw----  0 66  68   0x25 Sep 28 06:42 cuau0.lock
+crw-------  0 0   0     0x9 Sep 28 06:42 devctl
+crw-------  0 0   0     0xa Sep 28 06:42 devctl2
+cr--r--r--  0 0   0    0x26 Sep 28 06:42 devstat
+crw-------  0 0   0    0x12 Sep 28 06:42 fido
+crw-rw-rw-  0 0   0    0x15 Sep 28 06:42 full
+crw-r-----  0 0   5     0xb Sep 28 06:42 geom.ctl
+crw-------  0 0   0    0x1e Sep 28 06:42 kbdmux0
+crw-------  0 0   0    0x18 Sep 28 06:42 klog
+crw-------  0 0   0    0x2b Sep 28 06:42 mdctl
+crw-rw-rw-  0 0   0    0x16 Sep 28 06:42 null
+crw-------  0 0   0    0x19 Sep 28 06:42 openfirm
+crw-r--r--  0 0   0    0x1b Sep 28 06:42 pci
+crw-------  0 0   0    0x2a Sep 28 06:42 pfil
+crw-r--r--  0 0   0     0x6 Sep 28 06:42 random
+crw-------  0 0   0    0x20 Sep 28 06:42 ttyu0
+crw-------  0 0   0    0x21 Sep 28 06:42 ttyu0.init
+crw-------  0 0   0    0x22 Sep 28 06:42 ttyu0.lock
+crw-------  0 0   0    0x27 Sep 28 06:42 ufssuspend
+crw-r--r--  0 0   5    0x2c Sep 28 06:42 usbctl
+crw-r-----  0 0   5    0x2e Sep 28 06:42 vtbd0
+crw-r-----  0 0   5    0x2f Sep 28 06:42 vtbd1
+crw-------  0 0   5    0x2d Sep 28 06:42 xpt0
+crw-rw-rw-  0 0   0    0x17 Sep 28 06:42 zero
+
+
+dirent name is: ufs
+dirent name is: ufsid
+dirent name is: vtbd1
+dirent name is: vtbd0
+dirent name is: xpt0
+dirent name is: usbctl
+dirent name is: mdctl
+dirent name is: pfil
+dirent name is: ufssuspend
+dirent name is: devstat
+dirent name is: cuau0.lock
+dirent name is: cuau0.init
+dirent name is: cuau0
+dirent name is: ttyu0.lock
+dirent name is: ttyu0.init
+dirent name is: ttyu0
+dirent name is: kbd0
+dirent name is: kbdmux0
+dirent name is: ctty
+dirent name is: audit
+dirent name is: pci
+dirent name is: auditpipe
+dirent name is: openfirm
+dirent name is: klog
+dirent name is: zero
+dirent name is: null
+dirent name is: full
+dirent name is: bpf0
+dirent name is: bpf
+dirent name is: fido
+dirent name is: stderr
+dirent name is: fd
+dirent name is: stdout
+dirent name is: fd
+dirent name is: stdin
+dirent name is: fd
+dirent name is: geom.ctl
+dirent name is: devctl2
+dirent name is: devctl
+dirent name is: console
+dirent name is: urandom
+dirent name is: random
+dirent name is: reroot
+dirent name is: ..
+dirent name is: .
+
+在 devfs 下执行 ls -al 命令，发现打印出的 dirents 少了一些，而且主要缺少的是目录项和链接文件
+
+
+
+////////////// 20220929 //////////////
+  猜测一波： tptfs 与 devfs 融合之后，貌似不能从当前目录跳转到另外一个目录下，然后将该目录作为当前目录，导致上述问题？
+实际测试发现，给 dev_dir 和 dev_link 创建的文件对应的 inode number 全部都是0，可能在 ls 程序中会被隐藏掉，所以才
+出现了上面执行 ls -al 命令无法查看目录和链接文件，但是通过绝对路径可以查询到文件节点的情况
+
+    total 0
+    drwxr-xr-x  2 0   0   11008 Jan  1  1970 .
+    drwxr-xr-x  2 0   0     768 Jan  1  1970 ..
+    crw-------  0 0   2    0x1c Sep 29 05:54 audit
+    crw-------  0 0   0    0x1a Sep 29 05:54 auditpipe
+    crw-------  0 0   0    0x13 Sep 29 05:54 bpf
+    lrwxr-xr-x  1 0   0       9 Jan  1  1970 bpf0 -> /dev/bpf
+    crw-------  0 0   0     0x8 Sep 29 05:54 console
+    crw-rw-rw-  0 0   0    0x1d Sep 29 05:54 ctty
+    crw-rw----  0 66  68   0x23 Sep 29 05:54 cuau0
+    crw-rw----  0 66  68   0x24 Sep 29 05:54 cuau0.init
+    crw-rw----  0 66  68   0x25 Sep 29 05:54 cuau0.lock
+    crw-------  0 0   0     0x9 Sep 29 05:54 devctl
+    crw-------  0 0   0     0xa Sep 29 05:54 devctl2
+    cr--r--r--  0 0   0    0x26 Sep 29 05:54 devstat
+    drwxr-xr-x  2 0   0    1280 Jan  1  1970 fd
+    crw-------  0 0   0    0x12 Sep 29 05:54 fido
+    crw-rw-rw-  0 0   0    0x15 Sep 29 05:54 full
+    crw-r-----  0 0   5     0xb Sep 29 05:54 geom.ctl
+    lrwxr-xr-x  1 0   0       9 Jan  1  1970 kbd0 -> /dev/kbdm
+    crw-------  0 0   0    0x1e Sep 29 05:54 kbdmux0
+    crw-------  0 0   0    0x18 Sep 29 05:54 klog
+    crw-------  0 0   0    0x2b Sep 29 05:54 mdctl
+    crw-rw-rw-  0 0   0    0x16 Sep 29 05:54 null
+    crw-------  0 0   0    0x19 Sep 29 05:54 openfirm
+    crw-r--r--  0 0   0    0x1b Sep 29 05:54 pci
+    crw-------  0 0   0    0x2a Sep 29 05:54 pfil
+    crw-r--r--  0 0   0     0x6 Sep 29 05:54 random
+    drwxr-xr-x  2 0   0     768 Jan  1  1970 reroot
+    lrwxr-xr-x  1 0   0      11 Jan  1  1970 stderr -> /dev/fd/2
+    lrwxr-xr-x  1 0   0      10 Jan  1  1970 stdin -> /dev/fd/0
+    lrwxr-xr-x  1 0   0      11 Jan  1  1970 stdout -> /dev/fd/1
+    crw-------  0 0   0    0x20 Sep 29 05:54 ttyu0
+    crw-------  0 0   0    0x21 Sep 29 05:54 ttyu0.init
+    crw-------  0 0   0    0x22 Sep 29 05:54 ttyu0.lock
+    drwxr-xr-x  2 0   0     768 Jan  1  1970 ufs
+    drwxr-xr-x  2 0   0     768 Jan  1  1970 ufsid
+    crw-------  0 0   0    0x27 Sep 29 05:54 ufssuspend
+    lrwxr-xr-x  1 0   0      12 Jan  1  1970 urandom -> /dev/random
+    crw-r--r--  0 0   5    0x2c Sep 29 05:54 usbctl
+    crw-r-----  0 0   5    0x2e Sep 29 05:54 vtbd0
+    crw-r-----  0 0   5    0x2f Sep 29 05:54 vtbd1
+    crw-------  0 0   5    0x2d Sep 29 05:54 xpt0
+    crw-rw-rw-  0 0   0    0x17 Sep 29 05:54 zero
+
+  - devfs 与 tptfs 对于 inode number 的申请还是分离的，对于不使用 inode entry 的文件节点，
+    其实没必要从 inode bitmap 中申请
+  - 设备目录和链接文件对应的 inode entry 还是从堆栈中临时申请的，要再实现一个回写到 inode table 的方法
+  - 设备树中目录和链接文件的 inode number 申请需要根据根文件系统实际使用情况来确定。不能初始化成0，
+    否则会造成 ls -al 无法找到文件
+

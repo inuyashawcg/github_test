@@ -21,8 +21,8 @@ forward_list 跟 vector 是不一样的，它就是通过链表来管理数据�
 
   只编译 tptfs 模块
   cmake ../ TARGET_ARCH=riscv64
-  1942  make VERBOSE=1
-  1971  make
+  make VERBOSE=1
+  make
 
 
 ////////////// 202204022 //////////////

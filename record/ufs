@@ -1,96 +1,41 @@
->>>>>> vn_lock 之前
-v_lock = {
-  lock_object = {
-    lo_name = 0x10d0bb171,
-    lo_flags = 0x6fb0000,
-    lo_data = 0x0,
-    lo_witness = 0x0
-  },
-  lk_lock = 0x1,
-  lk_exslpfail = 0x0,
-  lk_timo = 0x6,
-  lk_pri = 0x60
-},
-v_interlock = {
-  lock_object = {
-    lo_name = 0x10d10b53e,
-    lo_flags = 0x1030000,
-    lo_data = 0x0,
-    lo_witness = 0x0
-  },
-  mtx_lock = 0x0
-},
-
-之后
-v_lock = {
-  lock_object = {
-    lo_name = 0x10d0bb171,
-    lo_flags = 0x6fb0000,
-    lo_data = 0x0,
-    lo_witness = 0x0
-  },
-  lk_lock = 0x21,
-  lk_exslpfail = 0x0,
-  lk_timo = 0x6,
-  lk_pri = 0x60
-},
-v_interlock = {
-  lock_object = {
-    lo_name = 0x10d10b53e,
-    lo_flags = 0x1030000,
-    lo_data = 0x0,
-    lo_witness = 0x0
-  },
-  mtx_lock = 0x0
-},
-
-
->>>>>> lock flags compute 之前
-  (gdb) p/x *cnp
-  $12 = {
-    cn_origflags = 0x2000000000,
-    cn_flags = 0x1004442b,
-    cn_thread = 0x1bfd8e680,
-    cn_cred = 0xffffffd009424c00,
-    cn_nameiop = 0x1,
-    cn_lkflags = 0x200000,
-    cn_pnbuf = 0xffffffd0093bdc00,
-    cn_nameptr = 0xffffffd0093bdc00,
-    cn_namelen = 0x1
-  }
-
-之后
-  $14 = {
-    cn_origflags = 0x20100d92e0,
-    cn_flags = 0x1004442b,
-    cn_thread = 0x1bfd3db80,
-    cn_cred = 0xffffffd00935ba00,
-    cn_nameiop = 0x1,
-    cn_lkflags = 0x202000,
-    cn_pnbuf = 0xffffffd0092ff800,
-    cn_nameptr = 0xffffffd0092ff800,
-    cn_namelen = 0x1
-  }
-
->>>>>> 返回 namei 函数之后 ni_dvp
-    v_lock = {
-      lock_object = {
-        lo_name = 0x10d0bb171,
-        lo_flags = 0x6fb0000,
-        lo_data = 0x0,
-        lo_witness = 0x0
-      },
-      lk_lock = 0x1bfd8e680,
-      lk_exslpfail = 0x0,
-      lk_timo = 0x6,
-      lk_pri = 0x60
-    },
-    v_interlock = {
-      lock_object = {
-        lo_name = 0x10d10b53e,
-        lo_flags = 0x1030000,
-        lo_data = 0x0,
-        lo_witness = 0x0
-      },
-      mtx_lock = 0x0
-    },
+crw-------  1 0   2   0x19 Sep 28 06:39 audit
+crw-------  1 0   0   0x17 Sep 28 06:39 auditpipe
+crw-------  1 0   0    0xb Sep 28 06:39 bpf
+lrwxr-xr-x  1 0   0      3 Sep 28 06:39 bpf0 -> bpf
+crw-------  1 0   0    0x6 Sep 28 06:39 console
+crw-rw-rw-  1 0   0   0x1b Sep 28 06:39 ctty
+crw-rw----  1 66  68  0x21 Sep 28 06:39 cuau0
+crw-rw----  1 66  68  0x22 Sep 28 06:39 cuau0.init
+crw-rw----  1 66  68  0x23 Sep 28 06:39 cuau0.lock
+crw-------  1 0   0    0x7 Sep 28 06:39 devctl
+crw-------  1 0   0    0x8 Sep 28 06:39 devctl2
+cr--r--r--  1 0   0   0x24 Sep 28 06:39 devstat
+dr-xr-xr-x  2 0   0    512 Sep 28 06:39 fd
+crw-------  1 0   0    0xa Sep 28 06:39 fido
+crw-rw-rw-  1 0   0    0xd Sep 28 06:39 full
+crw-r-----  1 0   5    0x9 Sep 28 06:39 geom.ctl
+lrwxr-xr-x  1 0   0      7 Sep 28 06:39 kbd0 -> kbdmux0
+crw-------  1 0   0   0x1c Sep 28 06:39 kbdmux0
+crw-------  1 0   0   0x1a Sep 28 06:39 klog
+crw-------  1 0   0   0x29 Sep 28 06:39 mdctl
+crw-rw-rw-  1 0   0    0xe Sep 28 06:39 null
+crw-------  1 0   0   0x16 Sep 28 06:39 openfirm
+crw-r--r--  1 0   0   0x18 Sep 28 06:39 pci
+crw-------  1 0   0   0x28 Sep 28 06:39 pfil
+crw-r--r--  1 0   0    0x4 Sep 28 06:39 random
+dr-xr-xr-x  2 0   0    512 Sep 28 06:39 reroot
+lrwxr-xr-x  1 0   0      4 Sep 28 06:39 stderr -> fd/2
+lrwxr-xr-x  1 0   0      4 Sep 28 06:39 stdin -> fd/0
+lrwxr-xr-x  1 0   0      4 Sep 28 06:39 stdout -> fd/1
+crw-------  1 0   0   0x1e Sep 28 06:39 ttyu0
+crw-------  1 0   0   0x1f Sep 28 06:39 ttyu0.init
+crw-------  1 0   0   0x20 Sep 28 06:39 ttyu0.lock
+dr-xr-xr-x  2 0   0    512 Sep 28 06:39 ufs
+dr-xr-xr-x  2 0   0    512 Sep 28 06:39 ufsid
+crw-------  1 0   0   0x25 Sep 28 06:39 ufssuspend
+lrwxr-xr-x  1 0   0      6 Sep 28 06:39 urandom -> random
+crw-r--r--  1 0   5   0x2a Sep 28 06:39 usbctl
+crw-r-----  1 0   5   0x2c Sep 28 06:39 vtbd0
+crw-r-----  1 0   5   0x30 Sep 28 06:39 vtbd1
+crw-------  1 0   5   0x2b Sep 28 06:39 xpt0
+crw-rw-rw-  1 0   0    0xf Sep 28 06:39 zero

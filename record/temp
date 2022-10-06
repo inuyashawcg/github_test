@@ -1,0 +1,64 @@
+>>>>> ufs
+2- 加共享锁之后的状态
+
+v_lock = {
+    lock_object = {
+      lo_name = 0x10d0bb1b1,
+      lo_flags = 0x6fb0000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    lk_lock = 0x21,
+    lk_exslpfail = 0x0,
+    lk_timo = 0x6,
+    lk_pri = 0x60
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x10d10b57e,
+      lo_flags = 0x1030000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0x0
+  },
+
+
+  4 - cn_lkflags 的状态变化
+  (gdb) p/x lkflags_save 
+  $54 = 0x200000
+  (gdb) n
+  949		    cnp->cn_flags);
+  (gdb) n
+  948		cnp->cn_lkflags = compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags,
+  (gdb) n
+  950		error = VOP_LOOKUP(dp, &ndp->ni_vp, cnp);
+  (gdb) p cnp->cn_lkflags 
+  $55 = 2105344
+  (gdb) p/x cnp->cn_lkflags 
+  $56 = 0x202000
+
+
+>>>>>> tptfs
+2 - 加共享锁之后的状态
+v_lock = {
+  lock_object = {
+    lo_name = 0x10d0b5939,
+    lo_flags = 0x6f30008,
+    lo_data = 0x0,
+    lo_witness = 0x0
+  },
+  lk_lock = 0xfffffffffffffee1,
+  lk_exslpfail = 0x0,
+  lk_timo = 0x6,
+  lk_pri = 0x60
+},
+v_interlock = {
+  lock_object = {
+    lo_name = 0x10d10b5ae,
+    lo_flags = 0x1030000,
+    lo_data = 0x0,
+    lo_witness = 0x0
+  },
+  mtx_lock = 0x0
+},

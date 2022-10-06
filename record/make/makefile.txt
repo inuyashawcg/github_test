@@ -1,0 +1,2 @@
+如何理解 makefile 文件中的 .PHONY？
+  -告诉make，.PHONY：后面跟着的名称不是指文件名，如果makefile中xxxx 写在.PHONY：后面，那么make  xxxx 就表示执行xxxx :指定的命令，而不是要（make）生成xxxx

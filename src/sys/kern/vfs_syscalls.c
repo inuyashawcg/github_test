@@ -3649,6 +3649,9 @@ kern_mkdirat(struct thread *td, int fd, char *path, enum uio_seg segflg,
 	AUDIT_ARG_MODE(mode);
 restart:
 	bwillwrite();
+	/*
+		mkdir 操作需要 namei() 返回一个加锁状态的 target directory vnode
+	*/
 	NDINIT_ATRIGHTS(&nd, CREATE, LOCKPARENT | SAVENAME | AUDITVNODE1 |
 	    NOCACHE, segflg, path, fd, &cap_mkdirat_rights,
 	    td);
@@ -3657,16 +3660,23 @@ restart:
 		return (error);
 	vp = nd.ni_vp;
 	if (vp != NULL) {
-		NDFREE(&nd, NDF_ONLY_PNBUF);
+		NDFREE(&nd, NDF_ONLY_PNBUF);	// 清除 nameidata 中的缓存数据
 		/*
 		 * XXX namei called with LOCKPARENT but not LOCKLEAF has
 		 * the strange behaviour of leaving the vnode unlocked
 		 * if the target is the same vnode as the parent.
+		 * 
+		 * vrele: unlocked -> unlocked
+		 * vput: locked -> unlocked
 		 */
 		if (vp == nd.ni_dvp)
 			vrele(nd.ni_dvp);
 		else
 			vput(nd.ni_dvp);
+		/*
+			上面可以认为是对 dir vnode 解锁并减少使用计数；这里是对 file_vnode 解锁并
+			减少使用计数。加入 vp == dvp，则目标文件需要减少使用计数2次
+		*/
 		vrele(vp);
 		return (EEXIST);
 	}
@@ -3691,6 +3701,9 @@ restart:
 out:
 #endif
 	NDFREE(&nd, NDF_ONLY_PNBUF);
+	/*
+		如果是 mkdir 操作，dvp 和 vp 返回时都应该是加锁状态
+	*/
 	vput(nd.ni_dvp);
 	if (error == 0)
 		vput(nd.ni_vp);

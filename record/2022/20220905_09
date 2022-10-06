@@ -1,0 +1,265 @@
+////////////// 20220905 //////////////
+  从 devfs 等其他文件系统跳转回 tptfs 的时候，保证 nameidata 数据结构中的各个字段完整性，尤其是路径完整性非常重要。
+可以先调试 devfs 跳转回 ufs 的情况，然后模仿上述过程即可
+
+struct nameidata->ni_vp:
+
+  v_lock = {
+    lock_object = {
+      lo_name = 0x10d0bb479 "ufs",
+      lo_flags = 117112832,
+      lo_data = 0,
+      lo_witness = 0x0
+    },
+    lk_lock = 33,   // 这个应该是加的共享锁
+    lk_exslpfail = 0,
+    lk_timo = 6,
+    lk_pri = 96
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x10d10b84d "vnode interlock",
+      lo_flags = 16973824,
+      lo_data = 0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0
+  },
+  v_vnlock = 0xffffffd009306810,
+
+  (gdb) p* (struct inode*)ndp->ni_vp->v_data
+  $11 = {
+    i_nextsnap = {
+      tqe_next = 0x0,
+      tqe_prev = 0x0
+    },
+    i_vnode = 0xffffffd0093067a0,
+    i_ump = 0xffffffd009420e00,
+    i_dquot = {0x0, 0x0},
+    i_un = {
+      dirhash = 0x0,
+      snapblklist = 0x0
+    },
+    dinode_u = {
+      din1 = 0xffffffd00b25de00,
+      din2 = 0xffffffd00b25de00
+    },
+    i_number = 2,     // 可以看出就是 ufs 根目录
+    i_flag = 1024,
+    i_effnlink = 20,
+    i_count = 0,
+    i_endoff = 0,
+    i_diroff = 0,
+    i_offset = 0,
+    i_nextclustercg = -1,
+    i_ea_area = 0x0,
+    i_ea_len = 0,
+    i_ea_error = 0,
+    i_ea_refs = 0,
+    i_size = 512,
+    i_gen = 1399678930,
+    i_flags = 0,
+    i_uid = 0,
+    i_gid = 0,
+    i_mode = 16877,
+    i_nlink = 20
+  }
+
+  (gdb) p *(struct inode*)ndp->ni_dvp->v_data
+  $6 = {
+    i_nextsnap = {
+      tqe_next = 0x0,
+      tqe_prev = 0x0
+    },
+    i_vnode = 0xffffffd0092b4000,
+    i_ump = 0xffffffd00b24ae00,
+    i_dquot = {0x0, 0x0},
+    i_un = {
+      dirhash = 0x0,
+      snapblklist = 0x0
+    },
+    dinode_u = {
+      din1 = 0xffffffd00b246d00,
+      din2 = 0xffffffd00b246d00
+    },
+    i_number = 5,   // 表示的应该是 ufs 下 /dev 节点对应的 vnode，而不是 devfs 下的 vnode
+    i_flag = 1024,
+    i_effnlink = 2,
+    i_count = 0,
+    i_endoff = 0,
+    i_diroff = 0,
+    i_offset = 0,
+    i_nextclustercg = -1,
+    i_ea_area = 0x0,
+    i_ea_len = 0,
+    i_ea_error = 0,
+    i_ea_refs = 0,
+    i_size = 512,
+    i_gen = 1877411529,
+    i_flags = 0,
+    i_uid = 0,
+    i_gid = 0,
+    i_mode = 16749,
+    i_nlink = 2
+  }
+
+
+执行到 namei()->VOP_LOOKUP() 之前 nameidata 的状态:
+
+  (gdb) p *ndp
+  $8 = {
+    ni_dirp = 0x402430a0 "../a",
+    ni_segflg = UIO_USERSPACE,
+    ni_rightsneeded = 0x110086c38 <cap_no_rights>,
+    ni_startdir = 0x0,
+    ni_rootdir = 0xffffffd0092b43d0,
+    ni_topdir = 0x0,
+    ni_dirfd = -100,
+    ni_lcf = 0,
+    ni_filecaps = {
+      fc_rights = {
+        cr_rights = {0, 0}
+      },
+      fc_ioctls = 0x0,
+      fc_nioctls = -1,
+      fc_fcntls = 0
+    },
+    ni_vp = 0x0,
+    ni_dvp = 0xffffffd0092b4000,
+    ni_resflags = 0,
+    ni_debugflags = 0,
+    ni_loopcnt = 0,
+    ni_pathlen = 3,
+    ni_next = 0xffffffd009341c02 "/a",
+    ni_cnd = {
+      cn_origflags = 4294967296,
+      cn_flags = 604242244,
+      cn_thread = 0x1bfd41100,
+      cn_cred = 0xffffffd009359a00,
+      cn_nameiop = LOOKUP,
+      cn_lkflags = 2097152,
+      cn_pnbuf = 0xffffffd009341c00 "../a",
+      cn_nameptr = 0xffffffd009341c00 "../a",
+      cn_namelen = 2
+    },
+    ni_cap_tracker = {
+      tqh_first = 0x0,
+      tqh_last = 0x1bfbaaae0
+    }
+  }
+
+  ni_dvp 加的是共享锁，如果跳转到 tptfs 需要做的是 ni_startdir = rootvnode，然后对 ni_dvp 解锁
+
+
+////////////// 20220906 //////////////
+  devfs 整体上看可以分成三个相对独立的模块：
+    1 - devfs_devs
+      该模块主要负责创建和释放 cdev 对象，并管理 cdev 全局链表。这部分跟设备对象的创建关系比较大，感觉反而跟 devfs 联系
+      并不是很密切，我们完全可以 devfs_dirent 替换成 TptFile
+    
+    2 - devfs ruleset
+    3 - devfs vfsops + vnops
+
+  目前来看，可能还是需要提供两个全局方法表，一个是 tptfs 的，另外一个是 devfs 的。因为 devfs 很多方法都包含 cdev 相关
+操作，不能被 tptfs 提供的方法完全取代。tptfs 提供了一套有别于 vfs 的文件查找方式，相当于进行了替换，将 devfs 融入到 tptfs
+当中的话，还是希望能继承这部分功能
+
+
+cdev_priv->si_name: reroot/reroot
+cdev_priv->si_name: random
+cdev_priv->si_name: urandom
+cdev_priv->si_name: console
+cdev_priv->si_name: devctl
+cdev_priv->si_name: devctl2
+cdev_priv->si_name: geom.ctl
+cdev_priv->si_name: fido
+cdev_priv->si_name: bpf
+cdev_priv->si_name: bpf0
+cdev_priv->si_name: full
+cdev_priv->si_name: null
+cdev_priv->si_name: zero
+cdev_priv->si_name: fd/0
+cdev_priv->si_name: stdin
+cdev_priv->si_name: fd/1
+cdev_priv->si_name: stdout
+cdev_priv->si_name: fd/2
+cdev_priv->si_name: stderr
+cdev_priv->si_name: openfirm
+cdev_priv->si_name: auditpipe
+cdev_priv->si_name: pci
+cdev_priv->si_name: audit
+cdev_priv->si_name: klog
+cdev_priv->si_name: ctty
+cdev_priv->si_name: kbdmux0
+cdev_priv->si_name: kbd0
+cdev_priv->si_name: ttyu0
+cdev_priv->si_name: ttyu0.init
+cdev_priv->si_name: ttyu0.lock
+cdev_priv->si_name: cuau0
+cdev_priv->si_name: cuau0.init
+cdev_priv->si_name: cuau0.lock
+cdev_priv->si_name: devstat
+cdev_priv->si_name: ufssuspend
+cdev_priv->si_name: pfil
+cdev_priv->si_name: mdctl
+cdev_priv->si_name: usbctl
+cdev_priv->si_name: xpt0
+cdev_priv->si_name: vtbd0
+
+# ls /dev
+random: unblocking device.
+audit		devctl		klog		stdin		usbctl
+auditpipe	devctl2		mdctl		stdout		vtbd0
+bpf		devstat		null		ttyu0		vtbd1
+bpf0		fd		openfirm	ttyu0.init	xpt0
+console		fido		pci		ttyu0.lock	zero
+ctty		full		pfil		ufs
+cuau0		geom.ctl	random		ufsid
+cuau0.init	kbd0		reroot		ufssuspend
+cuau0.lock	kbdmux0		stderr		urandom
+
+
+////////////// 20220907 //////////////
+  devfs dir 应该还是普通类型，只有设备文件才是与 tptfs 中其他类型文件操作不一致的地方。所以，devfs file 应该是要继承于 tpt file。
+所以，tptfs 最后应该变成三种类：
+  - class TptFile
+  - class TptDir ： public TptFile
+  - class TptDev ： public TptFile
+
+  class File 则是所有类型文件系统的基类，它包括直接查找和逐级查找两大类。既然 devfs 要直接融合到 tptfs 当中，那就可以作为 tptfs 中的
+一种特殊文件类型即可。
+
+
+////////////// 20220908 //////////////
+  设备文件 id 的申请是否可以统一到 inode number？从 devfs 代码逻辑来看，感觉是可以的
+
+tptfs 依赖于持久化内存才能正常挂载，持久化内存又依赖 devfs 进行设备查找。所以，把 devfs 融合进 tptfs 之后，可能就要设计成分阶段挂载的模式：
+  - 创建空的根节点，但是不要访问任何持久化内存区域的数据
+  - 加载设备设备节点
+  - 持久化内存区域初始化
+  - 初始化根节点和 tptfs
+  - 加载根文件系统
+
+修改点：
+  1、devfs_dirent->de_dirent 字段可以考虑撤掉。tptfs 方法表中的 readdir() 函数执行的时候会动态创建 struct dirent
+  2、统一使用分配 inode。从代码实现可以看到，devfs_dirent 中的很多字段跟 inode 是一致的，可以把不同部分划归到文件类中
+    - 文件和目录的创建可以直接使用方法表中的方法
+ 
+  3、查找的时候，如果发现该设备处于非活动状态，直接继续查找。否则，才会进行 name 和 namelen 的匹配工作
+  4、devfs_dirent 中会包含有一个 vnode 指针，当我们释放它的时候，vnode 如果不为空，需要将 vnode->v_data 置空？
+  5、创建设备文件时，如果发现该文件对应的目录项不存在，则需要将该目录也同时创建
+  6、当删除文件的时候，要考虑删除完成之后目录会不会变成空目录。如果是，则可能需要递归删除该路径下的所有根目录
+
+
+
+////////////// 20220909 //////////////
+  sh /usr/home/mc/workspace/qihai/tools/install.sh  -C -o root -g wheel -m 444 
+    /usr/home/mc/workspace/qihai/include/mpool.h
+    /usr/home/mc/workspace/qihai/include/ndbm.h 
+    /usr/home/mc/workspace/qihai/include/err.h 
+    /usr/home/mc/workspace/qihai/include/stringlist.h 
+    /usr/home/mc/workspace/qihai/include/a.out.h 
+    /usr/home/mc/workspace/qihai/include/nlist.h 
+    /usr/home/mc/workspace/qihai/include/nl_types.h 
+    /usr/home/mc/workspace/qihai/include/elf.h 
+    /usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/legacy/usr/include/

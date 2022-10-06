@@ -110,4 +110,11 @@ git merge-base a b
   后面这个最大数字应该是可以配置的，可以查阅一下
 
 github token:
-  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
+  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
+
+如何生成新的 github token：
+  - 登录账号
+  - setting
+  - developer setting
+  - 设置访问权限信息，点击 create new token
+  - git push 密码部分粘贴新生成的 token 即可

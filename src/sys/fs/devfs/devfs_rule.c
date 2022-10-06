@@ -81,10 +81,12 @@
 /*
  * Kernel version of devfs_rule.
  */
-struct devfs_krule {
-	TAILQ_ENTRY(devfs_krule)	dk_list;
-	struct devfs_ruleset		*dk_ruleset;
-	struct devfs_rule		dk_rule;
+struct devfs_krule
+{
+	TAILQ_ENTRY(devfs_krule)
+	dk_list;
+	struct devfs_ruleset *dk_ruleset;
+	struct devfs_rule dk_rule;
 };
 
 TAILQ_HEAD(rulehead, devfs_krule);
@@ -93,46 +95,48 @@ static MALLOC_DEFINE(M_DEVFSRULE, "DEVFS_RULE", "DEVFS rule storage");
 /*
  * Structure to describe a ruleset.
  */
-struct devfs_ruleset {
-	TAILQ_ENTRY(devfs_ruleset)	ds_list;
-	struct rulehead			ds_rules;
-	devfs_rsnum			ds_number;
-	int				ds_refcount;
+struct devfs_ruleset
+{
+	TAILQ_ENTRY(devfs_ruleset)
+	ds_list;
+	struct rulehead ds_rules;
+	devfs_rsnum ds_number;
+	int ds_refcount;
 };
 
 static devfs_rid devfs_rid_input(devfs_rid rid, struct devfs_mount *dm);
 
 static void devfs_rule_applyde_recursive(struct devfs_krule *dk,
-		struct devfs_mount *dm, struct devfs_dirent *de);
+																				 struct devfs_mount *dm, struct devfs_dirent *de);
 static void devfs_rule_applydm(struct devfs_krule *dk, struct devfs_mount *dm);
-static int  devfs_rule_autonumber(struct devfs_ruleset *ds, devfs_rnum *rnp);
+static int devfs_rule_autonumber(struct devfs_ruleset *ds, devfs_rnum *rnp);
 static struct devfs_krule *devfs_rule_byid(devfs_rid rid);
-static int  devfs_rule_delete(struct devfs_krule *dkp);
+static int devfs_rule_delete(struct devfs_krule *dkp);
 static struct cdev *devfs_rule_getdev(struct devfs_dirent *de);
-static int  devfs_rule_input(struct devfs_rule *dr, struct devfs_mount *dm);
-static int  devfs_rule_insert(struct devfs_rule *dr);
-static int  devfs_rule_match(struct devfs_krule *dk, struct devfs_mount *dm,
-		struct devfs_dirent *de);
-static int  devfs_rule_matchpath(struct devfs_krule *dk, struct devfs_mount *dm,
-		struct devfs_dirent *de);
+static int devfs_rule_input(struct devfs_rule *dr, struct devfs_mount *dm);
+static int devfs_rule_insert(struct devfs_rule *dr);
+static int devfs_rule_match(struct devfs_krule *dk, struct devfs_mount *dm,
+														struct devfs_dirent *de);
+static int devfs_rule_matchpath(struct devfs_krule *dk, struct devfs_mount *dm,
+																struct devfs_dirent *de);
 static void devfs_rule_run(struct devfs_krule *dk, struct devfs_mount *dm,
-		struct devfs_dirent *de, unsigned depth);
+													 struct devfs_dirent *de, unsigned depth);
 
 static void devfs_ruleset_applyde(struct devfs_ruleset *ds,
-		struct devfs_mount *dm, struct devfs_dirent *de,
-		unsigned depth);
+																	struct devfs_mount *dm, struct devfs_dirent *de,
+																	unsigned depth);
 static void devfs_ruleset_applydm(struct devfs_ruleset *ds,
-		struct devfs_mount *dm);
+																	struct devfs_mount *dm);
 static struct devfs_ruleset *devfs_ruleset_bynum(devfs_rsnum rsnum);
 static struct devfs_ruleset *devfs_ruleset_create(devfs_rsnum rsnum);
 static void devfs_ruleset_reap(struct devfs_ruleset *dsp);
-static int  devfs_ruleset_use(devfs_rsnum rsnum, struct devfs_mount *dm);
+static int devfs_ruleset_use(devfs_rsnum rsnum, struct devfs_mount *dm);
 
 static struct sx sx_rules;
 SX_SYSINIT(sx_rules, &sx_rules, "DEVFS ruleset lock");
 
 static TAILQ_HEAD(, devfs_ruleset) devfs_rulesets =
-    TAILQ_HEAD_INITIALIZER(devfs_rulesets);
+		TAILQ_HEAD_INITIALIZER(devfs_rulesets);
 
 /*
  * Called to apply the proper rules for 'de' before it can be
@@ -141,8 +145,7 @@ static TAILQ_HEAD(, devfs_ruleset) devfs_rulesets =
  * 调用以在“de”暴露给用户之前应用适当的规则。如果我们需要运行任何东西，应该用dm上
  * 的独占锁调用它
  */
-void
-devfs_rules_apply(struct devfs_mount *dm, struct devfs_dirent *de)
+void devfs_rules_apply(struct devfs_mount *dm, struct devfs_dirent *de)
 {
 	struct devfs_ruleset *ds;
 
@@ -160,8 +163,7 @@ devfs_rules_apply(struct devfs_mount *dm, struct devfs_dirent *de)
 /*
  * Rule subsystem ioctl hook.
  */
-int
-devfs_rules_ioctl(struct devfs_mount *dm, u_long cmd, caddr_t data, struct thread *td)
+int devfs_rules_ioctl(struct devfs_mount *dm, u_long cmd, caddr_t data, struct thread *td)
 {
 	struct devfs_ruleset *ds;
 	struct devfs_krule *dk;
@@ -185,18 +187,21 @@ devfs_rules_ioctl(struct devfs_mount *dm, u_long cmd, caddr_t data, struct threa
 
 	sx_xlock(&sx_rules);
 
-	switch (cmd) {
+	switch (cmd)
+	{
 	case DEVFSIO_RADD:
 		dr = (struct devfs_rule *)data;
 		error = devfs_rule_input(dr, dm);
 		if (error != 0)
 			break;
 		dk = devfs_rule_byid(dr->dr_id);
-		if (dk != NULL) {
+		if (dk != NULL)
+		{
 			error = EEXIST;
 			break;
 		}
-		if (rid2rsn(dr->dr_id) == 0) {
+		if (rid2rsn(dr->dr_id) == 0)
+		{
 			error = EIO;
 			break;
 		}
@@ -223,7 +228,8 @@ devfs_rules_ioctl(struct devfs_mount *dm, u_long cmd, caddr_t data, struct threa
 		 * that).
 		 */
 		if (dr->dr_iacts & DRA_INCSET &&
-		    devfs_ruleset_bynum(dr->dr_incset) == NULL) {
+				devfs_ruleset_bynum(dr->dr_incset) == NULL)
+		{
 			error = ESRCH;
 			break;
 		}
@@ -236,7 +242,8 @@ devfs_rules_ioctl(struct devfs_mount *dm, u_long cmd, caddr_t data, struct threa
 		rid = *(devfs_rid *)data;
 		rid = devfs_rid_input(rid, dm);
 		dk = devfs_rule_byid(rid);
-		if (dk == NULL) {
+		if (dk == NULL)
+		{
 			error = ENOENT;
 			break;
 		}
@@ -246,7 +253,8 @@ devfs_rules_ioctl(struct devfs_mount *dm, u_long cmd, caddr_t data, struct threa
 		rid = *(devfs_rid *)data;
 		rid = devfs_rid_input(rid, dm);
 		dk = devfs_rule_byid(rid);
-		if (dk == NULL) {
+		if (dk == NULL)
+		{
 			error = ENOENT;
 			break;
 		}
@@ -267,16 +275,19 @@ devfs_rules_ioctl(struct devfs_mount *dm, u_long cmd, caddr_t data, struct threa
 		 * interprets 0 to mean "auto-number").
 		 */
 		ds = devfs_ruleset_bynum(rid2rsn(dr->dr_id));
-		if (ds == NULL) {
+		if (ds == NULL)
+		{
 			error = ENOENT;
 			break;
 		}
 		rnum = rid2rn(dr->dr_id);
-		TAILQ_FOREACH(dk, &ds->ds_rules, dk_list) {
+		TAILQ_FOREACH(dk, &ds->ds_rules, dk_list)
+		{
 			if (rid2rn(dk->dk_rule.dr_id) > rnum)
 				break;
 		}
-		if (dk == NULL) {
+		if (dk == NULL)
+		{
 			error = ENOENT;
 			break;
 		}
@@ -290,7 +301,8 @@ devfs_rules_ioctl(struct devfs_mount *dm, u_long cmd, caddr_t data, struct threa
 		rsnum = *(devfs_rsnum *)data;
 		rsnum = rid2rsn(devfs_rid_input(mkrid(rsnum, 0), dm));
 		ds = devfs_ruleset_bynum(rsnum);
-		if (ds == NULL) {
+		if (ds == NULL)
+		{
 			error = ESRCH;
 			break;
 		}
@@ -298,11 +310,13 @@ devfs_rules_ioctl(struct devfs_mount *dm, u_long cmd, caddr_t data, struct threa
 		break;
 	case DEVFSIO_SGETNEXT:
 		rsnum = *(devfs_rsnum *)data;
-		TAILQ_FOREACH(ds, &devfs_rulesets, ds_list) {
+		TAILQ_FOREACH(ds, &devfs_rulesets, ds_list)
+		{
 			if (ds->ds_number > rsnum)
 				break;
 		}
-		if (ds == NULL) {
+		if (ds == NULL)
+		{
 			error = ENOENT;
 			break;
 		}
@@ -345,12 +359,12 @@ devfs_rid_input(devfs_rid rid, struct devfs_mount *dm)
  */
 static void
 devfs_rule_applyde_recursive(struct devfs_krule *dk, struct devfs_mount *dm,
-    struct devfs_dirent *de)
+														 struct devfs_dirent *de)
 {
 	struct devfs_dirent *de2;
 
 	TAILQ_FOREACH(de2, &de->de_dlist, de_list)
-		devfs_rule_applyde_recursive(dk, dm, de2);
+	devfs_rule_applyde_recursive(dk, dm, de2);
 	devfs_rule_run(dk, dm, de, devfs_rule_depth);
 }
 
@@ -377,14 +391,15 @@ devfs_rule_autonumber(struct devfs_ruleset *ds, devfs_rnum *rnump)
 	dk = TAILQ_LAST(&ds->ds_rules, rulehead);
 	if (dk == NULL)
 		*rnump = 100;
-	else {
+	else
+	{
 		*rnump = rid2rn(dk->dk_rule.dr_id) + 100;
 		/* Detect overflow. */
 		if (*rnump < rid2rn(dk->dk_rule.dr_id))
 			return (ERANGE);
 	}
 	KASSERT(devfs_rule_byid(mkrid(ds->ds_number, *rnump)) == NULL,
-	    ("autonumbering resulted in an already existing rule"));
+					("autonumbering resulted in an already existing rule"));
 	return (0);
 }
 
@@ -402,7 +417,8 @@ devfs_rule_byid(devfs_rid rid)
 	ds = devfs_ruleset_bynum(rid2rsn(rid));
 	if (ds == NULL)
 		return (NULL);
-	TAILQ_FOREACH(dk, &ds->ds_rules, dk_list) {
+	TAILQ_FOREACH(dk, &ds->ds_rules, dk_list)
+	{
 		if (rid2rn(dk->dk_rule.dr_id) == rn)
 			return (dk);
 		else if (rid2rn(dk->dk_rule.dr_id) > rn)
@@ -420,7 +436,8 @@ devfs_rule_delete(struct devfs_krule *dk)
 {
 	struct devfs_ruleset *ds;
 
-	if (dk->dk_rule.dr_iacts & DRA_INCSET) {
+	if (dk->dk_rule.dr_iacts & DRA_INCSET)
+	{
 		ds = devfs_ruleset_bynum(dk->dk_rule.dr_incset);
 		KASSERT(ds != NULL, ("DRA_INCSET but bad dr_incset"));
 		--ds->ds_refcount;
@@ -487,11 +504,13 @@ devfs_rule_insert(struct devfs_rule *dr)
 	 * soon as possible so that if it fails, we don't have to roll
 	 * back any changes we already made (e.g., ruleset creation).
 	 */
-	if (dr->dr_iacts & DRA_INCSET) {
+	if (dr->dr_iacts & DRA_INCSET)
+	{
 		dsi = devfs_ruleset_bynum(dr->dr_incset);
 		if (dsi == NULL)
 			return (ESRCH);
-	} else
+	}
+	else
 		dsi = NULL;
 
 	rsnum = rid2rsn(dr->dr_id);
@@ -501,9 +520,11 @@ devfs_rule_insert(struct devfs_rule *dr)
 	if (ds == NULL)
 		ds = devfs_ruleset_create(rsnum);
 	dkrn = rid2rn(dr->dr_id);
-	if (dkrn == 0) {
+	if (dkrn == 0)
+	{
 		error = devfs_rule_autonumber(ds, &dkrn);
-		if (error != 0) {
+		if (error != 0)
+		{
 			devfs_ruleset_reap(ds);
 			return (error);
 		}
@@ -517,8 +538,10 @@ devfs_rule_insert(struct devfs_rule *dr)
 	memcpy(&dk->dk_rule, dr, sizeof(*dr));
 	dk->dk_rule.dr_id = mkrid(rid2rsn(dk->dk_rule.dr_id), dkrn);
 
-	TAILQ_FOREACH(k1, &ds->ds_rules, dk_list) {
-		if (rid2rn(k1->dk_rule.dr_id) > dkrn) {
+	TAILQ_FOREACH(k1, &ds->ds_rules, dk_list)
+	{
+		if (rid2rn(k1->dk_rule.dr_id) > dkrn)
+		{
 			TAILQ_INSERT_BEFORE(k1, dk, dk_list);
 			break;
 		}
@@ -534,7 +557,7 @@ devfs_rule_insert(struct devfs_rule *dr)
  */
 static int
 devfs_rule_match(struct devfs_krule *dk, struct devfs_mount *dm,
-    struct devfs_dirent *de)
+								 struct devfs_dirent *de)
 {
 	struct devfs_rule *dr = &dk->dk_rule;
 	struct cdev *dev;
@@ -554,13 +577,15 @@ devfs_rule_match(struct devfs_krule *dk, struct devfs_mount *dm,
 	 * *not* match, since the default is to assume the rule should
 	 * be run (such as if there are no conditions).
 	 */
-	if (dr->dr_icond & DRC_DSWFLAGS) {
+	if (dr->dr_icond & DRC_DSWFLAGS)
+	{
 		if (dev == NULL)
 			return (0);
 		dsw = dev_refthread(dev, &ref);
 		if (dsw == NULL)
 			return (0);
-		if ((dsw->d_flags & dr->dr_dswflags) == 0) {
+		if ((dsw->d_flags & dr->dr_dswflags) == 0)
+		{
 			dev_relthread(dev, ref);
 			return (0);
 		}
@@ -578,7 +603,7 @@ devfs_rule_match(struct devfs_krule *dk, struct devfs_mount *dm,
  */
 static int
 devfs_rule_matchpath(struct devfs_krule *dk, struct devfs_mount *dm,
-    struct devfs_dirent *de)
+										 struct devfs_dirent *de)
 {
 	struct devfs_rule *dr = &dk->dk_rule;
 	struct cdev *dev;
@@ -590,11 +615,13 @@ devfs_rule_matchpath(struct devfs_krule *dk, struct devfs_mount *dm,
 	if (dev != NULL)
 		pname = dev->si_name;
 	else if (de->de_dirent->d_type == DT_LNK ||
-	    (de->de_dirent->d_type == DT_DIR && de != dm->dm_rootdir &&
-	    (de->de_flags & (DE_DOT | DE_DOTDOT)) == 0)) {
+					 (de->de_dirent->d_type == DT_DIR && de != dm->dm_rootdir &&
+						(de->de_flags & (DE_DOT | DE_DOTDOT)) == 0))
+	{
 		specname = malloc(SPECNAMELEN + 1, M_TEMP, M_WAITOK);
 		pname = devfs_fqpn(specname, dm, de, NULL);
-	} else
+	}
+	else
 		return (0);
 
 	KASSERT(pname != NULL, ("devfs_rule_matchpath: NULL pname"));
@@ -607,15 +634,16 @@ devfs_rule_matchpath(struct devfs_krule *dk, struct devfs_mount *dm,
  * Run dk on de.
  */
 static void
-devfs_rule_run(struct devfs_krule *dk,  struct devfs_mount *dm,
-    struct devfs_dirent *de, unsigned depth)
+devfs_rule_run(struct devfs_krule *dk, struct devfs_mount *dm,
+							 struct devfs_dirent *de, unsigned depth)
 {
 	struct devfs_rule *dr = &dk->dk_rule;
 	struct devfs_ruleset *ds;
 
 	if (!devfs_rule_match(dk, dm, de))
 		return;
-	if (dr->dr_iacts & DRA_BACTS) {
+	if (dr->dr_iacts & DRA_BACTS)
+	{
 		if (dr->dr_bacts & DRB_HIDE)
 			de->de_flags |= DE_WHITEOUT;
 		if (dr->dr_bacts & DRB_UNHIDE)
@@ -627,7 +655,8 @@ devfs_rule_run(struct devfs_krule *dk,  struct devfs_mount *dm,
 		de->de_gid = dr->dr_gid;
 	if (dr->dr_iacts & DRA_MODE)
 		de->de_mode = dr->dr_mode;
-	if (dr->dr_iacts & DRA_INCSET) {
+	if (dr->dr_iacts & DRA_INCSET)
+	{
 		/*
 		 * XXX: we should tell the user if the depth is exceeded here
 		 * XXX: but it is not obvious how to.  A return value will
@@ -637,7 +666,8 @@ devfs_rule_run(struct devfs_krule *dk,  struct devfs_mount *dm,
 		 * XXX: DoS the machine.  I guess a rate-limited message
 		 * XXX: might work.
 		 */
-		if (depth > 0) {
+		if (depth > 0)
+		{
 			ds = devfs_ruleset_bynum(dk->dk_rule.dr_incset);
 			KASSERT(ds != NULL, ("DRA_INCSET but bad dr_incset"));
 			devfs_ruleset_applyde(ds, dm, de, depth - 1);
@@ -650,12 +680,12 @@ devfs_rule_run(struct devfs_krule *dk,  struct devfs_mount *dm,
  */
 static void
 devfs_ruleset_applyde(struct devfs_ruleset *ds, struct devfs_mount *dm,
-    struct devfs_dirent *de, unsigned depth)
+											struct devfs_dirent *de, unsigned depth)
 {
 	struct devfs_krule *dk;
 
 	TAILQ_FOREACH(dk, &ds->ds_rules, dk_list)
-		devfs_rule_run(dk, dm, de, depth);
+	devfs_rule_run(dk, dm, de, depth);
 }
 
 /*
@@ -683,7 +713,7 @@ devfs_ruleset_applydm(struct devfs_ruleset *ds, struct devfs_mount *dm)
 	 * matter?
 	 */
 	TAILQ_FOREACH(dk, &ds->ds_rules, dk_list)
-		devfs_rule_applydm(dk, dm);
+	devfs_rule_applydm(dk, dm);
 }
 
 /*
@@ -694,7 +724,8 @@ devfs_ruleset_bynum(devfs_rsnum rsnum)
 {
 	struct devfs_ruleset *ds;
 
-	TAILQ_FOREACH(ds, &devfs_rulesets, ds_list) {
+	TAILQ_FOREACH(ds, &devfs_rulesets, ds_list)
+	{
 		if (ds->ds_number == rsnum)
 			return (ds);
 	}
@@ -713,14 +744,16 @@ devfs_ruleset_create(devfs_rsnum rsnum)
 	KASSERT(rsnum != 0, ("creating ruleset zero"));
 
 	KASSERT(devfs_ruleset_bynum(rsnum) == NULL,
-	    ("creating already existent ruleset %d", rsnum));
+					("creating already existent ruleset %d", rsnum));
 
 	ds = malloc(sizeof(*ds), M_DEVFSRULE, M_WAITOK | M_ZERO);
 	ds->ds_number = rsnum;
 	TAILQ_INIT(&ds->ds_rules);
 
-	TAILQ_FOREACH(s1, &devfs_rulesets, ds_list) {
-		if (s1->ds_number > rsnum) {
+	TAILQ_FOREACH(s1, &devfs_rulesets, ds_list)
+	{
+		if (s1->ds_number > rsnum)
+		{
 			TAILQ_INSERT_BEFORE(s1, ds, ds_list);
 			break;
 		}
@@ -741,7 +774,7 @@ devfs_ruleset_reap(struct devfs_ruleset *ds)
 
 	KASSERT(ds->ds_number != 0, ("reaping ruleset zero "));
 
-	if (!TAILQ_EMPTY(&ds->ds_rules) || ds->ds_refcount != 0) 
+	if (!TAILQ_EMPTY(&ds->ds_rules) || ds->ds_refcount != 0)
 		return;
 
 	TAILQ_REMOVE(&devfs_rulesets, ds, ds_list);
@@ -756,13 +789,15 @@ devfs_ruleset_use(devfs_rsnum rsnum, struct devfs_mount *dm)
 {
 	struct devfs_ruleset *cds, *ds;
 
-	if (dm->dm_ruleset != 0) {
+	if (dm->dm_ruleset != 0)
+	{
 		cds = devfs_ruleset_bynum(dm->dm_ruleset);
 		--cds->ds_refcount;
 		devfs_ruleset_reap(cds);
 	}
 
-	if (rsnum == 0) {
+	if (rsnum == 0)
+	{
 		dm->dm_ruleset = 0;
 		return (0);
 	}
@@ -777,13 +812,13 @@ devfs_ruleset_use(devfs_rsnum rsnum, struct devfs_mount *dm)
 	return (0);
 }
 
-void
-devfs_rules_cleanup(struct devfs_mount *dm)
+void devfs_rules_cleanup(struct devfs_mount *dm)
 {
 	struct devfs_ruleset *ds;
 
 	sx_assert(&dm->dm_lock, SX_XLOCKED);
-	if (dm->dm_ruleset != 0) {
+	if (dm->dm_ruleset != 0)
+	{
 		ds = devfs_ruleset_bynum(dm->dm_ruleset);
 		--ds->ds_refcount;
 		devfs_ruleset_reap(ds);
@@ -793,8 +828,7 @@ devfs_rules_cleanup(struct devfs_mount *dm)
 /*
  * Make rsnum the active ruleset for dm (locked)
  */
-void
-devfs_ruleset_set(devfs_rsnum rsnum, struct devfs_mount *dm)
+void devfs_ruleset_set(devfs_rsnum rsnum, struct devfs_mount *dm)
 {
 
 	sx_assert(&dm->dm_lock, SX_XLOCKED);
@@ -807,15 +841,15 @@ devfs_ruleset_set(devfs_rsnum rsnum, struct devfs_mount *dm)
 /*
  * Apply the current active ruleset on a mount
  */
-void
-devfs_ruleset_apply(struct devfs_mount *dm)
+void devfs_ruleset_apply(struct devfs_mount *dm)
 {
 	struct devfs_ruleset *ds;
 
 	sx_assert(&dm->dm_lock, SX_XLOCKED);
 
 	sx_xlock(&sx_rules);
-	if (dm->dm_ruleset == 0) {
+	if (dm->dm_ruleset == 0)
+	{
 		sx_xunlock(&sx_rules);
 		return;
 	}

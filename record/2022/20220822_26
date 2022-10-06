@@ -50,7 +50,7 @@ clang++ Formatting.cpp TptFile.cpp TptfsFormatTool.cpp main.cpp -o format
   rootfs read-only 的情况，貌似只能通过修改内核源码的方式来解决，通过 qemu 传参不太行：
     - parse_mount():
       ma = mount_arg(ma, "ro", "rw", 0); // 直接把 ro 参数写死
-    
+
     - parse_mountroot_options():
       // if( kc_strcmp(name, "rw") == 0 ||
       //     kc_strcmp(name, "noro") == 0) {
@@ -62,3 +62,63 @@ clang++ Formatting.cpp TptFile.cpp TptfsFormatTool.cpp main.cpp -o format
       // 	continue;
       // }
       // 直接注释掉对于 ro 属性的判断逻辑
+
+
+////////////// 20220825 //////////////
+  lookup() 函数中可能会出现这样一种情况，假设我们需要处理的路径信息是 /a/b/c/d，而用户当前是处在 c 目录下，
+然后执行 cd .. 命令，此时 struct nameidata->ni_startdir = c，但是 nameidata->ni_vp = b，那么 ni_dvp
+要如何去处理？
+  参考 ext2_lookup() 函数中的处理逻辑，当处理 .. 的时候，ni_dvp 好像仍然是原有的 dir vnode，只不过 ni_vp
+变成了比它更上级的目录，基本逻辑跟处理下级文件是一致的
+
+
+////////////// 20220826 //////////////
+  通过昨天的调试可以发现，如果目标目录是根目录的时候，对其执行 upgrade 操作会导致文件系统的阻塞。但如果我们在非根目录
+下去执行同样的操作，发现并没有同样的问题。可能的原因：
+
+  - 根文件系统挂载之后，root vnode 不仅仅涉及具体的文件系统，仍然可能在 vfs 层级别的模块用到，导致加解锁互相关联 **
+    -- 可以跟踪一下 mountroot 过程中 root vnode 状态的变化情况
+
+  - root vnode 挂载之后本身的状态就不对 *
+    -- 需要调查一下根文件系统 mount / root 过程中对文件系统 root node 的处理过程
+
+  - tptfs lookup() 逻辑上出现了问题，可能增加了一些本不需要的加解锁操作 ***
+    -- 重点查看 vput() / vhold() 等函数的使用场景是否正确
+
+  execv("/etc/rc") 这个错误貌似是因为现在执行脚本不支持绝对路径查找，而是直接指定脚本名称，然后在 command 中添加这个命令？
+
+  root vnode 最后貌似阻塞到 lockmgr_upgrade() 函数当中，其中包含有一个循环，然后就在那个循环中跳不出来了
+
+
+调试场景：
+  在 /etc 下创建一个文件 a， /etc vnode->v_lock 的状态变化 (此时还没有涉及到 interlock，所以暂不考虑)
+
+  初始状态
+    v_lock = {
+      lock_object = {
+        lo_name = 0x10d0b5949,
+        lo_flags = 0x6f30008,
+        lo_data = 0x0,
+        lo_witness = 0x0
+      },
+      lk_lock = 0x1,
+      lk_exslpfail = 0x0,
+      lk_timo = 0x6,
+      lk_pri = 0x60
+    },
+  
+  共享锁加了之后的状态
+  v_lock = {
+    lock_object = {
+      lo_name = 0x10d0b5949,
+      lo_flags = 0x6f30008,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    lk_lock = 0x21,
+    lk_exslpfail = 0x0,
+    lk_timo = 0x6,
+    lk_pri = 0x60
+  },
+
+  可以看出变化量是 lk_lock

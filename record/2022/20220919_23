@@ -1,0 +1,232 @@
+////////////// 20220919 //////////////
+  symlink: random
+  cdev->si_name: urandom
+  pdev_name: random
+
+  symlink: bpf
+  cdev->si_name: bpf0
+  pdev_name: bpf
+
+  symlink: fd/0
+  cdev->si_name: stdin
+  pdev_name: fd/0
+
+  symlink: fd/1
+  cdev->si_name: stdout
+  pdev_name: fd/1
+
+  symlink: fd/2
+  cdev->si_name: stderr
+  pdev_name: fd/2
+
+  symlink: kbdmux0
+  cdev->si_name: kbd0
+  pdev_name: kbdmux0
+
+  # ls -al | grep lrwx
+  lrwxr-xr-x  1 0   0      3 Sep 19 08:17 bpf0 -> bpf
+  lrwxr-xr-x  1 0   0      7 Sep 19 08:17 kbd0 -> kbdmux0
+  lrwxr-xr-x  1 0   0      4 Sep 19 08:17 stderr -> fd/2
+  lrwxr-xr-x  1 0   0      4 Sep 19 08:17 stdin -> fd/0
+  lrwxr-xr-x  1 0   0      4 Sep 19 08:17 stdout -> fd/1
+  lrwxr-xr-x  1 0   0      6 Sep 19 08:17 urandom -> random
+
+  从实际调试结果来看，链接文件也是会对应一个 cdev_privdata 结构体，然后也会包含一个 cdev
+    cdev->si_name： 存放的是链接文件本身的名字
+    pdev = cdp->cdp_c.si_parent： 存放的是链接的目标文件的名称
+    symlink = devfs_dirent->de_symlink： 表示的也是链接目标文件的名称
+所以，当我们删除包含有设备节点的文件目录时，应该也是要将 cdev_privlist 链表中对应的元素给删除掉
+
+  从代码逻辑来看，链接文件感觉是不对应真正的 cdev，只不过它还是会用到 cdev_privdata，该结构体中包含有路径信息字段，
+系统可以根据该结构体的全局链表构建设备文件树。当处理到路径信息中的最后一个组件时，才是真正的设备文件或者是链接文件。
+但是设备的增删机制还是要搞清楚
+
+
+////////////// 20220920 //////////////
+vfs_mount_root():
+  vfs_mountroot_conf0()
+    - 其实就是获取 vfs.root.mountfrom 的值，然后填充到 struct sbuf 当中，tptfs 中可以直接保留
+  
+  vfs_mountroot_devfs()
+    - 该函数对调用 devfs_populate_loop() 函数，也就是在此时，设备文件树构建完成。所以，tptfs 挂载第一阶段
+      应该是要放到这里
+    - 该阶段代码实现应该尽可能与原有逻辑隔离
+    - vfs rootdevmp 置空，/ 和 /dev 不再建立符号链接，不需要创建 devfs mount
+  
+  vfs_mountroot_parse()
+    - 解析文件系统类型，主要就是对 struct sbuf 中的数据进行处理，奇海可以直接继承
+  
+  parse_mount()
+    - vfs_mountroot_wait_if_neccessary() 等待设备就绪，应该是不影响的，直接继承
+  
+  kernel_mount()
+    - 将挂载属性填充到 struct uio 当中，直接继承
+
+  vfs_donmount()
+    - 属性判断部分应该是不需要修改的，然后跳转到 vfs_domount()
+  
+后面应该就可以按照原有的挂载流程来执行，然后 vfs_mountroot_shuffle() 处理逻辑要修改
+
+  挂载根文件系统的过程中，应该要避免执行 namei() 函数
+
+  sys/kernel/bus_if.h
+  sys/kernel/device_if.h
+
+
+////////////// 20220922 //////////////
+OpenSBI v0.9
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name             : riscv-virtio,qemu
+Platform Features         : timer,mfdeleg
+Platform HART Count       : 8
+Firmware Base             : 0x80000000
+Firmware Size             : 156 KB
+Runtime SBI Version       : 0.2
+
+Domain0 Name              : root
+Domain0 Boot HART         : 7
+Domain0 HARTs             : 0*,1*,2*,3*,4*,5*,6*,7*
+Domain0 Region00          : 0x0000000080000000-0x000000008003ffff ()
+Domain0 Region01          : 0x0000000000000000-0xffffffffffffffff (R,W,X)
+Domain0 Next Address      : 0x0000000081800000
+Domain0 Next Arg1         : 0x00000000816a0000
+Domain0 Next Mode         : S-mode
+Domain0 SysReset          : yes
+
+Boot HART ID              : 7
+Boot HART Domain          : root
+Boot HART ISA             : rv64imafdcsu
+Boot HART Features        : scounteren,mcounteren,time
+Boot HART PMP Count       : 16
+Boot HART PMP Granularity : 4
+Boot HART PMP Address Bits: 54
+Boot HART MHPM Count      : 0
+Boot HART MHPM Count      : 0
+Boot HART MIDELEG         : 0x0000000000000222
+Boot HART MEDELEG         : 0x000000000000b109
+---<<BOOT>>---
+Physical memory chunk(s):
+  0x80000000 - 0x27fffffff,  8192 MB (2097152 pages)
+Excluded memory regions:
+  0x80000000 - 0x801fffff,     2 MB (    512 pages) NoAlloc NoDump
+  0x81800000 - 0x86a6cfff,    82 MB (  21101 pages) NoAlloc 
+
+正常情况下，SYSINIT 阶段会初始化的 sx lock
+  sx_sysinit: tun_ioctl
+  sx_sysinit: allprison
+  sx_sysinit: in_control
+  sx_sysinit: rtc list
+  sx_sysinit: in_multi_sx
+  sx_sysinit: pmc-sx
+  sx_sysinit: DEVFS ruleset lock
+  sx_sysinit: clone events drain lock
+  sx_sysinit: in6_multi_sx
+  sx_sysinit: acct_sx
+  sx_sysinit: vfsconf
+  sx_sysinit: fail point set sx
+  sx_sysinit: ifnet descr
+  sx_sysinit: ifnet_sx
+  sx_sysinit: ifnet_detach_sx
+  sx_sysinit: Clock topology lock
+  sx_sysinit: tty list
+  sx_sysinit: Syscon topology lock
+  sx_sysinit: gif_ioctl
+
+将 devfs 合并到 tptfs 之后，init 阶段锁的加载状态
+  sx_sysinit: pmc-sx
+  sx_sysinit: in_control
+  sx_sysinit: in_multi_sx
+  sx_sysinit: acct_sx
+  sx_sysinit: vfsconf
+  sx_sysinit: fail point set sx
+  sx_sysinit: in6_multi_sx
+  sx_sysinit: clone events drain lock
+
+造成该问题的原因是在将一个类成员锁放在了 SYSINIT 阶段初始化，此时该对象都还没有实例化，结果就导致系统阻塞
+
+  当我们对 vnode 进行两次解锁的时候，vn_lock->lk_lock 会变成一个非常离谱的数字，正常可能就是 1->33 33->1 (共享锁)。
+再我们尝试对两次解锁的 vnode 进行加锁的时候，lk_lock 就无法恢复到一个正常状态，导致文件系统阻塞
+
+  v_lock = {
+    lock_object = {
+      lo_name = 0x10d0afea3 "tptfs",
+      lo_flags = 116588552,
+      lo_data = 0,
+      lo_witness = 0x0
+    },
+    lk_lock = 18446744073709551585,
+    lk_exslpfail = 0,
+    lk_timo = 6,
+    lk_pri = 96
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x10d104cfb "vnode interlock",
+      lo_flags = 16973824,
+      lo_data = 0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0
+  },
+
+
+////////////// 20220923 //////////////
+  实际调试发现，cdev_privdata list 在构造设备树的时候是空的，所以导致 hashtree 中没有任何元素，namei() 查找失败。
+需要搞清楚 FreeBSD 中该链表是在什么时间构造完成的
+
+priv_data->cdp_c->si_name: reroot/reroot
+priv_data->cdp_c->si_name: random
+priv_data->cdp_c->si_name: urandom
+priv_data->cdp_c->si_name: console
+priv_data->cdp_c->si_name: devctl
+priv_data->cdp_c->si_name: devctl2
+priv_data->cdp_c->si_name: geom.ctl
+priv_data->cdp_c->si_name: fd/0
+priv_data->cdp_c->si_name: stdin
+priv_data->cdp_c->si_name: fd/1
+priv_data->cdp_c->si_name: stdout
+priv_data->cdp_c->si_name: fd/2
+priv_data->cdp_c->si_name: stderr
+priv_data->cdp_c->si_name: fido
+priv_data->cdp_c->si_name: bpf
+priv_data->cdp_c->si_name: bpf0
+priv_data->cdp_c->si_name: full
+priv_data->cdp_c->si_name: null
+priv_data->cdp_c->si_name: zero
+priv_data->cdp_c->si_name: klog
+priv_data->cdp_c->si_name: openfirm
+priv_data->cdp_c->si_name: auditpipe
+priv_data->cdp_c->si_name: pci
+priv_data->cdp_c->si_name: audit
+priv_data->cdp_c->si_name: ctty
+priv_data->cdp_c->si_name: kbdmux0
+priv_data->cdp_c->si_name: kbd0
+priv_data->cdp_c->si_name: ttyu0
+priv_data->cdp_c->si_name: ttyu0.init
+priv_data->cdp_c->si_name: ttyu0.lock
+priv_data->cdp_c->si_name: cuau0
+priv_data->cdp_c->si_name: cuau0.init
+priv_data->cdp_c->si_name: cuau0.lock
+priv_data->cdp_c->si_name: devstat
+priv_data->cdp_c->si_name: ufssuspend
+priv_data->cdp_c->si_name: pfil
+priv_data->cdp_c->si_name: mdctl
+priv_data->cdp_c->si_name: usbctl
+priv_data->cdp_c->si_name: xpt0
+priv_data->cdp_c->si_name: vtbd0
+priv_data->cdp_c->si_name: vtbd1
+priv_data->cdp_c->si_name: ufsid/627b7c2801d40e6a
+priv_data->cdp_c->si_name: ufs/rootfs
+
+
+  geom 层级会提供一个 wait() 接口，用于等待 geom 设备是否可用。在 devfs 中，它是以通过检测在 /dev 路径下是否
+包含有文件节点来作为该设备是否已经加载完成的一个标志(猜测内部应该是有 notify/wait 机制)。所以 tptfs 构建设备树
+需要放在 geom_wait 完成之后才能进行，否则会丢失持久化内存设备节点

@@ -1,0 +1,449 @@
+////////////// 20220829 //////////////
+  /home/mercury/Documents/rootfs_env
+  /share/rd/backup/wcg/rootfs_env.zip
+
+  从 man page 的注释可以得知，vnode lock 的作用是为了保证对一个文件的序列化访问，保证文件数据的一致性。
+所以上周对于 root vnode 的处理方式是不行了，会导致对于根目录下文件的访问存在数据一致性隐患。所以还是要调查
+清楚，到底是哪里存在的问题
+
+  目前 kernel image 会分成几个部分，大致包括 global registry / data / code / fs 等等，文件系统格式化
+工具所要提供的 image 不能包含有 persistent memeory，因为这个部分已经在 kernel image 中做好了，所以文件
+系统提供的 image 只包含文件系统部分的数据就可以
+
+  不能把文件系统的大小写死，而是应该以参数的形式传递给格式化工具，然后计算每个区域所占的数据块的实际用量。计算
+方法大概如下：
+  pages - 文件系统占用的总的页数量
+  ppf - page per file
+  ipp - inode entries per page
+  ps - page size
+
+假定数据区域占用的页数量为 x，每个文件占用页数量默认是 ppf，则每个子区域占用的页数为:
+  superblock       1
+  page bitmap      x / (ps * 8)
+  inode bitmap     x / (ppf * ipp * ps * 8)
+  inode table      x / (ppf * ipp)
+  data region      x
+
+所有这些参数加起来，应该是要等于 pages
+
+(ppf*ipp*ps*8) + (ppf*ipp)*x + x + (ps*8)*x + (ppf*ipp*ps*8)*x
+  = (ppf*ipp*ps*8)*pages
+
+===>>>
+
+(ppf*ipp + 1 + ps*8 + ppf*ipp*ps*8)*x = (ppf*ipp*ps*8 - 1)pages
+
+===>>>
+
+x = (ppf*ipp*ps*8-1)*pages / (ppf*ipp +1+ps*8+ppf*ipp*ps*8)
+
+
+////////////// 20220830 //////////////
+根文件系统源文件目录是
+  qihai/build/rootfs
+当前脚本中需要添加 rootfs.img 生成的路径信息
+
+当前脚本会被添加到 cmake 当中，所以尽量只包含源文件，一些中间文件的生成尽量都添加到 shell 脚本中，即使是 rootfs.img 
+文件的构建也要添加到其中
+
+vnode v_lock 在不同加解锁行为下的状态变化： (以 ufs 为例，操作就是在根目录下 mkdir a，查看 root vnode 状态变化)
+  1 - 创建目录 a 时的初始状态
+  v_lock = {
+    lock_object = {
+      lo_name = 0x10d0bb1b1,
+      lo_flags = 0x6fb0000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    lk_lock = 0x1,
+    lk_exslpfail = 0x0,
+    lk_timo = 0x6,
+    lk_pri = 0x60
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x10d10b57e,
+      lo_flags = 0x1030000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0x0
+  },
+
+  2- 加共享锁之后的状态
+  v_lock = {      
+    lock_object = {
+      lo_name = 0x10d0bb1b1,
+      lo_flags = 0x6fb0000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    lk_lock = 0x21,
+    lk_exslpfail = 0x0,
+    lk_timo = 0x6,
+    lk_pri = 0x60
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x10d10b57e,
+      lo_flags = 0x1030000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0x0
+  },
+
+  3 - 锁升级之后的状态
+  v_lock = {
+    lock_object = {
+      lo_name = 0x10d0bb1b1,
+      lo_flags = 0x6fb0000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    lk_lock = 0x1bfcb7080,
+    lk_exslpfail = 0x0,
+    lk_timo = 0x6,
+    lk_pri = 0x60
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x10d10b57e,
+      lo_flags = 0x1030000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0x0
+  },
+
+从上述三个阶段可以看到，加解锁操作的对象貌似就是 lk_lock。调试 tptfs 的时候发现，rootvnode lk_lock 变化情况
+存在异常，具体如下：
+
+1 - 创建目录 a 时的初始状态
+  v_lock = {
+    lock_object = {
+      lo_name = 0x10d0b5939,
+      lo_flags = 0x6f30008,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    lk_lock = 0xfffffffffffffec1,
+    lk_exslpfail = 0x0,
+    lk_timo = 0x6,
+    lk_pri = 0x60
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x10d10b5ae,
+      lo_flags = 0x1030000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0x0
+  },
+
+2 - 加共享锁之后的状态
+  v_lock = {
+    lock_object = {
+      lo_name = 0x10d0b5939,
+      lo_flags = 0x6f30008,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    lk_lock = 0xfffffffffffffee1,
+    lk_exslpfail = 0x0,
+    lk_timo = 0x6,
+    lk_pri = 0x60
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x10d10b5ae,
+      lo_flags = 0x1030000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0x0
+},
+
+但是在 VFS_ROOT 阶段获取到的 rootvnode 状态对比 ufs，其实是一致的。所以肯定是中间某个过程
+出现了问题
+  v_lock = {
+    lock_object = {
+      lo_name = 0x10d0b5939,
+      lo_flags = 0x6f30008,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    lk_lock = 0x115ab0100,
+    lk_exslpfail = 0x0,
+    lk_timo = 0x6,
+    lk_pri = 0x60
+  },
+  v_interlock = {
+    lock_object = {
+      lo_name = 0x10d10b5ae,
+      lo_flags = 0x1030000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0x0
+  },
+
+
+然后 gdb 执行 watch *0xffffffd0092f0a10 (rootvnode lk_lock 地址)
+  (gdb) p &(vnode->v_lock.lk_lock)          
+  $3 = (volatile uintptr_t *) 0xffffffd0092f0a10
+  (gdb) p &(vnode->v_lock)        
+  $4 = (lock *) 0xffffffd0092f09f8
+  (gdb) p &(vnode->v_lock.lk_lock)
+  $5 = (volatile uintptr_t *) 0xffffffd0092f0a10
+  (gdb) watch *0xffffffd0092f0a10
+
+  取地址的时候要注意是用 -> 还是 .
+
+
+  Old value = -31
+  New value = -63
+  0x000000010c0d0268 in atomic_fcmpset_64 (p=0xffffffd0092f0a10, cmpval=0x11414e160, 
+      newval=18446744073709551553)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/include/atomic.h:373
+  373		__asm __volatile(
+  (gdb) bt
+  #0  0x000000010c0d0268 in atomic_fcmpset_64 (p=0xffffffd0092f0a10, cmpval=0x11414e160, 
+      newval=18446744073709551553)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/include/atomic.h:373
+  #1  0x000000010c0cf662 in atomic_fcmpset_rel_64 (p=0xffffffd0092f0a10, cmpval=0x11414e160, 
+      newval=18446744073709551553)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/include/atomic.h:473
+  #2  0x000000010c0cf088 in lockmgr_sunlock_try (lk=0xffffffd0092f09f8, xp=0x11414e160)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/kern_lock.cpp:538
+  #3  lockmgr_unlock (lk=0xffffffd0092f09f8)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/kern_lock.cpp:1279
+  #4  0x000000010c2174d6 in vop_unlock (ap=0x11414e1c0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_default.cpp:608
+  #5  0x000000010c229152 in VOP_UNLOCK (vp=0xffffffd0092f0988)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vnode_if.h:1155
+  #6  0x000000010c22f190 in vput (vp=0xffffffd0092f0988)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_subr.cpp:3199
+  #7  0x000000010c38f7b2 in TptLookup::lookupLBL (this=0xffffffd00ba09cc0, ndp=0x11414e918)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/tptfs/TptLookup.cpp:1043
+  #8  0x000000010c38e312 in TptLookup::lookupFile (this=0xffffffd00ba09cc0, NameiData=0x11414e918)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/tptfs/TptLookup.cpp:36
+  #9  0x000000010c38b140 in tpt_lookup (ndp=0x11414e918)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/fs/tptfs/TptFileSystem.cpp:749
+  #10 0x000000010c05ece0 in VfsLookup::namei (this=0x1100d93b8 <vfsLookup>, ndp=0x11414e918)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsLookup.cpp:508
+  #11 0x000000010c06161e in namei (ndp=0x11414e918)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/VfsLookupWrapper.cpp:15
+  #12 0x000000010c241e6c in kern_statat (td=0x115ab0100, flag=0, fd=-100, 
+      path=0x9001dea1 <user_lib_data_start+122529> "/dev", pathseg=UIO_USERSPACE, sbp=0x11414ea40, hook=0x0)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_syscalls.cpp:2399
+  #13 0x000000010c241d24 in sys_fstatat (td=0x115ab0100, uap=0x115ab04e8)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/kernel/vfs_syscalls.cpp:2377
+  #14 0x000000010c0191b6 in syscallenter (td=0x115ab0100)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/../../kernel/subr_syscall:189
+  #15 0x000000010c018ab4 in ecall_handler ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/trap.cpp:167
+  #16 0x000000010c004fc0 in system_call ()
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/riscv/swtch.S:601
+  Backtrace stopped: frame did not save the PC
+  (gdb) c
+  Continuing.
+
+
+  Thread 1 hit Hardware watchpoint 4: *0xffffffd0092f0a10
+
+  Old value = -191
+  New value = -159
+  0x000000010c0d0268 in atomic_fcmpset_64 (p=0xffffffd0092f0a10, cmpval=0x1bfbb4290, 
+      newval=18446744073709551457)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/include/atomic.h:373
+  373		__asm __volatile(
+  (gdb) 
+  Continuing.
+
+  Thread 1 hit Hardware watchpoint 4: *0xffffffd0092f0a10
+
+  Old value = -159
+  New value = -191
+  0x000000010c0d0268 in atomic_fcmpset_64 (p=0xffffffd0092f0a10, cmpval=0x1bfbb4260, 
+      newval=18446744073709551425)
+      at /home/mercury/Documents/code/qihai/rebuild_last/qihai/sys/riscv/include/atomic.h:373
+  373		__asm __volatile(
+  (gdb) 
+  Continuing.
+
+  Thread 1 hit Hardware watchpoint 4: *0xffffffd0092f0a10
+
+  Old value = -191
+  New value = -159
+  .....
+
+  后面有多个上述打印信息的重复，正常来说应该是正负值交替出现，不会一致出现负值。然后函数调用堆栈中出现了 lookupLBL() 函数，
+说明可能是此处逻辑存在问题。重新阅读源码发现， setMountPoint() 函数中直接将 ni_rootdir 赋值给 ni_dvp，但是没有按照之前
+的逻辑给 ni_dvp 加共享锁。尝试加锁之后测试，貌似是可以正常运行了，还需要进一步测试
+
+
+////////////// 20220831 //////////////
+  shell 脚本的编写参考：
+    https://blog.mythsman.com/post/5d2ab67ff678ba2eb3bd346f/#-
+
+  好像一本书叫做《编写Shell脚本的最佳实践》，可以关注一波
+
+  对 shell 脚本进行了重构，因为 shell 脚本跟 rootfs 源目录和格式化工具目录不一定是在同一个地方，所以它们之间的路径最好不要
+出现上下级的关联。所以新版本代码中移除了相对路径设置，全部改成了绝对路径；
+  编写脚本的意义应该就是为了让用户尽可能减少手动操作，比如创建、删除文件，或者编译等等，所以这些工作全部都放到脚本中进行。将原有
+config 文件和 record 文件设计成临时文件，通过脚本创建，使用完成之后就删除掉。这两个文件就直接放到格式化工具源文件路径下处理，
+比较方便
+
+  上述问题调试的时候发现，即使是在 setMountPoint() 函数中对 ni_dvp 加锁，调试过程中还是会出现阻塞的问题。说明还是没有找到
+根本原因。在代码中添加打印发现，阻塞的原因就是 root vnode 在前一阶段被加了独占锁，可能是某个地方操作遗漏，或者是一些 flags
+没有更新，使得下次又要对它进行加锁。而且检查出来这个锁是共享锁，需要升级，然后升级的时候又发现拿不到共享锁。最后就在那里等待，
+造成文件系统阻塞。
+  有可能是 .. 操作存在异常造成的。首先，调试的发现每次执行完 .. 之后，造成阻塞的概率更大；其次， .. 操作会造成当前目录与目标
+目录存在倒挂现象，就是当前目录是目标文件的子层级。tptfs 当前的处理方式是直接将当前目录替换成目标文件的目录，有可能会造成根节点
+处理异常
+
+
+////////////// 20220901 //////////////
+测试场景：
+  ufs 作为根文件系统进入 /tmp 目录下，然后执行 cd .. 命令
+
+  (gdb) p ndp->ni_dvp->v_lock.lk_lock
+  $11 = 33
+  (gdb) p ndp->ni_vp->v_lock.lk_lock 
+  $12 = 33
+  (gdb) p *(struct inode*)ndp->ni_dvp->v_data    
+  $13 = {
+    i_nextsnap = {
+      tqe_next = 0x0,
+      tqe_prev = 0x0
+    },
+    i_vnode = 0xffffffd0093beb70,
+    i_ump = 0xffffffd00b244e00,
+    i_dquot = {0x0, 0x0},
+    i_un = {
+      dirhash = 0x0,
+      snapblklist = 0x0
+    },
+    dinode_u = {
+      din1 = 0xffffffd0093c1500,
+      din2 = 0xffffffd0093c1500
+    },
+    i_number = 16,
+    i_flag = 1024,
+    i_effnlink = 3,
+    i_count = 0,
+    i_endoff = 0,
+    i_diroff = 0,
+    i_offset = 0,
+    i_nextclustercg = -1,
+    i_ea_area = 0x0,
+    i_ea_len = 0,
+    i_ea_error = 0,
+    i_ea_refs = 0,
+    i_size = 512,
+    i_gen = 1181320954,
+    i_flags = 0,
+    i_uid = 0,
+    i_gid = 0,
+    i_mode = 17407,
+    i_nlink = 3
+  }
+  (gdb) p *(struct inode*)ndp->ni_vp->v_data 
+  $14 = {
+    i_nextsnap = {
+      tqe_next = 0x0,
+      tqe_prev = 0x0
+    },
+    i_vnode = 0xffffffd0092b63d0,
+    i_ump = 0xffffffd00b244e00,
+    i_dquot = {0x0, 0x0},
+    i_un = {
+      dirhash = 0x0,
+      snapblklist = 0x0
+    },
+    dinode_u = {
+      din1 = 0xffffffd00b23fe00,
+      din2 = 0xffffffd00b23fe00
+    },
+    i_number = 2,
+    i_flag = 1024,
+    i_effnlink = 19,
+    i_count = 16,
+    i_endoff = 0,
+    i_diroff = 0,
+    i_offset = 300,
+    i_nextclustercg = -1,
+    i_ea_area = 0x0,
+    i_ea_len = 0,
+    i_ea_error = 0,
+    i_ea_refs = 0,
+    i_size = 512,
+    i_gen = 1399678930,
+    i_flags = 0,
+    i_uid = 0,
+    i_gid = 0,
+    i_mode = 16877,
+    i_nlink = 20
+  }
+  (gdb) 
+
+  从返回结果来看，struct nameidata->ni_dvp 表示的就是 /tmp，ino = 16； ni_vp 表示的是根目录 /，ino = 2。
+所以感觉 tptfs lookup() 函数中不需要对 .. 做特殊处理，传入的就是绝对路径，不用管 ni_dvp 和 ni_vp 之间的上下级
+关系。
+  修改了 handleNameiOpts() 函数的逻辑，ni_dvp 就是最初传递进来的 dir vnode，而不再是获取目标文件的上一级目录
+文件 vnode。经过手工测试发现，在根目录下创建和删除文件，已经在子目录下执行 cd .. 命令都不会再出现文件系统阻塞的情况。
+根本原因还是 root vnode 未解锁导致的。假设
+
+  调试过程中又发现另外一个问题，就是 VN_IS_DOOMED(vnode 回收) 宏被执行的次数较多。目前还不太清楚 vfs 处理时回收
+情况如何，如果是更多的话，可能会增加文件访问时的开销
+
+  然后就是 mkdir -p 命令执行出错，会把路径中所有的组件都创建到当前目录下，应该还是 lookup() 处理逻辑上的异常。
+经过测试发现，如果我们在返回的时候只把初始传进的 ni_dvp 作为起始目录，后续不再处理之后，就会使得加 -p 参数之后，
+ni_startdir 始终是在当前目录之下。比如在根目录下执行：
+  mkdir -p a/b/c
+
+  当 a 创建完成之后，vfs 并不会跳转到 a 目录下创建 b，而是仍然在根目录下创建 a/b。这里要注意，因为此时 b 是不存在的，
+所以 vfs 需要传递给 vop_mkdir() 新创建的文件 b 所在的目录。正常来讲应该是 a，但是修改之后 vfs 传递给该函数的对象
+仍然是根目录，就导致我们创建的所有目录都在根目录之下。
+  因此，对 handleNameiOpts() 函数的修改应重点集中在对 .. 情况的处理，其他的逻辑先暂时保留
+
+  在 vfs lookup() 函数中添加一个 fallbackToRootfs() 函数用来处理跨文件系统的访问。该函数的设计思路可以应用于其他
+所有函数。那就是我们要知道 vfs 在一个操作完成之后，返回的 struct nameidata 中的各个 vnode 字段所代表的含义以及它们
+当时的锁的状态。然后我们就可以在特定的阶段插入一些功能函数，完全模仿 vfs 的行为，进而实现一些特殊功能
+
+假设一个跨文件系统的访问的场景：
+  原文件系统 - tptfs
+  挂载点 - /dev
+  挂载文件系统类型 - devfs
+
+当我们想要从 /dev -> / 时，
+  - vfs lookup() 肯定是会处理到 .. 这个组件，否则无法从 devfs 退出到 tptfs
+  - 此时 struct nameidata->ni_dvp 存放的是节点挂载之前对应的 vnode
+  - ni_vp 应该是要从 tptfs 找到目标文件 (因为目前是跳转到根目录，所以目标文件直接锁死为 /)
+  - fallbackToRootfs() 所要做的就是模仿 vfs 的行为，并将字段一一对应，然后控制到锁状态，就可以完成跳转
+
+  实际测试中发现，我们只能从 /dev -> /，而不能直接跳转到 /etc。这个其实就是上面所说的原因，跳转函数把目标文件写死了。
+想要实现任意路径跳转，就需要进一步跟踪 nameidata 路径字段的变化过程，然后再模仿这个过程修改函数实现即可
+
+  /dev/  cd ../etc/a/b/c
+
+首先是逐级检测，遇到 .. 的时候跳转到 tptfs，此时 nameidata 中的路径应该是 etc/a/b/c。我们所要做的处理就是在路径前面
+加上一个 / 形成绝对路径，然后再递归调用 tptfs_lookup() 找到目标文件即可。需要测试
+
+
+////////////// 20220902 //////////////
+  需要整合一下 tptfs lookup() 函数，把直接查找和逐级查找统一到一个函数当中。逐级查找代码先暂时沿用原有 vfs lookup() C 代码。
+可能需要设计一个 enum 结构体来表示所有的查找类型；然后需要一个函数来处理此次查找到底属于那种类型
+  1、确定查找方式
+    - 逐级查找
+    - 直接查找
+  
+  2、设置挂载点，判断挂载点路径是否合法
+
+  感觉对挂载点的访问还是要通过绝对路径，而不同通过相对路径。因为 tptfs lookup() 首先会检查路径前几个字段是否匹配默认挂载路径。
+如果是采用相对路径的话，那我们将无从得知路径中是否包含有挂载点。从挂载点回退到 tptfs 无所谓，因为采用的仍然是逐级查找方式
+
+    if (kc_strcmp(dp->v_mount->mnt_vfc->vfc_name, "tptfs") == 0)
+      return (fallbackToRootfs(ndp));

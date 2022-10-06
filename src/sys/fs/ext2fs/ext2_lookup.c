@@ -382,6 +382,9 @@ ext2_lookup_ino(struct vnode *vdp, struct vnode **vpp, struct componentname *cnp
 	u_long bmask;			/* block offset mask 块偏移标志，应该是用于计算数据在块中所占大小，偏移等 */
 	int error;
 	struct ucred *cred = cnp->cn_cred;	/* 用户凭证 */
+	/*
+		这里要注意，不是获取 cn_lkflags，而是 cn_flags
+	*/
 	int flags = cnp->cn_flags;
 	int nameiop = cnp->cn_nameiop;	/* 判断文件操作，创建、重命名等等 */
 	ino_t ino, ino1;
@@ -696,6 +699,9 @@ found:
 	 * parameters which can be used to remove file.
 	 */
 	if (nameiop == DELETE && (flags & ISLASTCN)) {
+		/*
+			假如 cn_flags 包含有 LOCKPARENT 的属性，那么 ni_dvp 当前应该是要处在加锁的状态 
+		*/
 		if (flags & LOCKPARENT)
 			ASSERT_VOP_ELOCKED(vdp, __FUNCTION__);
 		/*
@@ -721,6 +727,9 @@ found:
 			dp->i_count = dp->i_offset - prevoff;
 		if (dd_ino != NULL)
 			return (0);
+		/*
+			注意这里，当 dir inode = target file inode 时，我们要对 dir vnode 执行一步 vref() 操作。
+		*/
 		if (dp->i_number == ino) {
 			VREF(vdp);
 			*vpp = vdp;
