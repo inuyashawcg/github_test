@@ -92,9 +92,10 @@
 
 
   系统打印完 start_init 后阻塞，首先判断是否进入 main 函数，可以在
-    __start
-    main
-    exec
+    start_init
+    init_main
+    execute_script
+    open_console
   等函数处打断点
 
   i thread 查看进程情况

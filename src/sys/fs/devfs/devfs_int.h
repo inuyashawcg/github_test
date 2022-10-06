@@ -75,7 +75,8 @@ struct cdev_priv {
 	u_int			cdp_maxdirent;
 	/*
 		cdp_dirents 保存的可能是所有子目录的指针变量。比如 /dev 可以认为是一个cdev，
-		它下面肯定会有很多子目录，该成员可能就用来管理这些目录
+		它下面肯定会有很多子目录，该成员可能就用来管理这些目录。
+		devfs_dirent 其实就表示 devfs 下的各个子设备节点，可以替换成 tptfs 下的文件类
 	*/
 	struct devfs_dirent	**cdp_dirents;
 	struct devfs_dirent	*cdp_dirent0;

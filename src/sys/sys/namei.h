@@ -60,6 +60,9 @@ struct componentname {
 	u_int64_t cn_flags;	/* flags to namei - namei属性标志 */
 	struct	thread *cn_thread;/* thread requesting lookup 发出查找请求的线程 */
 	struct	ucred *cn_cred;	/* credentials 证书 */
+	/*
+		cn_lkflags 貌似只包含两种锁类型：独占锁或者是共享锁
+	*/
 	int	cn_lkflags;	/* Lock flags LK_EXCLUSIVE or LK_SHARED */
 	/*
 	 * Shared between lookup and commit routines. 在查找和提交例程之间共享

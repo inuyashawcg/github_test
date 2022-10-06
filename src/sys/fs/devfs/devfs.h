@@ -70,8 +70,8 @@ typedef uint32_t devfs_rid;
  * Plain DEVFS rule.  This gets shared between kernel and userland
  * verbatim, so it shouldn't contain any pointers or other kernel- or
  * userland-specific values.
- * 普通DEVFS规则。这在内核和userland之间逐字共享，因此它不应该包含任何指针或其他
- * 内核或userland特定的值
+ * 普通 DEVFS 规则。这在内核和 userland 之间逐字共享，因此它不应该包含任何指针或其他
+ * 内核或 userland 特定的值
  */
 struct devfs_rule {
 	uint32_t dr_magic;			/* Magic number. */
@@ -146,10 +146,10 @@ struct devfs_dirent {
 	struct cdev_priv	*de_cdp;
 	int			de_inode;	// 对应的inode结点id？
 	int			de_flags;
-#define	DE_WHITEOUT	0x01	// write out
+#define	DE_WHITEOUT	0x01
 #define	DE_DOT		0x02	// .
 #define	DE_DOTDOT	0x04	// ..
-#define	DE_DOOMED	0x08	// doomed: 注定的？
+#define	DE_DOOMED	0x08	// 回收？
 /*
 	这里有一个应用场景，当我们通过 name 查找目录的时候，发现这个以这个name命名的文件是一个链接文件，
 	那么我们还要进一步去查找对应的目录文件实体；如果没有找到，那就需要重新创建一个目录，然后把这个
@@ -165,7 +165,7 @@ struct devfs_dirent {
 	struct dirent 		*de_dirent;
 	TAILQ_ENTRY(devfs_dirent) de_list;
 	struct devfs_dlist_head	de_dlist;	// 子目录列表
-	struct devfs_dirent	*de_dir;	// 当前目录
+	struct devfs_dirent	*de_dir;	// entry 所在的目录
 	int			de_links;
 	mode_t			de_mode;
 	uid_t			de_uid;

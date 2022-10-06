@@ -75,11 +75,11 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/vfs_mountroot.c 337837 2018-08-15 12:12
  *
  * <vfsname>:[<path>][	<vfsname>:[<path>] ...]
  * vfsname   := the name of a VFS known to the kernel and capable
- *              of being mounted as root 
+ *              of being mounted as root
  * 				内核已知的VFS的名称，可以作为根目录挂载
- * 
+ *
  * path      := disk device name or other data used by the filesystem
- *              to locate its physical store 
+ *              to locate its physical store
  * 			    文件系统用来定位其物理存储的磁盘设备名称或其他数据
  * 这个就可以参考qemu启动时候的提示: mountroot:/dev/vtbd0，freebsd-riscv网页上也有相应的提示
  *
@@ -93,7 +93,7 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/vfs_mountroot.c 337837 2018-08-15 12:12
  * set of string mount options.  These mount options must be parseable
  * by nmount() in the kernel.
  * 环境变量 vfs.root.mountfrom.options 是一组以逗号分隔的字符串装载选项。这些装载选项必须
-   可由内核中的 nmount 解析
+	 可由内核中的 nmount 解析
  */
 
 static int parse_mount(char **);
@@ -104,11 +104,11 @@ static int vfs_mountroot_wait_if_neccessary(const char *fs, const char *dev);
 
 /*
  * The vnode of the system's root (/ in the filesystem, without chroot
- * active.) 
+ * active.)
  * rootvnode 表示的应该就是文件系统中的根目录“/”
  * chroot: change root，更改根目录
  */
-struct vnode *rootvnode;	
+struct vnode *rootvnode;
 
 /*
  * Mount of the system's /dev.
@@ -122,16 +122,19 @@ char *rootdevnames[2] = {NULL, NULL};
 struct mtx root_holds_mtx;
 MTX_SYSINIT(root_holds, &root_holds_mtx, "root_holds", MTX_DEF);
 
-struct root_hold_token {
-	const char			*who;
-	LIST_ENTRY(root_hold_token)	list;
+struct root_hold_token
+{
+	const char *who;
+	LIST_ENTRY(root_hold_token)
+	list;
 };
 // root mount hold 队列
-static LIST_HEAD(, root_hold_token)	root_holds =
-    LIST_HEAD_INITIALIZER(root_holds);
+static LIST_HEAD(, root_hold_token) root_holds =
+		LIST_HEAD_INITIALIZER(root_holds);
 
 // 定义了文件系统的操作标识
-enum action {
+enum action
+{
 	A_CONTINUE,
 	A_PANIC,
 	A_REBOOT,
@@ -144,7 +147,7 @@ static enum action root_mount_onfail = A_CONTINUE;
 static int root_mount_mddev;
 static int root_mount_complete;
 
-/* By default wait up to 3 seconds for devices to appear. 
+/* By default wait up to 3 seconds for devices to appear.
 	默认情况下设备挂载需要等待3秒，然后再设置一下 vfs.mountroot.timeout 环境变量
 */
 static int root_mount_timeout = 3;
@@ -153,14 +156,14 @@ TUNABLE_INT("vfs.mountroot.timeout", &root_mount_timeout);
 // SYSCTL_INT： 通过sysctl机制控制一个int类型变量
 static int root_mount_always_wait = 0;
 SYSCTL_INT(_vfs, OID_AUTO, root_mount_always_wait, CTLFLAG_RDTUN,
-    &root_mount_always_wait, 0,
-    "Wait for root mount holds even if the root device already exists");
+					 &root_mount_always_wait, 0,
+					 "Wait for root mount holds even if the root device already exists");
 
 // SYSCTL_INT： 通过sysctl机制控制一个类似属性值的东西
 SYSCTL_PROC(_vfs, OID_AUTO, root_mount_hold,
-    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE,
-    NULL, 0, sysctl_vfs_root_mount_hold, "A",
-    "List of root mount hold tokens");
+						CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE,
+						NULL, 0, sysctl_vfs_root_mount_hold, "A",
+						"List of root mount hold tokens");
 
 // sysctl 设置root_mount_hold的属性
 static int
@@ -173,7 +176,8 @@ sysctl_vfs_root_mount_hold(SYSCTL_HANDLER_ARGS)
 	sbuf_new(&sb, NULL, 256, SBUF_AUTOEXTEND | SBUF_INCLUDENUL);
 
 	mtx_lock(&root_holds_mtx);
-	LIST_FOREACH(h, &root_holds, list) {
+	LIST_FOREACH(h, &root_holds, list)
+	{
 		if (h != LIST_FIRST(&root_holds))
 			sbuf_putc(&sb, ' ');
 		sbuf_printf(&sb, "%s", h->who);
@@ -202,8 +206,7 @@ root_mount_hold(const char *identifier)
 }
 
 // rel: release，对应上面的hold
-void
-root_mount_rel(struct root_hold_token *h)
+void root_mount_rel(struct root_hold_token *h)
 {
 
 	if (h == NULL)
@@ -217,8 +220,7 @@ root_mount_rel(struct root_hold_token *h)
 	free(h, M_DEVBUF);
 }
 
-int
-root_mounted(void)
+int root_mounted(void)
 {
 
 	/* No mutex is acquired here because int stores are atomic. */
@@ -245,16 +247,16 @@ set_rootvnode(void)
 	if (VFS_ROOT(TAILQ_FIRST(&mountlist), LK_EXCLUSIVE, &rootvnode))
 		panic("Cannot find root vnode");
 
-	VOP_UNLOCK(rootvnode, 0);
+	VOP_UNLOCK(rootvnode, 0); // rootvnode v_lock 解锁状态
 	/* 获取当前线程对应的进程信息 */
 	p = curthread->td_proc;
 	FILEDESC_XLOCK(p->p_fd);
 
 	/* 设置进程当前目录 */
-	if (p->p_fd->fd_cdir != NULL)	
+	if (p->p_fd->fd_cdir != NULL)
 		vrele(p->p_fd->fd_cdir);
 	p->p_fd->fd_cdir = rootvnode;
-	VREF(rootvnode);
+	VREF(rootvnode); // rootvnode interlock 解锁状态
 
 	/* 设置进程根目录 */
 	if (p->p_fd->fd_rdir != NULL)
@@ -268,14 +270,15 @@ set_rootvnode(void)
 static int
 vfs_mountroot_devfs(struct thread *td, struct mount **mpp)
 {
-	struct vfsoptlist *opts;	// operation链表
+	struct vfsoptlist *opts; // operation链表
 	struct vfsconf *vfsp;
 	struct mount *mp;
 	int error;
 
-	*mpp = NULL;	/* 初始化为null */
+	*mpp = NULL; /* 初始化为null */
 
-	if (rootdevmp != NULL) {
+	if (rootdevmp != NULL)
+	{
 		/*
 		 * Already have /dev; this happens during rerooting.
 		 * 如果 rootdevmp 不为空的话，就将其标记为 busy 状态
@@ -284,26 +287,28 @@ vfs_mountroot_devfs(struct thread *td, struct mount **mpp)
 		if (error != 0)
 			return (error);
 		*mpp = rootdevmp;
-	} else {
-		/* 
+	}
+	else
+	{
+		/*
 			处理 rootdevmp 为 null 的代码分支。VFS_SET 宏定义就是将每个文件系统对应的 vfsconf 结构体进行了封装
 			并注册进了内核当中。启动启动的时候会调用 vfs_modevent 函数，然后再调用 vfs_register 函数，该函数就是
 			对全局 vfsconf 链表进行填充。
 			感觉到这里的时候全局 vfsconf 链表中已经包含有所有注册的文件系统结构，这里调用 vfs_byname 函数就从链表
 			中通过名称拿到了结构体数据。后面调用注册函数的时候就对应到了 devfs 注册的函数
 		*/
-		vfsp = vfs_byname("devfs");	// 应该就是查找相应的文件系统设备文件，设置名称
+		vfsp = vfs_byname("devfs"); // 应该就是查找相应的文件系统设备文件，设置名称
 		KASSERT(vfsp != NULL, ("Could not find devfs by name"));
 		if (vfsp == NULL)
 			return (ENOENT);
 
-		/* 
+		/*
 			传入一个 vfsconf 结构体和一个空 vnode 指针，函数的作用可以认为是实例化出一个
 			mount 结构体对象；mp 的挂载点的名称信息在 alloc 中更新成了 "/dev"
 		*/
 		mp = vfs_mount_alloc(NULLVP, vfsp, "/dev", td->td_ucred);
 
-		error = VFS_MOUNT(mp);	// 挂载 /dev，执行的是 devfs_mount 函数
+		error = VFS_MOUNT(mp); // 挂载 /dev，执行的是 devfs_mount 函数
 		KASSERT(error == 0, ("VFS_MOUNT(devfs) failed %d", error));
 		if (error)
 			return (error);
@@ -324,7 +329,7 @@ vfs_mountroot_devfs(struct thread *td, struct mount **mpp)
 		mtx_unlock(&mountlist_mtx);
 
 		*mpp = mp;
-		rootdevmp = mp;	// 更新root devcie
+		rootdevmp = mp; // 更新root devcie
 	}
 
 	set_rootvnode();
@@ -366,7 +371,8 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 		如果不一致的话，那就把新根文件系统挂载点从链表现在的位置上移除，然后
 		插入到链表头部。也就是说链表头部位置应该就是新根文件系统挂载点结构
 	*/
-	if (mporoot != mpdevfs) {
+	if (mporoot != mpdevfs)
+	{
 		TAILQ_REMOVE(&mountlist, mpnroot, mnt_list);
 		TAILQ_INSERT_HEAD(&mountlist, mpnroot, mnt_list);
 	}
@@ -384,58 +390,67 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 	cache_purgevfs(mporoot, true);
 	if (mporoot != mpdevfs)
 		cache_purgevfs(mpdevfs, true);
-
+	/*
+		root vnode 都是一个独占锁的方式获取的，这里获取的是 old root vnode，给 v_lock 加独占锁。
+		然后是给 interlock 加锁，修改 v_iflag 的属性信息。
+	*/
 	VFS_ROOT(mporoot, LK_EXCLUSIVE, &vporoot);
 
 	VI_LOCK(vporoot);
-	vporoot->v_iflag &= ~VI_MOUNT;
+	vporoot->v_iflag &= ~VI_MOUNT; // 消除 VI_MOUNT 属性
 	VI_UNLOCK(vporoot);
 	vporoot->v_mountedhere = NULL;
-	mporoot->mnt_flag &= ~MNT_ROOTFS;
+	mporoot->mnt_flag &= ~MNT_ROOTFS; // devfs 不再是根文件系统
 	mporoot->mnt_vnodecovered = NULL;
-	vput(vporoot);
+	vput(vporoot); // 前面以独占的方式加锁，这里对 v_lock 进行解锁
 
 	/* Set up the new rootvnode, and purge the cache */
 	mpnroot->mnt_vnodecovered = NULL;
-	set_rootvnode();
-	cache_purgevfs(rootvnode->v_mount, true);
+	set_rootvnode();													// 处理完成后，rootvnode v_lock/v_interlock 都是解锁状态
+	cache_purgevfs(rootvnode->v_mount, true); // 清空 new root vnode 的所有缓存数据
 
 	/*
 		从调试的过程来看，mporoot 其实就是 devfs，所以它跟 mpdevfs 是同一个对象。
 	*/
-	if (mporoot != mpdevfs) {
+	if (mporoot != mpdevfs)
+	{
 		/* Remount old root under /.mount or /mnt */
 		fspath = "/.mount";
 		NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE,
-		    fspath, td);
+					 fspath, td);
 		error = namei(&nd);
-		if (error) {
+		if (error)
+		{
 			NDFREE(&nd, NDF_ONLY_PNBUF);
 			fspath = "/mnt";
 			NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE,
-			    fspath, td);
+						 fspath, td);
 			error = namei(&nd);
 		}
-		if (!error) {
+		if (!error)
+		{
 			vp = nd.ni_vp;
 			error = (vp->v_type == VDIR) ? 0 : ENOTDIR;
 			if (!error)
 				error = vinvalbuf(vp, V_SAVE, 0, 0);
-			if (!error) {
+			if (!error)
+			{
 				cache_purge(vp);
 				mporoot->mnt_vnodecovered = vp;
 				vp->v_mountedhere = mporoot;
 				strlcpy(mporoot->mnt_stat.f_mntonname,
-				    fspath, MNAMELEN);
+								fspath, MNAMELEN);
 				VOP_UNLOCK(vp, 0);
-			} else
+			}
+			else
 				vput(vp);
 		}
 		NDFREE(&nd, NDF_ONLY_PNBUF);
 
 		if (error)
 			printf("mountroot: unable to remount previous root "
-			    "under /.mount or /mnt (error %d)\n", error);
+						 "under /.mount or /mnt (error %d)\n",
+						 error);
 	}
 
 	/* Remount devfs under /dev */
@@ -445,14 +460,17 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 		而不是 devfs vnode 对象。后面可能会进行替换
 	*/
 	error = namei(&nd);
-	if (!error) {
+	if (!error)
+	{
 		vp = nd.ni_vp;
 		error = (vp->v_type == VDIR) ? 0 : ENOTDIR;
 		if (!error)
 			error = vinvalbuf(vp, V_SAVE, 0, 0);
-		if (!error) {
+		if (!error)
+		{
 			vpdevfs = mpdevfs->mnt_vnodecovered;
-			if (vpdevfs != NULL) {
+			if (vpdevfs != NULL)
+			{
 				cache_purge(vpdevfs);
 				vpdevfs->v_mountedhere = NULL;
 				vrele(vpdevfs);
@@ -460,22 +478,26 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 			mpdevfs->mnt_vnodecovered = vp;
 			vp->v_mountedhere = mpdevfs;
 			VOP_UNLOCK(vp, 0);
-		} else
+		}
+		else
 			vput(vp);
 	}
 	if (error)
 		printf("mountroot: unable to remount devfs under /dev "
-		    "(error %d)\n", error);
+					 "(error %d)\n",
+					 error);
 	NDFREE(&nd, NDF_ONLY_PNBUF);
 
-	if (mporoot == mpdevfs) {
+	if (mporoot == mpdevfs)
+	{
 		vfs_unbusy(mpdevfs);
 		/* Unlink the no longer needed /dev/dev -> / symlink */
 		error = kern_unlinkat(td, AT_FDCWD, "/dev/dev",
-		    UIO_SYSSPACE, 0);
+													UIO_SYSSPACE, 0);
 		if (error)
 			printf("mountroot: unable to unlink /dev/dev "
-			    "(error %d)\n", error);
+						 "(error %d)\n",
+						 error);
 	}
 }
 
@@ -484,12 +506,12 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
  */
 
 /* Parser character classes. */
-#define	CC_WHITESPACE		-1
-#define	CC_NONWHITESPACE	-2
+#define CC_WHITESPACE -1
+#define CC_NONWHITESPACE -2
 
 /* Parse errors. */
-#define	PE_EOF			-1
-#define	PE_EOL			-2
+#define PE_EOF -1
+#define PE_EOL -2
 
 static __inline int
 parse_peek(char **conf)
@@ -521,11 +543,13 @@ parse_skipto(char **conf, int mc)
 {
 	int c, match;
 
-	while (1) {
+	while (1)
+	{
 		c = parse_peek(conf); // 每次从conf中取出一个数据
 		if (c == 0)
 			return (PE_EOF);
-		switch (mc) {
+		switch (mc)
+		{
 		case CC_WHITESPACE:
 			// 跳转到字符为空的位置
 			match = (c == ' ' || c == '\t' || c == '\n') ? 1 : 0;
@@ -542,12 +566,12 @@ parse_skipto(char **conf, int mc)
 		}
 		if (match)
 			break;
-		parse_advance(conf); //conf指针执行++操作
+		parse_advance(conf); // conf指针执行++操作
 	}
 	return (0);
 }
 
-/* 
+/*
 	conf 其中一种情况是 vfs.root.mountfrom 环境变量中包含的数据
 	处理的逻辑是：首先跳转到字符串中不为空的位置，然后在跳转到字符串中空字符的位置，
 	再把两个指针作差，计算出截取到的字符串的长度
@@ -577,7 +601,8 @@ parse_dir_ask_printenv(const char *var)
 	char *val;
 
 	val = kern_getenv(var);
-	if (val != NULL) {
+	if (val != NULL)
+	{
 		printf("  %s=%s\n", var, val);
 		freeenv(val);
 	}
@@ -611,18 +636,21 @@ parse_dir_ask(char **conf)
 	printf("  .               Yield 1 second (for background tasks)\n");
 	printf("  <empty line>    Abort manual input\n");
 
-	do {
+	do
+	{
 		error = EINVAL;
 		printf("\nmountroot> ");
 		cngets(name, sizeof(name), GETS_ECHO);
 		if (name[0] == '\0')
 			break;
-		if (name[0] == '?' && name[1] == '\0') {
+		if (name[0] == '?' && name[1] == '\0')
+		{
 			printf("\nList of GEOM managed disk devices:\n  ");
 			g_dev_print();
 			continue;
 		}
-		if (name[0] == '.' && name[1] == '\0') {
+		if (name[0] == '.' && name[1] == '\0')
+		{
 			pause("rmask", hz);
 			continue;
 		}
@@ -663,7 +691,7 @@ parse_dir_md(char **conf)
 
 	/* Open /dev/mdctl so that we can attach/detach. */
 	error = kern_openat(td, AT_FDCWD, "/dev/" MDCTL_NAME, UIO_SYSSPACE,
-	    O_RDWR, 0);
+											O_RDWR, 0);
 	if (error)
 		goto out;
 
@@ -671,7 +699,8 @@ parse_dir_md(char **conf)
 	mdio->md_version = MDIOVERSION;
 	mdio->md_type = MD_VNODE;
 
-	if (root_mount_mddev != -1) {
+	if (root_mount_mddev != -1)
+	{
 		mdio->md_unit = root_mount_mddev;
 		error = kern_ioctl(td, fd, MDIOCDETACH, (void *)mdio);
 		/* Ignore errors. We don't care. */
@@ -686,7 +715,8 @@ parse_dir_md(char **conf)
 	if (error)
 		goto out;
 
-	if (mdio->md_unit > 9) {
+	if (mdio->md_unit > 9)
+	{
 		printf("rootmount: too many md units\n");
 		mdio->md_file = NULL;
 		mdio->md_options = 0;
@@ -702,7 +732,7 @@ parse_dir_md(char **conf)
 
 	error = kern_close(td, fd);
 
- out:
+out:
 	free(mdio, M_TEMP);
 	return (error);
 }
@@ -725,7 +755,8 @@ parse_dir_onfail(char **conf)
 		root_mount_onfail = A_REBOOT;
 	else if (!strcmp(action, "retry"))
 		root_mount_onfail = A_RETRY;
-	else {
+	else
+	{
 		printf("rootmount: %s: unknown action\n", action);
 		error = EINVAL;
 	}
@@ -771,7 +802,8 @@ parse_directive(char **conf)
 		error = parse_dir_onfail(conf);
 	else if (strcmp(dir, ".timeout") == 0)
 		error = parse_dir_timeout(conf);
-	else {
+	else
+	{
 		printf("mountroot: invalid directive `%s'\n", dir);
 		/* Ignore the rest of the line. */
 		(void)parse_skipto(conf, '\n');
@@ -795,7 +827,7 @@ parse_mount_dev_present(const char *dev)
 	return (error != 0) ? 0 : 1;
 }
 
-#define	ERRMSGL	255
+#define ERRMSGL 255
 static int
 parse_mount(char **conf)
 {
@@ -809,7 +841,8 @@ parse_mount(char **conf)
 		return (error);
 	fs = tok;
 	error = parse_skipto(&tok, ':');
-	if (error) {
+	if (error)
+	{
 		free(fs, M_TEMP);
 		return (error);
 	}
@@ -817,7 +850,8 @@ parse_mount(char **conf)
 	parse_advance(&tok);
 	dev = tok;
 
-	if (root_mount_mddev != -1) {
+	if (root_mount_mddev != -1)
+	{
 		/* Handle substitution for the md unit number. */
 		tok = strstr(dev, "md#");
 		if (tok != NULL)
@@ -829,11 +863,14 @@ parse_mount(char **conf)
 	opts = (error == 0) ? tok : NULL;
 
 	printf("Trying to mount root from %s:%s [%s]...\n", fs, dev,
-	    (opts != NULL) ? opts : "");
+				 (opts != NULL) ? opts : "");
 
 	errmsg = malloc(ERRMSGL, M_TEMP, M_WAITOK | M_ZERO);
-
-	if (vfs_byname(fs) == NULL) {
+	/*
+		遍历 vfsconf list，通过对比名称判断系统中是否存在我们所要挂载的 fs
+	*/
+	if (vfs_byname(fs) == NULL)
+	{
 		strlcpy(errmsg, "unknown file system", ERRMSGL);
 		error = ENOENT;
 		goto out;
@@ -846,7 +883,8 @@ parse_mount(char **conf)
 	delay = hz / 10;
 	timeout = root_mount_timeout * hz;
 
-	for (;;) {
+	for (;;)
+	{
 		ma = NULL;
 		ma = mount_arg(ma, "fstype", fs, -1);
 		ma = mount_arg(ma, "fspath", "/", -1);
@@ -860,18 +898,21 @@ parse_mount(char **conf)
 			break;
 
 		if (root_mount_timeout * hz == timeout ||
-		    (bootverbose && timeout % hz == 0)) {
+				(bootverbose && timeout % hz == 0))
+		{
 			printf("Mounting from %s:%s failed with error %d; "
-			    "retrying for %d more second%s\n", fs, dev, error,
-			    timeout / hz, (timeout / hz > 1) ? "s" : "");
+						 "retrying for %d more second%s\n",
+						 fs, dev, error,
+						 timeout / hz, (timeout / hz > 1) ? "s" : "");
 		}
 		pause("rmretry", delay);
 		timeout -= delay;
 	}
- out:
-	if (error) {
+out:
+	if (error)
+	{
 		printf("Mounting from %s:%s failed with error %d",
-		    fs, dev, error);
+					 fs, dev, error);
 		if (errmsg[0] != '\0')
 			printf(": %s", errmsg);
 		printf(".\n");
@@ -888,7 +929,7 @@ parse_mount(char **conf)
 /*
 	sb中包含有从环境信息中提取出的数据，rootdevname信息
 	gdb: sb - .onfail panic\n.timeout 3\n.ask\n
-*/ 
+*/
 static int
 vfs_mountroot_parse(struct sbuf *sb, struct mount *mpdevfs)
 {
@@ -903,28 +944,31 @@ retry:
 	mp = TAILQ_NEXT(mpdevfs, mnt_list);
 	error = (mp == NULL) ? 0 : EDOOFUS;
 	root_mount_onfail = A_CONTINUE;
-	while (mp == NULL) {
+	while (mp == NULL)
+	{
 		/*
 			parse_skipto() 函数感觉应该是跳过字符串中的通用空白符，实际调试中 sbuf 中的数据变化情况：
-			  .onfail panic\n.timeout 3\nufs:/dev/vtbd0 \nufs:/dev/vtbd0p3\n.ask\n
+				.onfail panic\n.timeout 3\nufs:/dev/vtbd0 \nufs:/dev/vtbd0p3\n.ask\n
 				\n.timeout 3\nufs:/dev/vtbd0 \nufs:/dev/vtbd0p3\n.ask\n
 				.timeout 3\nufs:/dev/vtbd0 \nufs:/dev/vtbd0p3\n.ask\n
 				\nufs:/dev/vtbd0 \nufs:/dev/vtbd0p3\n.ask\n
 				ufs:/dev/vtbd0 \nufs:/dev/vtbd0p3\n.ask\n
 				\nufs:/dev/vtbd0p3\n.ask\n
-			
+
 			处理到 ufs:/dev/vtbd0 时就会跳转到 parse_mount 函数，该函数解析之后就可以知道根文件系统
 			类型是 ufs，对应设备文件路径是 /dev/vtbd0。该函数就会调用 kernel_mount 函数挂载 ufs，
 			然后系统就能正常启动了
 		*/
 		error = parse_skipto(&conf, CC_NONWHITESPACE);
-		if (error == PE_EOL) {
+		if (error == PE_EOL)
+		{
 			parse_advance(&conf);
 			continue;
 		}
 		if (error < 0)
 			break;
-		switch (parse_peek(&conf)) {
+		switch (parse_peek(&conf))
+		{
 		case '#':
 			/*
 				这里是跳转到 \n，然后回到循环开头，跳过空白，然后就会指向下一个字符串的起始位置
@@ -939,9 +983,10 @@ retry:
 			break;
 		default:
 			error = parse_mount(&conf);
-			if (error == -1) {
+			if (error == -1)
+			{
 				printf("mountroot: invalid file system "
-				    "specification.\n");
+							 "specification.\n");
 				error = 0;
 			}
 			break;
@@ -949,7 +994,8 @@ retry:
 		if (error < 0)
 			break;
 		/* Ignore any trailing garbage on the line. */
-		if (parse_peek(&conf) != '\n') {
+		if (parse_peek(&conf) != '\n')
+		{
 			printf("mountroot: advancing to next directive...\n");
 			(void)parse_skipto(&conf, '\n');
 		}
@@ -961,7 +1007,8 @@ retry:
 	/*
 	 * We failed to mount (a new) root.
 	 */
-	switch (root_mount_onfail) {
+	switch (root_mount_onfail)
+	{
 	case A_CONTINUE:
 		break;
 	case A_PANIC:
@@ -994,21 +1041,24 @@ vfs_mountroot_conf0(struct sbuf *sb)
 		sbuf_printf(sb, "%s\n", ROOTDEVNAME);
 #endif
 	// 处理设备是只读光盘的情况
-	if (boothowto & RB_CDROM) {
+	if (boothowto & RB_CDROM)
+	{
 		sbuf_printf(sb, "cd9660:/dev/cd0 ro\n");
 		sbuf_printf(sb, ".timeout 0\n");
 		sbuf_printf(sb, "cd9660:/dev/cd1 ro\n");
 		sbuf_printf(sb, ".timeout %d\n", root_mount_timeout);
 	}
-	s = kern_getenv("vfs.root.mountfrom");	// 获取环境变量，gdb 打印： ufs:/dev/vtbd0
-	if (s != NULL) {
+	s = kern_getenv("vfs.root.mountfrom"); // 获取环境变量，gdb 打印： ufs:/dev/vtbd0
+	if (s != NULL)
+	{
 		opt = kern_getenv("vfs.root.mountfrom.options");
 		tok = s;
 		error = parse_token(&tok, &mnt);
-		while (!error) {
+		while (!error)
+		{
 			// 循环检测，将环境变量中的数组全部取出，放入到sbuf
 			sbuf_printf(sb, "%s %s\n", mnt,
-			    (opt != NULL) ? opt : "");
+									(opt != NULL) ? opt : "");
 			free(mnt, M_TEMP);
 			error = parse_token(&tok, &mnt);
 		}
@@ -1047,10 +1097,11 @@ vfs_mountroot_readconf(struct thread *td, struct sbuf *sb)
 	NDFREE(&nd, NDF_ONLY_PNBUF);
 	ofs = 0;
 	len = sizeof(buf) - 1;
-	while (1) {
+	while (1)
+	{
 		error = vn_rdwr(UIO_READ, nd.ni_vp, buf, len, ofs,
-		    UIO_SYSSPACE, IO_NODELOCKED, td->td_ucred,
-		    NOCRED, &resid, td);
+										UIO_SYSSPACE, IO_NODELOCKED, td->td_ucred,
+										NOCRED, &resid, td);
 		if (error)
 			break;
 		if (resid == len)
@@ -1075,22 +1126,25 @@ vfs_mountroot_wait(void)
 	TSENTER();
 
 	curfail = 0;
-	while (1) {
+	while (1)
+	{
 		g_waitidle();
 		mtx_lock(&root_holds_mtx);
-		if (LIST_EMPTY(&root_holds)) {
+		if (LIST_EMPTY(&root_holds))
+		{
 			mtx_unlock(&root_holds_mtx);
 			break;
 		}
-		if (ppsratecheck(&lastfail, &curfail, 1)) {
+		if (ppsratecheck(&lastfail, &curfail, 1))
+		{
 			printf("Root mount waiting for:");
 			LIST_FOREACH(h, &root_holds, list)
-				printf(" %s", h->who);
+			printf(" %s", h->who);
 			printf("\n");
 		}
 		TSWAIT("root mount");
 		msleep(&root_holds, &root_holds_mtx, PZERO | PDROP, "roothold",
-		    hz);
+					 hz);
 		TSUNWAIT("root mount");
 	}
 
@@ -1108,7 +1162,8 @@ vfs_mountroot_wait_if_neccessary(const char *fs, const char *dev)
 	 * behaviour by setting vfs.root_mount_always_wait=1.
 	 */
 	if (strcmp(fs, "zfs") == 0 || strstr(fs, "nfs") != NULL ||
-	    dev[0] == '\0' || root_mount_always_wait != 0) {
+			dev[0] == '\0' || root_mount_always_wait != 0)
+	{
 		vfs_mountroot_wait();
 		return (0);
 	}
@@ -1130,7 +1185,8 @@ vfs_mountroot_wait_if_neccessary(const char *fs, const char *dev)
 	printf("mountroot: waiting for device %s...\n", dev);
 	delay = hz / 10;
 	timeout = root_mount_timeout * hz;
-	do {
+	do
+	{
 		pause("rmdev", delay);
 		timeout -= delay;
 	} while (timeout > 0 && !parse_mount_dev_present(dev));
@@ -1149,15 +1205,14 @@ vfs_mountroot_wait_if_neccessary(const char *fs, const char *dev)
 		- parse_mount：解析到环境变量中的 ufs:/dev/vtbd0 (qemu环境)，将 ufs 作为根文件系统
 		- 执行挂载操作
 */
-void
-vfs_mountroot(void)
+void vfs_mountroot(void)
 {
 	struct mount *mp;
 	struct sbuf *sb;
 	struct thread *td;
 	time_t timebase;
 	int error;
-	
+
 	mtx_assert(&Giant, MA_NOTOWNED);
 
 	TSENTER();
@@ -1169,9 +1224,11 @@ vfs_mountroot(void)
 	sbuf_finish(sb);
 
 	error = vfs_mountroot_devfs(td, &mp);
-	while (!error) {
-		error = vfs_mountroot_parse(sb, mp); // 解析sbuf_data数据
-		if (!error) {
+	while (!error)
+	{
+		error = vfs_mountroot_parse(sb, mp); // 解析 sbuf_data 数据
+		if (!error)
+		{
 			vfs_mountroot_shuffle(td, mp);
 			sbuf_clear(sb);
 			error = vfs_mountroot_readconf(td, sb);
@@ -1189,18 +1246,19 @@ vfs_mountroot(void)
 	 */
 	timebase = 0;
 	mtx_lock(&mountlist_mtx);
-	/* 
+	/*
 		初始化 mount list，推测所有的挂载记录都应该是存储在该链表中。遍历整个链表中的元素，
 		找出其中最晚挂载时间作为 timebase
 	*/
 	mp = TAILQ_FIRST(&mountlist);
-	while (mp != NULL) {
+	while (mp != NULL)
+	{
 		if (mp->mnt_time > timebase)
 			timebase = mp->mnt_time;
 		mp = TAILQ_NEXT(mp, mnt_list);
 	}
 	mtx_unlock(&mountlist_mtx);
-	inittodr(timebase);	/* 利用timebase初始化系统时间 */
+	inittodr(timebase); /* 利用timebase初始化系统时间 */
 
 	/* Keep prison0's root in sync with the global rootvnode. */
 	mtx_lock(&prison0.pr_mtx);
@@ -1230,21 +1288,25 @@ parse_mountroot_options(struct mntarg *ma, const char *options)
 		return (ma);
 
 	p = opts = strdup(options, M_MOUNT);
-	if (opts == NULL) {
+	if (opts == NULL)
+	{
 		return (ma);
 	}
 
-	while((name = strsep(&p, ",")) != NULL) {
+	while ((name = strsep(&p, ",")) != NULL)
+	{
 		if (name[0] == '\0')
 			break;
 
 		val = strchr(name, '=');
-		if (val != NULL) {
+		if (val != NULL)
+		{
 			*val = '\0';
 			++val;
 		}
-		if( strcmp(name, "rw") == 0 ||
-		    strcmp(name, "noro") == 0) {
+		if (strcmp(name, "rw") == 0 ||
+				strcmp(name, "noro") == 0)
+		{
 			/*
 			 * The first time we mount the root file system,
 			 * we need to mount 'ro', so We need to ignore
@@ -1258,7 +1320,7 @@ parse_mountroot_options(struct mntarg *ma, const char *options)
 			val_arg = strdup(val, M_MOUNT);
 
 		ma = mount_arg(ma, name_arg, val_arg,
-		    (val_arg != NULL ? -1 : 0));
+									 (val_arg != NULL ? -1 : 0));
 	}
 	free(opts, M_MOUNT);
 	return (ma);

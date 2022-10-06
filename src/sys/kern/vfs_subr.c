@@ -2932,7 +2932,11 @@ vget(struct vnode *vp, int flags, struct thread *td)
 		这里要注意，vget() 还要对 vnode 进行加锁操作
 	*/
 	if ((error = vn_lock(vp, flags)) != 0) {
-		vdrop(vp);
+		/*
+			当对 vnode 加锁失败的时候，由于前面增加了 holdcount，所以这里要做一步
+			vdrop() 操作，将 holdcount 恢复到原有的状态
+		*/
+		vdrop(vp);	
 		CTR2(KTR_VFS, "%s: impossible to lock vnode %p", __func__,
 		    vp);
 		return (error);
@@ -2944,8 +2948,11 @@ vget(struct vnode *vp, int flags, struct thread *td)
 	 * trigger inactive processing so just make a best effort
 	 * here at preventing a reference to a removed file.  If
 	 * we don't succeed no harm is done.
+	 * 我们不保证任何特定的关闭都会触发非活动处理，因此请尽最大努力防止对
+	 * 已删除文件的引用。如果我们不成功，就不会有任何伤害
 	 *
 	 * Upgrade our holdcnt to a usecount.
+	 * 将我们的 holdcnt 升级为 usecount
 	 */
 	if (vp->v_type == VCHR ||
 	    !refcount_acquire_if_not_zero(&vp->v_usecount)) {
@@ -2970,7 +2977,8 @@ vget(struct vnode *vp, int flags, struct thread *td)
 /*
  * Increase the reference (use) and hold count of a vnode.
  * This will also remove the vnode from the free list if it is presently free.
- * 如果 vnode 当前是空闲的，这也将从空闲列表中删除它
+ * 如果 vnode 当前是空闲的，这也将从空闲列表中删除它。
+ * vref() 操作对象是 vnode holdcount，所以它应该只关注 interlock，而不会去管 vn_lock
  */
 void
 vref(struct vnode *vp)
@@ -3016,6 +3024,9 @@ vrefact(struct vnode *vp)
 		vref(vp);
 		return;
 	}
+	/*
+		freebsd-13.0 版本中该函数的行为发生了变化，只增加 usecount，不增加 holdcount
+	*/
 #ifdef INVARIANTS
 	int old = atomic_fetchadd_int(&vp->v_holdcnt, 1);
 	VNASSERT(old > 0, vp, ("%s: wrong hold count", __func__));
@@ -3063,6 +3074,10 @@ vputx(struct vnode *vp, int func)
 	int error;
 
 	KASSERT(vp != NULL, ("vputx: null vp"));
+	/*
+		总这里可以看出，如果我们操作类型是 vunref() 或者 vput()，那我们就要保证传入的
+		vnode 是处于加锁的状态
+	*/
 	if (func == VPUTX_VUNREF)
 		ASSERT_VOP_LOCKED(vp, "vunref");
 	else if (func == VPUTX_VPUT)

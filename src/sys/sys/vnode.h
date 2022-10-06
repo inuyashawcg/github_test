@@ -203,6 +203,10 @@ struct vnode {
 
 	u_int	v_holdcnt;			/* I prevents recycling. */
 	u_int	v_usecount;			/* I ref count of users */
+	/*
+		v_iflag 表示的应该是 v_interlock 的属性；
+		v_vflag 表示的应该是 v_lock 的属性
+	*/
 	u_int	v_iflag;			/* i vnode flags (see below) */
 	u_int	v_vflag;			/* v vnode flags */
 	u_int	v_mflag;			/* l mnt-specific vnode flags */

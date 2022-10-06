@@ -270,11 +270,8 @@ namei_handle_root(struct nameidata *ndp, struct vnode **dpp)
 		cnp->cn_nameptr++;
 		ndp->ni_pathlen--;
 	}
-	if (kc_strncmp(cnp->cn_nameptr, "tpt", 3) == 0)
-		*dpp = ndp->ni_startdir;
-	else
-		*dpp = ndp->ni_rootdir;
-	vrefact(*dpp);
+	*dpp = ndp->ni_rootdir;
+	vrefact(*dpp);	// 注意，13.0 当中该函数只会增加 usecount，锁的状态没有改变
 	return (0);
 }
 
@@ -337,9 +334,6 @@ namei_setup(struct nameidata *ndp, struct vnode **dpp, struct pwd **pwdp)
 
 	if (cnp->cn_pnbuf[0] == '/') {
 		ndp->ni_resflags |= NIRES_ABS;
-		// TODO: to be compatible root directory is /tpt.
-		if (kc_strncmp(cnp->cn_pnbuf, "/tpt", 4) == 0)
-			ndp->ni_startdir = pwd->pwd_cdir;
 		error = namei_handle_root(ndp, dpp);
 	} else {
 		if (ndp->ni_startdir != NULL) {
@@ -605,10 +599,7 @@ namei(struct nameidata *ndp)
 	 */
 	for (;;) {
 		ndp->ni_startdir = dp;
-		if (!kc_strcmp(dp->v_mount->mnt_vfc->vfc_name, "tptfs"))
-			error = tpt_lookup(ndp);
-		else
-			error = lookup(ndp);
+		error = lookup(ndp);
 		if (error != 0)
 			goto out;
 
@@ -809,6 +800,7 @@ lookup(struct nameidata *ndp)
 
 	/*
 	 * Setup: break out flag bits into variables.
+	 		wantparent 在查找过程中只计算了一次，docache 也是
 	 */
 	ni_dvp_unlocked = 0;
 	wantparent = cnp->cn_flags & (LOCKPARENT | WANTPARENT);
@@ -835,6 +827,12 @@ lookup(struct nameidata *ndp)
 	/*
 	 * We use shared locks until we hit the parent of the last cn then
 	 * we adjust based on the requesting flags.
+	 * 我们使用共享锁，直到找到最后一个组件的父级，然后根据请求标志进行调整。
+	 * 这里首先将 cn_lkflags 初始化为 LK_SHARED，说明起始目录是加共享锁。然后后续处理到最后
+	 * 一个组件的时候u，判断 cn_flags 来决定是否对目录加独占锁。这个貌似对于根目录和其他目录
+	 * 并没有进行区别对待，都是按照同样的逻辑去处理的。
+	 * 是不是每次 startdir vnode 都是处于未加锁的状态进来的？
+	 * 那经过前次处理过后的 dir vnode，是不是执行对应的解锁操作？
 	 */
 	cnp->cn_lkflags = LK_SHARED;
 	dp = ndp->ni_startdir;
@@ -1031,6 +1029,9 @@ unionlookup:
 #endif
 	ndp->ni_dvp = dp;
 	ndp->ni_vp = NULL;
+	/*
+		注意这里，dp 此时一定要是处在加锁状态
+	*/
 	ASSERT_VOP_LOCKED(dp, "lookup");
 	/*
 	 * If we have a shared lock we may need to upgrade the lock for the
@@ -1046,6 +1047,11 @@ unionlookup:
 	/*
 	 * If we're looking up the last component and we need an exclusive
 	 * lock, adjust our lkflags.
+	 * 我们对 vnode 加锁利用的是 cn_lkflags 这个参数，然后判断对最后一个组件的操作行为需要判断
+	 * cnp->cn_flags 中包含的属性信息。这些属性信息是在更加上层的函数中设定的，例如 vfs syscall
+	 * 函数。
+	 * cn_lkflags 貌似只会包含两种类型，共享和独占。然后会根据 cn_flags 去判断最后一个组件操作
+	 * 是否需要改变类型。是不是可以说明，对于中间组件的操作都是采用的 shared lock
 	 */
 	if (needs_exclusive_leaf(dp->v_mount, cnp->cn_flags))
 		cnp->cn_lkflags = LK_EXCLUSIVE;
@@ -1211,6 +1217,26 @@ nextname:
 			cnp->cn_nameptr++;
 			ndp->ni_pathlen--;
 		}
+		/*
+			注意这里，代码中经常出现这样的场景，就是如果 ni_dvp 与 ni_vp 相同的话，就调用 vrele();
+			不同的话就调用 vput()，为什么？ 应该还是 VOP_LOOKUP() 函数中对 ni_vp 也做了一些操作，
+			并且由于操作对象刚好是 ni_dvp，就改变了 ni_dvp 的状态，所以最后要用不同的函数对 ni_dvp 
+			做处理？
+
+			从代码注释可以看到，vput() 实现的效果 unclock() + vrele() 两个函数的合并。也就是说明
+			当 ni_dvp ！= ni_vp 的时候，ni_dvp 是处在锁定的状态，相同的时候则是处在非锁定状态？
+			而且这个锁对象是 vn_lock()，不是 interlock
+
+			从这两个函数调用底层函数 vputx() 的实现逻辑来看，vput() 其实是要确保传进来的 vnode 的
+			vn_lock 属于加锁状态。而 ni_dvp 初始状态应该是 LK_SHARED，即加了共享锁。执行完成之后
+			对 vnode 进行了解锁。vrele() 函数也是传入的是一个加锁状态的 vndoe，返回一个解锁的 vnode，
+			但是 vunref() 返回的是加锁状态的 vnode，从代码实现来看，该锁还是一个独占锁
+
+			因此，这里面的逻辑应该是这样的：当我们所要查找的目标文件刚好就是当前目录的时候，我们所要返回
+			的是一个保持加锁状态的 dir vnode；当不同的时候，ni_dvp 就要返回一个解锁状态的 dir vnode。
+			也从侧面说明，文件系统 lookup() 函数返回的 ni_vp 是处于加锁的状态。然后 vfs lookup()
+			再根据 struct componentname->cn_flags 的属性判断是否需要对 ni_vp 解锁
+		*/
 		if (ndp->ni_dvp != dp)
 			vput(ndp->ni_dvp);
 		else
