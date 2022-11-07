@@ -1,0 +1,45 @@
+////////////// 20221107 //////////////
+
+block number = 524
+
+(gdb) p ap[0]
+$71 = {
+  in_lbn = 0,
+  in_off = 0
+}
+(gdb) p ap[-1]
+$72 = {
+  in_lbn = -524,
+  in_off = 0
+}
+(gdb) p ap[-2]
+$73 = {
+  in_lbn = -269,
+  in_off = 1
+}
+(gdb) p ap[-3]
+$74 = {
+  in_lbn = -269,
+  in_off = 1
+}
+
+readindir (vp=0xffffffd009788b70, lbn=-269, daddr=1056, bpp=0x1def73540)
+    at /home/mercury/Documents/code/qihai/dev_rebuild/qihai/sys/fs/ext2fs/ext2_bmap.c:165
+165		mp = vp->v_mount;
+(gdb) n
+166		ump = VFSTOEXT2(mp);
+(gdb) 
+168		bp = getblk(vp, lbn, mp->mnt_stat.f_iosize, 0, 0, 0);
+(gdb) s    
+getblk (vp=0xffffffd009788b70, blkno=-269, size=1024, slpflag=0, slptimeo=0, flags=0)
+    at /home/mercury/Documents/code/qihai/dev_rebuild/qihai/sys/kernel/vfs_bio.cpp:3666
+3666		error = getblkx(vp, blkno, blkno, size, slpflag, slptimeo, flags, &bp);
+(gdb) s
+getblkx (vp=0xffffffd009788b70, blkno=-269, dblkno=-269, size=1024, slpflag=0, slptimeo=0, 
+    flags=0, bpp=0x1def733c0)
+    at /home/mercury/Documents/code/qihai/dev_rebuild/qihai/sys/kernel/vfs_bio.cpp:3726
+3726		KASSERT((flags & (GB_UNMAPPED | GB_KVAALLOC)) != GB_KVAALLOC,
+
+  ext2fs block map 中生成间接索引数组的情形，getblk() 传入的参数包含有负数，这对于 tptfs 来说是不存在的。
+可能更下层的函数能够处理当逻辑块号是负数的情况，但这是对于磁盘文件系统来说的。tptfs 应该是要重新设计该算法，
+只处理非负逻辑块号

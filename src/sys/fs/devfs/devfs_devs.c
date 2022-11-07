@@ -147,7 +147,6 @@ devfs_alloc(int flags)
 
 	/* 初始化 cdp_dirents 指针 */
 	cdp->cdp_dirents = &cdp->cdp_dirent0;
-
 	/*
 		创建新的 cdev_priv 对象时，会同步创建一个 struct cdev 对象，然后将这个
 		cdev 对象，而不是 cdev_priv 返回。cdp_c 是一个结构体对象，不是指针
@@ -161,8 +160,7 @@ devfs_alloc(int flags)
 }
 
 /* 应该是通过文件名查找对应的 dev */
-int devfs_dev_exists(const char *name)
-{
+int devfs_dev_exists(const char *name) {
 	/*
 		devfs 一些功能函数代码实现上有一个规律，那就是 cdev_priv 经常性的出现在
 		函数开头，说明这个结构体应该是有相当的重要性
@@ -233,8 +231,8 @@ void devfs_free(struct cdev *cdev)
 			- 释放 struct cdev 部分成员
 			- 释放 cdev_priv->cdp_inode
 			- 释放 cdev_priv
-
-		其实这些数据都是隶属于 devfs_dirent 结构中，所以该函数可以作为奇海设备文件类的函数成员
+		其实这些数据都是隶属于 devfs_dirent 结构中，所以该函数可以作为奇海设备文件类的函数成员。
+		但并不是释放 cdev 本身
 	*/
 }
 
@@ -247,8 +245,7 @@ devfs_find(struct devfs_dirent *dd, const char *name, int namelen, int type)
 {
 	struct devfs_dirent *de;
 
-	TAILQ_FOREACH(de, &dd->de_dlist, de_list)
-	{
+	TAILQ_FOREACH(de, &dd->de_dlist, de_list) {
 		/*
 			de_dirent 是 dirent 类型的一个结构体，它存放有directory entry 的 inode number，
 			name length 等信息。一般存在与目录结构体中，我们可以通过它获取到目录项的一些信息
@@ -264,7 +261,8 @@ devfs_find(struct devfs_dirent *dd, const char *name, int namelen, int type)
 		 * completely closed by the check, but it is similar
 		 * to the devfs_allocv() in making it unlikely enough.
 		 * 通过名称和 namelen 查找一个文件的时候，如果目标文件是字符设备，但是判断其属性发现，该设备
-		 * 节点目前处于非活动状态，就直接跳过名称匹配，进行下次查找
+		 * 节点目前处于非活动状态，就直接跳过名称匹配，进行下次查找；
+		 * tptfs 下的查找函数是否也要添加相应的处理逻辑？
 		 */
 		if (de->de_dirent->d_type == DT_CHR &&
 				(de->de_cdp->cdp_flags & CDP_ACTIVE) == 0)
@@ -285,8 +283,7 @@ devfs_find(struct devfs_dirent *dd, const char *name, int namelen, int type)
 	还有存在的必要？
 */
 struct devfs_dirent *
-devfs_newdirent(char *name, int namelen)
-{
+devfs_newdirent(char *name, int namelen) {
 	int i;
 	struct devfs_dirent *de;
 	struct dirent d;
@@ -344,8 +341,7 @@ devfs_parent_dirent(struct devfs_dirent *de)
 */
 struct devfs_dirent *
 devfs_vmkdir(struct devfs_mount *dmp, char *name, int namelen,
-						 struct devfs_dirent *dotdot, u_int inode)
-{
+						 struct devfs_dirent *dotdot, u_int inode) {
 	struct devfs_dirent *dd;
 	struct devfs_dirent *de;
 
@@ -388,12 +384,9 @@ devfs_vmkdir(struct devfs_mount *dmp, char *name, int namelen,
 	de->de_dirent->d_type = DT_DIR;
 	de->de_flags |= DE_DOTDOT;
 	TAILQ_INSERT_TAIL(&dd->de_dlist, de, de_list);
-	if (dotdot == NULL)
-	{
+	if (dotdot == NULL) {
 		de->de_dir = dd;
-	}
-	else
-	{
+	} else {
 		de->de_dir = dotdot;
 		sx_assert(&dmp->dm_lock, SX_XLOCKED);
 		TAILQ_INSERT_TAIL(&dotdot->de_dlist, dd, de_list);
@@ -446,8 +439,7 @@ devfs_rmdir_empty(struct devfs_mount *dm, struct devfs_dirent *de)
 
 	sx_assert(&dm->dm_lock, SX_XLOCKED);
 
-	for (;;)
-	{
+	for (;;) {
 		KASSERT(de->de_dirent->d_type == DT_DIR,
 						("devfs_rmdir_empty: de is not a directory"));
 
@@ -471,8 +463,7 @@ devfs_rmdir_empty(struct devfs_mount *dm, struct devfs_dirent *de)
 		devfs_delete(dm, de, DEVFS_DEL_NORECURSE);
 		devfs_delete(dm, de_dot, DEVFS_DEL_NORECURSE);
 		devfs_delete(dm, de_dotdot, DEVFS_DEL_NORECURSE);
-		if (DEVFS_DE_DROP(dd))
-		{
+		if (DEVFS_DE_DROP(dd)) {
 			devfs_dirent_free(dd);
 			return;
 		}
@@ -523,8 +514,7 @@ void devfs_delete(struct devfs_mount *dm, struct devfs_dirent *de, int flags)
 	*/
 	mtx_lock(&devfs_de_interlock);
 	vp = de->de_vnode;
-	if (vp != NULL)
-	{
+	if (vp != NULL) {
 		VI_LOCK(vp); // lock vnode interlock
 		mtx_unlock(&devfs_de_interlock);
 		vholdl(vp);
@@ -544,16 +534,14 @@ void devfs_delete(struct devfs_mount *dm, struct devfs_dirent *de, int flags)
 	/*
 		如果文件是链接文件的话，要把存放文件名的字段占用空间释放掉
 	*/
-	if (de->de_symlink)
-	{
+	if (de->de_symlink) {
 		free(de->de_symlink, M_DEVFS);
 		de->de_symlink = NULL;
 	}
 #ifdef MAC
 	mac_devfs_destroy(de);
 #endif
-	if (de->de_inode > DEVFS_ROOTINO)
-	{
+	if (de->de_inode > DEVFS_ROOTINO) {
 		// 申请的 inode number 也要释放掉并置零
 		devfs_free_cdp_inode(de->de_inode);
 		de->de_inode = 0;
@@ -565,8 +553,7 @@ void devfs_delete(struct devfs_mount *dm, struct devfs_dirent *de, int flags)
 	if (DEVFS_DE_DROP(de))
 		devfs_dirent_free(de);
 
-	if (dd != NULL)
-	{
+	if (dd != NULL) {
 		if (DEVFS_DE_DROP(dd))
 			devfs_dirent_free(dd);
 		else
@@ -588,8 +575,7 @@ devfs_purge(struct devfs_mount *dm, struct devfs_dirent *dd)
 	sx_assert(&dm->dm_lock, SX_XLOCKED);
 
 	DEVFS_DE_HOLD(dd);
-	for (;;)
-	{
+	for (;;) {
 		/*
 		 * Use TAILQ_LAST() to remove "." and ".." last.
 		 * We might need ".." to resolve a path in
@@ -625,16 +611,16 @@ devfs_purge(struct devfs_mount *dm, struct devfs_dirent *dd)
  * 考虑到默认数组是1个元素而不是malloc'ed，此函数在必要时扩展数组
  */
 static void
-devfs_metoo(struct cdev_priv *cdp, struct devfs_mount *dm)
-{
+devfs_metoo(struct cdev_priv *cdp, struct devfs_mount *dm) {
 	struct devfs_dirent **dep;
 	int siz;
-
+	/*
+		*dep 表示的还是一个指针，并不是 devfs_dirent 结构体的大小
+	*/
 	siz = (dm->dm_idx + 1) * sizeof *dep;
 	dep = malloc(siz, M_DEVFS2, M_WAITOK | M_ZERO);
 	dev_lock();
-	if (dm->dm_idx <= cdp->cdp_maxdirent)
-	{
+	if (dm->dm_idx <= cdp->cdp_maxdirent) {
 		/* We got raced */
 		dev_unlock();
 		free(dep, M_DEVFS2);
@@ -659,10 +645,8 @@ devfs_metoo(struct cdev_priv *cdp, struct devfs_mount *dm)
 		第二种可能就是循环删除
  */
 static int
-devfs_populate_loop(struct devfs_mount *dm, int cleanup)
-{
+devfs_populate_loop(struct devfs_mount *dm, int cleanup) {
 	struct cdev_priv *cdp; // cdev 的私有数据
-
 	/*
 		dd: dirent of directory.
 		dt: dirent of target file.
@@ -675,16 +659,12 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 
 	sx_assert(&dm->dm_lock, SX_XLOCKED); // devfs_mount 此时应该持有独占锁
 	dev_lock();
-
 	/*
 		cdevp_list 中存放的是所有创建的cdev的私有数据，应该是可以通过判断其中的
 		一些属性值来检测 cdev 的状态
 	*/
-	TAILQ_FOREACH(cdp, &cdevp_list, cdp_list)
-	{
-
+	TAILQ_FOREACH(cdp, &cdevp_list, cdp_list) {
 		KASSERT(cdp->cdp_dirents != NULL, ("NULL cdp_dirents"));
-
 		/*
 		 * If we are unmounting, or the device has been destroyed,
 		 * clean up our dirent.
@@ -694,8 +674,7 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 		 */
 		if ((cleanup || !(cdp->cdp_flags & CDP_ACTIVE)) &&
 				dm->dm_idx <= cdp->cdp_maxdirent &&
-				cdp->cdp_dirents[dm->dm_idx] != NULL)
-		{
+				cdp->cdp_dirents[dm->dm_idx] != NULL) {
 			de = cdp->cdp_dirents[dm->dm_idx];
 			cdp->cdp_dirents[dm->dm_idx] = NULL;
 			KASSERT(cdp == de->de_cdp,
@@ -760,8 +739,7 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 			中进行遍历查找。如果找到的话就继续解析路径，提取路径名，再查找，直到解析完毕；所以其中一旦有某一个目录
 			没有找到，应该是要做相应处理的，报错或者是重新创建一个。也可以大致推测一下这个函数的功能是干什么
 		*/
-		for (;;)
-		{
+		for (;;) {
 			for (q = s; *q != '/' && *q != '\0'; q++)
 				continue;
 			if (*q != '/')
@@ -769,8 +747,8 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 			de = devfs_find(dd, s, q - s, 0); // q - s 路径名
 			if (de == NULL)										// 如果当前目录中没有这个目录，那就要重新创建一个
 				de = devfs_vmkdir(dm, s, q - s, dd, 0);
-			else if (de->de_dirent->d_type == DT_LNK)
-			{ // 如果是链接文件，那就找对应的目录实体
+			else if (de->de_dirent->d_type == DT_LNK) { 
+				// 如果是链接文件，那就找对应的目录实体
 				de = devfs_find(dd, s, q - s, DT_DIR);
 				if (de == NULL)
 					de = devfs_vmkdir(dm, s, q - s, dd, 0);
@@ -792,13 +770,16 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 			应该是承担存放路径信息的功能
 		*/
 		de_flags = 0;
+		/*
+			为什么要检查一次当前目录下是否存在链接文件？ 其实应该就是为了处理同名文件。因为代码走到这一步已经是要
+			开始处理路径中的最后一个组件。首先要做的就是查找
+		*/
 		de = devfs_find(dd, s, q - s, DT_LNK);
 		if (de != NULL)
 			de_flags |= DE_COVERED;
 
 		de = devfs_newdirent(s, q - s);
-		if (cdp->cdp_c.si_flags & SI_ALIAS)
-		{
+		if (cdp->cdp_c.si_flags & SI_ALIAS) {
 			de->de_uid = 0;
 			de->de_gid = 0;
 			de->de_mode = 0755;
@@ -818,9 +799,7 @@ devfs_populate_loop(struct devfs_mount *dm, int cleanup)
 			while (depth-- > 0)
 				strcat(de->de_symlink, "../");
 			strcat(de->de_symlink, pdev->si_name);
-		}
-		else
-		{
+		} else {
 			de->de_uid = cdp->cdp_c.si_uid;
 			de->de_gid = cdp->cdp_c.si_gid;
 			de->de_mode = cdp->cdp_c.si_mode;

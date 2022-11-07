@@ -93,6 +93,8 @@
         "malloc.h": "c",
         "*.tcc": "c",
         "slist": "c",
-        "fs.h": "c"
+        "fs.h": "c",
+        "buf.h": "c",
+        "ufs_inode.h": "c"
     }
 }

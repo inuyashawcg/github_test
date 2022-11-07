@@ -51,7 +51,7 @@ static MALLOC_DEFINE(M_MODULE, "module", "module data structures");
 */
 struct module {
 	TAILQ_ENTRY(module)	link;	/* chain together all modules */
-	TAILQ_ENTRY(module)	flink;	/* all modules in a file 一个文件中所包含的全部module */
+	TAILQ_ENTRY(module)	flink;	/* all modules in a file 一个文件中所包含的全部 module */
 	struct linker_file	*file;	/* file which contains this module 包含此模块的文件 */
 	int			refs;	/* reference count */
 	int 			id;	/* unique id number */

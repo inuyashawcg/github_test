@@ -101,10 +101,12 @@ typedef TAILQ_HEAD(devclass_list, devclass) devclass_list_t;
 typedef TAILQ_HEAD(driver_list, driverlink) driver_list_t;
 typedef TAILQ_HEAD(device_list, device) device_list_t;
 
-/* devclass的主要作用包含两个:
-	1. 设备实例的单元号分配
-	2. 保存特定总线类型的设备驱动程序列表
- */
+/* 
+	devclass 可以看做是保存了两个链表的对象，一个链表存放的是与该对象关联的所有 drivers，一个则是关联的所有 device。
+	为什么要这么设计？ 个人理解是为了方便设备与驱动的配对。
+	该结构其实就是将某一具体类型的设备和驱动都管理起来了，所以匹配时不需要将设备与所有的驱动比较，只需要与链表中存放的这些
+	比较即可，因为别的类型驱动完全不搭边。这样做的好处就是大大缩小的了查找范围，节省系统开销
+*/
 struct devclass {
 	TAILQ_ENTRY(devclass) link;
 	devclass_t	parent;		/* parent in devclass hierarchy */
@@ -409,6 +411,9 @@ static d_ioctl_t	devioctl;
 static d_poll_t		devpoll;
 static d_kqfilter_t	devkqfilter;
 
+/*
+	/dev/devctl 节点的方法表
+*/
 static struct cdevsw dev_cdevsw = {
 	.d_version =	D_VERSION,
 	.d_open =	devopen,
@@ -457,10 +462,16 @@ devinit(void)
 {
 	devctl_dev = make_dev_credf(MAKEDEV_ETERNAL, &dev_cdevsw, 0, NULL,
 	    UID_ROOT, GID_WHEEL, 0600, "devctl");
+	// devsoftc 是一个静态全局对象
 	mtx_init(&devsoftc.mtx, "dev mtx", "devd", MTX_DEF);
 	cv_init(&devsoftc.cv, "dev cv");
 	TAILQ_INIT(&devsoftc.devq);
 	knlist_init_mtx(&devsoftc.sel.si_note, &devsoftc.mtx);
+	/*
+		创建了两个节点，第一个是 /dev/devctl，另外一个是 /dev/devctl2。
+		freebsd 服务器 (.213) 中包含上述两个设备节点
+		这两个节点貌似只支持 only-one-reader
+	*/
 	devctl2_init();
 }
 
@@ -912,7 +923,6 @@ DEFINE_CLASS(null, null_methods, 0);
 /*
  * Bus pass implementation
  */
-
 // driver_list_t 是driverlink的一个双端队列，管理所有driver的pass等级
 static driver_list_t passes = TAILQ_HEAD_INITIALIZER(passes);
 int bus_current_pass = BUS_PASS_ROOT;

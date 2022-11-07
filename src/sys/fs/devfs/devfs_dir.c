@@ -63,8 +63,7 @@ MTX_SYSINIT(dirlist_mtx, &dirlist_mtx, "devfs dirlist lock", MTX_DEF);
 
 /* Returns 1 if the path is in the directory list. */
 int
-devfs_dir_find(const char *path)
-{
+devfs_dir_find(const char *path) {
 	struct dirlistent *dle;
 
 	mtx_lock(&dirlist_mtx);

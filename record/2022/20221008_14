@@ -1,0 +1,232 @@
+////////////// 20221008 //////////////
+  freebsd 对于设备的热插拔貌似是通过 devd 守护进程来实现的，该进程绑定 /dev/devctl 驱动，处理设备增删事件？
+  freebsd qemu-amd64 版本只支持 BIOS 启动，不支持直接利用 kernel 启动
+
+在 qemu-riscv freebsd 中编译一个简单的内核驱动程序，提示如下错误：
+  make: "/usr/share/mk/bsd.sysdir.mk" line 15: Unable to locate the kernel source tree. Set SYSDIR to override.
+  - 这个报错貌似是因为系统缺少 kernel source file (/usr/src/*) 引起的。buildworld 生成 riscv.img 过程中貌似是没有把这些
+    文件放到根文件系统中指定位置的
+
+  解决办法就是将该驱动直接添加到内核设备驱动代码当中，源代码可以放到 /usr/src/sys/dev 路径下，makefile 放到 /usr/src/sys/modules。
+可以参考现有模块的实现方式，比如 if_vge.ko 模块的生成方式
+
+在 qemu-freebsd 系统中手动添加内核模块 (kldload echo.ko)，观察 devfs 是在什么时候创建设备文件节点。结果如下：
+
+情形1： 执行 ls -al /dev
+  Thread 2 hit Breakpoint 5, devfs_newdirent (name=0xffffffd002a36ce0 "echo", namelen=4)
+    at /usr/src/sys/fs/devfs/devfs_devs.c:226
+  226		i = sizeof(*de) + GENERIC_DIRSIZ(&d);
+  (gdb) bt
+  #0  devfs_newdirent (name=0xffffffd002a36ce0 "echo", namelen=4) at /usr/src/sys/fs/devfs/devfs_devs.c:226
+  #1  0xffffffc00017162c in devfs_populate_loop (dm=0xffffffd001f1f000, cleanup=<optimized out>)
+      at /usr/src/sys/fs/devfs/devfs_devs.c:610
+  #2  0xffffffc000171396 in devfs_populate (dm=0xffffffd001f1f000) at /usr/src/sys/fs/devfs/devfs_devs.c:677
+  #3  0xffffffc0001768ee in devfs_populate_vp (vp=0xffffffd001ec6b70) at /usr/src/sys/fs/devfs/devfs_vnops.c:359
+  #4  0xffffffc000175358 in devfs_getattr (ap=<optimized out>) at /usr/src/sys/fs/devfs/devfs_vnops.c:802
+  #5  0xffffffc00038a504 in VOP_GETATTR (vp=0xffffffd001ec6b70, vap=0xffffffc000bdf850, cred=<optimized out>)
+      at ./vnode_if.h:454
+  #6  vop_stdstat (a=0xffffffc000bdfa20) at /usr/src/sys/kern/vfs_default.c:1513
+  #7  0xffffffc0003ab00a in VOP_STAT (vp=<optimized out>, sb=0xffffffc000bdfa88, active_cred=<optimized out>, 
+      file_cred=0x0, td=0xffffffc09aa40080) at ./vnode_if.h:420
+  #8  kern_statat (td=0xffffffc09aa40080, flag=<optimized out>, fd=<optimized out>, path=<optimized out>, 
+      pathseg=<optimized out>, sbp=0xffffffc000bdfa88, hook=0x0) at /usr/src/sys/kern/vfs_syscalls.c:2401
+  #9  0xffffffc0003aaf1a in sys_fstatat (td=0x10000, uap=0xffffffc09aa40468)
+      at /usr/src/sys/kern/vfs_syscalls.c:2377
+  #10 0xffffffc00056c618 in syscallenter (td=0xffffffc09aa40080)
+      at /usr/src/sys/riscv/riscv/../../kern/subr_syscall.c:189
+  #11 ecall_handler () at /usr/src/sys/riscv/riscv/trap.c:167
+  #12 do_trap_user (frame=<optimized out>) at /usr/src/sys/riscv/riscv/trap.c:371
+  #13 <signal handler called>
+  #14 0x00000000401e5598 in ?? ()
+  (gdb) c
+  Continuing.
+
+情形2： 直接执行 echo "111" >> /dev/echo (此时我们已经知道驱动 echo 已经被加载到了内核中)
+  Thread 1 hit Breakpoint 5, devfs_newdirent (name=0xffffffd0029ccce0 "echo", namelen=4)
+    at /usr/src/sys/fs/devfs/devfs_devs.c:226
+  226		i = sizeof(*de) + GENERIC_DIRSIZ(&d);
+  (gdb) bt
+  #0  devfs_newdirent (name=0xffffffd0029ccce0 "echo", namelen=4) at /usr/src/sys/fs/devfs/devfs_devs.c:226
+  #1  0xffffffc00017162c in devfs_populate_loop (dm=0xffffffd001f1f000, cleanup=<optimized out>)
+      at /usr/src/sys/fs/devfs/devfs_devs.c:610
+  #2  0xffffffc000171396 in devfs_populate (dm=0xffffffd001f1f000) at /usr/src/sys/fs/devfs/devfs_devs.c:677
+  #3  0xffffffc0001768ee in devfs_populate_vp (vp=0xffffffd001ec6b70) at /usr/src/sys/fs/devfs/devfs_vnops.c:359
+  #4  0xffffffc000174832 in devfs_lookup (ap=0xffffffc000bee6d8) at /usr/src/sys/fs/devfs/devfs_vnops.c:1187
+  #5  0xffffffc0003907aa in VOP_LOOKUP (dvp=0xffffffd001ec6b70, vpp=0xffffffc000beea68, cnp=0xffffffc000beea90)
+      at ./vnode_if.h:65
+  #6  lookup (ndp=0xffffffc000beea10) at /usr/src/sys/kern/vfs_lookup.c:1056
+  #7  0xffffffc00038fddc in namei (ndp=0xffffffc000beea10) at /usr/src/sys/kern/vfs_lookup.c:609
+  #8  0xffffffc0003b1000 in vn_open_cred (ndp=0xffffffc000beea10, flagp=0xffffffc000beeaec, cmode=420, 
+      vn_open_flags=<optimized out>, cred=<optimized out>, fp=<optimized out>)
+      at /usr/src/sys/kern/vfs_vnops.c:250
+  #9  0xffffffc0003b0eb6 in vn_open (ndp=0x10000, flagp=0x4, cmode=4, fp=0x0) at /usr/src/sys/kern/vfs_vnops.c:193
+  #10 0xffffffc0003a9136 in kern_openat (td=0xffffffc09aa41100, fd=<optimized out>, path=0x40899150 "/dev/echo", 
+      pathseg=UIO_USERSPACE, flags=1538, mode=438) at /usr/src/sys/kern/vfs_syscalls.c:1141
+  #11 0xffffffc0003a9326 in sys_openat (td=0xffffffc09aa41100, uap=0xffffffc09aa414e8)
+      at /usr/src/sys/kern/vfs_syscalls.c:1090
+  #12 0xffffffc00056c618 in syscallenter (td=0xffffffc09aa41100)
+      at /usr/src/sys/riscv/riscv/../../kern/subr_syscall.c:189
+  #13 ecall_handler () at /usr/src/sys/riscv/riscv/trap.c:167
+  #14 do_trap_user (frame=<optimized out>) at /usr/src/sys/riscv/riscv/trap.c:371
+  #15 <signal handler called>
+  #16 0x00000000401b67f8 in ?? ()
+
+  freebsd 的实现感觉非常朴实。。。加载模块会执行 make_dev() 函数，用于给设备创建 struct cdev 和 struct cdev_priv 两个对象。然后
+在全局链表中插入一个新的 entry。此时系统就认为该设备已经存在了，但此时 devfs 还不知道有这个设备，所以在 /dev 下也就不存在该设备对应的
+文件节点。
+
+  devfs 什么时候知道有这个设备的？ 其实是当用户需要访问该设备的时候，devfs 实时产生的。devfs_open() / devfs_lookpx() 等等函数中
+包含有 devfs_populate_loop() 操作，该操作会在特定条件下遍历设备全局链表。什么条件下会去遍历？ 这个就涉及到了 devfs 中另外一个全局
+变量 devfs_generation，无论是添加或者删除设备，该变量都会进行自增操作。
+  当调用到上述接口时，devfs 首先会判断当前的 generation 与上一次保存的变量值是否相等。如果是，则什么也不做；如果不是，那就会重新 populate_loop
+整个全局链表，查看当前我们所要查找的设备是不是已经在系统当中，或者是被删除了。也就是在我们真正访问设备之前，devfs 会更新一下整个设备文件树
+
+
+////////////// 20221010 //////////////
+FreeBSD 中关于设备的相关表述：
+  - 网络设备不出现在文件系统中，可以通过套接字接口访问它们
+
+  - 字符-设备接口有两种类型，它们取决于底层硬件设备的特征。字符设备接口是真正面向字符的，怎么理解？ 可以与磁盘这类面向块的设备对比；
+    块设备 (FreeBSD 中统一成了字符设备) 需要经过文件系统或者页面缓存。但是真字符设备直接利用设备或者应用程序的虚拟地址空间中的生成
+    缓存区。因此，操作的大小必须是设备所需的地城块大小的倍数，并且在某些机器上，应用程序的 I/O 缓冲区必须对齐在适当的边界上
+
+  - 在操作系统内部，I/O 设备通过每个设备的设备驱动程序提供的一组“入口点”进行访问。字符-设备接口使用 cdevsw 结构
+
+  - 系统中所有的设备都由 devfs 文件系统管理。在配置设备时，将在 /dev 下为设备创建条目。每个条目都有对应的 cdevsw 结构的直接引用
+
+  - 程序通过 devfs 文件系统中的路径，调用 open() 系统调用直接访问一个设备，devfs 在其内部设备列表搜索匹配的条目，然后调用设备的
+    cdevsw->open()
+
+  - 打开后，大多数设备分配新的状态来处理它们的新消费者。当第二个用于试图调用 open() 时，只能由一个用户打开的设备将返回错误 
+
+FreeBSD 设备驱动：
+  - 自动配置和初始化例程
+  - 服务 I/O 请求的例程 (上半部分)
+  - 中断服务例程 (下半部分)
+
+  分上下半部分应该是为了提高设备相应，把一些需要及时处理的部分放在上半部，然后把一些花时间比较多的部分放到下半部 (参考中断上下文)
+
+  - 服务 I/O 请求的驱动程序部分由系统调用或者通过虚拟内存系统调用，该部分在内核的上半部分同步执行，并且可通过调用 sleep() 阻塞
+
+  - 设备驱动程序通常在其正常操作中管理一个或者多个 I/O 请求队列。当一个输入或者输出请求被驱动程序的上半部分接收时，它会被记录在
+    一个数据结构中，并放置带每个设备的队列上进行处理。当一个输入或者输出操作完成之后，设备驱动程序从控制器接收到一个中断。此时，
+    服务例程从设备的队列中删除适当的请求，并通知请求者命令已经完成，然后从队列中启动下一个请求
+
+  - I/O 队列是设备驱动程序上半部分和下半部分之间通信的主要方式。因为 I/O 队列在异步例程之间共享，所以必须同步对于队列的访问。
+    驱动程序的上下半部分的例程必须在操作队列之前获取与队列相关的互斥锁，避免同时修改造成的数据破坏。启动 I/O 请求的多个进程
+    之间的同步也通过与队列关联的互斥锁序列化
+
+中断处理：
+  - 中断是由设备生成的，用于表示操作已经完成或者状态发生了变化
+  - 系统在接收到设备中断时，会使用一个或者多个参数调度适当的设备驱动中断服务例程，这些参数"唯一"标识需要服务的设备。这些参数是必须的，
+    因为设备驱动通常支持同一类型的多个设备。如果没有标识，驱动程序将被迫轮询所有可能的设备
+
+文件系统与磁盘设备驱动的关系：
+  - 磁盘文件系统与 tptfs 差别还是很大的，磁盘文件系统所有的数据操作都是在内核缓存中执行的。这些缓存会映射到磁盘中的某个磁盘块，所以
+    在 struct buf  中会保存数据对应的磁盘块号。磁盘驱动就会根据这个磁盘块号，在进行内存同步时，将数据从缓存区搬运到磁盘具体位置。
+    所以，磁盘设备驱动可以看做是文件系统的"帮手"，它的作用就是确保数据在磁盘和内存中的正确流转
+
+  - "文件系统在内核缓冲区之间读写数据，原始设备在用户缓冲区之间来回传输数据"。绕过内核缓冲区消除了内存到内存的复制，但也剥夺了应用程序
+    享受数据缓存的好处。并且对于同时支持原始数据和文件系统访问的设备，应用程序必须注意保持内核缓冲区中的数据与直接写入设备的数据之间的
+    一致性
+
+  - 原始设备由于绕过了内核缓冲区，所以它们负责管理自己的缓冲区结构。大多数设备借用"交换缓冲区"来描述它们的 I/O
+  - physio()： 原始设备 I/O 操作请求硬件设备直接向 uio 参数描述的用户程序地址空间的数据缓冲区传输数据。必须要检查设备收可以访问
+    用户缓冲区，这点跟 DMA 有点区别？
+
+
+非即插即用的设备在 /boot/device.hints 文件中指定：
+  root@freebsd-x86-3:/boot # cat device.hints 
+    # $FreeBSD$
+    hint.fdc.0.at="isa"
+    hint.fdc.0.port="0x3F0"
+    hint.fdc.0.irq="6"
+    hint.fdc.0.drq="2"
+    hint.fd.0.at="fdc0"
+    hint.fd.0.drive="0"
+    hint.fd.1.at="fdc0"
+    hint.fd.1.drive="1"
+    hint.atkbdc.0.at="isa"
+    hint.atkbdc.0.port="0x060"
+    hint.atkbd.0.at="atkbdc"
+    hint.atkbd.0.irq="1"
+    hint.psm.0.at="atkbdc"
+    hint.psm.0.irq="12"
+    hint.sc.0.at="isa"
+    hint.sc.0.flags="0x100"
+    hint.uart.0.at="isa"
+    hint.uart.0.port="0x3F8"
+    hint.uart.0.flags="0x10"
+    hint.uart.0.irq="4"
+    hint.uart.1.at="isa"
+    hint.uart.1.port="0x2F8"
+    hint.uart.1.irq="3"
+    hint.ppc.0.at="isa"
+    hint.ppc.0.irq="7"
+    hint.atrtc.0.at="isa"
+    hint.atrtc.0.port="0x70"
+    hint.atrtc.0.irq="8"
+    hint.attimer.0.at="isa"
+    hint.attimer.0.port="0x40"
+    hint.attimer.0.irq="0"
+    hint.acpi_throttle.0.disabled="1"
+    hint.p4tcc.0.disabled="1"
+
+  Thread 2 hit Breakpoint 3, bus_generic_new_pass (dev=0xffffffd001356400)
+    at /usr/src/sys/kern/subr_bus.c:4113
+  4113	 *
+  (gdb) bt
+  #0  bus_generic_new_pass (dev=0xffffffd001356400)
+      at /usr/src/sys/kern/subr_bus.c:4113
+  #1  0xffffffc00030cb82 in BUS_NEW_PASS (_dev=0xffffffd001356400) at ./bus_if.h:1072
+  #2  bus_set_pass (pass=2147483647) at /usr/src/sys/kern/subr_bus.c:939
+  #3  root_bus_configure () at /usr/src/sys/kern/subr_bus.c:5207
+  #4  0xffffffc00055a9d4 in configure (dummy=0xffffffd001356400)
+      at /usr/src/sys/riscv/riscv/autoconf.c:79
+  #5  0xffffffc0002607a4 in mi_startup () at /usr/src/sys/kern/init_main.c:314
+  #6  0xffffffc0000001be in va () at /usr/src/sys/riscv/riscv/locore.S:261
+  Backtrace stopped: frame did not save the PC
+
+
+////////////// 20221011 //////////////
+usb 热插拔机制参考
+  https://www.cnblogs.com/xinghuo123/p/13269787.html
+
+  简单来说就是驱动中包含 usb-hub 部分，它会创建一个线程，专门用来处理接口或者状态的变化。貌似还包含一个调度线程，说明该驱动本身
+创建不止一个线程。从源码可以看到，驱动也包含了许多类似 usb->uart / usb->网口等代码，可能创建多个线程就是为了处理各种各样的数据
+交互
+
+  驱动跟 devfs 的关联应该就是通过 make_dev() 函数创建一个 device entry，devfs 本身不会单独创建一个线程来专门管理子节点的
+增删。参考：
+  usb_alloc_device()
+    -> usb_make_dev()
+      -> make_dev_s()
+    
+  devfs 应该就只是简单利用 devfs_populate_loop() 来动态管理子节点
+  tptfs 可以考虑采用新的方式来处理子节点的增删，比如建立多个管理队列？
+
+
+////////////// 20221012 //////////////
+为什么 devfs_populate_loop() 会存在？
+  - 一个显而易见的原因是，我们需要遍历 cdev_privdata 全局链表来判断系统中存在哪些设备，然后创建 /dev 设备树
+  - 驱动程序通过 make_dev() 函数在 privdata 链表中添加一个成员，然后并没有调用 devfs 接口同时创建一个 devfs entry
+
+采用上述设计的原因可能是：
+  - populate_loop() 既要处理设备加载，又要处理设备移除。但设备移除仅仅是将 cdev_privdata 设置为失活状态，然后就没了；
+    设备创建也只是简单插入一个新创建的对象。对于 devfs entry 的处理还是交给 devfs 来做。感觉是为了最大程度减少操作时间
+  - 降低驱动程序与 devfs 之间的耦合度
+  - 保证数据一致性
+
+奇海是否可以将驱动加载/卸载与设备文件节点的创建/释放同步进行？
+  - 需要将设备树的构建与文件系统挂载拆分，也就是创建设备树节点的时候，不要去依赖文件系统相关数据结构，比如 struct mount
+
+  GC 在计算机领域是 Garbage Collection 的缩写
+
+devfs_populate_loop() 对于不活跃的设备，也是不会在 /dev 下显示的，即使它还存在于 cdev_privdata 全局链表当中
+
+
+////////////// 20221013 //////////////
+  kldload / kldunload 加载/移除 一个设备节点可以看到，它们只是会访问 cdev_priv list 并设置设备状态，然后立刻返回，
+而不会调用 devfs_delete() 去删除一个 devfs dirent，可以印证上述猜测
+
+  tptfs 需要规定，不允许创建目录软链接，就是从一个目录文件软链接到另外一个目录文件

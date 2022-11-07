@@ -1,0 +1,104 @@
+////////////// 20221024 //////////////
+参考 atf 和 kyuafile 生成的逻辑思考根文件系统自动化生成方法：
+  atf 大体上可以看做是包含两个部分，第一个部分其实是一些库函数，类似与 libc；第二部分就是用户编写的测试程序代码。
+在奇海系统中，库文件会被编译成一个静态库，然后直接链接到 kernel 当中。测试程序会被编译成一个线程，当使用到该测试
+用例的时候，会起一个线程进行处理
+
+  除了奇海系统的核心模块(cmake)之外，其他一些模块尽量沿用 FreeBSD 的编译系统(bmake)实现，简化步骤。查看 vm 模块
+测试用例的生成情况，对比奇海与 freebsd 的不同之处:
+
+qihai: (奇海指定 /build/tmp 作为 bmake 目标文件)
+  mercury@mercury:~/Documents/code/qihai/master/qihai/build/tmp/usr/tests/sys/vm$ ls
+    Kyuafile
+
+freebsd:
+  root@:/usr/obj/usr/src/riscv.riscv64/tests/sys/vm # ls
+  .depend.mlock_test				mlock_test.o
+  .depend.mlock_test.mlock_test.o			mmap_test
+  .depend.mmap_test				mmap_test.debug
+  .depend.mmap_test.mmap_test.o			mmap_test.full
+  .depend.page_fault_signal			mmap_test.o
+  .depend.page_fault_signal.page_fault_signal.o	page_fault_signal
+  Kyuafile					page_fault_signal.debug
+  mlock_test					page_fault_signal.full
+  mlock_test.debug				page_fault_signal.o
+  mlock_test.full
+
+  root@:/usr/obj/usr/src/riscv.riscv64/tests/sys/vm # file mlock_test
+    mlock_test: ELF 64-bit LSB executable, UCB RISC-V, version 1 (SYSV), dynamically linked, 
+      interpreter /libexec/ld-elf.so.1, for FreeBSD 13.0 (1300139), FreeBSD-style, not stripped
+
+  在 qihai 系统中，只输出了一个 Kyuafile 文件，但是在 freebsd 中还会包含有一堆可执行或相关文件。主要是因为这些模块都
+编译成了线程的缘故。在 freebsd 中，该模块其实就是 buildworld 生成的，所以 qihai 在 build/*** 路径下生成的文件应该
+都是要包含到根文件系统当中的。/etc 下的文件并不是由 buildworld 生成，所以应该是要手动添加到根文件系统当中。
+  刘强也会用到 buildworld 生成一些必须的库文件，可以根据后续实际输出的文件确定根文件系统构造方法。很有可能就只是简单遍历
+所有文件，然后利用格式化工具生成 rootfs.img
+
+  Makefile 中包含 INSTALL 变量时，很大概率就是会生成新的文件，这个也要同步到根文件系统
+
+在 /mnt 执行 mount 之后 umount，提示如下错误：
+  # ls -al mnt
+  total 4
+  ls: mnt/.: Not a directory
+  drwxrwxr-x  2 0  0   512 Oct 18 07:10 .
+  drwxr-xr-x  2 0  0  1792 Jan  1  1970 ..
+
+  原因是奇海引入了跨文件系统访问机制，对目录的访问增加了一步，判断该节点当前是否处在挂载状态。如果是，那么就要跳转到对应文件
+系统根节点；如果不是，则还是以 tptfs 直接查找方式访问目录。上述错误是由于在执行完 umount 之后，目录对应的类对象的属性没有
+被还原，导致 tptfs lookup() 跳转到了逐级查找函数当中，所以查找失败。
+  解决方法就是在 vfs doumount() 函数中添加属性还原的代码逻辑。因为 tptfs umount 不被允许，所以只会影响到非 tptfs 类型
+文件系统的卸载操作
+
+
+////////////// 20221025 //////////////
+  头文件包含出错，貌似是因为内核中的 malloc/free 与 C++ 库中的冲突导致，梅潮在 KernelSTL.h 中对该文件进行了修复(宏定义)。
+后续内核中如果要是用到 string、forward_list 等数据结构的时候，包含该头文件即可
+
+格式化工具对于间接索引的处理，总体上可以分成两部分：
+  - metadata，即间接索引占用的数据块
+  - 文件真实数据所占用的数据块
+
+  比较方便的做法就是将 metadata 逐级按顺序处理完成，保证文件所占用的虚拟页和磁盘块都是连续排列的。这样做的好处就是当我们处理完
+metadata 之后，从源文件读数据块可以依次写入到 rootfs image 文件，而不需要考虑数据块顺序问题。直接块索引也是要算到元数据中。
+
+  假设我们要处理包含三级块索引的一个大文件，步骤应该是：
+    - 填充直接块索引
+    - 计算 single indirect index 起始块号
+    - 计算 double indirect index 起始块号，紧接着计算它所管理的所有 single indirect index 占用块
+    - triple indirect index 同上
+
+这样，我们首先就把该文件 metadata 所占用的数据块总数计算了出来。然后更新可用磁盘块号，该文件真实数据就可以从该块开始依次写起，
+可以避开后续磁盘块排序和 inode 数据更新问题
+
+
+如何设计 index node 类？ 
+  - 首先我们要搞清楚这个类必须要包含哪些要素。该类的主要作用其实是为了模拟 inode 中的间接索引数据。间接索引指向的是一个大小为
+    4096 字节的数据块。因此，我们可以看出："该类要包含一个 4096 字节的 buffer，用来存放数据开指针，因为后续要回写到磁盘块中"
+    ==>> 因此，我们要知道，这个 metadata 数据块要写到磁盘中的哪个位置，"需要包含一个成员，来描述这个 buffer 后续要写到镜像
+    中的哪个位置"
+
+  - 间接数据块并不都是完全填满的，所以感觉 "类中应该包含描述子节点个数的成员"
+
+  - buffer 中存放的并不是磁盘块号，而是虚拟页号，所以 "要能够正确获取虚拟页号"
+
+  - 每个层级的处理逻辑本质上是一样的，只不过一些参数不同而已，所以 "成员函数的实现最好能支持递归操作"
+
+  - 最好还是要保证 metadata 数据块也是连续排布的。所以，我们处理的逻辑应该是 "自顶向下，即先处理最高间接索引等级"
+
+  - 高层级节点 buffer 中的 entry 指向的是低层级节点的 buffer disk location.类则是通过链表管理起来，必须是有序的
+
+
+////////////// 20221028 //////////////
+buildIndirectTree() 应该包含的基本要素：
+  1、计算每一个等级所要处理的块的总数
+  2、计算 metadata blocks 的数量
+  3、填充上一个等级
+  4、填充直接索引数组(只需要执行一次，可以单独列出来)
+  5、disk block 和 virtual page 需要不断更新
+  6、链表顺序处理并填充 buffer entry
+  7、更新下一个文件可用起始磁盘块
+
+构建属性索引数组，各种计算中需要用到的变量都放到数组中，这样就可以将不同的操作统一到对数组的操作
+
+Linux LTS: Linux Long Term Support，即长期支持版本
+  

@@ -123,6 +123,8 @@
 .include "targets/Makefile"
 .else
 
+# TGTS: targets
+# 其实就是我们执行 make 命令时所加入的参数，比如 buildworld / buildkernel 等等
 TGTS=	all all-man buildenv buildenvvars buildkernel buildworld \
 	check check-old check-old-dirs check-old-files check-old-libs \
 	checkdpadd checkworld clean cleandepend cleandir cleanworld \
@@ -146,14 +148,29 @@ TGTS=	all all-man buildenv buildenvvars buildkernel buildworld \
 	print-dir test-system-compiler test-system-linker
 
 # These targets require a TARGET and TARGET_ARCH be defined.
+# 应该是表示一些特定的目标或者目标架构才会被添加到编译系统当中
 XTGTS=	native-xtools native-xtools-install xdev xdev-build xdev-install \
 	xdev-links
 
 # XXX: r156740: This can't work since bsd.subdir.mk is not included ever.
 # It will only work for SUBDIR_TARGETS in make.conf.
+# 只有在 bsd.subdir.mk 被包含之后才能工作。并且它只有在 make.conf 中包含 SUBDIR_TARGETS 的时候
+# 才会工作
 TGTS+=	${SUBDIR_TARGETS}
 
+# binary targets？
 BITGTS=	files includes
+
+# 在 makefile 中，= 表示 make 会将整个 makefile 展开后，再决定变量的值。也就是说，变量的值将会是
+# 整个makefile中最后被指定的值
+# x = 111
+# y = $(x) 222
+# x = 333
+# 
+# y = 333 222
+# 
+# := 表示变量的值决定于它在 makefile 中的位置，而不是整个 makefile 展开后的最终值
+# 将上面的 y= 变成 y:= 之后，y = 111 222
 BITGTS:=${BITGTS} ${BITGTS:S/^/build/} ${BITGTS:S/^/install/}
 TGTS+=	${BITGTS}
 
@@ -164,6 +181,11 @@ TGTS+=	${BITGTS}
 # For other cases, such as delete-old-libs, meta mode may break
 # the interactive tty prompt.  The safest route is to just whitelist
 # the ones that benefit from it.
+# 
+# 仅允许某些目标使用元模式。其他人将其禁用。在某些情况下，例如“安装”，元模式可能很危险，
+# 因为cookie可能用于防止冗余安装（例如WORLDTMP登台）。对于DESTDIR=/，我们总是希望安装
+# 对于其他情况，例如删除旧库，元模式可能会中断交互式tty提示符。最安全的方法是将从中受益的人
+# 列入白名单
 META_TGT_WHITELIST+= \
 	_* build32 buildfiles buildincludes buildkernel buildsoft \
 	buildworld everything kernel-toolchain kernel-toolchains kernel \
@@ -171,6 +193,7 @@ META_TGT_WHITELIST+= \
 	test-system-linker tinderbox toolchain \
 	toolchains universe universe-toolchain world worlds xdev xdev-build
 
+# .ORDER： The named targets	are made in sequence. 这些目标必须按顺序执行
 .ORDER: buildworld installworld
 .ORDER: buildworld distrib-dirs
 .ORDER: buildworld distribution
@@ -192,6 +215,10 @@ META_TGT_WHITELIST+= \
 .ORDER: buildkernel reinstallkernel.debug
 
 PATH=	/sbin:/bin:/usr/sbin:/usr/bin
+
+# make object prefix. 应该是为需要创建的对象添加前缀
+# ？= 表示如果该变量没有被赋值，则赋予等号后的值
+# != 操作符是将右边的命令执行后，再将结果返回给左边变量
 MAKEOBJDIRPREFIX?=	/usr/obj
 _MAKEOBJDIRPREFIX!= /usr/bin/env -i PATH=${PATH} ${MAKE} MK_AUTO_OBJ=no \
     ${.MAKEFLAGS:MMAKEOBJDIRPREFIX=*} __MAKE_CONF=${__MAKE_CONF} \

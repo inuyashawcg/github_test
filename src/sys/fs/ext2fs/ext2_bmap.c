@@ -163,7 +163,9 @@ ext4_bmapext(struct vnode *vp, int32_t bn, int64_t *bnp, int *runp, int *runb)
  * are addressed by one less than the address of the first indirect block to
  * which they point.  Triple indirect blocks are addressed by one less than
  * the address of the first double indirect block to which they point.
- * 这里讲的内容应该是文件的三级间接寻址 
+ * 这里讲的内容应该是文件的三级间接寻址
+ * 注意注释中的表述信息，"negative logical block numbers"，就是说它们在寻址的时候用的是
+ * 负逻辑块号，比较奇怪
  *
  * ext2_bmaparray does the bmap conversion, and if requested returns the
  * array of logical blocks which must be traversed to get to a block.
@@ -185,6 +187,9 @@ ext2_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, int *runp, int *runb)
 	struct mount *mp;
 	struct indir a[EXT2_NIADDR + 1], *ap;	/* a表示的应该是三级间接寻址 */
 	daddr_t daddr;
+	/*
+		这里需要注意的是，metalbn 是一个 int64_t 类型的变脸，而不是 uint64_t
+	*/
 	e2fs_lbn_t metalbn;	/* metadata logical block number */
 	int error, num, maxrun = 0, bsize;
 	int *nump;	/* 指向上面定义的变量 num */
@@ -349,7 +354,9 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 	if (nump)
 		*nump = 0;
 	numlevels = 0; /* 应该表示的是寻址的等级，1、2、3级直接或者间接寻址 */
-	realbn = bn;	// bn 在上层函数中传入的是文件的 logical block number 
+	realbn = bn;	// bn 在上层函数中传入的是文件的 logical block number
+
+	// bn 在后续进行操作的时候，一定要保证它是一个正数
 	if ((long)bn < 0)
 		bn = -(long)bn;
 
@@ -370,7 +377,7 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 	 * EXT2_NIADDR-i 表示定位请求块所需的间接寻址级别数
 	 */
 	for (blockcnt = 1, i = EXT2_NIADDR, bn -= EXT2_NDADDR; ;
-	    i--, bn -= blockcnt) {
+	    	i--, bn -= blockcnt) {
 		if (i == 0)
 			return (EFBIG);	/* 返回错误码：文件太大 */
 		/*
@@ -389,6 +396,9 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 		/*
 			qblockcnt 表示当前索引等级所能管理的数据块的数量。如果是小于的情况，说明剩余数据块已经不能
 			填满当前索引，直接 break
+			注意这里该循环退出的条件，只有当 bn < qblockcnt 的时候才会退出，亦或是i == 0。后者是不会
+			出现的，否则就表示连三级间接索引都无法容纳整个文件，说明文件已经超过最大 size。其实就是上面
+			if 分支处理的情况。
 		*/
 		if (bn < qblockcnt)
 			break;
@@ -403,12 +413,12 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 		*/
 	}
 
+	// 观察代码逻辑，for 循环退出之后，后面的代码会处理 bn 和 i。而 bn 是最高等级间接索引需要处理的数据块。
+	// 假设我们所要查找的逻辑块号是落在三级间接索引当中，for 循环之后
+	// bn = 逻辑块号 - 直接索引块数 - 一级间接索引所能容纳的总块数 - 二级间接索引所能容纳的总块数
+	// 也就是 bn = 三级间接索引所要处理的剩余块数
 	/* 
 		Calculate the address of the first meta-block.
-		间接寻址的时候，文件系统会分配单独的一个数据块用来存放磁盘块号。所以我们需要先找到存放数据块块号的这个
-		块。所以下面的逻辑应该就是先找到这个数据块，然后利用offset找到我们需要读取的数据块块号在这个块中的存储
-		位置，这样就可以拿到真正的磁盘块号，最后读取真实数据。bn 存放的是当前间接查找等级剩余的数据块，所以 metalbn
-		表示的就是前面所有检查等级所能容纳的数据块的个数加上 EXT2_NIADDR - i (可以认为是一种offset)
 	*/
 	if (realbn >= 0)
 		metalbn = -(realbn - bn + EXT2_NIADDR - i);
@@ -426,6 +436,7 @@ ext2_getlbns(struct vnode *vp, daddr_t bn, struct indir *ap, int *nump)
 	ap->in_lbn = metalbn;
 	ap->in_off = off = EXT2_NIADDR - i;
 	ap++;
+
 	for (++numlevels; i <= EXT2_NIADDR; i++) {
 		/* If searching for a meta-data block, quit when found. */
 		if (metalbn == realbn)

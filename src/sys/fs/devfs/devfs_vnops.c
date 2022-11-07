@@ -110,7 +110,7 @@ devfs_timestamp(struct timespec *tsp)
 	time_t ts;
 
 	if (devfs_dotimes)
-	{
+	
 		vfs_timestamp(tsp);
 	}
 	else
@@ -127,8 +127,7 @@ devfs_timestamp(struct timespec *tsp)
 /* 对于文件描述符 file 的属性检测 */
 static int
 devfs_fp_check(struct file *fp, struct cdev **devp, struct cdevsw **dswp,
-							 int *ref)
-{
+							 int *ref) {
 	/* 获取 vnode 对应的 cdev 的 cdevsw */
 	*dswp = devvn_refthread(fp->f_vnode, devp, ref);
 	if (*devp != fp->f_data)
@@ -146,7 +145,7 @@ devfs_fp_check(struct file *fp, struct cdev **devp, struct cdevsw **dswp,
 }
 
 /*
-	获取cdev的私有数据
+	获取cdev的私有数据，这是一个 devfs 的对外接口
 	这里扩展一下，当我们对一个文件进行操作的时候，肯定是通过某一个进程或者线程来进行的。这个时候
 	文件会被映射到进程的地址空间，td_fpop 成员貌似表示的就是线程所要操作的设备文件
 */
@@ -174,6 +173,7 @@ int devfs_get_cdevpriv(void **datap)
 /*
 	devfs_***_cdevpriv 主要是为了允许cdev驱动程序方法将一些特定于驱动程序的数据与
 	设备特殊文件的每个用户进程open（2）相关联
+	好像也是一个 devfs 的对外接口
 */
 int devfs_set_cdevpriv(void *priv, d_priv_dtor_t *priv_dtr)
 {
@@ -225,11 +225,11 @@ void devfs_destroy_cdevpriv(struct cdev_privdata *p)
 	free(p, M_CDEVPDATA);
 }
 
-static void
-devfs_fpdrop(struct file *fp)
-{
+static void devfs_fpdrop(struct file *fp) {
 	struct cdev_privdata *p;
 
+	// 此处对 cdevpriv_mtx 进行加锁，然后在 devfs_destroy_cdevpriv() 函数中再进行解锁。
+	// 可以看出，该锁保护的其中一个对象就是 cdevpriv data list.
 	mtx_lock(&cdevpriv_mtx);
 	if ((p = fp->f_cdevpriv) == NULL)
 	{
@@ -241,7 +241,9 @@ devfs_fpdrop(struct file *fp)
 }
 
 /*
-	该函数以及上面三个函数其实都是对 cdev_privdata 数据进行操作，说明这个数据还是相当重要的
+	该函数以及上面三个函数其实都是对 cdev_privdata 数据进行操作，说明这个数据还是相当重要的。
+	devfs 下貌似只有 devfs_open() 函数调用了它，可能是因为 open() 与文件描述符的关联比较
+	密切，当打开一个文件出现异常，就直接清除起对应的 cdev_privdata
 */
 void devfs_clear_cdevpriv(void)
 {
@@ -1192,7 +1194,9 @@ devfs_lookup(struct vop_lookup_args *ap)
 	int dm_unlock;
 
 	/*
-		注意这里的操作逻辑，查找的时候会传入查找的参数，这个参数中包含有 vnode，
+		注意这里的操作，lookup 操作执行之前，会先去执行一次 populate_loop。这么操作的原因是系统中
+		已经存在某个设备的实例化对象，但当时没有调用 devfs 的接口，所以没有创建相应的 entry。此时调用
+		populate 函数可以将 entry 补上，不会导致查找异常
 	*/
 	if (devfs_populate_vp(ap->a_dvp) != 0)
 		return (ENOTDIR);

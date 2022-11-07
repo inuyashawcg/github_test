@@ -1,0 +1,52 @@
+////////////// 20221101 //////////////
+格式化工具建立元数据映射图的另外一个实现方案是依次构造完整的间接索引节点，如下：
+
+| 独立一级间接索引块 | 独立二级间接索引块 | 子一级间接索引块 .... | 三级间接索引 | 子二级间接索引块 | 子一级间接索引块 ... | 子二级间接索引 | 子一级间接索引块....
+
+这样做的好处就是，三级间接索引和二级间接索引块中的任何一个 entry 对应的数据块都是已知的，
+最后我们只需要对所有的一级间接索引进行顺序填充即可
+
+  不过上述方法有一个问题，就是代码实现有些臃肿，不利于调试和后期维护；使用起来也不够灵活，如果后续需要增加新的索引机制，
+还需要重新去写新的实现，没有办法实现代码重用
+
+解决思路：
+- 可以把整个过程做成一个大的循环，然后每次构造一条从根节点到叶节点的路径，然后按顺序从左到右依次执行，直到完成整棵树
+
+- 那首先就要计算出索引节点一共会占用多少数据块。代码实现上感觉应该需要两个辅助性的块指针，一个指向镜像文件当前可用起始块，
+  另外一个指向文件数据可使用起始块。这样我们每次都能完整构造一条路径上的所有节点
+
+- 计算索引块数量的过程中，会同时得到很多有用的信息，就比如每个索引等级节点数量。所以我们就需要有一个数据结构实例来保存它们
+
+////////////// 20221102 //////////////
+time = 1667459732
+KDB: stack backtrace:
+#0 0x10c179f82 at kdb_backtrace+0x7c
+#1 0x10c114f82 at vpanic+0x202
+#2 0x10c114d7c at panic+0x32
+#3 0x10c019d64 at do_trap_supervisor+0x5da
+#4 0x10c019860 at do_trap_supervisor+0xd6
+#5 0x10c004508 at cpu_exception_handler_supervisor+0x68
+#6 0x10c3777b8 at _ZN11TptBlockMap13buildBlockMapEP13vop_bmap_args+0x4a
+#7 0x10c386488 at _ZN12TptVopVector8blockMapEP13vop_bmap_args+0x1e
+#8 0x10c37d334 at _Z14tptfs_blockMapP13vop_bmap_args+0x24
+#9 0x10c37550a at _ZN6TptLib15getLogiaclBlockEm+0xaa
+#10 0x10c3752f8 at _ZN13TptBlockAlloc16getBlockAtOffsetEP5vnodelPPcRNSt3__110shared_ptrI9TptBufferEE+0x66
+#11 0x10c386aea at _ZN12TptVopVector4readEP13vop_read_args+0x1da
+#12 0x10c37d934 at _Z10tptfs_readP13vop_read_args+0x24
+#13 0x10c252ee2 at VOP_READ_APV+0x40
+#14 0x10c24aa08 at vn_rdwr+0x89a
+#15 0x10c250a9c at vn_lock_pair+0xc5c
+#16 0x10c247d04 at sys_copy_file_range+0x724
+#17 0x10c1a0f38 at seltdfini+0x232
+
+将 buildworld.txt(38M) 文件放到镜像当中，可正常启动。但是执行 cat 命令查看文件内容时，会出现上述错误。
+可能的原因：
+  - tptfs block map 代码逻辑存在问题
+  - 文件索引节点数据没有正确写入到镜像文件中的指定位置
+
+
+////////////// 20221102 //////////////
+  在 ext2_bmap() 函数中，貌似文件的逻辑块号会在处理过程中被转换成负数，目前还不知道这么做的原因，为了防止误操作？
+
+王总：
+  格式化工具一定要做到参数可配置，然后就是要考虑磁盘读写性能，还有磁盘块索引指针的大小(uint32_t 和 uint64_t)

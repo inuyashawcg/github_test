@@ -1,0 +1,314 @@
+////////////// 20221017 //////////////
+  当我们访问到 /dev 下的任何一个文件时，都会触发 devfs populate 函数，判断是否需要对 devfs 的状态进行更新。
+该函数会内嵌到 vnode operations 当中，在 tptfs 下就是当我们需要访问设备文件的时候才会触发。但是当我们访问
+目录或者链接文件的时候就不太行了，因为它们已经不会再去注册 device vndoe operations
+
+  解决办法： 可以直接在 lookup() 函数中添加 populate()，只要绝对路径中包括 /dev，就直接触发该函数。这样对于
+设备文件的更新也不会绑定到某一类型的 vnode
+
+
+////////////// 20221018 //////////////
+  freebsd 中，除了根文件系统和 devfs 之外，其他文件系统的加载都是通过 syscall() -> sys_mount() 来实现的。
+sys_mount() 采用的方式是 kern_kldload() 一个文件系统模块到内核当中。但是奇海目前已经不再支持动态内核模块加载。
+所以，如果奇海要支持其他文件系统的挂载，就必须重写 sys_mount()
+
+qihai-qemu 下执行 df -a 打印信息如下:
+  # mount -t ext2fs /dev/vtbd2 /mount
+  # cd mount/
+  # ls
+  lost+found
+  # ls -al
+  total 13
+  drwxr-xr-x  3 0  0   1024 Oct 17 10:12 .
+  drwxr-xr-x  2 0  0   1792 Jan  1  1970 /.
+  drwx------  2 0  0  12288 Oct 17 10:12 lost+found
+  # cd ..
+  # df -a
+  random: unblocking device.
+  Filesystem 1K-blocks Used  Avail Capacity  Mounted on
+  tptfs         131072 2076 128996     2%    /
+  /dev/vtbd2    121299   14 114732     0%    /mount
+
+freebsd-13.0 执行同样的操作:
+  root@:/ # df -a
+  Filesystem   1K-blocks     Used     Avail Capacity  Mounted on
+  /dev/ada0s1a 199049880 35840644 147285248    20%    /
+  devfs                1        1         0   100%    /dev
+
+可以发现，如果是内存文件系统的话，显示的是内存文件系统的类型；如果是磁盘文件系统的话，显示的就是文件系统对应的设备文件
+
+  调试 tmpfs mount/unmount 过程中发现，当我们执行 umount 命令的时候，文件系统需要执行两次查找，第一次是查找 tmp
+路径，第二次是查找 tmp/.. 路径。假设我们只执行挂载操作，不执行卸载操作，之前的跨文件系统访问逻辑是没什么问题的。如果
+考虑卸载的话，原有只通过路径信息的判断将不能覆盖所有的情况。所以我们应该首先解析出绝对路径，然后再判断执行执行直接查找
+还是逐级查找
+
+  # umount mnt
+  panic: vinvalbuf: dirty bufs
+  cpuid = 2
+  time = 1666087374
+  KDB: stack backtrace:
+  #0 0x10c179f0a at kdb_backtrace+0x7c
+  #1 0x10c114f0a at vpanic+0x202
+  #2 0x10c114d04 at panic+0x32
+  #3 0x10c22b662 at bufobj_invalbuf+0x2c8
+  #4 0x10c654fbc at g_vfs_close+0x3c
+  #5 0x10c3abac4 at ext2_clusteracct+0xf62
+  #6 0x10c21f130 at dounmount+0x832
+  #7 0x10c21e8b2 at kern_unmount+0x63a
+  #8 0x10c21e26c at sys_unmount+0x20
+  #9 0x10c0191b2 at ecall_handler+0x71e
+  #10 0x10c018ab0 at ecall_handler+0x1c
+  #11 0x10c004fbc at system_call+0x6c
+  Uptime: 1m3s
+
+
+////////////// 20221020 //////////////
+  1、根文件系统镜像制作
+    - 相当于将 freebsd 中的 buildworld 和 installworld 两个步骤合并到 cmake 当中
+    - installworld 需要用我们自己的工具替换 (需要格式化成 tptfs 能够识别的类型)
+    - 需要判断哪些文件我们需要，哪些不需要，以及是如何生成的
+
+  2、与持久化内存和系统启动的对接
+      - 需要利用持久化读取磁盘上的文件系统元数据
+      - 第一次启动时需要执行挂载操作，后续启动则无需重复执行相应步骤
+
+  3、文件系统性能完整性测试：
+    - regular file operations
+        -- 已编写 kyua shell 脚本，但只包括基本测试用例，后续要继续添加
+
+    - device file operations
+        -- 模拟 kldload 的行为，编写一些应用程序动态添加设备，再进行一些读写操作，查看执行结果是否满足预期
+        -- 向系统添加实际设备
+
+////////////// 20221020 //////////////
+  编译器在编译的过程中，可能会创建一些临时可执行文件来帮助产生源文件，然后再提供给编译器进行后续的编译操作。
+但是奇海已经不支持 elf 文件的执行，所以对于中间可执行文件的处理，需要思考新的方法。修改编译器的行为？
+  dlopen() 同样也是如此，系统中已经不再包含动态链接库
+
+////////////// mtree 命令 //////////////
+FreeBSD 下，在 /etc/mtree 会包含有包含有多个 .dist 类型文件
+
+  root@:/etc/mtree # ls
+  BSD.debug.dist		BSD.lib32.dist		BSD.sendmail.dist	BSD.usr.dist
+  BSD.include.dist	BSD.root.dist		BSD.tests.dist		BSD.var.dist
+
+以 BSD.root.dist 为例进行说明，文件内容如下：
+  # $FreeBSD$
+  #
+  # Please see the file src/etc/mtree/README before making changes to this file.
+  #
+  /set type=dir uname=root gname=wheel mode=0755
+  .
+      bin
+      ..
+      boot
+          defaults
+          ..
+          dtb
+              allwinner             tags=package=runtime
+              ..
+              overlays              tags=package=runtime
+              ..
+              rockchip              tags=package=runtime
+              ..
+          ..
+          efi
+          ..
+          firmware
+          ..
+          loader.conf.d             tags=package=bootloader
+          ..
+          lua
+          ..
+          kernel
+          ..
+          modules
+          ..
+          uboot
+          ..
+          zfs
+          ..
+
+该文件描述的就是某个路径下的子目录结构，mtree 通过解析 .dist 文件，判断目标目录下的结构是否满足要求。如果发现某些文件是缺失的，
+则会根据输入的参数决定是否创建新的子目录
+
+  root@:/home/work # mtree -W -deU -i -f /usr/src/etc/mtree/BSD.root.dist -p /home/tmp/
+  ./bin missing (created)
+  ./boot missing (created)
+  ./boot/defaults missing (created)
+  ./boot/dtb missing (created)
+  ./boot/dtb/allwinner missing (created)
+  ./boot/dtb/overlays missing (created)
+  ./boot/dtb/rockchip missing (created)
+  ./boot/efi missing (created)
+  ./boot/firmware missing (created)
+  ./boot/loader.conf.d missing (created)
+  ./boot/lua missing (created)
+  ./boot/kernel missing (created)
+  ./boot/modules missing (created)
+  ./boot/uboot missing (created)
+  ./boot/zfs missing (created)
+  ./dev missing (created)
+  ./etc missing (created)
+  ./etc/X11 missing (created)
+  ./etc/authpf missing (created)
+  ./etc/autofs missing (created)
+  ./etc/bluetooth missing (created)
+  ./etc/cron.d missing (created)
+  ./etc/defaults missing (created)
+  ./etc/devd missing (created)
+  ./etc/dma missing (created)
+  ./etc/gss missing (created)
+  ./etc/kyua missing (created)
+  ./etc/mail missing (created)
+  ./etc/mtree missing (created)
+  ./etc/newsyslog.conf.d missing (created)
+  ./etc/ntp missing (created)
+  ./etc/pam.d missing (created)
+  ./etc/periodic missing (created)
+  ./etc/periodic/daily missing (created)
+  ./etc/periodic/monthly missing (created)
+  ./etc/periodic/security missing (created)
+  ./etc/periodic/weekly missing (created)
+  ./etc/pkg missing (created)
+  ./etc/ppp missing (created)
+  ./etc/rc.conf.d missing (created)
+  ./etc/rc.d missing (created)
+  ./etc/security missing (created)
+  ./etc/ssh missing (created)
+  ./etc/ssl missing (created)
+  ./etc/syslog.d missing (created)
+  ./etc/zfs missing (created)
+  ./lib missing (created)
+  ./lib/casper missing (created)
+  ./lib/geom missing (created)
+  ./lib/nvmecontrol missing (created)
+  ./libexec missing (created)
+  ./libexec/resolvconf missing (created)
+  ./media missing (created)
+  ./mnt missing (created)
+  ./net missing (created)
+  ./proc missing (created)
+  ./rescue missing (created)
+  ./root missing (created)
+  ./sbin missing (created)
+  ./tmp missing (created)
+  ./usr missing (created)
+  ./var missing (created)
+
+  root@:/home/tmp # ls -al
+  total 72
+  drwxr-xr-x  18 root  wheel  512 Oct 20 22:34 .
+  drwxr-xr-x   5 root  wheel  512 Oct 20 22:28 ..
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 bin
+  drwxr-xr-x  12 root  wheel  512 Oct 20 22:34 boot
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 dev
+  drwxr-xr-x  27 root  wheel  512 Oct 20 22:34 etc
+  drwxr-xr-x   5 root  wheel  512 Oct 20 22:34 lib
+  drwxr-xr-x   3 root  wheel  512 Oct 20 22:34 libexec
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 media
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 mnt
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 net
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 proc
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 rescue
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 root
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 sbin
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 tmp
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 usr
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 var
+
+  root@:/home/tmp # ls -al boot/
+  total 48
+  drwxr-xr-x  12 root  wheel  512 Oct 20 22:34 .
+  drwxr-xr-x  18 root  wheel  512 Oct 20 22:34 ..
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 defaults
+  drwxr-xr-x   5 root  wheel  512 Oct 20 22:34 dtb
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 efi
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 firmware
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 kernel
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 loader.conf.d
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 lua
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 modules
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 uboot
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 zfs
+
+  root@:/home/tmp # ls -al boot/dtb/
+  total 20
+  drwxr-xr-x   5 root  wheel  512 Oct 20 22:34 .
+  drwxr-xr-x  12 root  wheel  512 Oct 20 22:34 ..
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 allwinner
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 overlays
+  drwxr-xr-x   2 root  wheel  512 Oct 20 22:34 rockchip
+  root@:/home/tmp # 
+
+可以看到，新生成的目录刚好满足 .dist 文件中的描述。再次执行 installworld 中的命令，查看生成的 METALOG：
+
+root@:/home # mtree -C -f /usr/src/etc/mtree/BSD.root.dist -K all | sed s#^\.#.# | cat -l >> tmp//METALOG
+
+  . type=dir uname=root gname=wheel mode=0755
+  ./bin type=dir uname=root gname=wheel mode=0755
+  ./boot type=dir uname=root gname=wheel mode=0755
+  ./boot/defaults type=dir uname=root gname=wheel mode=0755
+  ./boot/dtb type=dir uname=root gname=wheel mode=0755
+  ./boot/dtb/allwinner type=dir uname=root gname=wheel mode=0755 tags=package=runtime
+  ./boot/dtb/overlays type=dir uname=root gname=wheel mode=0755 tags=package=runtime
+  ./boot/dtb/rockchip type=dir uname=root gname=wheel mode=0755 tags=package=runtime
+  ./boot/efi type=dir uname=root gname=wheel mode=0755
+  ./boot/firmware type=dir uname=root gname=wheel mode=0755
+  ./boot/loader.conf.d type=dir uname=root gname=wheel mode=0755 tags=package=bootloader
+  ./boot/lua type=dir uname=root gname=wheel mode=0755
+  ./boot/kernel type=dir uname=root gname=wheel mode=0755
+  ./boot/modules type=dir uname=root gname=wheel mode=0755
+  ./boot/uboot type=dir uname=root gname=wheel mode=0755
+  ./boot/zfs type=dir uname=root gname=wheel mode=0755
+  ./dev type=dir uname=root gname=wheel mode=0555
+  ./etc type=dir uname=root gname=wheel mode=0755
+  ./etc/X11 type=dir uname=root gname=wheel mode=0755
+  ./etc/authpf type=dir uname=root gname=wheel mode=0755
+  ./etc/autofs type=dir uname=root gname=wheel mode=0755
+  ./etc/bluetooth type=dir uname=root gname=wheel mode=0755
+  ./etc/cron.d type=dir uname=root gname=wheel mode=0755
+  ./etc/defaults type=dir uname=root gname=wheel mode=0755
+  ./etc/devd type=dir uname=root gname=wheel mode=0755
+  ./etc/dma type=dir uname=root gname=wheel mode=0755
+  ./etc/gss type=dir uname=root gname=wheel mode=0755
+  ./etc/kyua type=dir uname=root gname=wheel mode=0755 tags=package=tests
+  ./etc/mail type=dir uname=root gname=wheel mode=0755
+  ./etc/mtree type=dir uname=root gname=wheel mode=0755
+  ./etc/newsyslog.conf.d type=dir uname=root gname=wheel mode=0755
+  ./etc/ntp type=dir uname=root gname=wheel mode=0700
+  ./etc/pam.d type=dir uname=root gname=wheel mode=0755
+  ./etc/periodic type=dir uname=root gname=wheel mode=0755
+  ./etc/periodic/daily type=dir uname=root gname=wheel mode=0755
+  ./etc/periodic/monthly type=dir uname=root gname=wheel mode=0755
+  ./etc/periodic/security type=dir uname=root gname=wheel mode=0755
+  ./etc/periodic/weekly type=dir uname=root gname=wheel mode=0755
+  ./etc/pkg type=dir uname=root gname=wheel mode=0755
+  ./etc/ppp type=dir uname=root gname=wheel mode=0755
+  ./etc/rc.conf.d type=dir uname=root gname=wheel mode=0755
+  ./etc/rc.d type=dir uname=root gname=wheel mode=0755
+  ./etc/security type=dir uname=root gname=wheel mode=0755
+  ./etc/ssh type=dir uname=root gname=wheel mode=0755
+  ./etc/ssl type=dir uname=root gname=wheel mode=0755
+  ./etc/syslog.d type=dir uname=root gname=wheel mode=0755
+  ./etc/zfs type=dir uname=root gname=wheel mode=0755
+  ./lib type=dir uname=root gname=wheel mode=0755
+  ./lib/casper type=dir uname=root gname=wheel mode=0755
+  ./lib/geom type=dir uname=root gname=wheel mode=0755
+  ./lib/nvmecontrol type=dir uname=root gname=wheel mode=0755
+  ./libexec type=dir uname=root gname=wheel mode=0755
+  ./libexec/resolvconf type=dir uname=root gname=wheel mode=0755
+  ./media type=dir uname=root gname=wheel mode=0755
+  ./mnt type=dir uname=root gname=wheel mode=0755
+  ./net type=dir uname=root gname=wheel mode=0755
+  ./proc type=dir uname=root gname=wheel mode=0555
+  ./rescue type=dir uname=root gname=wheel mode=0755
+  ./root type=dir uname=root gname=wheel mode=0750
+  ./sbin type=dir uname=root gname=wheel mode=0755
+  ./tmp type=dir uname=root gname=wheel mode=01777
+  ./usr type=dir uname=root gname=wheel mode=0755
+  ./var type=dir uname=root gname=wheel mode=0755
+
+其实就是对 .dist 文件中的每个 entry 进一步处理，生成相对路径信息。当处理完所有这些 entry 之后，会把最后生成的 METALOG
+作为配置文件输入给 makefs 程序，最终生成 riscv.img。可以看出，METALOG 其实就是告诉 makefs 到底要把哪些文件包含到根文件
+系统镜像中
