@@ -211,9 +211,7 @@ typedef uint32_t vm_page_bits_t;
 typedef uint64_t vm_page_bits_t;
 #endif
 
-/* 
-	virtual memory page 物理内存跟虚拟内存的对应
-*/
+// 表示的是物理页
 struct vm_page {
 	/*
 		定义了 vm_page 的组织结构，或者是用队列，或者使用链表

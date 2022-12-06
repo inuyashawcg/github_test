@@ -110,7 +110,7 @@ git merge-base a b
   后面这个最大数字应该是可以配置的，可以查阅一下
 
 github token:
-  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
+  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
 
 如何生成新的 github token：
   - 登录账号

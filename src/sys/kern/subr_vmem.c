@@ -123,8 +123,8 @@ typedef struct qcache qcache_t;
 #define	VMEM_NAME_MAX	16
 
 /* 
-	vmem arena
-	总的管理某个地址空间的结构体，作用类似于文件系统中的超级块
+	vmem 是一个资源分配器，所以它角色定位应该是类似于 geom 层级的 consumer。同样，它所能
+	分配的空间肯定是由某个 provider 提供的。推测应该是 vm_map / vm_map_entry
 */
 struct vmem {
 	struct mtx_padalign	vm_lock;
@@ -148,19 +148,24 @@ struct vmem {
 		vmem 下管理的所有可用 btag 通过链表统一管理起来
 	*/
 	LIST_HEAD(, vmem_btag)	vm_freetags;
-	int			vm_nfreetags;	// 可用 btag 数量
-	int			vm_nbusytag;	// 已经被占用的 btag 数量
+	int			vm_nfreetags;	// 可用 boundry tag 数量
+	int			vm_nbusytag;	// 已经被占用的 bountry tag 数量
 	vmem_size_t		vm_inuse;	// vmem 正在使用的地址空间大小
 	vmem_size_t		vm_size;	// 总的地址空间大小？
 	vmem_size_t		vm_limit;
 
-	/* Used on import. */
+	/* Used on import.
+		import / release 回调函数，用于虚拟地址空间的申请和释放
+	*/
 	vmem_import_t		*vm_importfn;
 	vmem_release_t		*vm_releasefn;
-	void			*vm_arg;
+	/*
+		指向某个 arena，比如 kernel arena.
+	*/
+	void			*vm_arg;	
 
-	/* Space exhaustion callback. 
-		当地址空间被耗尽时的回调函数
+	/* Space exhaustion callback.
+		当地址空间被耗尽时的回调函数，应该是整个虚拟内存地址空间的回收
 	*/
 	vmem_reclaim_t		*vm_reclaimfn;
 
@@ -184,8 +189,8 @@ struct vmem_btag {
 
 #define	BT_TYPE_SPAN		1	/* Allocated from importfn */
 #define	BT_TYPE_SPAN_STATIC	2	/* vmem_add() or create. */
-#define	BT_TYPE_FREE		3	/* Available space. 可用空间使用链表管理 */
-#define	BT_TYPE_BUSY		4	/* Used space. 已经被使用的空间使用哈希表管理 */
+#define	BT_TYPE_FREE		3	/* Available space. */
+#define	BT_TYPE_BUSY		4	/* Used space. */
 #define	BT_ISSPAN_P(bt)	((bt)->bt_type <= BT_TYPE_SPAN_STATIC)
 
 #define	BT_END(bt)	((bt)->bt_start + (bt)->bt_size - 1)
@@ -214,14 +219,13 @@ static uma_zone_t vmem_zone;
 #define	VMEM_CONDVAR_WAIT(vm)		cv_wait(&vm->vm_cv, &vm->vm_lock)
 #define	VMEM_CONDVAR_BROADCAST(vm)	cv_broadcast(&vm->vm_cv)
 
-
 #define	VMEM_LOCK(vm)		mtx_lock(&vm->vm_lock)
 #define	VMEM_TRYLOCK(vm)	mtx_trylock(&vm->vm_lock)
 #define	VMEM_UNLOCK(vm)		mtx_unlock(&vm->vm_lock)
 #define	VMEM_LOCK_INIT(vm, name) mtx_init(&vm->vm_lock, (name), NULL, MTX_DEF)
 #define	VMEM_LOCK_DESTROY(vm)	mtx_destroy(&vm->vm_lock)
 #define	VMEM_ASSERT_LOCKED(vm)	mtx_assert(&vm->vm_lock, MA_OWNED);
-
+// align up: 上对齐
 #define	VMEM_ALIGNUP(addr, align)	(-(-(addr) & -(align)))
 
 #define	VMEM_CROSS_P(addr1, addr2, boundary) \
@@ -253,7 +257,8 @@ static uma_zone_t vmem_bt_zone;
 /* boot time arena storage. */
 static struct vmem kernel_arena_storage;
 static struct vmem buffer_arena_storage;
-static struct vmem transient_arena_storage;
+static struct vmem transient_arena_storage; // transient: 短暂的，转瞬即逝的
+
 /* kernel and kmem arenas are aliased for backwards KPI compat. */
 vmem_t *kernel_arena = &kernel_arena_storage;
 vmem_t *kmem_arena = &kernel_arena_storage;
@@ -269,9 +274,10 @@ vmem_t *memguard_arena = &memguard_arena_storage;
  * Fill the vmem's boundary tag cache.  We guarantee that boundary tag
  * allocation will not fail once bt_fill() passes.  To do so we cache
  * at least the maximum possible tag allocations in the arena.
- * 
  * 填充 vmem btag 缓存。我们保证一旦 bt_fill() 通过，btag 的分配就不会失败。所以
- * 我们至少缓存最大可能数量的 btag allocations
+ * 我们至少缓存最大可能数量的 btag allocations.
+ *
+ * 注意注释的表述，这个函数是为了填充 vmem 的 boundary tag，并不是要分配虚拟内存空间
  */
 static int
 bt_fill(vmem_t *vm, int flags)
@@ -326,7 +332,7 @@ bt_fill(vmem_t *vm, int flags)
 
 /*
  * Pop a tag off of the freetag stack.
-		从 tag free list 中弹出一个可用 tag
+		从 vmem->vm_freetags 中弹出一个可用 tag
  */
 static bt_t *
 bt_alloc(vmem_t *vm)
@@ -353,6 +359,10 @@ bt_freetrim(vmem_t *vm, int freelimit)
 	LIST_HEAD(, vmem_btag) freetags;
 	bt_t *bt;
 
+	/*
+		该函数会传入一个 freelimit 参数来限制 vmem->vm_freetags 链表中元素的数量，
+		如果超过，则从头开始释放其中的元素，直到符合限制条件
+	*/ 
 	LIST_INIT(&freetags);
 	VMEM_ASSERT_LOCKED(vm);
 	while (vm->vm_nfreetags > freelimit) {
@@ -364,7 +374,7 @@ bt_freetrim(vmem_t *vm, int freelimit)
 	VMEM_UNLOCK(vm);
 	while ((bt = LIST_FIRST(&freetags)) != NULL) {
 		LIST_REMOVE(bt, bt_freelist);
-		uma_zfree(vmem_bt_zone, bt);
+		uma_zfree(vmem_bt_zone, bt);	// 释放 uma 空间资源
 	}
 }
 
@@ -374,6 +384,7 @@ bt_free(vmem_t *vm, bt_t *bt)
 
 	VMEM_ASSERT_LOCKED(vm);
 	MPASS(LIST_FIRST(&vm->vm_freetags) != bt);
+	// 释放 bt，做法就是将其放到 vmem->vm_freetags 链表头部位置
 	LIST_INSERT_HEAD(&vm->vm_freetags, bt, bt_freelist);
 	vm->vm_nfreetags++;
 }
@@ -402,9 +413,7 @@ bt_freehead_tofree(vmem_t *vm, vmem_size_t size)
 	MPASS(idx >= 0);
 	MPASS(idx < VMEM_MAXORDER);
 	/*
-		vm_freelist 是 vmem_freelist 类型的数据，其中的每一个元素都是一个
-		btag 链表。目前一共是包含有 5 个链表，该函数是通过 size 确定链表的在
-		数组中的索引
+		vm_freelist 是 vmem_freelist 类型的数据，其中的每一个元素都是一个 btag
 	*/
 	return &vm->vm_freelist[idx];
 }
@@ -739,7 +748,7 @@ void
 vmem_startup(void)
 {
 	/*
-		初始化全局 vmem 链表锁，创建 vmem 和 vmem_btag zone
+		初始化全局 vmem 链表锁，创建 vmem zone 和 vmem_boundary tag zone
 	*/
 	mtx_init(&vmem_list_lock, "vmem list lock", NULL, MTX_DEF);
 	vmem_zone = uma_zcreate("vmem",

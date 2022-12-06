@@ -1,0 +1,21 @@
+unknown@:~ # ls -ali
+ls: color support not compiled in
+total 24
+5 -rw-rw-r--  1 0  0   1464 Aug 18 05:13 .cshrc
+3 drwxr-xr-x  2 0  0  12288 Jan  1  1970 dev/
+6 drwxrwxr-x  2 0  0    512 Nov  3 03:28 mnt/
+4 -rw-rw-r--  1 0  0     17 Nov 24 05:10 record
+
+unknown@:~ # ls -ali /dev
+ls: color support not compiled in
+total 0
+ 9 lrwxr-xr-x  1 0   0       9 Jan  1  1970 bpf0@ -> /dev/bpf
+14 drwxr-xr-x  2 0   0    1280 Jan  1  1970 fd/
+ 8 drwxr-xr-x  2 0   0    1280 Jan  1  1970 gpt/
+ 7 drwxr-xr-x  2 0   0    1280 Jan  1  1970 gptid/
+10 lrwxr-xr-x  1 0   0       9 Jan  1  1970 kbd0@ -> /dev/kbdm
+16 drwxr-xr-x  2 0   0     768 Jan  1  1970 reroot/
+11 lrwxr-xr-x  1 0   0      11 Jan  1  1970 stderr@ -> /dev/fd/2
+13 lrwxr-xr-x  1 0   0      10 Jan  1  1970 stdin@ -> /dev/fd/0
+12 lrwxr-xr-x  1 0   0      11 Jan  1  1970 stdout@ -> /dev/fd/1
+15 lrwxr-xr-x  1 0   0      12 Jan  1  1970 urandom@ -> /dev/random

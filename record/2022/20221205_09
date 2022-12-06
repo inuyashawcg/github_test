@@ -1,0 +1,60 @@
+////////////// 20221205 //////////////
+[Creating objdir /home/mercury/Documents/code/qihai/master/qihai/build/riscv.riscv64/tmp/home/mercury/Documents/code/qihai/master/qihai/x86_64.amd64/tests/sys/fs/tmpfs...]
+bmake: "/home/mercury/Documents/code/qihai/master/qihai/share/mk/auto.obj.mk" line 61: warning: >>>>>> include share auto.obj.mk >>>>>>>>>>>>
+
+echo '#! /usr/libexec/atf-sh' > create_test.tmp
+cat /home/mercury/Documents/code/qihai/master/qihai/contrib/netbsd-tests/fs/tmpfs/t_create.sh >>create_test.tmp
+chmod +x create_test.tmp
+mv create_test.tmp create_test
+sh /home/mercury/Documents/code/qihai/master/qihai/tools/install.sh   -o root  -g wheel -m 555  create_test  /home/mercury/Documents/code/qihai/master/qihai/build/riscv.riscv64/tmp/usr/tests/sys/fs/tmpfs/create_test
+install: cannot create regular file '/home/mercury/Documents/code/qihai/master/qihai/build/riscv.riscv64/tmp/usr/tests/sys/fs/tmpfs/create_test': No such file or directory
+*** Error code 1
+
+- Creating objdir 与后续 install 真正想要安装的位置并不是一致的，正常情况下应该是要安装到 tmp/usr
+- 从 warning 信息来看，creating dir 使用的是 share/mk/auto.obj.mk，可以通过该文件进行进一步追踪
+
+bmake: "/home/mercury/Documents/code/qihai/master/qihai/share/mk/auto.obj.mk" line 44: warning: >>>>>>>>>>> objdir is /home/mercury/Documents/code/qihai/master/qihai/build/riscv.riscv64/tmp/home/mercury/Documents/code/qihai/master/qihai/x86_64.amd64/tests/sys/fs/tmpfs >>>>>>>>>>> ddd
+
+在 auto.obj.mk 进来之前，objdir 变量已经是一个错误路径了，说明肯定是在别的地方已经错误处理了路径信息
+
+
+abs path is /home/mercury/Documents/code/qihai/master/qihai/build/riscv.riscv64/tmp/home/mercury/Documents/code/qihai/master/qihai/x86_64.amd64/tests/sys/fs/tmpfs
+install -p create_test /home/mercury/Documents/code/qihai/master/qihai/build/riscv.riscv64/tmp/usr/tests/sys/fs/tmpfs/create_test
+install: cannot create regular file '/home/mercury/Documents/code/qihai/master/qihai/build/riscv.riscv64/tmp/usr/tests/sys/fs/tmpfs/create_test': No such file or directory
+
+build/riscv.riscv64/tmp/home/mercury/Documents/code/qihai/master/qihai/x86_64.amd64/tests/sys/fs/tmpfs/
+
+
+# # Install scripts
+# .if defined(SCRIPTS) && !empty(SCRIPTS)
+# realinstall: _scriptsinstall
+# .ORDER: beforeinstall _scriptsinstall
+
+# SCRIPTSDIR?= 	${LIBDIR}
+# SCRIPTSOWN?=	${LIBOWN}
+# SCRIPTSGRP?=	${LIBGRP}
+# SCRIPTSMODE?=	${LIBMODE}
+
+# STAGE_AS_SETS+= scripts
+# stage_as.scripts: ${SCRIPTS}
+# FLAGS.stage_as.scripts= -m ${SCRIPTSMODE}
+# STAGE_FILES_DIR.scripts= ${STAGE_OBJTOP}
+# .for script in ${SCRIPTS}
+# .if defined(SCRIPTSNAME)
+# SCRIPTSNAME_${script:T}?=	${SCRIPTSNAME}
+# .else
+# SCRIPTSNAME_${script:T}?=	${script:T:R}
+# .endif
+# SCRIPTSDIR_${script:T}?=	${SCRIPTSDIR}
+# SCRIPTSOWN_${script:T}?=	${SCRIPTSOWN}
+# SCRIPTSGRP_${script:T}?=	${SCRIPTSGRP}
+# SCRIPTSMODE_${script:T}?=	${SCRIPTSMODE}
+# STAGE_AS_${script:T}=		${SCRIPTSDIR_${script:T}}/${SCRIPTSNAME_${script:T}}
+# _scriptsinstall: _SCRIPTSINS_${script:T}
+# _SCRIPTSINS_${script:T}: ${script}
+# 	${INSTALL} ${TAG_ARGS} -o ${SCRIPTSOWN_${.ALLSRC:T}} \
+# 	    -g ${SCRIPTSGRP_${.ALLSRC:T}} -m ${SCRIPTSMODE_${.ALLSRC:T}} \
+# 	    ${.ALLSRC} \
+# 	    ${DESTDIR}${SCRIPTSDIR_${.ALLSRC:T}}/${SCRIPTSNAME_${.ALLSRC:T}}
+# .endfor
+# .endif

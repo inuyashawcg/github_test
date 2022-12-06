@@ -1,0 +1,152 @@
+https://linux.die.net/man/1/bmake
+https://docs.freebsd.org/doc/6.0-RELEASE/usr/share/doc/en/books/pmake/book.html
+
+关于 makefile 中 = := ?= != 的区别，可以参考:
+  https://blog.csdn.net/sinat_34241861/article/details/110352961
+
+  = 与 ：= 主要区别是，:= 是立即赋值，即使后文会改变某个变量的值； = 就可以看作是延时赋值，如果后续会改变变量的值，那么前面
+的赋值是会被改变的。!= 则是将一个 shell command 的输出结构赋值给某个变量，一般输出结果不能太长，限制 8k 好像是
+
+变量类型:
+  - 环境变量
+  - 全局变量
+  - 命令行变量
+  - 局部变量，仅仅用于定义某个特定的目标
+
+NOTE: target local	variable assignments behave differently	in that;
+  "+=" Only appends to a previous local assignment for the same target and variable.
+      仅追加到同一目标和变量的上一个本地赋值
+
+  ":=" Is redundant	with respect to	Global variables, which	have already been	expanded.
+      对于已扩展的全局变量而言是多余的
+  
+  "* []" 用作目标或者源的最后组件的一部分，并且必须用于描述现有文件；
+  "{}" 不必用于描述现有文件；
+  扩展是按照目录顺序进行的，而不是按照 shell 中的字幕顺序进行
+
+
+"FILE DEPENDENCY SPECIFICATIONS"
+依赖关系行由一个或多个目标、一个运算符和零个或更多个源组成。这就产生了一种关系，其中目标“依赖”于源，
+并且通常是从源创建的。如果目标不存在，或者其修改时间小于其任何来源的修改时间，则该目标被视为过期。
+过期的目标将被重新创建，但直到所有源都被检查并根据需要重新创建。可使用三个操作员：
+
+  "："  许多依赖关系行可以命名此目标，但只有一行可以附加 shell 命令。在所有依赖关系行中命名的所有源都将一起考虑，
+        如果需要，将运行附加的 shell 命令来创建或重新创建目标。如果生成被中断，目标将被删除
+  
+  "!"   相同，但无论目标是否过期，都会重新创建
+
+  "::"  任何依赖项行都可能有附加的 shell 命令，但每个命令都是独立处理的：考虑其源，如果目标（仅）相对于这些源已过时，
+        则运行附加的 shell 命令。因此，可以根据环境运行不同组的附加 shell 命令。此外，与：不同，对于没有源的依赖项行，
+        始终运行附加的 shell 命令。与：不同的是，如果制造中断，则不会删除目标
+
+  实例:
+    install \
+    install.libs \
+    install.includes :: ${AUTO_SRC} ${INCLUDEDIR} \
+        curses.h \
+        unctrl.h \
+        ncurses_dll.h \
+        term.h \
+        termcap.h \
+        $(srcdir)/tic.h \
+        $(srcdir)/term_entry.h \
+        $(srcdir)/nc_tparm.h
+      @ (cd ${INCLUDEDIR} && rm -f curses.h) ; ../headers.sh ${INSTALL_DATA} ${INCLUDEDIR} ${srcdir} curses.h
+      @ (cd ${INCLUDEDIR} && rm -f ncurses.h && ${LN_S} curses.h ncurses.h)
+      @ (cd ${INCLUDEDIR} && rm -f unctrl.h) ; ../headers.sh ${INSTALL_DATA} ${INCLUDEDIR} ${srcdir} unctrl.h
+      @ (cd ${INCLUDEDIR} && rm -f ncurses_dll.h) ; ../headers.sh ${INSTALL_DATA} ${INCLUDEDIR} ${srcdir} ncurses_dll.h
+      @ (cd ${INCLUDEDIR} && rm -f term.h) ; ../headers.sh ${INSTALL_DATA} ${INCLUDEDIR} ${srcdir} term.h
+      @ (cd ${INCLUDEDIR} && rm -f termcap.h) ; ../headers.sh ${INSTALL_DATA} ${INCLUDEDIR} ${srcdir} termcap.h
+      @ (cd ${INCLUDEDIR} && rm -f tic.h) ; ../headers.sh ${INSTALL_DATA} ${INCLUDEDIR} ${srcdir} $(srcdir)/tic.h
+      @ (cd ${INCLUDEDIR} && rm -f term_entry.h) ; ../headers.sh ${INSTALL_DATA} ${INCLUDEDIR} ${srcdir} $(srcdir)/term_entry.h
+      @ (cd ${INCLUDEDIR} && rm -f nc_tparm.h) ; ../headers.sh ${INSTALL_DATA} ${INCLUDEDIR} ${srcdir} $(srcdir)/nc_tparm.h
+
+    uninstall \
+    uninstall.libs \
+    uninstall.includes ::
+      -@ (cd ${INCLUDEDIR} && rm -f curses.h)
+      -@ (cd ${INCLUDEDIR} && rm -f ncurses.h)
+      -@ (cd ${INCLUDEDIR} && rm -f unctrl.h)
+      -@ (cd ${INCLUDEDIR} && rm -f ncurses_dll.h)
+      -@ (cd ${INCLUDEDIR} && rm -f term.h)
+      -@ (cd ${INCLUDEDIR} && rm -f termcap.h)
+      -@ (cd ${INCLUDEDIR} && rm -f tic.h)
+      -@ (cd ${INCLUDEDIR} && rm -f term_entry.h)
+      -@ (cd ${INCLUDEDIR} && rm -f nc_tparm.h)
+
+"All dependency lines mentioning a particular target must use the same operator."
+
+
+"SHELL COMMAND"
+  如果命令的第一个字符是 "@"、"+" 或 "-" 的任意组合，则会对该命令进行特殊处理:
+    "@" - 使命令在执行前不被回显
+    "+" - 即使给定 -n，也会导致命令执行。这与 ".MAKE" 特殊源的效果类似，只是效果可以限制在脚本的一行
+    "-" - 在兼容模式下，将忽略命令行的任何非零退出状态
+
+
+"THE SEVEN BUILT-IN LOCAL VARIABLE"
+  ".ALLSRC" - 该目标对应的所有源文件，也可以认为是 "_"
+
+  ".ARCHIVE" - archive file，也可以被认为是 "!"
+
+  ".IMPSRC" - 在后缀转换规则中，要转换目标的源的名称/路径("隐含"源)；也称为"_"，它没有在显式规则中定义
+
+  ".MEMBER" - archive member name, 也可以被认为是"%"
+
+  ".OODATE" - 此目标的已过期来源列表， 也可以认为是 "?"
+
+  ".PREFIX" - 目标的文件前缀，仅包含文件部分，不包含后缀或前面的目录组件；也称为"*"；
+            后缀必须是用 .suffixes 声明的已知后缀之一，否则将无法识别
+
+  ".TARGET" - 目标的名称, 也称为"@"。为了与其他make兼容，这是存档成员规则中 .ARCHIVE 的别名
+
+允许使用较短的形式（"_"、"！"、"_"，"%"、"？"、"*"和"@"）与历史生成文件和旧版 POSIX 生成向后兼容，不建议使用
+
+
+"ADDITIONAL BUILT-IN VARIABLE"
+  ".ALLTARGETS" - Makefile中遇到的所有目标的列表。如果在Makefile解析期间进行评估，则只列出迄今为止遇到的目标
+
+  ".CURDIR" - 执行make的目录的路径
+
+  ".INCLUDEDFROMDIR" - 包含此 Makefile 的文件的目录
+
+  ".INCLUDEDFROMFILE" - 包含此 Makefile 的文件的文件名
+
+  "MAKE" - 使用（argv[0]）执行make的名称。为了兼容性，还应设置 ".MAKE" 值相同。首选使用的变量是环境变量 MAKE，
+          因为它与其他版本的 MAKE 更兼容，不能与同名的特殊目标混淆
+  
+  ".MAKE.ALWAYS_PASS_JOB_QUEUE" - 告诉 make 是否传递 job token queue，即使目标没有标记。make 默认值为"yes"，
+                                以便与FreeBSD 9.0及更早版本向后兼容
+
+  ".MAKE.DEPENDFILE" - 命名生成的依赖项从中读取的生成文件 (默认为 ".depend")
+
+  ".MAKE.EXPAND_VARIABLES" - 控制 "-V" 选项默认行为的布尔值。如果为真，则用 "-V" 打印的变量值将完全展开；
+                             如果为 false，则显示原始变量内容 (可能包括其他未扩展的变量引用)
+
+  ".MAKE.EXPORTED" - make 导出的变量列表
+
+  ".MAKE.JOBS" - make -j
+
+  ".MAKE.JOB.PREFIX" - 当 make 并行执行的时候，通过 prefix 可以打印更多的信息，更容易跟踪实现的并行度，例如:
+                        .MAKE.JOB.PREFIX=${.newline}---${.MAKE:T}[${.MAKE.PID}]
+  
+  ".MAKE.TARGET_LOCAL_VARIABLES" - 如果设置为 false，依赖关系行中的明显变量赋值将被视为正常源
+
+  "MAKEFLAGS" - 环境变量 "MAKEFLAGS" 可以包含在make命令行中指定的任何内容。make 命令行中指定的任何内容都将附加到
+                "MAKEFLAGS" 变量，然后将该变量输入到 make 执行的所有程序的环境中
+  
+  ".MAKE.LEVEL" - make 的递归深度。make 的初始实例将为 0，并将一个递增的值放入环境中，供下一代查看。这允许像:
+                  .if $｛.MAKE.LEVEL｝==0 这样的测试来保护只应在 make 的初始实例中评估的内容
+
+  ".MAKE.MAKEFILE_PREFERENCE" - make 将查找的 makefile 名称 (默认"makefile"，"makefile") 的有序列表
+        # Tell bmake the makefile preference
+        MAKEFILE_PREFERENCE?= BSDmakefile makefile Makefile
+        .MAKE.MAKEFILE_PREFERENCE= ${MAKEFILE_PREFERENCE}
+
+  ".MAKE.MAKEFILES" - make 读取的 makefile 列表，用于跟踪依赖项。每个 makefile 只记录一次，而不考虑读取的次数
+
+  ".MAKE.MODE" - 读取所有生成文件后已处理。可以影响运行模式。它可以包含多个关键字：
+      
+
+SPECIAL	TARGETS - 特殊目标不能与其他目标一起包含，即它们必须是唯一指定的目标
+  ".MAIN" - 如果在调用 make时 未指定目标，则将生成此目标

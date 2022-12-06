@@ -1,0 +1,70 @@
+////////////// 20221114 //////////////
+  vm_map 表示的是一块与机器无关的虚拟地址空间最高层级数据结构
+  vm_map_entry 表示的是描述一段连续的虚拟地址空间范围到 "后备存储 vm_object" 的映射，这些地址共享保护权限和继承属性
+
+  经过对比可以发现，文件系统其实就类似于 vm_map_entry，然后每个文件就是 vm_object，对应到 "后备存储"
+
+  将 tptfs 设计成动态增长存储空间的形式，感觉可以参考 tmpfs 的实现。tmpfs mount 结构中会包含一个成员表示 tmpfs 所能
+申请页数的最大值，也就是说它的大小也不是动态变化的，会有一个范围值。不过，我们可以考虑将该值变成可设置的，是否就可以把它变成
+能动态变化的文件系统？
+
+
+////////////// 20221115 //////////////
+  unknown@:/dev # ls -ali | grep drw
+    3 drwxr-xr-x  2 0   0   11264 Jan  1  1970 ./
+    2 drwxr-xr-x  2 0   0    1536 Jan  1  1970 ../
+    13 drwxr-xr-x  2 0   0    1280 Jan  1  1970 fd/
+    16 drwxr-xr-x  2 0   0     768 Jan  1  1970 reroot/
+    7 drwxr-xr-x  2 0   0     768 Jan  1  1970 ufs/
+    8 drwxr-xr-x  2 0   0     768 Jan  1  1970 ufsid/
+  unknown@:/dev # ls -ali | grep lrw
+    14 lrwxr-xr-x  1 0   0       9 Jan  1  1970 bpf0@ -> /dev/bpf
+    9 lrwxr-xr-x  1 0   0       9 Jan  1  1970 kbd0@ -> /dev/kbdm
+    10 lrwxr-xr-x  1 0   0      11 Jan  1  1970 stderr@ -> /dev/fd/2
+    12 lrwxr-xr-x  1 0   0      10 Jan  1  1970 stdin@ -> /dev/fd/0
+    11 lrwxr-xr-x  1 0   0      11 Jan  1  1970 stdout@ -> /dev/fd/1
+    15 lrwxr-xr-x  1 0   0      12 Jan  1  1970 urandom@ -> /dev/random
+
+  启动时已经被占用的 inode number = 16，新文件申请的第一个 inode = 17
+
+dev test:
+  /usr/src/contrib/netbsd-tests/dev
+
+
+////////////// 20221116 //////////////
+  atf 测试用例是需要调用可执行程序或者是脚本。所以对于 atf-c 和 atf-c++，在奇海操作系统中，是首先要编译生成对应的线程，
+然后编译的结果就只剩下 kyuafile，在 freebsd 中应该存在的可执行文件已经消失
+
+  文件系统大部分还是以 shell 脚本的形式编写测试用例，好处就是不需要依赖编译系统，可在多平台之间切换，使用起来比较方便。
+不过也要确保在奇海系统中存在这些命令
+
+  tptfs 与设备相关的代码的子目录不要用 dev 命名，因为会与 sys/dev 下的重名，可以换一个名字
+
+"atf-sh 测试用例中很多都使用了 TMPDIR 这个变量并 export，那这样会不会造成多个测试用例同时处理同一个目录？"
+  其实是不会的，这涉及到了环境变量在不同 shell 进程中的作用域和传递关系，可参考
+    http://c.biancheng.net/view/773.html
+  
+  如果是父进程 export 环境变量，它对应的子进程是可以继承的，但是不具备父子关系的其他进程则不会感知到这个环境变量
+
+实际测试：
+  - 开启两个 shell 终端，然后在一个终端设置环境变量并输出，再在另外一个终端检查能够打印该环境变量的值
+
+  终端1:
+    mercury@mercury:~$ a=1
+    mercury@mercury:~$ export a
+    mercury@mercury:~$ echo $a
+
+  终端2:
+    mercury@mercury:~$ echo $a
+    (空输出)
+
+
+////////////// 20221118 //////////////
+  freebsd 内核内存分配器层次结构:
+    - vm_map: 最底层管理虚拟地址空间，其他子模块使用的子空间都应该在它的管理之下
+    - vm_map_entry: 描述 vm_map 中一段地址空间的使用情况，其中包含有一个子映射的概念。关于子映射，在 freebsd 手册中
+      有这么一段表述: "内核某些部分可能有特殊的对齐格式，甚至会要求特定的地址。这些都可以使用子映射来解决"
+    - vmem: 在 vm_map_entry 中按照 page_size 的整数倍分配虚拟空间
+      - slab
+      - uma: 以更小的粒度分配地址空间，所以会把完整的页再进一步切分成更小的部分，比如我们 malloc 的时候，
+             uma 就会拿一个合适的部分给使用者 

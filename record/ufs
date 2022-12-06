@@ -1,41 +1,95 @@
-crw-------  1 0   2   0x19 Sep 28 06:39 audit
-crw-------  1 0   0   0x17 Sep 28 06:39 auditpipe
-crw-------  1 0   0    0xb Sep 28 06:39 bpf
-lrwxr-xr-x  1 0   0      3 Sep 28 06:39 bpf0 -> bpf
-crw-------  1 0   0    0x6 Sep 28 06:39 console
-crw-rw-rw-  1 0   0   0x1b Sep 28 06:39 ctty
-crw-rw----  1 66  68  0x21 Sep 28 06:39 cuau0
-crw-rw----  1 66  68  0x22 Sep 28 06:39 cuau0.init
-crw-rw----  1 66  68  0x23 Sep 28 06:39 cuau0.lock
-crw-------  1 0   0    0x7 Sep 28 06:39 devctl
-crw-------  1 0   0    0x8 Sep 28 06:39 devctl2
-cr--r--r--  1 0   0   0x24 Sep 28 06:39 devstat
-dr-xr-xr-x  2 0   0    512 Sep 28 06:39 fd
-crw-------  1 0   0    0xa Sep 28 06:39 fido
-crw-rw-rw-  1 0   0    0xd Sep 28 06:39 full
-crw-r-----  1 0   5    0x9 Sep 28 06:39 geom.ctl
-lrwxr-xr-x  1 0   0      7 Sep 28 06:39 kbd0 -> kbdmux0
-crw-------  1 0   0   0x1c Sep 28 06:39 kbdmux0
-crw-------  1 0   0   0x1a Sep 28 06:39 klog
-crw-------  1 0   0   0x29 Sep 28 06:39 mdctl
-crw-rw-rw-  1 0   0    0xe Sep 28 06:39 null
-crw-------  1 0   0   0x16 Sep 28 06:39 openfirm
-crw-r--r--  1 0   0   0x18 Sep 28 06:39 pci
-crw-------  1 0   0   0x28 Sep 28 06:39 pfil
-crw-r--r--  1 0   0    0x4 Sep 28 06:39 random
-dr-xr-xr-x  2 0   0    512 Sep 28 06:39 reroot
-lrwxr-xr-x  1 0   0      4 Sep 28 06:39 stderr -> fd/2
-lrwxr-xr-x  1 0   0      4 Sep 28 06:39 stdin -> fd/0
-lrwxr-xr-x  1 0   0      4 Sep 28 06:39 stdout -> fd/1
-crw-------  1 0   0   0x1e Sep 28 06:39 ttyu0
-crw-------  1 0   0   0x1f Sep 28 06:39 ttyu0.init
-crw-------  1 0   0   0x20 Sep 28 06:39 ttyu0.lock
-dr-xr-xr-x  2 0   0    512 Sep 28 06:39 ufs
-dr-xr-xr-x  2 0   0    512 Sep 28 06:39 ufsid
-crw-------  1 0   0   0x25 Sep 28 06:39 ufssuspend
-lrwxr-xr-x  1 0   0      6 Sep 28 06:39 urandom -> random
-crw-r--r--  1 0   5   0x2a Sep 28 06:39 usbctl
-crw-r-----  1 0   5   0x2c Sep 28 06:39 vtbd0
-crw-r-----  1 0   5   0x30 Sep 28 06:39 vtbd1
-crw-------  1 0   5   0x2b Sep 28 06:39 xpt0
-crw-rw-rw-  1 0   0    0xf Sep 28 06:39 zero
+===> tests/sys/fs/tmpfs (all)
+(cd /usr/home/mc/workspace/qihai/tests/sys/fs/tmpfs &&  DEPENDFILE=.depend.h_tools  NO_SUBDIR=1 make -f /usr/home/mc/workspace/qihai/tests/sys/fs/tmpfs/Makefile _RECURSING_PROGS=t  PROG=h_tools )
+echo h_tools.full: /usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/lib/libc.a  >> .depend.h_tools
+cc -target riscv64-unknown-freebsd13.0 --sysroot=/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp -B/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/bin  -O2 -pipe -fno-common -march=rv64imafdc -mabi=lp64d   -mno-relax -g -MD  -MF.depend.h_tools.h_tools.o -MTh_tools.o -std=gnu99 -Wno-format-zero-length -fstack-protector-strong -Wsystem-headers -Werror -Wall -Wno-format-y2k -W -Wno-unused-parameter -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wreturn-type -Wcast-qual -Wwrite-strings -Wswitch -Wshadow -Wunused-parameter -Wcast-align -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls -Wold-style-definition -Wno-pointer-sign -Wmissing-variable-declarations -Wthread-safety -Wno-empty-body -Wno-string-plus-int -Wno-unused-const-variable  -Qunused-arguments  -c /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/h_tools.c -o h_tools.o
+cc -target riscv64-unknown-freebsd13.0 --sysroot=/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp -B/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/bin -O2 -pipe -fno-common -march=rv64imafdc -mabi=lp64d -mno-relax -g -std=gnu99 -Wno-format-zero-length -fstack-protector-strong -Wsystem-headers -Werror -Wall -Wno-format-y2k -W -Wno-unused-parameter -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wreturn-type -Wcast-qual -Wwrite-strings -Wswitch -Wshadow -Wunused-parameter -Wcast-align -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls -Wold-style-definition -Wno-pointer-sign -Wmissing-variable-declarations -Wthread-safety -Wno-empty-body -Wno-string-plus-int -Wno-unused-const-variable -Qunused-arguments   -o h_tools.full h_tools.o  
+objcopy --only-keep-debug h_tools.full h_tools.debug
+objcopy --strip-debug --add-gnu-debuglink=h_tools.debug  h_tools.full h_tools
+echo '#! /usr/libexec/atf-sh' > create_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_create.sh >>create_test.tmp
+chmod +x create_test.tmp
+mv create_test.tmp create_test
+echo '#! /usr/libexec/atf-sh' > read_write_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_read_write.sh >>read_write_test.tmp
+chmod +x read_write_test.tmp
+mv read_write_test.tmp read_write_test
+echo '#! /usr/libexec/atf-sh' > dots_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_dots.sh >>dots_test.tmp
+chmod +x dots_test.tmp
+mv dots_test.tmp dots_test
+echo '#! /usr/libexec/atf-sh' > exec_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_exec.sh >>exec_test.tmp
+chmod +x exec_test.tmp
+mv exec_test.tmp exec_test
+echo '#! /usr/libexec/atf-sh' > link_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_link.sh >>link_test.tmp
+chmod +x link_test.tmp
+mv link_test.tmp link_test
+echo '#! /usr/libexec/atf-sh' > mkdir_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_mkdir.sh >>mkdir_test.tmp
+chmod +x mkdir_test.tmp
+mv mkdir_test.tmp mkdir_test
+echo '#! /usr/libexec/atf-sh' > mknod_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_mknod.sh  | sed -e 's,mknod pipe p,mkfifo pipe,g'  -e 's,mknod dir/pipe p,mkfifo dir/pipe,g' >>mknod_test.tmp
+chmod +x mknod_test.tmp
+mv mknod_test.tmp mknod_test
+echo '#! /usr/libexec/atf-sh' > mount_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_mount.sh  | sed -e 's,-o -g,-o gid=,g'  -e 's,-o -m,-o mode=,g'  -e 's,-o -s,-o size=,g'  -e 's,-o -u,-o uid=,g'  -e 's,mount_tmpfs,mount -t tmpfs,g' >>mount_test.tmp
+chmod +x mount_test.tmp
+mv mount_test.tmp mount_test
+echo '#! /usr/libexec/atf-sh' > trail_slash_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_trail_slash.sh >>trail_slash_test.tmp
+chmod +x trail_slash_test.tmp
+mv trail_slash_test.tmp trail_slash_test
+echo '#! /usr/libexec/atf-sh' > readdir_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_readdir.sh  | sed -e 's,mknod fifo p,mkfifo fifo,g' >>readdir_test.tmp
+chmod +x readdir_test.tmp
+mv readdir_test.tmp readdir_test
+echo '#! /usr/libexec/atf-sh' > remove_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_remove.sh >>remove_test.tmp
+chmod +x remove_test.tmp
+mv remove_test.tmp remove_test
+echo '#! /usr/libexec/atf-sh' > rename_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_rename.sh >>rename_test.tmp
+chmod +x rename_test.tmp
+mv rename_test.tmp rename_test
+echo '#! /usr/libexec/atf-sh' > rmdir_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_rmdir.sh >>rmdir_test.tmp
+chmod +x rmdir_test.tmp
+mv rmdir_test.tmp rmdir_test
+echo '#! /usr/libexec/atf-sh' > setattr_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_setattr.sh >>setattr_test.tmp
+chmod +x setattr_test.tmp
+mv setattr_test.tmp setattr_test
+echo '#! /usr/libexec/atf-sh' > sizes_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_sizes.sh  | sed -e 's,-o -s,-o size=,g' >>sizes_test.tmp
+chmod +x sizes_test.tmp
+mv sizes_test.tmp sizes_test
+echo '#! /usr/libexec/atf-sh' > sockets_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_sockets.sh >>sockets_test.tmp
+chmod +x sockets_test.tmp
+mv sockets_test.tmp sockets_test
+echo '#! /usr/libexec/atf-sh' > statvfs_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_statvfs.sh  | sed -e 's,-o -s,-o size=,g' >>statvfs_test.tmp
+chmod +x statvfs_test.tmp
+mv statvfs_test.tmp statvfs_test
+echo '#! /usr/libexec/atf-sh' > symlink_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_symlink.sh >>symlink_test.tmp
+chmod +x symlink_test.tmp
+mv symlink_test.tmp symlink_test
+echo '#! /usr/libexec/atf-sh' > times_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_times.sh >>times_test.tmp
+chmod +x times_test.tmp
+mv times_test.tmp times_test
+echo '#! /usr/libexec/atf-sh' > truncate_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_truncate.sh >>truncate_test.tmp
+chmod +x truncate_test.tmp
+mv truncate_test.tmp truncate_test
+echo '#! /usr/libexec/atf-sh' > vnd_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_vnd.sh  | sed -e 's,vndconfig -u /dev/vnd3,mdconfig -d -u $md_dev,g'  -e 's,/dev/vnd3,/dev/$md_dev,g' >>vnd_test.tmp
+chmod +x vnd_test.tmp
+mv vnd_test.tmp vnd_test
+echo '#! /usr/libexec/atf-sh' > vnode_leak_test.tmp
+cat /usr/home/mc/workspace/qihai/contrib/netbsd-tests/fs/tmpfs/t_vnode_leak.sh  | sed -e 's,-o -s,-o size=,g' >>vnode_leak_test.tmp
+chmod +x vnode_leak_test.tmp
+mv vnode_leak_test.tmp vnode_leak_test

@@ -1,0 +1,89 @@
+////////////// 20221121 //////////////
+如果一个类中包含一个函数，处理逻辑是把自己 delete 掉，执行之后会发生什么？
+  执行完该函数之后，类对象占用的那部分空间已经被释放。这个释放值得是 vm 模块会标定这块地址没有被使用，但可能还没来得及把其中的数据清零，
+  所以类的其他成员成员函数还是有可能正常执行的。但绝对不是代表说，这样的写法是正确的。
+
+  一般 delete 掉一个类指针之后，应该是将该指针置空，防止再次利用该指针访问一些本不应该被访问的数据
+
+
+////////////// 20221123 //////////////
+bmake: don't know how to make /usr/tests/sys/fs/h_funcs.subr. Stop
+bmake: don't know how to make /usr/tests/sys/fs/h_funcs.subr. Stop
+bmake[1]: "/home/mercury/Documents/code/qihai/master/qihai/share/mk/netbsd-tests.test.mk" line 9:
+"Please define TESTSRC to the absolute path of the test sources, e.g. ${SRCTOP}/contrib/netbsd-tests/lib/libc/stdio"
+
+#include<...> 出错，不是一定要替换成 #include"...", 有可能是在 cmake 中没有包含对应的查找路径，加进去之后错误消除
+
+
+////////////// 20221124 //////////////
+  目前 qihai.disk 是使用 uboot 进行制作，不能再用格式化工具简单拼接 
+
+  warm boot 初始版本测试
+
+  start init
+  2022-11-24T06:31:58.212493+00:00 - init 20 - - login_getclass: unknown class 'daemon'
+  2022-11-24T06:31:58.365608+00:00 - init 20 - - can't access /etc/rc: No such file or directory
+  /home: No such file or directory.
+  sh: The terminal database could not be opened.
+  sh: using dumb terminal settings.
+  unknown@:~ # 
+  unknown@:~ # 
+  unknown@:~ # ls
+  ls: color support not compiled in
+  .cshrc	dev/	mnt/	record
+  unknown@:~ # cd dev
+  unknown@:/dev # ls -al
+  ls: color support not compiled in
+  total 0
+  drwxr-xr-x  2 0   0   12288 Jan  1  1970 ./
+  crw-------  0 0   2    0x1c Nov 24 06:31 audit
+  crw-------  0 0   0    0x1b Nov 24 06:31 auditpipe
+  crw-------  0 0   0    0x16 Nov 24 06:31 bpf
+  lrwxr-xr-x  1 0   0       9 Jan  1  1970 bpf0@ -> /dev/bpf
+  crw-------  0 0   0     0x5 Nov 24 06:32 console
+  crw-------  0 0   0     0xb Nov 24 06:31 consolectl
+  crw-rw-rw-  0 0   0    0x20 Nov 24 06:31 ctty
+  crw-rw----  0 66  68   0x24 Nov 24 06:31 cuau0
+  crw-rw----  0 66  68   0x25 Nov 24 06:31 cuau0.init
+  crw-rw----  0 66  68   0x26 Nov 24 06:31 cuau0.lock
+  crw-------  0 0   0     0x6 Nov 24 06:31 devctl
+  crw-------  0 0   0     0x7 Nov 24 06:31 devctl2
+  cr--r--r--  0 0   0    0x27 Nov 24 06:31 devstat
+  drwxr-xr-x  2 0   0    1280 Jan  1  1970 fd/
+  crw-------  0 0   0    0x15 Nov 24 06:31 fido
+  crw-rw-rw-  0 0   0    0x18 Nov 24 06:31 full
+  crw-r-----  0 0   5     0xa Nov 24 06:31 geom.ctl
+  drwxr-xr-x  2 0   0    1280 Jan  1  1970 gpt/
+  drwxr-xr-x  2 0   0    1280 Jan  1  1970 gptid/
+  lrwxr-xr-x  1 0   0       9 Jan  1  1970 kbd0@ -> /dev/kbdm
+  crw-------  0 0   0    0x12 Nov 24 06:31 kbdmux0
+  crw-------  0 0   0    0x1f Nov 24 06:31 klog
+  crw-------  0 0   0    0x2e Nov 24 06:31 mdctl
+  crw-rw-rw-  0 0   0    0x19 Nov 24 06:31 null
+  crw-------  0 0   0    0x1d Nov 24 06:31 openfirm
+  crw-r--r--  0 0   0    0x1e Nov 24 06:31 pci
+  crw-------  0 0   0    0x2b Nov 24 06:31 pfil
+  crw-r--r--  0 0   0     0x8 Nov 24 06:31 random
+  drwxr-xr-x  2 0   0     768 Jan  1  1970 reroot/
+  lrwxr-xr-x  1 0   0      11 Jan  1  1970 stderr@ -> /dev/fd/2
+  lrwxr-xr-x  1 0   0      10 Jan  1  1970 stdin@ -> /dev/fd/0
+  lrwxr-xr-x  1 0   0      11 Jan  1  1970 stdout@ -> /dev/fd/1
+  crw-------  0 0   0    0x14 Nov 24 06:31 sysmouse
+  crw-------  0 0   0    0x21 Nov 24 06:31 ttyu0
+  crw-------  0 0   0    0x22 Nov 24 06:31 ttyu0.init
+  crw-------  0 0   0    0x23 Nov 24 06:31 ttyu0.lock
+  crw-------  0 0   0    0x28 Nov 24 06:31 ufssuspend
+  lrwxr-xr-x  1 0   0      12 Jan  1  1970 urandom@ -> /dev/random
+  crw-r--r--  0 0   5    0x2c Nov 24 06:31 usbctl
+  crw-r-----  0 0   5    0x2f Nov 24 06:31 vtbd0
+  crw-r-----  0 0   5    0x30 Nov 24 06:31 vtbd0p1
+  crw-r-----  0 0   5    0x31 Nov 24 06:31 vtbd0p2
+  crw-r-----  0 0   5    0x32 Nov 24 06:31 vtbd0p3
+  crw-r-----  0 0   5    0x33 Nov 24 06:31 vtbd0p4
+  crw-------  0 0   5    0x2d Nov 24 06:31 xpt0
+  crw-rw-rw-  0 0   0    0x1a Nov 24 06:31 zero
+  unknown@:/dev # cd ..
+  unknown@:~ # cat record 
+  /.cshrc#5
+  /mnt#6
+  unknown@:~ # 

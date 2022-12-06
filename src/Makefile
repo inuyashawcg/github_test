@@ -220,6 +220,8 @@ PATH=	/sbin:/bin:/usr/sbin:/usr/bin
 # ？= 表示如果该变量没有被赋值，则赋予等号后的值
 # != 操作符是将右边的命令执行后，再将结果返回给左边变量
 MAKEOBJDIRPREFIX?=	/usr/obj
+
+# 通过执行 shell 命令获取 object prefix
 _MAKEOBJDIRPREFIX!= /usr/bin/env -i PATH=${PATH} ${MAKE} MK_AUTO_OBJ=no \
     ${.MAKEFLAGS:MMAKEOBJDIRPREFIX=*} __MAKE_CONF=${__MAKE_CONF} \
     SRCCONF=${SRCCONF} SRC_ENV_CONF= \
@@ -233,6 +235,9 @@ _MAKEOBJDIRPREFIX!= /usr/bin/env -i PATH=${PATH} ${MAKE} MK_AUTO_OBJ=no \
 # Choices add to complexity though.
 # We cannot blindly use a make which may not be the one we want
 # so be explicit - until all choice is removed.
+# 
+# 我们通常需要使用树的 make 版本来构建它。但是选择会增加复杂性。我们不能盲目地
+# 使用一个可能不是我们想要的品牌，所以要明确——直到所有的选择都被删除
 WANT_MAKE=	bmake
 .if !empty(.MAKE.MODE:Mmeta)
 # 20160604 - support missing-meta,missing-filemon and performance improvements
