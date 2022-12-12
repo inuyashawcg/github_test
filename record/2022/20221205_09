@@ -25,36 +25,38 @@ install: cannot create regular file '/home/mercury/Documents/code/qihai/master/q
 build/riscv.riscv64/tmp/home/mercury/Documents/code/qihai/master/qihai/x86_64.amd64/tests/sys/fs/tmpfs/
 
 
-# # Install scripts
-# .if defined(SCRIPTS) && !empty(SCRIPTS)
-# realinstall: _scriptsinstall
-# .ORDER: beforeinstall _scriptsinstall
+////////////// 20221206 //////////////
+  tptfs 部分测试脚本中仍然需要利用辅助测试工具完成测试，感觉是要重命名一下。或者是将 tmpfs 也编译进去，可以让 tmpfs 作为跨文件访问测试的
+目标文件系统，这样还可以共用 h-tools 工具
 
-# SCRIPTSDIR?= 	${LIBDIR}
-# SCRIPTSOWN?=	${LIBOWN}
-# SCRIPTSGRP?=	${LIBGRP}
-# SCRIPTSMODE?=	${LIBMODE}
+  bmake 在整个 buildworld 过程中是处在最后一个过程，即 building everything；
+  在前面的阶段会有 make ... 等命令被调用，如果放到 qihai 系统当中，是不是就得先编译 bmake，然后再编译其他的模块？
 
-# STAGE_AS_SETS+= scripts
-# stage_as.scripts: ${SCRIPTS}
-# FLAGS.stage_as.scripts= -m ${SCRIPTSMODE}
-# STAGE_FILES_DIR.scripts= ${STAGE_OBJTOP}
-# .for script in ${SCRIPTS}
-# .if defined(SCRIPTSNAME)
-# SCRIPTSNAME_${script:T}?=	${SCRIPTSNAME}
-# .else
-# SCRIPTSNAME_${script:T}?=	${script:T:R}
-# .endif
-# SCRIPTSDIR_${script:T}?=	${SCRIPTSDIR}
-# SCRIPTSOWN_${script:T}?=	${SCRIPTSOWN}
-# SCRIPTSGRP_${script:T}?=	${SCRIPTSGRP}
-# SCRIPTSMODE_${script:T}?=	${SCRIPTSMODE}
-# STAGE_AS_${script:T}=		${SCRIPTSDIR_${script:T}}/${SCRIPTSNAME_${script:T}}
-# _scriptsinstall: _SCRIPTSINS_${script:T}
-# _SCRIPTSINS_${script:T}: ${script}
-# 	${INSTALL} ${TAG_ARGS} -o ${SCRIPTSOWN_${.ALLSRC:T}} \
-# 	    -g ${SCRIPTSGRP_${.ALLSRC:T}} -m ${SCRIPTSMODE_${.ALLSRC:T}} \
-# 	    ${.ALLSRC} \
-# 	    ${DESTDIR}${SCRIPTSDIR_${.ALLSRC:T}}/${SCRIPTSNAME_${.ALLSRC:T}}
-# .endfor
-# .endif
+
+////////////// 20221208 //////////////
+FreeBSD builds a world goes through the following stages:
+  legacy stage [BMAKE]
+    - 该阶段主要负责创建 bootstrap-tools、build-tools 和 cross-tools 兼容性的垫片，它们通常是来自这三个阶段之一的工具需要构建的API，
+      而这些 API 在主机上并不存在
+  
+  bootstrap-tools stage [BMAKE]
+    - 此阶段负责创建出于向后兼容性原因所需的程序，它们不是作为交叉工具构建的
+  
+  build-tools stage [TMAKE]
+    - 该阶段负责创建文件树并构建在 building 过程中所需要的工具。一些程序会在该阶段列出，因为它们创建出的二进制文件，
+      会产生 build programs 所需要的文件
+    - 个人理解就是该过程会首先编译出出一些基本的可执行文件，在编译其他可执行文件的过程中，会使用这些提前编译出的可执行文件
+      生成一些必要辅助文件，让整个编译过程能够进行下去
+    - 该过程只编译 build-tools，还没有到 build all 阶段
+
+  cross-tools stage [XMAKE]
+    - 该阶段负责 building system 所需要的各种工具，其中包含有一个 cross-compiler
+    - 该阶段与 build-tools 的区别主要包括两点:
+        1. build all target，而不是 build tools
+        2. 这些工具将会被安装到 TMPPATH，以供 world stage 使用
+
+  world stage [WMAKE]
+    - 真正执行 build world 的阶段
+
+  install stage (optional) [IMAKE]
+    - 将 build world 所有输出放到指定位置

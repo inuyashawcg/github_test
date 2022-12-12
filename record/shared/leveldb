@@ -2,6 +2,13 @@
 https://leveldb-handbook.readthedocs.io/zh/latest/basic.html
 https://github.com/google/leveldb
 
+https://www.zhihu.com/question/19887265
+https://cloud.tencent.com/developer/article/1441835
+https://zhuanlan.zhihu.com/p/181498475
+
+http://blog.mrcroxx.com/categories/%E6%B7%B1%E5%85%A5%E6%B5%85%E5%87%BAleveldb/
+
+
 leveldb 是一个写性能比较优秀的存储引擎，基于典型的 LSM 树(Log Structured-Merge Tree)实现。该树的核心思想是
 放弃部分读性能，换取最大的写入能力。实现原理就是尽可能减少随机写的次数。对于每次写入操作，并不是直接将最新的数据驻留
 在磁盘中，而是将其拆分成：
@@ -167,6 +174,7 @@ LevelDB 读操作：
 slice 是 leveldb 中自定义的字符串处理类型，主要是因为标准库中的 string:
   - "默认语义为拷贝，会损失性能(在可预期的条件下，传递指针即可)"
   - "标准库不支持 remove_prefix / starts_with 等函数，使用起来不太方便"
+  - 当我们遇到需要设计处理字符串的类时，一定要考虑数据拷贝带来的性能损失，还有构造函数的实现方式等
 
 
 编码，包括定长编码和变长编码

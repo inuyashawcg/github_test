@@ -36,6 +36,8 @@
 
 // 利用 namespace 把类定义包裹起来，其他模块如果想要使用该类，则必须要指定该命令空间。
 // 同时也是为了防止不同模块之间的命名冲突
+// 
+// skiplist 参考:
 // https://www.jianshu.com/p/9d8296562806
 
 namespace leveldb {

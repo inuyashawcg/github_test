@@ -25,6 +25,7 @@ NOTE: target local	variable assignments behave differently	in that;
   扩展是按照目录顺序进行的，而不是按照 shell 中的字幕顺序进行
 
 
+
 "FILE DEPENDENCY SPECIFICATIONS"
 依赖关系行由一个或多个目标、一个运算符和零个或更多个源组成。这就产生了一种关系，其中目标“依赖”于源，
 并且通常是从源创建的。如果目标不存在，或者其修改时间小于其任何来源的修改时间，则该目标被视为过期。
@@ -77,11 +78,13 @@ NOTE: target local	variable assignments behave differently	in that;
 "All dependency lines mentioning a particular target must use the same operator."
 
 
+
 "SHELL COMMAND"
   如果命令的第一个字符是 "@"、"+" 或 "-" 的任意组合，则会对该命令进行特殊处理:
     "@" - 使命令在执行前不被回显
     "+" - 即使给定 -n，也会导致命令执行。这与 ".MAKE" 特殊源的效果类似，只是效果可以限制在脚本的一行
     "-" - 在兼容模式下，将忽略命令行的任何非零退出状态
+
 
 
 "THE SEVEN BUILT-IN LOCAL VARIABLE"
@@ -96,11 +99,12 @@ NOTE: target local	variable assignments behave differently	in that;
   ".OODATE" - 此目标的已过期来源列表， 也可以认为是 "?"
 
   ".PREFIX" - 目标的文件前缀，仅包含文件部分，不包含后缀或前面的目录组件；也称为"*"；
-            后缀必须是用 .suffixes 声明的已知后缀之一，否则将无法识别
+              后缀必须是用 .suffixes 声明的已知后缀之一，否则将无法识别
 
   ".TARGET" - 目标的名称, 也称为"@"。为了与其他make兼容，这是存档成员规则中 .ARCHIVE 的别名
 
 允许使用较短的形式（"_"、"！"、"_"，"%"、"？"、"*"和"@"）与历史生成文件和旧版 POSIX 生成向后兼容，不建议使用
+
 
 
 "ADDITIONAL BUILT-IN VARIABLE"
@@ -146,7 +150,24 @@ NOTE: target local	variable assignments behave differently	in that;
   ".MAKE.MAKEFILES" - make 读取的 makefile 列表，用于跟踪依赖项。每个 makefile 只记录一次，而不考虑读取的次数
 
   ".MAKE.MODE" - 读取所有生成文件后已处理。可以影响运行模式。它可以包含多个关键字：
-      
+      "compat": 类似于 -B 选项，使得 make 进入 compat 模式
+      "meta"
+      "curdirOk= bf"
+      "missing-meta= bf"
+      "missing-filemon= bf"
+      "nofilemon"
+      "env"
+      "verbose"
+      "ignore-cmd"
+      "silent= bf"
 
-SPECIAL	TARGETS - 特殊目标不能与其他目标一起包含，即它们必须是唯一指定的目标
+
+
+"SPECIAL TARGETS"
+  - 特殊目标不能与其他目标一起包含，即它们必须是唯一指定的目标
+
   ".MAIN" - 如果在调用 make时 未指定目标，则将生成此目标
+
+
+
+"VARIABLE MODIFIERS"
