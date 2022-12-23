@@ -1,21 +1,95 @@
-unknown@:~ # ls -ali
-ls: color support not compiled in
-total 24
-5 -rw-rw-r--  1 0  0   1464 Aug 18 05:13 .cshrc
-3 drwxr-xr-x  2 0  0  12288 Jan  1  1970 dev/
-6 drwxrwxr-x  2 0  0    512 Nov  3 03:28 mnt/
-4 -rw-rw-r--  1 0  0     17 Nov 24 05:10 record
+#!/bin/sh
 
-unknown@:~ # ls -ali /dev
-ls: color support not compiled in
-total 0
- 9 lrwxr-xr-x  1 0   0       9 Jan  1  1970 bpf0@ -> /dev/bpf
-14 drwxr-xr-x  2 0   0    1280 Jan  1  1970 fd/
- 8 drwxr-xr-x  2 0   0    1280 Jan  1  1970 gpt/
- 7 drwxr-xr-x  2 0   0    1280 Jan  1  1970 gptid/
-10 lrwxr-xr-x  1 0   0       9 Jan  1  1970 kbd0@ -> /dev/kbdm
-16 drwxr-xr-x  2 0   0     768 Jan  1  1970 reroot/
-11 lrwxr-xr-x  1 0   0      11 Jan  1  1970 stderr@ -> /dev/fd/2
-13 lrwxr-xr-x  1 0   0      10 Jan  1  1970 stdin@ -> /dev/fd/0
-12 lrwxr-xr-x  1 0   0      11 Jan  1  1970 stdout@ -> /dev/fd/1
-15 lrwxr-xr-x  1 0   0      12 Jan  1  1970 urandom@ -> /dev/random
+set -e
+
+srcdir=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/contrib/bmake
+
+DEFAULT_SYS_PATH="/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/bmake-install/share/mk"
+
+case "yes" in
+yes) XDEFS="-DUSE_META ${XDEFS}";;
+esac
+
+CC="/usr/bin/cc"
+CFLAGS="-I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/cross-build/include/common -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/cross-build/include/linux -D_GNU_SOURCE=1 -I. -I${srcdir} -DHAVE_CONFIG_H  -DMAKE_NATIVE ${XDEFS} -DBMAKE_PATH_MAX=1024"
+
+MAKE_VERSION=20220208
+
+MDEFS="-DMAKE_VERSION=\"$MAKE_VERSION\" \
+-DMACHINE=\"amd64\" \
+-DMACHINE_ARCH=\"x86_64\" \
+-D_PATH_DEFSYSPATH=\"${DEFAULT_SYS_PATH}\""
+
+
+LDFLAGS=""
+LIBS=""
+
+toUpper() {
+    ${TR:-tr} abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ
+}
+
+do_compile2() {
+	obj="$1"; shift
+	src="$1"; shift
+	echo ${CC} -c ${CFLAGS} "$@" -o "$obj" "$src"
+	${CC} -c ${CFLAGS} "$@" -o "$obj" "$src"
+}
+
+do_compile() {
+	obj="$1"; shift
+	case "$1" in
+	*.c) src=$1; shift;;
+	*) src=`basename "$obj" .o`.c;;
+	esac
+
+	for d in "$srcdir" "$srcdir/lst.lib"
+	do
+		test -s "$d/$src" || continue
+
+		do_compile2 "$obj" "$d/$src" "$@" || exit 1
+		return
+	done
+	echo "Unknown object file '$obj'" >&2
+	exit 1
+}
+
+do_link() {
+	output="$1"; shift
+	echo ${CC} ${LDSTATIC} ${LDFLAGS} -o "$output" "$@" ${LIBS}
+	${CC} ${LDSTATIC} ${LDFLAGS} -o "$output" "$@" ${LIBS}
+}
+
+BASE_OBJECTS="arch.o buf.o compat.o cond.o dir.o for.o hash.o \
+lst.o make.o make_malloc.o metachar.o parse.o sigcompat.o str.o \
+suff.o targ.o trace.o var.o util.o"
+
+LIB_OBJECTS=" ${LIBOBJDIR}stresep$U.o ${LIBOBJDIR}strlcpy$U.o"
+
+do_compile main.o ${MDEFS}
+
+for o in ${BASE_OBJECTS} ${LIB_OBJECTS}
+do
+	do_compile "$o"
+done
+
+case "yes" in
+yes)
+	case "no" in
+	no) MDEFS=;;
+	*)
+		MDEFS="-DUSE_FILEMON -DUSE_FILEMON_`echo no | toUpper`"
+		case "no," in
+		dev,*/filemon.h) FDEFS="-DHAVE_FILEMON_H -I`dirname `";;
+		*) FDEFS=;;
+		esac
+		do_compile filemon_no.o filemon/filemon_no.c ${FDEFS}
+		BASE_OBJECTS="filemon_no.o $BASE_OBJECTS"
+		;;
+	esac
+	do_compile meta.o ${MDEFS}
+	BASE_OBJECTS="meta.o ${BASE_OBJECTS}"
+	;;
+esac
+do_compile job.o ${MDEFS}
+
+do_link bmake main.o job.o ${BASE_OBJECTS} ${LST_OBJECTS} ${LIB_OBJECTS}

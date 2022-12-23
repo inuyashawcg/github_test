@@ -134,7 +134,7 @@ static void reverse_redirect(void) {
 
   // 重定位恢复首先是要备份原有标准输出表项，然后在重定位之后，再将备份回写，进而恢复到原有状态
   int s_fd = dup(1), n_fd = dup2(fd, 1);
-  fprintf(stdout, "before redirect");
+  fprintf(stdout, "before redirect\n");
 
   // 恢复重定向
   dup2(s_fd, n_fd);

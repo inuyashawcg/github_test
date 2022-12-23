@@ -1,0 +1,123 @@
+////////////// 20221219 //////////////
+  奇海不仅仅要 bootstrap bmake，可能还需要加上 install 和 mtree。对比 user/lq 和 user/wcg 两个分支在 ubuntu20.04 上的
+运行情况可知，需要在不同的分支上修改 install 命令的版本(lq 依赖 freebsd 原生 install 命令，wcg 版本通过修改参数，可以兼容
+主机 install 版本)
+  最好的方法还是利用 freebsd-src buildworld 过程中生成的 install 或者 mtree (bsd / linux 通用，暂时不需要考虑)
+
+  makefile 中的 CC/CPP/LD 表示的应该是主机 toolchain 的类型， XCC/XCPP/XLD 表示的可能是 cross-compile toolchain
+
+gcc的-D选项可以定义宏，这是什么意思呢？
+  - C 语言源程序中有 #define 定义的宏，可以起到替换、条件编译的功能；定义宏的方式是放在头文件或者C文件中。gcc 提供了另外一种宏定义的方法，
+    当然可以想象这样的宏定义方法并不是很好用，但毕竟编译器给我们提供了额外的宏定义的方法。假设程序需要很多宏，不可能这些宏都在编译器中定义，
+    可以说比较重要的宏才会放在 gcc 的 D 选项后边
+  -Dname 定义宏 name,默认定义内容为字符串 "1"
+  -Dname=defn 定义宏 name，并且内容为 defn
+
+Python run(... cwd=***)，其中 cwd = current working directory
+
+考虑在 bmake 之前将 install 和 mtree 提前编译出来，这样后续使用过程中就不用再去修改主机 install 命令版本和脚本中的参数。可以尝试在 make.py
+脚本中添加对应的函数，编译参数可以先用脚本中编译 bmake 已经给出的那些
+
+
+////////////// 20221220 //////////////
+run cmd is >>>>>> ['sh', '/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/contrib/bmake/boot-strap', '--with-default-sys-path=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/bmake-install/share/mk', '--with-machine=amd64', '--without-filemon', '--prefix=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/bmake-install'] >>>>>>
+
+env is >>>>>> {'SHELL': '/bin/bash', 'SESSION_MANAGER': 'local/mercury:@/tmp/.ICE-unix/2224,unix/mercury:/tmp/.ICE-unix/2224', 'QT_ACCESSIBILITY': '1', 'COLORTERM': 'truecolor', 'XDG_CONFIG_DIRS': '/etc/xdg/xdg-ubuntu:/etc/xdg', 'XDG_MENU_PREFIX': 'gnome-', 'no_proxy': 'localhost,127.0.0.1/8,::1', 'GNOME_DESKTOP_SESSION_ID': 'this-is-deprecated', 'GTK_IM_MODULE': 'fcitx', 'GTK2_MODULES': 'overlay-scrollbar', 'LANGUAGE': 'en_US:en', 'QT4_IM_MODULE': 'fcitx', 'LC_ADDRESS': 'zh_CN.UTF-8', 'GNOME_SHELL_SESSION_MODE': 'ubuntu', 'LC_NAME': 'zh_CN.UTF-8', 'SSH_AUTH_SOCK': '/run/user/1000/keyring/ssh', 'XMODIFIERS': '@im=fcitx', 'DESKTOP_SESSION': 'ubuntu', 'LC_MONETARY': 'zh_CN.UTF-8', 'SSH_AGENT_PID': '2163', 'GTK_MODULES': 'gail:atk-bridge', 'PWD': '/home/mercury/Documents/code/qihai/master/qihai/freebsd-src', 'MAKEOBJDIRPREFIX': '/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj', 'XDG_SESSION_DESKTOP': 'ubuntu', 'LOGNAME': 'mercury', 'XDG_SESSION_TYPE': 'x11', 'GPG_AGENT_INFO': '/run/user/1000/gnupg/S.gpg-agent:0:1', 'MAKESYSPATH': '/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/share/mk', 'XAUTHORITY': '/run/user/1000/gdm/Xauthority', 'ftp_proxy': 'http://127.0.0.1:8000/', 'GJS_DEBUG_TOPICS': 'JS ERROR;JS LOG', 'WINDOWPATH': '2', 'HOME': '/home/mercury', 'USERNAME': 'mercury', 'IM_CONFIG_PHASE': '1', 'LC_PAPER': 'zh_CN.UTF-8', 'LANG': 'en_US.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'XDG_CURRENT_DESKTOP': 'Unity', 'QEMU': '/home/mercury/qemu/qemu-5.1.0', 'VTE_VERSION': '6003', 'GNOME_TERMINAL_SCREEN': '/org/gnome/Terminal/screen/39f6fcd9_5a59_4aeb_905b_0abf55733e79', 'https_proxy': 'http://127.0.0.1:8000/', 'INVOCATION_ID': 'cdf4cdd11a0045129be97efc9ea90eed', 'MANAGERPID': '1944', 'CHROME_DESKTOP': 'code-url-handler.desktop', 'CLUTTER_IM_MODULE': 'fcitx', 'GJS_DEBUG_OUTPUT': 'stderr', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'XDG_SESSION_CLASS': 'user', 'TERM': 'xterm-256color', 'LC_IDENTIFICATION': 'zh_CN.UTF-8', 'LESSOPEN': '| /usr/bin/lesspipe %s', 'USER': 'mercury', 'NO_PROXY': 'localhost,127.0.0.1/8,::1', 'FTP_PROXY': 'http://127.0.0.1:8000/', 'GNOME_TERMINAL_SERVICE': ':1.142', 'DISPLAY': ':1', 'SHLVL': '1', 'LC_TELEPHONE': 'zh_CN.UTF-8', 'HTTPS_PROXY': 'http://127.0.0.1:8000/', 'OPENSBI': '/share/rd/os/qihai/development/run', 'HTTP_PROXY': 'http://127.0.0.1:8000/', 'QT_IM_MODULE': 'fcitx', 'LC_MEASUREMENT': 'zh_CN.UTF-8', 'PAPERSIZE': 'a4', 'http_proxy': 'http://127.0.0.1:8000/', 'XDG_RUNTIME_DIR': '/run/user/1000', 'ALL_PROXY': 'socks://127.0.0.1:1080/', 'LC_TIME': 'zh_CN.UTF-8', 'JOURNAL_STREAM': '8:69775', 'XDG_DATA_DIRS': '/usr/share/ubuntu:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop', 'GDK_BACKEND': 'x11', 'all_proxy': 'socks://127.0.0.1:1080/', 'PATH': '/opt/riscv/bin:/home/mercury/.local/bin:/opt/tools/riscv-spike/bin:/opt/tools/riscv-ovpsim/bin:/opt/tools/riscv32-elf-toolchain/bin:/opt/tools/riscv64-elf-toolchain/bin:/opt/riscv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/usr/local/arm/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabihf/bin:/home/mercury/qemu/qemu-5.1.0/x86_64-softmmu', 'GDMSESSION': 'ubuntu', 'ORIGINAL_XDG_CURRENT_DESKTOP': 'ubuntu:GNOME', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus', 'LC_NUMERIC': 'zh_CN.UTF-8', 'OLDPWD': '/home/mercury/Documents/code/qihai/master/qihai', '_': '/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/make.py', 'CC': '/usr/bin/cc', 'CXX': '/usr/bin/c++', 'CPP': '/usr/bin/cpp', 'XCC': '/home/mercury/llvm/clang+llvm-14/bin/clang', 'XCXX': '/home/mercury/llvm/clang+llvm-14/bin/clang++', 'XCPP': '/home/mercury/llvm/clang+llvm-14/bin/clang-cpp', 'XLD': '/home/mercury/llvm/clang+llvm-14/bin/ld.lld', 'CFLAGS': '-I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/cross-build/include/common -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/cross-build/include/linux -D_GNU_SOURCE=1'} >>>>>>
+
+run cmd is >>>>>> ['sh', '/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/contrib/bmake/boot-strap', 'op=install', '--with-default-sys-path=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/bmake-install/share/mk', '--with-machine=amd64', '--without-filemon', '--prefix=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/bmake-install'] >>>>>>
+
+ >>>>>> parameters: op=install --with-default-sys-path=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/bmake-install/share/mk --with-machine=amd64 --without-filemon --prefix=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/bmake-install >>>>>> 
+
+
+////////////// 20221221 //////////////
+可以从 qihai buildworld 过程打印的信息提取 xinstall.o / getid.o 编译命令:
+
+ /usr/bin/cc  -O2 -pipe -fno-common  -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/contrib/mtree -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/lib/libnetbsd -Xlinker --allow-multiple-definition -MD  -MF.depend.xinstall.o -MTxinstall.o -std=gnu99 -Wno-format-zero-length -Wsystem-headers -Wall -Wno-format-y2k -W -Wno-unused-parameter -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wreturn-type -Wcast-qual -Wwrite-strings -Wswitch -Wshadow -Wunused-parameter -Wcast-align -Wchar-subscripts -Wnested-externs -Wredundant-decls -Wold-style-definition -Wno-pointer-sign -Wno-error=address -Wno-error=array-bounds -Wno-error=attributes -Wno-error=bool-compare -Wno-error=cast-align -Wno-error=clobbered -Wno-error=deprecated-declarations -Wno-error=enum-compare -Wno-error=extra -Wno-error=logical-not-parentheses -Wno-error=strict-aliasing -Wno-error=uninitialized -Wno-error=unused-but-set-variable -Wno-error=unused-function -Wno-error=unused-value -Wno-error=empty-body -Wno-error=maybe-uninitialized -Wno-error=nonnull-compare -Wno-error=redundant-decls -Wno-error=shift-negative-value -Wno-error=tautological-compare -Wno-error=unused-const-variable -Wno-error=bool-operation -Wno-error=deprecated -Wno-error=expansion-to-defined -Wno-error=format-overflow -Wno-error=format-truncation -Wno-error=implicit-fallthrough -Wno-error=int-in-bool-context -Wno-error=memset-elt-size -Wno-error=noexcept-type -Wno-error=nonnull -Wno-error=pointer-compare -Wno-error=stringop-overflow -Wno-error=aggressive-loop-optimizations -Wno-error=cast-function-type -Wno-error=catch-value -Wno-error=multistatement-macros -Wno-error=restrict -Wno-error=sizeof-pointer-memaccess -Wno-error=stringop-truncation -Wno-system-headers   -Wno-unused-result    -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/usr.bin/xinstall/include -Werror=implicit-function-declaration -Werror=implicit-int  -Werror=return-type -Wundef -DHAVE_NBTOOL_CONFIG_H=1 -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/cross-build/include/common -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/cross-build/include/linux -D_GNU_SOURCE=1 -c /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/usr.bin/xinstall/xinstall.c -o xinstall.o
+
+/home/mercury/llvm/clang+llvm-14/bin/clang -target riscv64-unknown-freebsd13.1 --sysroot=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp -B/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/usr/bin  -O2 -pipe -fno-common -march=rv64imafdc -mabi=lp64d   -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/usr.sbin/makefs -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/sys/fs/cd9660/ -DMAKEFS -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/sys/fs/msdosfs -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/sbin/newfs_msdos -DHAVE_STRUCT_STAT_ST_FLAGS=1 -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/contrib/mtree -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/contrib/mknod -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/lib/libnetbsd -mno-relax -Xlinker --allow-multiple-definition -MD  -MF.depend.getid.o -MTgetid.o -std=c11 -Wno-format-zero-length -nobuiltininc -idirafter /home/mercury/llvm/clang+llvm-14/lib/clang/14.0.0/include -fstack-protector-strong -Wsystem-headers -Wall -Wno-format-y2k -Wno-uninitialized -Wno-pointer-sign -Wno-empty-body -Wno-string-plus-int -Wno-unused-const-variable -Wno-error=unused-but-set-variable -Wno-tautological-compare -Wno-unused-value -Wno-parentheses-equality -Wno-unused-function -Wno-enum-conversion -Wno-unused-local-typedef -Wno-address-of-packed-member -Wno-switch -Wno-switch-enum -Wno-knr-promoted-parameter  -Qunused-arguments     -c /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/contrib/mtree/getid.c -o getid.o
+
+mercury@mercury:~/Documents/code/qihai/master/qihai/freebsd-src/usr.bin/xinstall$ /usr/bin/cc -O2 -pipe -fno-common -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/contrib/mtree -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/lib/libnetbsd -Xlinker --allow-multiple-definition -std=gnu99 -Wno-format-zero-length -Wsystem-headers -Wall -Wno-format-y2k -W -Wno-unused-parameter -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wreturn-type -Wcast-qual -Wwrite-strings -Wswitch -Wshadow -Wunused-parameter -Wcast-align -Wchar-subscripts -Wnested-externs -Wredundant-decls -Wold-style-definition -Wno-pointer-sign -Wno-error=address -Wno-error=array-bounds -Wno-error=attributes -Wno-error=bool-compare -Wno-error=cast-align -Wno-error=clobbered -Wno-error=deprecated-declarations -Wno-error=enum-compare -Wno-error=extra -Wno-error=logical-not-parentheses -Wno-error=strict-aliasing -Wno-error=uninitialized -Wno-error=unused-but-set-variable -Wno-error=unused-function -Wno-error=unused-value -Wno-error=empty-body -Wno-error=maybe-uninitialized -Wno-error=nonnull-compare -Wno-error=redundant-decls -Wno-error=shift-negative-value -Wno-error=tautological-compare -Wno-error=unused-const-variable -Wno-error=bool-operation -Wno-error=deprecated -Wno-error=expansion-to-defined -Wno-error=format-overflow -Wno-error=format-truncation -Wno-error=implicit-fallthrough -Wno-error=int-in-bool-context -Wno-error=memset-elt-size -Wno-error=noexcept-type -Wno-error=nonnull -Wno-error=pointer-compare -Wno-error=stringop-overflow -Wno-error=aggressive-loop-optimizations -Wno-error=cast-function-type -Wno-error=catch-value -Wno-error=multistatement-macros -Wno-error=restrict -Wno-error=sizeof-pointer-memaccess -Wno-error=stringop-truncation -Wno-system-headers -Wno-unused-result -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/legacy/usr/include -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Wundef -DHAVE_NBTOOL_CONFIG_H=1 -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/cross-build/include/common -I/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/cross-build/include/linux -D_GNU_SOURCE=1    -L/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/legacy/usr/lib -o xinstall xinstall.o getid.o  -L/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/obj-tools/lib/libmd -lmd  -legacy -lresolv -pthread
+/usr/bin/ld: cannot find -lmd
+/usr/bin/ld: cannot find -legacy
+collect2: error: ld returned 1 exit status
+
+最后生成可执行文件需要依赖多个库文件，所以如果要在 bmake 之前编译出 bsd-install，首先得生成相应的库文件，感觉会比较繁琐；
+或者把用到的函数都提取到 xinstall 路径下，再一起进行编译
+
+
+install -N /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/etc -U -M /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir//METALOG -D /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir -T package=rescue -s -o root -g wheel -m 555   librescue.a /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir/rescue/librescue.a
+--- realinstall_subdir_bin ---
+--- _proginstall ---
+--- realinstall_subdir_rescue ---
+install: librescue.a: No such file or directory
+
+
+install -N /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/etc -U -M /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir//METALOG -D /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir -T package=rescue -s -o root -g wheel -m 555   librescue.a /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir/rescue
+install: librescue.a: No such file or directory
+*** [_proginstall] Error code 71
+
+
+build/riscv.riscv64/obj/riscv/rescue/librescue/librescue.a
+
+从 bmake makefile 中可以看到，它没有依赖其他库文件，是比较独立的一个模块，可能这也是它能够独立在 linux 下编译的一个条件
+
+xinstall 则会依赖比较多其他库文件，比如 libmd / libnetbsd / getid.o 等等，想要在 linux 下完成编译，首先得把依赖的库文件编好，
+要么就是把库文件中的实现放到 xinstall 当中，操作起来会比较繁琐。可能也不适合采用 bmake 的编译方式
+
+
+////////////// 20221222 //////////////
+mv build/riscv.riscv64/obj/riscv/rescue/librescue/librescue.a build/riscv.riscv64/obj/riscv/rescue/rescue/
+
+实际测试发现，qihai buildworld 阶段是会用到本机的 install，但是最终的文件输出是正常的。加入我们将 /usr/bin/install 重命名，
+就会导致 buildworld 出错。所有文件生成之后，将本机 install 重命名，installworld 可以正常执行，说明该过程用到的肯定是自己编译
+生成的 install 工具
+
+progs 都会生成对应的 lib***.a，比如 tmpfs h_tools.c 
+  mercury@mercury:~/Documents/code/qihai/master/qihai$ find ./ -name "libh_tools.a"
+    ./build/riscv.riscv64/obj/riscv/tests/sys/fs/tmpfs/libh_tools.a
+    ./build/riscv.riscv64/destdir/usr/tests/sys/fs/tmpfs/libh_tools.a
+
+格式化工具对于链接文件的处理目前存在异常，可能是访问权限的问题，然后就是它所存储的内容并不是目标文件本身的内容，而是一个路径；
+如果是硬链接的话，它其实就是另外一个文件的别名，对于格式化工具来讲，应该是无法处理的
+
+linux stat() 函数是处理非链接文件，否则会提示无法识别链接文件；如果我们指向获得链接文件本身的属性，而不去访问目标文件，可以使用 lstat() 函数
+
+rootfs 镜像文件的大小一定要分配的足够。实际测试过程中发现，当我们所要处理的所有文件总大小为 1.6G 的时候，所占用的实际镜像文件大小为 3G+。
+可能是因为主机磁盘文件系统分配的块的颗粒度较小，所以浪费的空间不多。但是 tptfs 每个块大小都是 4K，浪费现象比较严重，所以导致了 image 变得庞大
+
+
+////////////// 20221223 //////////////
+  >>>>> Test initial superblock
+  tptfs start virtual address: 104000000
+  page bitmap virtual address: 104001000
+  inode bitmap virtual address: 104021000
+  inode table virtual address: 104029000
+  data region virtual address: 107f2d000
+  page bitmap size: 32
+  inode bitmap size: 8
+  inode table size: 16132
+  data region size: 1032403
+  inode count: 258112
+  inode free: 258108
+  pages count: 1048576
+  pages free: 1032403
+  format used inodes: 0
+  format used pages: 0
+
+  >>>>> Test final superblock
+  tptfs start virtual address: 104000000
+  page bitmap virtual address: 104001000
+  inode bitmap virtual address: 104021000
+  inode table virtual address: 104029000
+  data region virtual address: 107f2d000
+  page bitmap size: 32
+  inode bitmap size: 8
+  inode table size: 16132
+  data region size: 1032403
+  inode count: 258112
+  inode free: 213451
+  pages count: 1048576
+  pages free: 265845
+  format used inodes: 44661
+  format used pages: 766558
+

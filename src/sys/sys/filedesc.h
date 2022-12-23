@@ -101,7 +101,13 @@ struct filedesc {
 	struct	vnode *fd_rdir;		/* root directory 根目录 */
 	struct	vnode *fd_jdir;		/* jail root directory 监控根目录 */
 	NDSLOTTYPE *fd_map;		/* bitmap of free fds 类似文件系统中块位图，用来查找可用的文件描述符 */
+	/*
+		最后一个被打开文件占用的索引值 fd？
+	*/
 	int	fd_lastfile;		/* high-water mark of fd_ofiles */
+	/*
+		当前可以被使用的文件描述符索引值，应该就是为了方便 fd 的申请，类似于 inode next_alloc_goal
+	*/
 	int	fd_freefile;		/* approx. next free file 表示的应该是目前空闲的文件描述符的标号 */
 	u_short	fd_cmask;		/* mask for file creation */
 	int	fd_refcnt;		/* thread reference count 被线程引用的次数？ */

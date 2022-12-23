@@ -1,6 +1,115 @@
-////////////// 20221216 //////////////
+////////////// 20221212 //////////////
   目前刘强已经将 freebsd 代码移植到了 qihai 系统当中。之前奇海中采用的临时过渡编译库的方式，可以省略掉，所有的库文件
 和测试文件都仍然按照 freebsd 原有的方式进行。从编译脚本中可以看到，执行的命令是 buildworld，是否还需要执行 installworld？
 
   不管是 buildword 还是 installworld，编译输出的所有文件都混在一起，在根文件系统构建工具中应该加上一个过滤器，将这部分
 文件过滤掉。因为不需要添加到根文件系统当中，应该只需要处理一些配置文件和头文件等等
+
+
+////////////// 20221214 //////////////
+export MAKEOBJDIRPREFIX=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj
+export MAKESYSPATH=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/share/mk
+
+/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/make.py --cross-compiler-type=clang --cross-bindir=/home/mercury/llvm/clang+llvm-14/bin buildworld TARGET_ARCH=riscv64 TARGET=riscv -j16 > /home/mercury/wcg_private/github_inuyasha/github_test/record/temp
+
+/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/make.py --cross-compiler-type=clang --cross-bindir=/home/mercury/llvm/clang+llvm-14/bin installworld TARGET_ARCH=riscv64 TARGET=riscv -j16 > /home/mercury/wcg_private/github_inuyasha/github_test/record/temp
+
+/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/make.py --cross-compiler-type=clang --cross-bindir=/home/mercury/llvm/clang+llvm-11.0.1-freebsd12/bin buildworld TARGET_ARCH=riscv64 TARGET=riscv -j16 > /home/mercury/wcg_private/github_inuyasha/github_test/record/temp
+
+/home/mercury/llvm/clang+llvm-14/bin
+/home/mercury/llvm/clang+llvm-11.0.1-freebsd12/bin
+/home/mercury/llvm/clang+llvm-11.0.1-freebsd12/bin
+
+./contrib/libarchive/libarchive/archive.h
+
+
+freebsd-src 下无法编译的异常:
+  - 如果我们使用的是 apt install 类型的 clang，会缺少 clang-cpp 等工具，这样我们进入 freebsd-src 下后会出现编译异常，
+    导致 freebsd 对应的库文件无法生成
+  - 我们可以手动下载 llvm+clang-14.0.0 版本，并更新 --cross-bindir 到对应路径
+  - 编译过程中发现，每次到编译 ar 的时候，就会报如下错误:
+      fatal error: archive.h: No such file or directory
+
+    修改成绝对路径后，又会报其他错误。推测可能是需要依赖主机系统提供的头文件，执行命令:
+      sudo apt-get install libarchive-dev
+  
+  实测 freebsd-src 可以编译通过
+
+export DESTDIR=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir
+
+export DESTDIR=/home/mercury/Documents/code/qihai/master/qihai/build/riscv.riscv64
+
+貌似 buildworld 的时候不能设置 DESTDIR，否则会编译报错，找不到什么文件
+
+
+////////////// 20221215 //////////////
+  freebsd buildworld 生成的 METALOG 文件中，每一个需要安装的文件应该都会在其中包含一个 entry，这样 install 命令
+进行解析的时候，才能获得源文件的准确位置信息
+
+举个例子 - libdialog.a
+
+qihai - installworld
+--- realinstall_subdir_gnu ---
+  install -N /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/etc
+          -U -M  /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir//METALOG
+          -D /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir 
+          -T package=utilities -s -o root -g wheel -m 555   libdialog.a 
+          /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir/usr/bin/libdialog.a
+
+--- realinstall_subdir_gnu ---
+  install -N /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/etc
+          -U -M /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir//METALOG
+          -D /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir 
+          -T package=utilities -s -o root -g wheel -m 555   libdialog.a 
+          /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/desdir/usr/bin/libdialog.a
+  
+METALOG：
+  ./usr/bin/libdialog.a type=file uname=root gname=wheel mode=0555 size=35492 tags=package=utilities
+
+目标文件:
+  mercury@mercury:~/Documents/code/qihai/master/qihai/freebsd-src$ find ./ -name "libdialog.a"
+  ./desdir/usr/bin/libdialog.a
+  ./desdir/usr/lib/libdialog.a
+
+
+freebsd - installworld
+===> gnu (install)
+===> gnu/lib (install)
+===> gnu/lib/libdialog (install)
+  install -U -M /usr/home/work/riscv64/riscv64_world//METALOG
+          -D /usr/home/work/riscv64/riscv64_world 
+          -T package=utilities,dev -C -o root -g wheel -m 444   libdialog.a
+          /usr/home/work/riscv64/riscv64_world/usr/lib/
+
+METALOG:
+  ./usr/lib/libdialog.a type=file uname=root gname=wheel mode=0444 size=1826486 tags=package=utilities,dev
+
+目标文件:
+  root@:/home/work/riscv64/riscv64_world # find ./ -name "libdialog.a"
+    ./usr/lib/libdialog.a
+
+METALOG 应该是在 installworld 阶段进行填充的，然后在进行根文件系统构建的时候，对该文件进行解析，这样就可以知道我们需要处理哪些文件
+
+通过对比发现，qihai installworld 感觉流程上有点混乱，导致同一个目标被安装到了两个不同的位置
+
+--- realinstall_subdir_rescue ---
+install: librescue.a: No such file or directory
+
+其他可以正常执行的模块，说明 bsd-install linux 版本是可以正常运行的
+
+freebsd-src/share/mk/src.tools.mk 中包含有 INSTALL_CMD 的定义。可以将 freebsd install 的 linux 版本重命名并安装到主机中，然后设置该变量
+
+
+////////////// 20221216 //////////////
+  对比 freebsd 和 qihai buildworld 后生成的 METALOG 文件，其中的条目数差了将近 30 倍。freebsd 下 3w+，而 qihai 下则只有 1k+，
+其中是否存在异常？
+
+freebsd METALOG 中存在很多重复的条目，比如:
+  ./etc type=dir uname=root gname=wheel mode=0755 tags=package=utilities
+
+在 freebsd-src/obj/usr.bin .../usr.sbin 目录下，不仅仅生成了可执行文件，而且对应生成了静态库，freebsd 下是只有可执行文件的，这一点与 qihai 
+还是有些许区别
+
+在 bmake 源目录下，我们可以发现 boot-strap 相关命名的文件，但是在其他可执行文件源目录下却没有发现。是不是说明在 bootstrap 阶段进行编译的一些
+工具，需要提供能够在该阶段进行编译的 shell 脚本
+

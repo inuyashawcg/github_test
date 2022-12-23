@@ -127,16 +127,22 @@ static void	filecaps_free_finish(u_long *ioctls);
  * been selected based the historical limit of 20 open files, and an
  * assumption that the majority of processes, especially short-lived
  * processes like shells, will never need more.
+ * 进程从 NDFILE 描述符开始。NDFILE 的值是基于 20 个打开文件的历史限制，以及大多数进程，特别是像
+ * shell 这样的短期进程，永远不会需要更多的假设而选择的
  *
  * If this initial allocation is exhausted, a larger descriptor table and
  * map are allocated dynamically, and the pointers in the process's struct
  * filedesc are updated to point to those.  This is repeated every time
  * the process runs out of file descriptors (provided it hasn't hit its
  * resource limit).
+ * 如果初始分配耗尽，则动态分配更大的描述符表和映射，并更新进程结构 filedesc 中的指针以指向这些指针。
+ * 每当进程用完文件描述符时 (前提是它没有达到资源限制)，都会重复此操作
  *
  * Since threads may hold references to individual descriptor table
  * entries, the tables are never freed.  Instead, they are placed on a
  * linked list and freed only when the struct filedesc is released.
+ * 由于线程可能保存对单个描述符表项的引用，因此这些表永远不会被释放。相反，它们被放置在链接列表中，
+ * 只有在释放结构 filedesc 时才被释放
  */
 #define NDFILE		20
 #define NDSLOTSIZE	sizeof(NDSLOTTYPE)
@@ -148,7 +154,7 @@ static void	filecaps_free_finish(u_long *ioctls);
 /*
  * SLIST entry used to keep track of ofiles which must be reclaimed when
  * the process exits.
- * SLIST条目用于跟踪进程退出时必须回收的文件
+ * SLIST 条目用于跟踪进程退出时必须回收的 open files
  */
 struct freetable {
 	struct fdescenttbl *ft_table;	// 描述符表
@@ -188,7 +194,7 @@ void __read_mostly (*mq_fdclose)(struct thread *td, int fd, struct file *fp);
  * If low >= size, just return low. Otherwise find the first zero bit in the
  * given bitmap, starting at low and not exceeding size - 1. Return size if
  * not found.
- * 找到第一个可以被使用的空闲文件描述符标号
+ * 找到第一个可以被使用的空闲文件描述符标号，从 low 一直到 size - 1
  */
 static int
 fd_first_free(struct filedesc *fdp, int low, int size)
@@ -238,7 +244,7 @@ fd_last_used(struct filedesc *fdp, int size)
 	return (-1);
 }
 
-/* 判断 fd 标号的文件描述符是否已经被使用了 */
+/* 判断 fd 标号的文件描述符是否已经被使用了，fd 是文件描述符表索引 */
 static int
 fdisused(struct filedesc *fdp, int fd)
 {
@@ -269,6 +275,10 @@ fdused(struct filedesc *fdp, int fd)
 	FILEDESC_XLOCK_ASSERT(fdp);
 
 	fdused_init(fdp, fd);
+	/*
+		fdused_init() 是对位图中的点位进行设置，下面则是根据此次操作的结果，判断是否更新
+		文件描述结构中的其他字段
+	*/
 	if (fd > fdp->fd_lastfile)
 		fdp->fd_lastfile = fd;
 	if (fd == fdp->fd_freefile)
@@ -283,8 +293,9 @@ fdunused(struct filedesc *fdp, int fd)
 {
 
 	FILEDESC_XLOCK_ASSERT(fdp);
-
+	// 如果该 fd 已经被释放了，提示警告信息
 	KASSERT(fdisused(fdp, fd), ("fd=%d is already unused", fd));
+	// 并且需要保证数组中对应索引的元素应该是 null
 	KASSERT(fdp->fd_ofiles[fd].fde_file == NULL,
 	    ("fd=%d is still in use", fd));
 
@@ -296,15 +307,18 @@ fdunused(struct filedesc *fdp, int fd)
 }
 
 /*
- * Free a file descriptor.	释放掉一个文件描述符
+ * Free a file descriptor.
  *
  * Avoid some work if fdp is about to be destroyed.
- * 如果fdp即将被破坏，避免一些工作
  */
 static inline void
 fdefree_last(struct filedescent *fde)
 {
-
+	/*
+		感觉像执行释放一个 file descriptor entry 的最后一个步骤，
+		就是把它所包含的属性信息最后一步再删除，其他的部分猜测应该是
+		可以在更早的阶段进行释放
+	*/
 	filecaps_free(&fde->fde_caps);
 }
 
@@ -318,11 +332,13 @@ fdfree(struct filedesc *fdp, int fd)
 #ifdef CAPABILITIES
 	seq_write_begin(&fde->fde_seq);
 #endif
+	// file 指针置空
 	fde->fde_file = NULL;
 #ifdef CAPABILITIES
+	// 终止 sequence write 的执行，把未同步的工作执行完成后结束？
 	seq_write_end(&fde->fde_seq);
 #endif
-	fdefree_last(fde);
+	fdefree_last(fde);	// 执行释放 fd entry 的最后一步
 	fdunused(fdp, fd);	// 设置 fd 目前还未使用
 }
 
@@ -390,12 +406,15 @@ struct dup2_args {
 int
 sys_dup2(struct thread *td, struct dup2_args *uap)
 {
-
+	/*
+		当我们需要拷贝文件描述结构时，需要强制分配固定的 entries，从 @from 到 @to。
+		感觉 dup() 并不是简简单单的指针变化，而是要把整个结构体数据拷贝过去
+	*/
 	return (kern_dup(td, FDDUP_FIXED, 0, (int)uap->from, (int)uap->to));
 }
 
 /*
- * Duplicate a file descriptor.复制文件描述符，fork的时候使用？
+ * Duplicate a file descriptor.
  */
 #ifndef _SYS_SYSPROTO_H_
 struct dup_args {
@@ -832,6 +851,9 @@ kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
 	u_long *oioctls, *nioctls;
 	int error, maxfd;
 
+	/*
+		函数参数中传入的是线程结构，但对于文件描述结构的访问，还是要经过进程才可以访问
+	*/
 	p = td->td_proc;
 	fdp = p->p_fd;	// 进程描述符结构
 
@@ -857,7 +879,14 @@ kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
 		return (mode == FDDUP_FCNTL ? EINVAL : EBADF);
 
 	error = EBADF;
+	/*
+		X: exclusive lock.
+		S: shared lock.
+	*/
 	FILEDESC_XLOCK(fdp);
+	/*
+		加锁状态下获取索引值为 old 的文件描述符 entry
+	*/
 	if (fget_locked(fdp, old) == NULL)
 		goto unlock;
 	if ((mode == FDDUP_FIXED || mode == FDDUP_MUSTREPLACE) && old == new) {
@@ -925,7 +954,7 @@ kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
 	delfp = newfde->fde_file;
 
 	/*
-		old inctls and new ioctls
+		old ioctls and new ioctls
 		释放掉新文件的属性信息，拷贝一份旧文件的属性信息
 	*/ 
 	oioctls = filecaps_free_prep(&newfde->fde_caps);
@@ -954,10 +983,14 @@ kern_dup(struct thread *td, u_int mode, int flags, int old, int new)
 	/*
 		前面把旧文件描述符号写入线程寄存器表第一个元素，这里更新为新文件描述符
 	*/
-	td->td_retval[0] = new;	
+	td->td_retval[0] = new;
 
 	error = 0;
 
+	/*
+		假如新的文件描述符表 entry 所指向的 file 已经是存在的，
+		那就要把该 file 给 close 掉
+	*/
 	if (delfp != NULL) {
 		(void) closefp(fdp, new, delfp, td, 1);
 		FILEDESC_UNLOCK_ASSERT(fdp);
@@ -2217,7 +2250,7 @@ fdcopy(struct filedesc *fdp)
  *
  * File descriptors are copied over to the new file descriptor table,
  * regardless of whether the close-on-exec flag is set.
- * 不管是否设置了close on exec标志，文件描述符都会复制到新的文件描述符表中
+ * 不管是否设置了 close on exec 标志，文件描述符都会复制到新的文件描述符表中
  */
 int
 fdcopy_remapped(struct filedesc *fdp, const int *fds, size_t nfds,

@@ -226,6 +226,8 @@ _MAKEOBJDIRPREFIX!= /usr/bin/env -i PATH=${PATH} ${MAKE} MK_AUTO_OBJ=no \
     ${.MAKEFLAGS:MMAKEOBJDIRPREFIX=*} __MAKE_CONF=${__MAKE_CONF} \
     SRCCONF=${SRCCONF} SRC_ENV_CONF= \
     -f /dev/null -V MAKEOBJDIRPREFIX dummy
+
+# 感觉像是检查 MAKEOBJDIRPREFIX 是否可用
 .if !empty(_MAKEOBJDIRPREFIX)
 .error MAKEOBJDIRPREFIX can only be set in environment or src-env.conf(5),\
     not as a global (in make.conf(5) or src.conf(5)) or command-line variable.
@@ -238,6 +240,8 @@ _MAKEOBJDIRPREFIX!= /usr/bin/env -i PATH=${PATH} ${MAKE} MK_AUTO_OBJ=no \
 # 
 # 我们通常需要使用树的 make 版本来构建它。但是选择会增加复杂性。我们不能盲目地
 # 使用一个可能不是我们想要的品牌，所以要明确——直到所有的选择都被删除
+# 
+# 作用同上，只不过这里是检查可用的 make 版本
 WANT_MAKE=	bmake
 .if !empty(.MAKE.MODE:Mmeta)
 # 20160604 - support missing-meta,missing-filemon and performance improvements
