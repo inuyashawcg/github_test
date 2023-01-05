@@ -1,0 +1,133 @@
+////////////// 20221226 //////////////
+  当前奇海系统划分给文件系统的存储空间只有 64M，在 freebsd-src installworld 生成的文件一共有4w多，大小 3+G。
+所以在根文件系统需要将一些不会被使用的文件给过滤掉，主要包括库文件、可执行文件、头文件等等
+
+
+////////////// 20221227 //////////////
+  usr/tests 路径下的文件就有总大小就有将近 700M，除去一些可执行文件和库，剩余文件大小也将近 400M，远大于奇海现有
+文件区的长度。而且小文本文件和目录数量也是不少的，导致虚拟页占用的不多，但是 inode 占用的不少。当前情况下，可能要减少
+每个文件占用的虚拟页数，增加 inode entry 的数量
+
+
+////////////// 20221228 //////////////
+scp  root@192.168.2.109:/usr/home/wcg/workspace/riscv-world/usr/tests/sys/fs/tptfs
+#! /usr/libexec/atf-sh
+
+root@:/usr/obj/usr/src/riscv.riscv64/tests/sys/fs/tptfs # kyua test -k Kyuafile 
+create_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.001s]
+mount_other_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.001s]
+
+Results file id is usr_obj_usr_src_riscv.riscv64_tests_sys_fs_tptfs.20221228-130748-961413
+Results saved to /root/.kyua/store/results.usr_obj_usr_src_riscv.riscv64_tests_sys_fs_tptfs.20221228-130748-961413.db
+
+0/2 passed (2 failed)
+
+当生成测试结果之后，可执行 report 命令查看输出:
+  kyua report --results-file=usr_tests.20140731-150500-196784
+  kyua report --results-file=~/.kyua/store/results.usr_tests.20140731-150500-196784.db
+
+实际测试发现，buildworld 之后 h_funcs.subr 并没有被拷贝到 obj 对应的路径之下，installworld 之后再去执行测试命令，无异常
+
+////////////// 20221229 //////////////
+  在虚拟机上执行测试脚本时，一定记得 h_tools 工具要使用 amd64 版本，不要用 riscv64 版本。。。
+
+  atf-shell 源测试脚本中，好像是不能定义全局变量的
+
+  root@:/ # sysctl -n kern.maxvnodes
+  2000
+  root@:/ # sysctl -w kern.maxvnodes=214220
+  kern.maxvnodes: 2000 -> 214220
+
+  root@:/home/wcg/workspace/riscv-world/usr/tests/sys/fs/tptfs # kyua test -k Kyuafile
+  create_test:create  ->  passed  [0.020s]
+  create_test:kqueue  ->  passed  [0.024s]
+  mount_other_test:attrs  ->  passed  [0.019s]
+  mount_other_test:links  ->  passed  [0.021s]
+  mount_other_test:negative  ->  passed  [0.023s]
+  mount_other_test:options  ->  passed  [0.024s]
+  mount_other_test:plain  ->  passed  [0.023s]
+  dots_test:nesteddir  ->  passed  [0.028s]
+  dots_test:topdir  ->  passed  [0.023s]
+  mkdir_test:kqueue  ->  passed  [0.043s]
+  mkdir_test:many  ->  passed  [0.865s]
+  mkdir_test:nested  ->  passed  [0.037s]
+  mkdir_test:single  ->  passed  [0.023s]
+  mknod_test:block  ->  passed  [0.019s]
+  mknod_test:block_kqueue  ->  passed  [0.039s]
+  mknod_test:char  ->  passed  [0.020s]
+  mknod_test:char_kqueue  ->  passed  [0.039s]
+  mknod_test:pipe  ->  passed  [0.030s]
+  mknod_test:pipe_kqueue  ->  passed  [0.026s]
+  exec_test:basic  ->  passed  [0.022s]
+  link_test:basic  ->  passed  [0.033s]
+  link_test:subdirs  ->  passed  [0.048s]
+  readdir_test:caching  ->  passed  [0.029s]
+  readdir_test:dots  ->  passed  [0.022s]
+  readdir_test:many  ->  passed  [0.323s]
+  readdir_test:types  ->  passed  [0.036s]
+  read_write_test:basic  ->  passed  [0.024s]
+  read_write_test:kqueue  ->  passed  [0.062s]
+  remove_test:dot  ->  passed  [0.031s]
+  remove_test:kqueue  ->  passed  [0.046s]
+  remove_test:single  ->  passed  [0.025s]
+  rename_test:basic  ->  passed  [0.027s]
+  rename_test:crossdev  ->  passed  [0.024s]
+  rename_test:dir_to_emptydir  ->  passed  [0.035s]
+  rename_test:dir_to_file  ->  passed  [0.031s]
+  rename_test:dir_to_fulldir  ->  passed  [0.046s]
+  rename_test:dotdot  ->  passed  [0.081s]
+  rename_test:dots  ->  passed  [0.026s]
+  rename_test:file_to_dir  ->  passed  [0.033s]
+  rename_test:kqueue  ->  passed  [0.122s]
+  rmdir_test:curdir  ->  passed  [0.024s]
+  rmdir_test:dots  ->  passed  [0.028s]
+  rmdir_test:links  ->  passed  [0.040s]
+  rmdir_test:mntpt  ->  passed  [0.029s]
+  rmdir_test:nested  ->  passed  [0.029s]
+  rmdir_test:non_empty  ->  passed  [0.037s]
+  rmdir_test:non_existent  ->  passed  [0.018s]
+  rmdir_test:single  ->  passed  [0.038s]
+  setattr_test:chgrp  ->  passed  [0.028s]
+  setattr_test:chgrp_kqueue  ->  passed  [0.025s]
+  setattr_test:chmod  ->  passed  [0.023s]
+  setattr_test:chmod_kqueue  ->  passed  [0.027s]
+  setattr_test:chown  ->  passed  [0.023s]
+  setattr_test:chown_kqueue  ->  passed  [0.051s]
+  setattr_test:chowngrp  ->  passed  [0.023s]
+  setattr_test:chowngrp_kqueue  ->  passed  [0.029s]
+  setattr_test:chtimes  ->  passed  [0.021s]
+  setattr_test:chtimes_kqueue  ->  passed  [0.043s]
+  sizes_test:big  ->  passed  [0.038s]
+  sizes_test:overflow  ->  passed  [0.048s]
+  sizes_test:overwrite  ->  passed  [0.055s]
+  sizes_test:small  ->  passed  [0.020s]
+  sockets_test:basic  ->  passed  [0.055s]
+  statvfs_test:values  ->  skipped: Invalid bsize  [0.017s]
+  symlink_test:dir  ->  passed  [0.042s]
+  symlink_test:file  ->  passed  [0.026s]
+  symlink_test:texec  ->  passed  [0.017s]
+  times_test:empty  ->  passed  [2.130s]
+  times_test:link  ->  passed  [1.090s]
+  times_test:non_empty  ->  passed  [1.095s]
+  times_test:rename  ->  passed  [1.045s]
+  trail_slash_test:main  ->  passed  [0.029s]
+  truncate_test:basic  ->  passed  [0.024s]
+  vnd_test:basic  ->  passed  [0.506s]
+
+  Results file id is usr_home_wcg_workspace_riscv-world_usr_tests_sys_fs_tptfs.20221229-160026-135876
+  Results saved to /root/.kyua/store/results.usr_home_wcg_workspace_riscv-world_usr_tests_sys_fs_tptfs.20221229-160026-135876.db
+
+  74/74 passed (0 failed)
+
+////////////// 20221230 //////////////
+经过与组员之间的讨论，有了一些基本共识:
+  - cpu 是无法直接访问 pci 设备自带的内存的。pci 地址空间与 memory 空间是两个独立的部分。cpu 可以直接访问 memory 空间，
+    也可理解为 load 指令可访问的地址
+  - 总线设备自带的内存，cpu 就不能直接访问了。因为与 cpu 直接对接的，应该是总线，否则还要总线干嘛。cpu 要访问某个设备，一定
+    是向总线发起请求，后续的操作就交给总线自己去处理，cpu 等着拿返回数据即可
+  - 所以，cpu 能直接访问的，应该就是 memory 空间和设备，或者总线，的相关控制器组。控制器应该才会去对应 cpu 可访问地址空间
+  - pci 总线的处理机制类似于网络，数据也是经过层层包装后进行传递的
+  - pci 总线会维持自己的地址空间，这个空间可能与 cpu 可寻址空间是一样大的(32位)，但不能认为它们就是同一个。两者之间的转换
+    也是要通过 pci 总线来进行的，所以即使建立了某种映射关系，cpu 同样是无法直接访问 pci 本身管理的地址
+
+

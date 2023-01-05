@@ -3,7 +3,7 @@
 
 #define PAGE_SIZE   4096
 #define INODE_ENTRY_SIZE  256
-#define DEFAULT_PAGES_PER_FILE  4
+#define DEFAULT_PAGES_PER_FILE  1
 #define INODES_OCCUPIED 4
 
 #define MB_TO_PAGE  ((1024 * 1024) / (PAGE_SIZE))

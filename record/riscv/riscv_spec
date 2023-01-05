@@ -1,0 +1,52 @@
+////////////////// overview //////////////////
+riscv 包含4种核心指令:
+  R-type
+  I-type
+  S-type
+  U-type
+
+- 除了 CSR 指令中使用的 5 位立即数外，立即数始终是符号扩展的(对应零扩展)。riscv 一个基本指令设计思想是，立即数通常向指令中
+  最左边的可用位进行打包，用于降低硬件设计复杂度
+- 实际上，大多数的立即数要么很小，要么需要所有 XLEN 位，riscv 采用非对称立即拆分
+    regular instruction: 12 bits + special load upper immediate instruction: 20 bit
+  这样设计的好处是，可增加常规指令可用的操作码空间
+
+
+////////////////// 指令汇总 //////////////////
+addi rd, rs1, imm
+  - rd = rs1 + imm
+  - 伪指令 mv rd, rs1 = addi rd, rs1, 0
+
+slti rd, rs1, imm
+  - set less than immediate
+  - if rs1 < imm, rd = 1; else rd = 0
+
+sltiu rd, rs1, imm
+  - set less than immediate unsigned
+  - sltiu rd, rs1, 1 ==> if rs1 == 0, rd = 1; else rd = 0 ==> 伪指令 seqz rd, rs
+
+andi / ori / xori rd, rs1, imm
+  - bitwise 与或非操作
+
+slli rd, rs1, imm
+  - shift left logical immediate (lower 5 bits)
+  - zeros are shifted into the lower bits
+
+srli rd, rs1, imm
+  - shift right logical immediate (lower 5 bits)
+  - zeros are shifted into the upper bits
+
+srai rd, rs1, imm
+  - shift right arithmetic(算术) immediate
+  - the original sign bit is copied into the vacated upper bits
+
+lui rd, imm
+  - load upper immediate, build 32-bit constants and uses the U-type format
+  - places the U-immediate value in the top 20 bits of rd
+  - filling in the lowest 12 bits with zeros
+
+auipc rd, imm
+  - add upper immediate to pc, used to build pc-relative addresses and uses the U-type format
+  - forms a 32-bit "offset" from the 20-bit U-immediate
+  - filling in the lowest 12 bits with zeros
+  - 感觉像是地址跳转， rd = pc + immediate(upper 20 bits)

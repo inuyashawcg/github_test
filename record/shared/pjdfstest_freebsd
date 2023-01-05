@@ -1,0 +1,229 @@
+# FreeBSD freebsd-x86-3 13.1-RELEASE-p2 FreeBSD 13.1-RELEASE-p2 GENERIC amd64
+
+  root@freebsd-x86-3:/usr/src/contrib/pjdfstest/travis # ./build.sh 
+  checking for a BSD-compatible install... /usr/bin/install -c
+  checking whether build environment is sane... yes
+  checking for a race-free mkdir -p... ././install-sh -c -d
+  checking for gawk... no
+  checking for mawk... no
+  checking for nawk... nawk
+  checking whether make sets $(MAKE)... yes
+  checking whether make supports nested variables... yes
+  checking build system type... amd64-unknown-freebsd13.1
+  checking host system type... amd64-unknown-freebsd13.1
+  checking for cc... cc
+  checking whether the C compiler works... yes
+  checking for C compiler default output file name... a.out
+  checking for suffix of executables... 
+  checking whether we are cross compiling... no
+  checking for suffix of object files... o
+  checking whether the compiler supports GNU C... yes
+  checking whether cc accepts -g... yes
+  checking for cc option to enable C11 features... none needed
+  checking whether cc understands -c and -o together... yes
+  checking whether make supports the include directive... no
+  checking dependency style of cc... none
+  checking for stdio.h... yes
+  checking for stdlib.h... yes
+  checking for string.h... yes
+  checking for inttypes.h... yes
+  checking for stdint.h... yes
+  checking for strings.h... yes
+  checking for sys/stat.h... yes
+  checking for sys/types.h... yes
+  checking for unistd.h... yes
+  checking for wchar.h... yes
+  checking for minix/config.h... no
+  checking whether it is safe to define __EXTENSIONS__... yes
+  checking whether _XOPEN_SOURCE should be defined... no
+  checking for sys/mkdev.h... no
+  checking for bindat... yes
+  checking for chflags... yes
+  checking for chflagsat... yes
+  checking for connectat... yes
+  checking for faccessat... yes
+  checking for fchflags... yes
+  checking for fchmodat... yes
+  checking for fchownat... yes
+  checking for fstatat... yes
+  checking for lchflags... yes
+  checking for lchmod... yes
+  checking for linkat... yes
+  checking for lpathconf... yes
+  checking for mkdirat... yes
+  checking for mkfifoat... yes
+  checking for mknodat... yes
+  checking for openat... yes
+  checking for posix_fallocate... yes
+  checking for readlinkat... yes
+  checking for renameat... yes
+  checking for symlinkat... yes
+  checking for utimensat... yes
+  checking for sys/acl.h... yes
+  checking for acl_create_entry_np... yes
+  checking for acl_from_text... yes
+  checking for acl_get_entry... yes
+  checking for acl_get_file... yes
+  checking for acl_set_file... yes
+  checking for cc options needed to detect all undeclared functions... -fno-builtin
+  checking whether ACL_TYPE_NFS4 is declared... yes
+  checking for struct stat.st_atim... yes
+  checking for struct stat.st_atimespec... yes
+  checking for struct stat.st_birthtim... yes
+  checking for struct stat.st_birthtime... yes
+  checking for struct stat.st_birthtimespec... yes
+  checking for struct stat.st_ctim... yes
+  checking for struct stat.st_ctimespec... yes
+  checking for struct stat.st_mtim... yes
+  checking for struct stat.st_mtimespec... yes
+  checking that generated files are newer than configure... done
+  configure: creating ./config.status
+  config.status: creating Makefile
+  config.status: creating config.h
+  config.status: config.h is unchanged
+  config.status: executing depfiles commands
+  config.status: error: in `/usr/src/contrib/pjdfstest':
+  config.status: error: Something went wrong bootstrapping makefile fragments
+      for automatic dependency tracking.  If GNU make was not used, consider
+      re-running the configure script with MAKE="gmake" (or whatever is
+      necessary).  You can also try re-running configure with the
+      '--disable-dependency-tracking' option to at least be able to build
+      the package (albeit without support for automatic dependency tracking).
+  See `config.log' for more details
+
+
+修改原有 build.sh 脚本:
+  ./configure --disable-dependency-tracking 
+  gmake
+
+修改 config.status 配置文件:
+  MAKE=gmake
+
+执行 build.sh，可正确执行(bmake 存在兼容性问题?):
+  root@freebsd-x86-3:/usr/src/contrib/pjdfstest/travis # ./build.sh 
+  checking for a BSD-compatible install... /usr/bin/install -c
+  checking whether build environment is sane... yes
+  checking for a race-free mkdir -p... ././install-sh -c -d
+  checking for gawk... no
+  checking for mawk... no
+  checking for nawk... nawk
+  checking whether make sets $(MAKE)... yes
+  checking whether make supports nested variables... yes
+  checking build system type... amd64-unknown-freebsd13.1
+  checking host system type... amd64-unknown-freebsd13.1
+  checking for cc... cc
+  checking whether the C compiler works... yes
+  checking for C compiler default output file name... a.out
+  checking for suffix of executables... 
+  checking whether we are cross compiling... no
+  checking for suffix of object files... o
+  checking whether the compiler supports GNU C... yes
+  checking whether cc accepts -g... yes
+  checking for cc option to enable C11 features... none needed
+  checking whether cc understands -c and -o together... yes
+  checking whether make supports the include directive... no
+  checking dependency style of cc... none
+  checking for stdio.h... yes
+  checking for stdlib.h... yes
+  checking for string.h... yes
+  checking for inttypes.h... yes
+  checking for stdint.h... yes
+  checking for strings.h... yes
+  checking for sys/stat.h... yes
+  checking for sys/types.h... yes
+  checking for unistd.h... yes
+  checking for wchar.h... yes
+  checking for minix/config.h... no
+  checking whether it is safe to define __EXTENSIONS__... yes
+  checking whether _XOPEN_SOURCE should be defined... no
+  checking for sys/mkdev.h... no
+  checking for bindat... yes
+  checking for chflags... yes
+  checking for chflagsat... yes
+  checking for connectat... yes
+  checking for faccessat... yes
+  checking for fchflags... yes
+  checking for fchmodat... yes
+  checking for fchownat... yes
+  checking for fstatat... yes
+  checking for lchflags... yes
+  checking for lchmod... yes
+  checking for linkat... yes
+  checking for lpathconf... yes
+  checking for mkdirat... yes
+  checking for mkfifoat... yes
+  checking for mknodat... yes
+  checking for openat... yes
+  checking for posix_fallocate... yes
+  checking for readlinkat... yes
+  checking for renameat... yes
+  checking for symlinkat... yes
+  checking for utimensat... yes
+  checking for sys/acl.h... yes
+  checking for acl_create_entry_np... yes
+  checking for acl_from_text... yes
+  checking for acl_get_entry... yes
+  checking for acl_get_file... yes
+  checking for acl_set_file... yes
+  checking for cc options needed to detect all undeclared functions... -fno-builtin
+  checking whether ACL_TYPE_NFS4 is declared... yes
+  checking for struct stat.st_atim... yes
+  checking for struct stat.st_atimespec... yes
+  checking for struct stat.st_birthtim... yes
+  checking for struct stat.st_birthtime... yes
+  checking for struct stat.st_birthtimespec... yes
+  checking for struct stat.st_ctim... yes
+  checking for struct stat.st_ctimespec... yes
+  checking for struct stat.st_mtim... yes
+  checking for struct stat.st_mtimespec... yes
+  checking that generated files are newer than configure... done
+  configure: creating ./config.status
+  config.status: creating Makefile
+  config.status: creating config.h
+  config.status: config.h is unchanged
+  config.status: executing depfiles commands
+  gmake  all-am
+  gmake[1]: Entering directory '/usr/src/contrib/pjdfstest'
+  cc -DHAVE_CONFIG_H -I.    -Wall -Werror -g -O2 -c -o pjdfstest.o pjdfstest.c
+  cc -Wall -Werror -g -O2   -o pjdfstest pjdfstest.o  
+  gmake[1]: Leaving directory '/usr/src/contrib/pjdfstest'
+
+生成 pjdfstest 可执行文件。接着执行 ./test.sh 脚本，进行实际测试:
+  + dirname ./test.sh
+  + cd ./..
+  + df .
+  Filesystem  1K-blocks     Used   Avail Capacity  Mounted on
+  /dev/ada0p2  32486996 20535040 9353000    69%    /
+  + uname -a
+  FreeBSD freebsd-x86-3 13.1-RELEASE-p2 FreeBSD 13.1-RELEASE-p2 GENERIC amd64
+  + uname
+  + mount -p
+  /dev/ada0p2		/			ufs	rw		1 1
+  devfs			/dev			devfs	rw		0 0
+  /dev/ada1s1d		/work			ufs	rw		1 1
+  /dev/ada1s1e		/usr/obj		ufs	rw		1 1
+  /dev/ada1s1f		/usr/home		ufs	rw		1 1
+  procfs			/proc			procfs	rw		0 0
+  linprocfs		/compat/linux/proc	linprocfs	rw		0 0
+  + sudo prove -rv .
+  ./tests/chflags/00.t .... 
+  1..742
+  ok 1
+  ok 2
+  ok 3
+  ...
+  ...
+  ...
+  ./tests/utimensat/09.t .. 
+  1..7
+  ok 1
+  ok 2
+  ok 3
+  ok 4
+  ok 5
+  ok 6
+  ok 7
+  ok
+  All tests successful.
+  Files=230, Tests=12349, 603 wallclock secs ( 2.14 usr  0.83 sys + 49.66 cusr 117.28 csys = 169.91 CPU)
+  Result: PASS

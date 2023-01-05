@@ -1,0 +1,161 @@
+////////////// 20230103 //////////////
+/usr/obj/usr/home/whd/work/freebsd-src/amd64.amd64/tests/sys/pjdfstest/pjdfstest/pjdfstest
+/usr/src/contrib/pjdfstest/pjdfstest.c
+
+kyua report --results-file=./usr/lib/debug/usr/tests/sys/pjdfstest
+
+setenv DESTDIR /home/work/amd64/amd64_world/
+make TARGET_ARCH=riscv64 -DNO_ROOT DESTDIR=$DESTDIR WITHOUT_CLEAN=yes installworld 
+
+make -DNO_ROOT DESTDIR=/usr/home/work/amd64/amd64_world WITHOUT_CLEAN=yes installworld -j8
+
+/home/work/amd64/amd64_world/usr/tests/sys/pjdfstest
+
+
+automake 版本测试结果:
+  root@freebsd-x86-3:/usr/src/contrib/pjdfstest/travis # ./test.sh 
+  + dirname ./test.sh
+  + cd ./..
+  + df .
+  Filesystem  1K-blocks     Used   Avail Capacity  Mounted on
+  /dev/ada0p2  32486996 20534696 9353344    69%    /
+  + uname -a
+  FreeBSD freebsd-x86-3 13.1-RELEASE-p2 FreeBSD 13.1-RELEASE-p2 GENERIC amd64
+  + uname
+  + mount -p
+  /dev/ada0p2		/			ufs	rw		1 1
+  devfs			/dev			devfs	rw		0 0
+  /dev/ada1s1d		/work			ufs	rw		1 1
+  /dev/ada1s1e		/usr/obj		ufs	rw		1 1
+  /dev/ada1s1f		/usr/home		ufs	rw		1 1
+  procfs			/proc			procfs	rw		0 0
+  linprocfs		/compat/linux/proc	linprocfs	rw		0 0
+  + sudo prove -rv .
+  ./tests/chflags/00.t .... 
+  not ok - could not find pjdfstest app
+  Dubious, test returned 1 (wstat 256, 0x100)
+  Failed 1/1 subtests 
+  ./tests/chflags/01.t .... 
+  not ok - could not find pjdfstest app
+  Dubious, test returned 1 (wstat 256, 0x100)
+  Failed 1/1 subtests 
+  ./tests/chflags/02.t .... 
+  not ok - could not find pjdfstest app
+  Dubious, test returned 1 (wstat 256, 0x100)
+  Failed 1/1 subtests 
+  ...
+  ...
+  ...
+  ./tests/utimensat/07.t (Wstat: 256 Tests: 1 Failed: 1)
+    Failed test:  1
+    Non-zero exit status: 1
+    Parse errors: No plan found in TAP output
+  ./tests/utimensat/08.t (Wstat: 256 Tests: 1 Failed: 1)
+    Failed test:  1
+    Non-zero exit status: 1
+    Parse errors: No plan found in TAP output
+  ./tests/utimensat/09.t (Wstat: 256 Tests: 1 Failed: 1)
+    Failed test:  1
+    Non-zero exit status: 1
+    Parse errors: No plan found in TAP output
+  Files=230, Tests=230,  3 wallclock secs ( 0.31 usr  0.25 sys +  1.15 cusr  3.20 csys =  4.91 CPU)
+  Result: FAIL
+
+
+atf 版本测试结果：
+  root@:/home/work/amd64/amd64_world/usr/tests/sys/pjdfstest/chflags # kyua test -k Kyuafile
+  00:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/2/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.009s]
+  01:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/4/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.009s]
+  02:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/6/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.007s]
+  03:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/8/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.007s]
+  04:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/10/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.008s]
+  05:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/12/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.008s]
+  06:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/14/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.009s]
+  07:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/16/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.007s]
+  08:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/18/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.008s]
+  09:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/20/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.007s]
+  10:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/22/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.007s]
+  11:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/24/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.009s]
+  12:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/26/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.009s]
+  13:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.Kxfiwg/28/stdout.txt' failed: Output did not contain any TAP plan and the program did not bail out  [0.008s]
+
+  https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=219756
+
+
+////////////// 20230104 //////////////
+tap_test_program
+
+root@:/usr/home/work/amd64/amd64_world/usr/tests/sys/pjdfstest/chflags # kyua test -k Kyuafile
+00:main  ->  broken: TAP test program yielded invalid data: Load of '/tmp/kyua.EOialu/2/stdout.txt' failed: 
+    Output did not contain any TAP plan and the program did not bail out  [0.008s]
+
+kyua tap_test_case 测试流程猜测(仅供参考):
+  - 首先肯定是读取 kyuafile，得知到底有哪些测试用例需要被执行
+  - 执行完成后，将测试结果输出到 stdout.txt 文件当中，每次输出的路径前缀貌似都是唯一的
+  - 调用 parse 函数，对输出的结果进行解析，判断其中是否包含 TAP plans
+  - 若发现没有，则提示上述错误
+  - 另外一种可能，是首先生成 TAP plans 到 stdout.txt，然后解析该文件，看需要执行哪些测试用例。
+    因为上面的错误信息，是在较短的时间内打印出来的，而正常执行测试需要花费较长时间
+
+实际测试发现，stdout.txt 是在执行的过程中被不断写入的，内容类似:
+  root@:/tmp/kyua.sRPe43/2 # less stdout.txt 
+  1..742
+  ok 1
+  ok 2
+  ok 3
+  ok 4
+  ok 5
+  ok 6
+  ok 7
+  ok 8
+  ok 9
+  ok 10
+  ok 11
+  ok 12
+  ok 13
+  ok 14
+  ok 15
+  ok 16
+  ok 17
+  ok 18
+  ok 19
+  ok 20
+  ok 21
+  ok 22
+  ok 23
+  ok 24
+  ...
+
+  这里一定要注意 1..742，它表示的就是测试用例个数，是会在源测试文件中给出的，千万不要注释掉，否则就会提示
+上述错误。kyua-tap 内部包含有多个正则检测模块，其中包括一个 plan 检测，其中一项就是判断用户是否指定了测试
+用例个数。如果没有找到，就会报异常。
+  执行完成之后，kyua-tap 会对输出的结果进行判断(推测应该是对比测试 ok 个数与执行的测试用例总数，此处即 742)，
+并根据判断结果打印相应的信息。最后再做清理工作，将所有的临时文件和目录删除。
+
+上述结果对应的源文件:
+  .../usr/tests/sys/pjdfstest/chflags/00 (installworld 之后生成)
+
+  case "${os}:${fs}" in
+  FreeBSD:UFS)
+          allflags="UF_NODUMP,UF_IMMUTABLE,UF_APPEND,UF_NOUNLINK,UF_OPAQUE,SF_ARCHIVED,SF_IMMUTABLE,SF_APPEND,
+          userflags="UF_NODUMP,UF_IMMUTABLE,UF_APPEND,UF_NOUNLINK,UF_OPAQUE"
+          systemflags="SF_ARCHIVED,SF_IMMUTABLE,SF_APPEND,SF_NOUNLINK"
+
+          echo "1..742"
+          ;;
+  FreeBSD:ZFS)
+          allflags="UF_NODUMP,SF_IMMUTABLE,SF_APPEND,SF_NOUNLINK"
+          userflags="UF_NODUMP"
+          systemflags="SF_IMMUTABLE,SF_APPEND,SF_NOUNLINK"
+
+          echo "1..482"
+          ;;
+  *)
+          quick_exit
+          ;;
+  esac
+
+- 我们测试的是 ufs，所以对应上述 1..742
+- 测试用例总数 = 功能函数调用的总次数。需要注意属性 (如 UF_NODUMP) 和循环内部次数计算，最后加上循环外部的次数
+
+////////////// 20230105 //////////////

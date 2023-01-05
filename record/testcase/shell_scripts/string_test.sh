@@ -2,12 +2,6 @@
 # 参考：
 # https://www.cnblogs.com/liangyou666/p/10877630.html
 
-. ./common.sh
-
-echo ${TESTDIR}
-common_init
-common_cleanup
-
 # filename="/home/mercury/Documents/code/qihai/work/buildrootfs/rootfs.img"
 # size=`ls -l ${filename} | awk '{ print $5 }'`
 # size=$1

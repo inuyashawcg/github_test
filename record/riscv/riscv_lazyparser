@@ -1,4 +1,7 @@
 ////////////////// 汇编语言语法介绍(GNU 版本) //////////////////
+riscv64 裸机代码实例:
+  https://cloud.tencent.com/developer/article/1770528
+
   [label:] [operation] [comment]
 
   - label(标号): GNU 汇编中，任何以 : 结尾的标识符都会被认为是一个标号。在汇编语言中，label 可以被认为就是一个地址，只不过这个地址是有名字的
@@ -6,29 +9,29 @@
   - operation 可以有多多种类型:
     1/ instruction (指令): 直接对应二进制机器指令的字符串
     2/ pseudo-instruction (伪指令): 为了提高写代码效率，可以用一条伪指令转换成多个实际的指令
-    3/ directive (指示/伪操作): 通过类似指令的形式(以 . 开头)，通知汇编器如何控制代码的产生，不对应具体的指令。它们不属于riscv指令的一部分，是汇编器定义的一些语法。汇编器会根据这些 directive 的指示，做一些特殊的处理
+    3/ directive (指示/伪操作): 通过类似指令的形式(以 . 开头)，通知汇编器如何控制代码的产生，不对应具体的指令。它们不属于riscv指令的一部分，
+       是汇编器定义的一些语法。汇编器会根据这些 directive 的指示，做一些特殊的处理
     4/ macro (宏定义): 采用 .macro/.endm 自定义的宏
 
 以下面这段代码为例说明:
 
-    # First RISC-V Assemble Sample
+# First RISC-V Assemble Sample
 
-    .macro do_nothing	# directive - 表示定义一个宏
-      nop		# pseudo-instruction
-      nop		# pseudo-instruction
-    .endm			# directive - 表示宏的结束
+.macro do_nothing	# directive - 表示定义一个宏
+  nop		# pseudo-instruction
+  nop		# pseudo-instruction
+.endm			# directive - 表示宏的结束
 
-      .text		# directive - 表示代码要放到 .text section
-      .global _start	# directive - 表示外部可见，类似全局变量
-    _start: 		# Label
-      li x6, 5	# pseudo-instruction
-      li x7, 4	# pseudo-instruction
-      add x5, x6, x7	# instruction
-      do_nothing	# Calling macro - 类似于预处理器，会进行宏展开
-    stop:	j stop		# statement in one line
+.text		# directive - 表示代码要放到 .text section
+.global _start	# directive - 表示外部可见，类似全局变量
+_start: 		# Label
+  li x6, 5	# pseudo-instruction
+  li x7, 4	# pseudo-instruction
+  add x5, x6, x7	# instruction
+  do_nothing	# Calling macro - 类似于预处理器，会进行宏展开
+stop:	j stop		# statement in one line
 
-      .end		# End of file - 后面的代码汇编器应该不会再去读了
+.end		# End of file - 后面的代码汇编器应该不会再去读了
 
-  riscv 中存在一个 hart 概念，可以理解为 CPU 最小的执行单元，它在执行算数逻辑运算时所操作的数据必须直接来自于寄存器，而不是内存或者缓存
-
+riscv 中存在一个 hart 概念，可以理解为 CPU 最小的执行单元，它在执行算数逻辑运算时所操作的数据必须直接来自于寄存器，而不是内存或者缓存
   

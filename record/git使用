@@ -109,12 +109,14 @@ git merge-base a b
     git config merge.renameLimit 999999
   后面这个最大数字应该是可以配置的，可以查阅一下
 
+https://github.com/settings/tokens/new
+
 github token:
-  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
+  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
 
 如何生成新的 github token：
   - 登录账号
   - setting
   - developer setting
   - 设置访问权限信息，点击 create new token
-  - git push 密码部分粘贴新生成的 token 即可
+  - git push, 密码部分粘贴新生成的 token 即可
