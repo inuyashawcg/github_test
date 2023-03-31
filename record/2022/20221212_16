@@ -14,14 +14,13 @@ export MAKESYSPATH=/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/s
 
 /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/make.py --cross-compiler-type=clang --cross-bindir=/home/mercury/llvm/clang+llvm-14/bin installworld TARGET_ARCH=riscv64 TARGET=riscv -j16 > /home/mercury/wcg_private/github_inuyasha/github_test/record/temp
 
-/home/mercury/Documents/code/qihai/master/qihai/freebsd-src/tools/build/make.py --cross-compiler-type=clang --cross-bindir=/home/mercury/llvm/clang+llvm-11.0.1-freebsd12/bin buildworld TARGET_ARCH=riscv64 TARGET=riscv -j16 > /home/mercury/wcg_private/github_inuyasha/github_test/record/temp
-
 /home/mercury/llvm/clang+llvm-14/bin
 /home/mercury/llvm/clang+llvm-11.0.1-freebsd12/bin
 /home/mercury/llvm/clang+llvm-11.0.1-freebsd12/bin
 
 ./contrib/libarchive/libarchive/archive.h
 
+/home/mercury/Documents/backup/buildqihai.txt
 
 freebsd-src 下无法编译的异常:
   - 如果我们使用的是 apt install 类型的 clang，会缺少 clang-cpp 等工具，这样我们进入 freebsd-src 下后会出现编译异常，

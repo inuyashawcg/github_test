@@ -1097,14 +1097,19 @@ retry:
 	runstart = 0;
 	for (loc = start; loc < end; loc++) {
 		/*
-			这里处理的情况是优先块是在cg块组中，但是它已经被占用的情况。
+			这里处理的情况是优先块是在cg块组中，但是它已经被占用的情况
 		*/
 		if (bbp[loc] == (char)0xff) {
 			runlen = 0;
 			continue;
 		}
 
-		/* Start of a run, find the number of high clear bits. */
+		/* Start of a run, find the number of high clear bits. 
+			fls() 函数的作用是返回最后一个高位bit，所以 runlen 就表示后面剩余
+			空闲 bit 的数量(此时要保证 bit 后全部是低位，因为从注释可以看出，
+			这部分逻辑处理的是一次分配连续8个可用数据块。runstart 表示的应该是
+			连续可用数据块的首个数据块号)
+		*/
 		if (runlen == 0) {
 			bit = fls(bbp[loc]);
 			runlen = NBBY - bit;
@@ -1116,6 +1121,11 @@ retry:
 			/*
 			 * Finish the current run.  If it isn't long
 			 * enough, start a new one.
+			 * ffs() 函数返回的是第一个高位 bit，需要保证该 bit 前面的所有位
+			 * 都是低位(这样做是为了跟前一次高可用 bit 连贯起来，因为它们在内存
+			 * 中的位置是不连续的)。从这里可以看出，runlen 表示就是连续可用 bit
+			 * 数，只要 runlen >= 8，就满足了连续块数量要求，就可以返回 (返回值)
+			 * 是连续块首块号
 			 */
 			bit = ffs(bbp[loc]) - 1;
 			runlen += bit;
@@ -1136,7 +1146,11 @@ retry:
 			goto gotit;
 		}
 	}	/* end for */
-
+	/*
+	  类似二分查找，查找从 start 开始的后半部分是否有可用 block。如果没有，
+	  将 end 设置成 start，同时 start 设置成 0，相当于是检查前一部分。
+	  这一部分貌似就没有数据块连续排布的要求，每次好像只分配一个数据块
+	*/
 	if (start != 0) {
 		end = start;
 		start = 0;

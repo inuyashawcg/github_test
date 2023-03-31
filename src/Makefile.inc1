@@ -993,6 +993,9 @@ _worldtmp: .PHONY
 	@touch ${WORLDTMP}/${.TARGET}
 # We can't use mtree to create the worldtmp directories since it may not be
 # available on the target system (this happens e.g. when building on non-FreeBSD)
+#
+# 跨平台编译过程中，我们需要指定 DESTDIR，但是不需要指定 DIRPRFX。因为从下面代码可以看出，
+# 前者需要配置 (可能需要设置环境变量)，但是后者是直接写死的
 	cd ${.CURDIR}/tools/build; \
 	    ${MAKE} DIRPRFX=tools/build/ DESTDIR=${WORLDTMP}/legacy installdirs
 _legacy:

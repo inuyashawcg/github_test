@@ -1,0 +1,141 @@
+////////////// 20230306 //////////////
+    Thread 1 hit Breakpoint 2, engine::atf_interface::parse_list (this=0x4020c010, status=..., 
+        stdout_path=..., stderr_path=...)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/engine/atf.cpp:133
+    133	    const std::string stderr_contents = utils::read_file(stderr_path);
+    (gdb) bt
+    #0  engine::atf_interface::parse_list (this=0x4020c010, status=..., stdout_path=..., 
+        stderr_path=...)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/engine/atf.cpp:133
+    #1  0x000000010cfc1a48 in engine::scheduler::scheduler_handle::list_tests (this=0xffffce00, 
+        test_program=0x4021fff0, user_config=...)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/engine/scheduler.cpp:1051
+    #2  0x000000010cfc1716 in engine::scheduler::lazy_test_program::test_cases (this=0x4021fff0)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/engine/scheduler.cpp:585
+    #3  0x000000010cfb7c72 in engine::scanner::impl::advance (this=0x4023c620)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/engine/scanner.cpp:129
+    #4  0x000000010cfb7a6a in engine::scanner::yield (this=0xffffcd60)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/engine/scanner.cpp:190
+    #5  0x000000010cfe6d00 in drivers::run_tests::drive (kyuafile_path=..., build_root=..., 
+        store_path=..., filters=..., user_config=..., hooks=...)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/drivers/run_tests.cpp:289
+    #6  0x000000010cfed9a4 in cli::cmd_test::run (this=0x40243880, ui=0xffffe7f0, cmdline=..., 
+        user_config=...)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/cmd_test.cpp:158
+    #7  0x000000010d0129e2 in utils::cmdline::base_command<utils::config::tree>::main (
+        this=0x40243880, ui=0xffffe7f0, args=..., data=...)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/cmdline/base_command.ipp:96
+    #8  0x000000010d00e1ca in (anonymous namespace)::run_subcommand (ui=0xffffe7f0, 
+        command=0x40243880, args=..., user_config=...)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:139
+    #9  0x000000010d00d28e in (anonymous namespace)::safe_main (ui=0xffffe7f0, argc=4, 
+        argv=0xffffebd0, mock_command=...)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:228
+    #10 0x000000010d00b716 in cli::main (ui=0xffffe7f0, argc=4, argv=0xffffebd0, mock_command=...)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:280
+    #11 0x000000010d00d79a in cli::main (argc=4, argv=0xffffebd0)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:353
+    #12 0x000000010cf17ed4 in kyua_main (argc=4, argv=0xffffebd0)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/main.cpp:49
+    #13 0x000000010cc0d230 in main (argc=4, argv=0xffffebd0, env=0xffffebf8)
+        at /home/mercury/Videos/qihai_riscv/qihai_tptfs/lib/csu/riscv/crt1_c.c:83
+
+
+(gdb) p absolute_path 
+$9 = "/tmp/kyua.tr1Oo4/1/work/create_test", '\000' <repeats 988 times>
+
+kyua 测试开始执行的时候，还需要拷贝一份源测试文件到 ***/work/ 下？ 应该是没有这种操作的，多了一步拷贝操作，完全不合理。
+大概率还是atf-sh 没有添加到系统当中所致
+
+
+(gdb) p *(struct pwd*)td->td_proc->p_pd->pd_pwd
+$15 = {
+  pwd_refcount = 2,
+  pwd_cdir = 0xffffffd1c0a1f7a0,
+  pwd_rdir = 0xffffffd1c0d29d58,
+  pwd_jdir = 0x0
+}
+
+echo atf-sh.full: /usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/lib/libc.a /usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/lib/libprivateatf-c++.a /usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/lib/libprivateatf-c.a >> .depend
+echo atf-sh.full: /usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/lib/libc++.a >> .depend
+c++  -target riscv64-unknown-freebsd13.0 --sysroot=/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp -B/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/bin  -O2 -pipe -fno-common -march=rv64imafdc -mabi=lp64d -DHAVE_CONFIG_H -DHAVE_CONFIG_H -DATF_LIBEXECDIR='"/usr/libexec"' -DATF_PKGDATADIR='"/usr/share/atf"' -DATF_SHELL='"/bin/sh"' -I/usr/home/mc/workspace/qihai/contrib/atf -mno-relax -g -MD -MF.depend.atf-sh.o -MTatf-sh.o -Wno-format-zero-length -fstack-protector-strong -Wsystem-headers -Werror -Wall -Wno-format-y2k -W -Wno-unused-parameter -Wpointer-arith -Wno-uninitialized -Wformat=2 -Wno-format-extra-args -Werror -Wno-empty-body -Wno-string-plus-int -Wno-unused-const-variable -Wno-tautological-compare -Wno-unused-value -Wno-parentheses-equality -Wno-unused-function -Wno-enum-conversion -Wno-unused-local-typedef -Wno-address-of-packed-member -Wno-format-nonliteral -Qunused-arguments  -Wno-deprecated-declarations   -Wno-c++11-extensions   -c /usr/home/mc/workspace/qihai/contrib/atf/atf-sh/atf-sh.cpp -o atf-sh.o
+c++ -target riscv64-unknown-freebsd13.0 --sysroot=/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp -B/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/bin -O2 -pipe -fno-common -march=rv64imafdc -mabi=lp64d -DHAVE_CONFIG_H -DHAVE_CONFIG_H -DATF_LIBEXECDIR='"/usr/libexec"' -DATF_PKGDATADIR='"/usr/share/atf"' -DATF_SHELL='"/bin/sh"' -I/usr/home/mc/workspace/qihai/contrib/atf -mno-relax -g -Wno-format-zero-length -fstack-protector-strong -Wsystem-headers -Werror -Wall -Wno-format-y2k -W -Wno-unused-parameter -Wpointer-arith -Wno-uninitialized -Wformat=2 -Wno-format-extra-args -Werror -Wno-empty-body -Wno-string-plus-int -Wno-unused-const-variable -Wno-tautological-compare -Wno-unused-value -Wno-parentheses-equality -Wno-unused-function -Wno-enum-conversion -Wno-unused-local-typedef -Wno-address-of-packed-member -Wno-format-nonliteral -Qunused-arguments -Wno-deprecated-declarations -Wno-c++11-extensions    -o atf-sh.full  atf-sh.o -lprivateatf-c++ -lprivateatf-c 
+objcopy --only-keep-debug atf-sh.full atf-sh.debug
+objcopy --strip-debug --add-gnu-debuglink=atf-sh.debug  atf-sh.full atf-sh
+
+
+===> libexec/atf/atf-check (all)
+echo atf-check.full: /usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/lib/libc.a /usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/lib/libprivateatf-c++.a /usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/lib/libprivateatf-c.a >> .depend
+echo atf-check.full: /usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/lib/libc++.a >> .depend
+c++  -target riscv64-unknown-freebsd13.0 --sysroot=/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp -B/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/bin  -O2 -pipe -fno-common -march=rv64imafdc -mabi=lp64d -DHAVE_CONFIG_H -I/usr/home/mc/workspace/qihai/contrib/atf -DATF_SHELL='"/bin/sh"' -mno-relax -g -MD -MF.depend.atf-check.o -MTatf-check.o -Wno-format-zero-length -fstack-protector-strong -Wsystem-headers -Werror -Wall -Wno-format-y2k -W -Wno-unused-parameter -Wpointer-arith -Wno-uninitialized -Wformat=2 -Wno-format-extra-args -Werror -Wno-empty-body -Wno-string-plus-int -Wno-unused-const-variable -Wno-tautological-compare -Wno-unused-value -Wno-parentheses-equality -Wno-unused-function -Wno-enum-conversion -Wno-unused-local-typedef -Wno-address-of-packed-member -Wno-format-nonliteral -Qunused-arguments  -Wno-deprecated-declarations   -Wno-c++11-extensions   -c /usr/home/mc/workspace/qihai/contrib/atf/atf-sh/atf-check.cpp -o atf-check.o
+c++ -target riscv64-unknown-freebsd13.0 --sysroot=/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp -B/usr/obj/usr/home/mc/workspace/qihai/riscv.riscv64/tmp/usr/bin -O2 -pipe -fno-common -march=rv64imafdc -mabi=lp64d -DHAVE_CONFIG_H -I/usr/home/mc/workspace/qihai/contrib/atf -DATF_SHELL='"/bin/sh"' -mno-relax -g -Wno-format-zero-length -fstack-protector-strong -Wsystem-headers -Werror -Wall -Wno-format-y2k -W -Wno-unused-parameter -Wpointer-arith -Wno-uninitialized -Wformat=2 -Wno-format-extra-args -Werror -Wno-empty-body -Wno-string-plus-int -Wno-unused-const-variable -Wno-tautological-compare -Wno-unused-value -Wno-parentheses-equality -Wno-unused-function -Wno-enum-conversion -Wno-unused-local-typedef -Wno-address-of-packed-member -Wno-format-nonliteral -Qunused-arguments -Wno-deprecated-declarations -Wno-c++11-extensions    -o atf-check.full  atf-check.o -lprivateatf-c++ -lprivateatf-c 
+objcopy --only-keep-debug atf-check.full atf-check.debug
+objcopy --strip-debug --add-gnu-debuglink=atf-check.debug  atf-check.full atf-check
+
+mercury@mercury:~/Videos/qihai_riscv/qihai_tptfs/build/riscv.riscv64$ cmake ../../ -DTARGET_ARCH=riscv64
+mercury@mercury:~/Videos/qihai_riscv/qihai_tptfs/build/riscv.riscv64/bin/atf_sh$ make V=1
+
+/etc/host.conf 
+/etc/hosts 
+/etc/nsswitch.conf 
+
+cat build/riscv.riscv64/CMakeFiles/qihai.elf.dir/link.txt
+
+////////////// 20230309 //////////////
+    cmake 没有编译到某个文件的时候，首先要检查 CMakeLists.txt 的文件命名有没有大小写错误
+
+sed -E 's/time=[0-9\.]+$//' METALOG > METALOG.new
+mv METALOG.new METALOG
+echo 'hostname="qemu"' > etc/rc.conf
+echo "/dev/vtbd0        /       ufs     rw      1       1" > etc/fstab
+echo "./etc/fstab type=file uname=root gname=wheel mode=0644" >> METALOG
+echo "./etc/rc.conf type=file uname=root gname=wheel mode=0644" >> METALOG
+makefs -D -f 1000000 -o version=2 -s 4g riscv.img METALOG
+
+
+////////////// 20230309 //////////////
+21054 drwxr-xr-x  2 root  wheel  1024 Mar 10 01:51 tmpfs
+21098 -r-xr-xr-x  1 root  wheel    530 Mar 10 02:21 create_test
+
+
+(gdb) p *imgp
+$12 = {
+  proc = 0xffffffd001ee8000,
+  execlabel = 0x0,
+  vp = 0xffffffd001f653d0,
+  object = 0xffffffd001f89528,
+  attr = 0xffffffc09d1bc808,
+  image_header = 0xffffffd04d8fa000 "#! /usr/libexec/atf-sh\n\natf_test_case create\ncreate_head() {\n
+                atf_set \"descr\" \"Verifies that files can be created\"\n
+                atf_set \"require.user\" \"root\"\n}\ncreate_body() {\n
+                test_mount\n\n  "...,
+  entry_addr = 0,
+  reloc_base = 0,
+  vmspace_destroyed = 0 '\000',
+  interpreted = 0 '\000',
+  opened = 1 '\001',
+  interpreter_name = 0x0,
+  auxargs = 0x0,
+  firstpage = 0xffffffd07ecbaaf0,
+  ps_strings = 0x0,
+  args = 0xffffffc09d1bcb08,
+  sysent = 0x0,
+  argv = 0x0,
+  envv = 0x0,
+  execpath = 0xffffffc04fb0e000 "/usr/tests/sys/fs/tmpfs/create_test",
+  execpathp = 0x0,
+  freepath = 0x0,
+  canary = 0x0,
+  canarylen = 0,
+  pagesizes = 0x0,
+  pagesizeslen = 0,
+  stack_prot = 0 '\000',
+  stack_sz = 0,
+  eff_stack_sz = 0,
+  newcred = 0x0,
+  credential_setid = false,
+  textset = true,
+  map_flags = 0
+}
+
+atf-sh 测试也会存在 exec-args 用完的情况，不太确定是不是这个问题引发的 abort()

@@ -112,7 +112,7 @@ SYSINIT(vm_mem, SI_SUB_VM, SI_ORDER_FIRST, vm_mem_init, NULL);
  *	This is done only by the first cpu up.
  *
  *	The start and end address of physical memory is passed in.
- 		vm_init初始化虚拟内存系统；这仅由第一个cpu启动时完成。传入物理内存的起始地址和结束地址。
+ 		vm_init 初始化虚拟内存系统；这仅由第一个cpu启动时完成。传入物理内存的起始地址和结束地址。
  */
 static void
 vm_mem_init(void *dummy)

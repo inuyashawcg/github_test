@@ -77,10 +77,12 @@ typedef char vm_inherit_t;	/* inheritance codes */
 #define	VM_INHERIT_SHARE	((vm_inherit_t) 0)
 /*
 	The object associated with the entry should be copied to the new map.
+	只拷贝，不共享。上面宏定义表示既要拷贝，又要共享
 */
 #define	VM_INHERIT_COPY		((vm_inherit_t) 1)
 /*
 	The entry should not be copied to the new map.
+	下面这两个宏定义应该都是说明不要拷贝 entry 到新的映射
 */
 #define	VM_INHERIT_NONE		((vm_inherit_t) 2)
 #define	VM_INHERIT_ZERO		((vm_inherit_t) 3)

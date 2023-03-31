@@ -3,7 +3,7 @@
  * All rights reserved.
  *
  * Portions of this software were developed by SRI International and the
- * University of Cambridge Computer Laboratory under DARPA/AFRL contract
+ * University of Cambridge Computer Laboratory under DARPA/AFRL contract7
  * FA8750-10-C-0237 ("CTSRD"), as part of the DARPA CRASH research programme.
  *
  * Portions of this software were developed by the University of Cambridge
@@ -53,6 +53,8 @@
 
 		.extern XXXX 说明xxxx为外部函数，调用的时候可以遍访所有文件找到该函数并且使用它。跟 .globl 作用
 		还是有点区别的
+
+		.set - 创建一个符号 kernbase, 并且将 KERNBASE 赋值给 kernbase
 	*/
 	.globl	kernbase
 	.set	kernbase, KERNBASE
@@ -65,8 +67,8 @@
 	.globl _start
 _start:
 	/* Get the physical address kernel loaded to */
-	la	t0, virt_map
-	ld	t1, 0(t0)
+	la	t0, virt_map	/* load address，伪指令，将 virt_map 的地址写入 t0 */
+	ld	t1, 0(t0)			/* load doubleword，将 64 位地址写入 t1 */
 	sub	t1, t1, t0
 	li	t2, KERNBASE	/* 将 KERNBASE 加载到 t2 寄存器当中 */
 	sub	s9, t2, t1	/* s9 = physmem base */

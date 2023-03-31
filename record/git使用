@@ -120,3 +120,6 @@ github token:
   - developer setting
   - 设置访问权限信息，点击 create new token
   - git push, 密码部分粘贴新生成的 token 即可
+
+
+git stash -u -k

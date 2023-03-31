@@ -128,8 +128,8 @@ __FBSDID("$FreeBSD: releng/12.0/sys/vm/vm_map.c 338370 2018-08-29 12:24:19Z kib 
  *	As mentioned above, virtual copy operations are performed
  *	by copying VM object references from one map to
  *	another, and then marking both regions as copy-on-write.
-    如上所述，虚拟复制操作是通过将 VM 对象引用从一个映射复制到另一个映射，然后将这两个区域标记为
-		写时复制来执行的
+    如上所述，虚拟复制操作是通过将 VM 对象引用从一个映射复制到另一个映射，然后将这两个区域
+		标记为写时复制来执行的
  */
 
 static struct mtx map_sleep_mtx;
@@ -316,6 +316,7 @@ vmspace_alloc(vm_offset_t min, vm_offset_t max, pmap_pinit_t pinit)
 
 	KASSERT(vm->vm_map.pmap == NULL, ("vm_map.pmap must be NULL"));
 
+	// 假如用户没有提供 pmap 初始化函数，则调用系统默认函数
 	if (pinit == NULL)
 		pinit = &pmap_pinit;
 
@@ -324,6 +325,11 @@ vmspace_alloc(vm_offset_t min, vm_offset_t max, pmap_pinit_t pinit)
 		return (NULL);
 	}
 	CTR1(KTR_VM, "vmspace_alloc: %p", vm);
+	/*
+		这里是把 vmspace->vm_pmap 传递给了 vmspace->vm_map->pmap；
+		vm_map->header (vm_map_entry 链表中的第一个元素)管理的地址范围是 min-max，
+		初始化阶段只设置了第一个元素
+	*/
 	_vm_map_init(&vm->vm_map, vmspace_pmap(vm), min, max);
 	vm->vm_refcnt = 1;
 	vm->vm_shm = NULL;
@@ -536,7 +542,9 @@ vmspace_switch_aio(struct vmspace *newvm)
 void
 _vm_map_lock(vm_map_t map, const char *file, int line)
 {
-
+	/*
+		system map 与 user map 要用不同的锁成员
+	*/
 	if (map->system_map)
 		mtx_lock_flags_(&map->system_mtx, 0, file, line);
 	else
@@ -544,6 +552,7 @@ _vm_map_lock(vm_map_t map, const char *file, int line)
 	map->timestamp++;
 }
 
+// deferred: 推迟，延迟
 static void
 vm_map_process_deferred(void)
 {
@@ -826,7 +835,10 @@ vm_map_create(pmap_t pmap, vm_offset_t min, vm_offset_t max)
 static void
 _vm_map_init(vm_map_t map, pmap_t pmap, vm_offset_t min, vm_offset_t max)
 {
-
+	/*
+		初始化阶段，next 和 prev 都是指向 header 本身。需要调用者提供 pmap 指针和
+		地址范围
+	*/
 	map->header.next = map->header.prev = &map->header;
 	map->needs_wakeup = FALSE;
 	map->system_map = 0;
@@ -1480,6 +1492,13 @@ charged:
  *	maximum amount of contiguous free space in its subtree.  This
  *	allows finding a free region in one path down the tree, so
  *	O(log n) amortized with splay trees.
+
+		adj_free 表示的应该是第一个可用的空闲空间 (higher address)，max_free 表示的
+		则是最大可用连续空间。这些参数应该就是为了处理"最佳大小空间"。就比如说我们需要申请
+		16 字节大小的内存，adj_free = 32 bytes， max_free = 64 bytes，但是可能最
+		合适的却是在两者之间的某个大小刚好是 16 bytes 的空闲空间；
+		如果我们要采用最佳匹配策略，就要花费更多时间找到这个 16 字节大小的区域。如果仅仅是
+		为了获取一个可用空间，可能就直接返回 adj_free 或者 max_free
  *
  *	The map must be locked, and leaves it so.
  *
@@ -3509,6 +3528,7 @@ vmspace_map_entry_forked(const struct vmspace *vm1, struct vmspace *vm2,
  * values on the regions in that map.
  *
  * XXX It might be worth coalescing the entries added to the new vmspace.
+ * 将添加到新 vmspace 的条目合并起来可能是值得的
  *
  * The source map must not be locked.
  */
@@ -3523,26 +3543,37 @@ vmspace_fork(struct vmspace *vm1, vm_ooffset_t *fork_charge)
 	vm_inherit_t inh;
 
 	old_map = &vm1->vm_map;
-	/* Copy immutable fields of vm1 to vm2. */
+	/* Copy immutable fields of vm1 to vm2.
+		这里一步可以认为是设置 vm2->vm_map->header 链表中的第一个元素。所以后续
+		代码就可以从链表的 next 元素开始处理。这里要留意 vm_map 初始化的步骤，假如
+		链表只有一个元素，prev = next = header 本身
+	*/
 	vm2 = vmspace_alloc(vm_map_min(old_map), vm_map_max(old_map), NULL);
 	if (vm2 == NULL)
 		return (NULL);
 	vm2->vm_taddr = vm1->vm_taddr;
 	vm2->vm_daddr = vm1->vm_daddr;
 	vm2->vm_maxsaddr = vm1->vm_maxsaddr;
+	/*
+		操作 old_map 和 new_map 两个对象时，要保证它们一定是处于加锁状态。否则，
+		要等待锁释放并拿到之后再进行操作
+	*/
 	vm_map_lock(old_map);
 	if (old_map->busy)
 		vm_map_wait_busy(old_map);
 	new_map = &vm2->vm_map;
 	locked = vm_map_trylock(new_map); /* trylock to silence WITNESS */
 	KASSERT(locked, ("vmspace_fork: lock failed"));
-
+	/*
+		vm_map->header 是一个环形双向链表。前面已经设置完了第一个元素，
+		所以这里就可以从 next 元素开始处理
+	*/
 	old_entry = old_map->header.next;
 
 	while (old_entry != &old_map->header) {
 		if (old_entry->eflags & MAP_ENTRY_IS_SUB_MAP)
 			panic("vm_map_fork: encountered a submap");
-
+		/* 判断 entry 的继承类型 */
 		inh = old_entry->inheritance;
 		if ((old_entry->eflags & MAP_ENTRY_GUARD) != 0 &&
 		    inh != VM_INHERIT_NONE)
@@ -3555,6 +3586,8 @@ vmspace_fork(struct vmspace *vm1, vm_ooffset_t *fork_charge)
 		case VM_INHERIT_SHARE:
 			/*
 			 * Clone the entry, creating the shared object if necessary.
+			 		shared 类型可能会存在一个影子 vm_object (cow?)；
+					初始设置为 old_entry->object.vm_object，如果该字段为空，则创建一个
 			 */
 			object = old_entry->object.vm_object;
 			if (object == NULL) {
@@ -3573,9 +3606,15 @@ vmspace_fork(struct vmspace *vm1, vm_ooffset_t *fork_charge)
 			/*
 			 * Add the reference before calling vm_object_shadow
 			 * to insure that a shadow object is created.
+			 * 需要在 vm_object_shadow() 函数执行之前，增加 object 的引用计数，
+			 * 确保该对象会被创建成功
 			 */
 			vm_object_reference(object);
 			if (old_entry->eflags & MAP_ENTRY_NEEDS_COPY) {
+				/*
+					如果发现确实需要进行拷贝操作，那就要给源 object
+					创建一个影子对象
+				*/
 				vm_object_shadow(&old_entry->object.vm_object,
 				    &old_entry->offset,
 				    old_entry->end - old_entry->start);
@@ -3673,7 +3712,7 @@ vmspace_fork(struct vmspace *vm1, vm_ooffset_t *fork_charge)
 
 		case VM_INHERIT_ZERO:
 			/*
-			 * Create a new anonymous mapping entry modelled from
+			 * Create a new anonymous(匿名的) mapping entry modelled from
 			 * the old one.
 			 */
 			new_entry = vm_map_entry_create(new_map);
@@ -3713,7 +3752,7 @@ vmspace_fork(struct vmspace *vm1, vm_ooffset_t *fork_charge)
 }
 
 /*
- * Create a process's stack for exec_new_vmspace().  This function is never
+ * Create a process's stack for exec_new_vmspace(). This function is never
  * asked to wire the newly created stack.
  */
 int
@@ -3725,9 +3764,10 @@ vm_map_stack(vm_map_t map, vm_offset_t addrbos, vm_size_t max_ssize,
 	int rv;
 
 	MPASS((map->flags & MAP_WIREFUTURE) == 0);
-	growsize = sgrowsiz;
+	growsize = sgrowsiz;	/* stack grow size */
 	init_ssize = (max_ssize < growsize) ? max_ssize : growsize;
 	vm_map_lock(map);
+	/* 返回系统当前资源软限制，这里看着像是虚拟内存地址空间 */
 	vmemlim = lim_cur(curthread, RLIMIT_VMEM);
 	/* If we would blow our VMEM resource limit, no go */
 	if (map->size + init_ssize > vmemlim) {
@@ -3741,6 +3781,9 @@ out:
 	return (rv);
 }
 
+/*
+	指定增长的堆栈的保护页数
+*/
 static int stack_guard_page = 1;
 SYSCTL_INT(_security_bsd, OID_AUTO, stack_guard_page, CTLFLAG_RWTUN,
     &stack_guard_page, 0,
@@ -3759,6 +3802,7 @@ vm_map_stack_locked(vm_map_t map, vm_offset_t addrbos, vm_size_t max_ssize,
 	 * The stack orientation is piggybacked with the cow argument.
 	 * Extract it into orient and mask the cow argument so that we
 	 * don't pass it around further.
+	 * 将 cow 参数与栈增长方向参数合并到一起处理
 	 */
 	orient = cow & (MAP_STACK_GROWS_DOWN | MAP_STACK_GROWS_UP);
 	KASSERT(orient != 0, ("No stack grow direction"));

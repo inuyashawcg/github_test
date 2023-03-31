@@ -777,8 +777,8 @@ static int
 __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 {
 	struct thread *td;
-	const Elf_Ehdr *hdr;
-	const Elf_Phdr *phdr;
+	const Elf_Ehdr *hdr;	/* ELF header*/
+	const Elf_Phdr *phdr;	/* program header */
 	Elf_Auxargs *elf_auxargs;
 	struct vmspace *vmspace;
 	const char *err_str, *newinterp;
@@ -790,7 +790,7 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 	u_long seg_size, seg_addr, addr, baddr, et_dyn_addr, entry, proghdr;
 	int32_t osrel;
 	int error, i, n, interp_name_len, have_interp;
-
+	/* shell 脚本对应的是 #! **，elf 文件对应的 elf header */
 	hdr = (const Elf_Ehdr *)imgp->image_header;
 
 	/*
@@ -807,7 +807,6 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 	 * From here on down, we return an errno, not -1, as we've
 	 * detected an ELF file.
 	 */
-
 	if ((hdr->e_phoff > PAGE_SIZE) ||
 	    (u_int)hdr->e_phentsize * hdr->e_phnum > PAGE_SIZE - hdr->e_phoff) {
 		/* Only support headers in first page for now */
@@ -1075,6 +1074,7 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 
 	/*
 	 * Construct auxargs table (used by the fixup routine)
+	 	在 qihai 系统当中，elf 相关参数应该是不需要保留的
 	 */
 	elf_auxargs = malloc(sizeof(Elf_Auxargs), M_TEMP, M_WAITOK);
 	elf_auxargs->execfd = -1;

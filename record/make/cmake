@@ -14,6 +14,8 @@ cmake 中常用的内置路径搜索变量的基本解释：
 
 参考 - https://stdrc.cc/post/2021/12/28/cmake-variables/
 
+file 文件操作命令
+  https://blog.csdn.net/weixin_42730667/article/details/122568165
 
 tptfs CMakeLists.txt - backup
 

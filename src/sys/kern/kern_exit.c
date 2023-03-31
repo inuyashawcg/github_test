@@ -101,6 +101,7 @@ void (*nlminfo_release_p)(struct proc *p);
 
 EVENTHANDLER_LIST_DECLARE(process_exit);
 
+/* 获取子进程真正的父进程 */
 struct proc *
 proc_realparent(struct proc *child)
 {
@@ -821,15 +822,17 @@ sys_wait6(struct thread *td, struct wait6_args *uap)
  * Reap the remains of a zombie process and optionally return status and
  * rusage.  Asserts and will release both the proctree_lock and the process
  * lock as part of its work.
+ * 收割僵尸进程的剩余部分，并可选择返回状态和 rusage。作为其工作的一部分，断言并将释放
+ * proctree_lock 和进程锁
  */
 void
 proc_reap(struct thread *td, struct proc *p, int *status, int options)
 {
 	struct proc *q, *t;
 
-	sx_assert(&proctree_lock, SA_XLOCKED);
+	sx_assert(&proctree_lock, SA_XLOCKED);	/* 需要持有独占锁 */
 	PROC_LOCK_ASSERT(p, MA_OWNED);
-	KASSERT(p->p_state == PRS_ZOMBIE, ("proc_reap: !PRS_ZOMBIE"));
+	KASSERT(p->p_state == PRS_ZOMBIE, ("proc_reap: !PRS_ZOMBIE")); /* 只处理僵尸进程 */
 
 	mtx_spin_wait_unlocked(&p->p_slock);
 
@@ -1198,7 +1201,7 @@ kern_wait6(struct thread *td, idtype_t idtype, id_t id, int *status,
 
 	if ((pid_t)id == WAIT_MYPGRP && (idtype == P_PID || idtype == P_PGID)) {
 		PROC_LOCK(q);
-		id = (id_t)q->p_pgid;
+		id = (id_t)q->p_pgid
 		PROC_UNLOCK(q);
 		idtype = P_PGID;
 	}

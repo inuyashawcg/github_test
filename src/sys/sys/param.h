@@ -257,11 +257,14 @@
  *		make it too big the kernel will not be able to optimally use
  *		the KVM memory reserved for the buffer cache and will wind
  *		up with too-few buffers.
+			如果把 BKVASIZE 设置的过小，可能会有风险使得 buffer KVM map 严重碎片化，
+			并使得一些步骤执行比较缓慢；如果设置的过大，内核将无法以最佳策略为 buffer
+			保存 KVM 内存，并且将导致 buffer 数量过少
  *
  *		The default is 16384, roughly 2x the block size used by a
  *		normal UFS filesystem.
  */
-#define MAXBSIZE	65536	/* must be power of 2  - 16k */
+#define MAXBSIZE	65536	/* must be power of 2  - 64k */
 #ifndef	MAXBCACHEBUF
 #define	MAXBCACHEBUF	MAXBSIZE /* must be a power of 2 >= MAXBSIZE */
 #endif

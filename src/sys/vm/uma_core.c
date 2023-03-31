@@ -140,6 +140,14 @@ static struct rwlock_padalign __exclusive_cache_line uma_rwlock;
  * startup to bootstrap UMA.
  */
 static char *bootmem;
+/*
+	从后续的代码逻辑可以看到，boot_pages 会包含许多内核启动引导阶段需要创建的一些
+	对象的定义。就比如说 uma zones 类型的定义，vmem 相关定义等等。它们都是会占用
+	一定的存储空间的，并且这个阶段系统虚拟内存地址使用环境还没有真正搭建起来，所以
+	给它们分配的应该是物理内存；
+	此时物理内存分配器应该也是没有创建的，因为直接是用 vm_page 进行管理。否则调用
+	相关接口拿到合适的物理内存，没必要直接用 vm_page
+*/
 static int boot_pages;
 
 static struct sx uma_drain_lock;

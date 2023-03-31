@@ -1,0 +1,46 @@
+////////////// 20230109 //////////////
+freebsd 顶层 makefile 中包含的处理事项:
+  - 确定各类 targets: XTGTS(架构相关) / TGTS / BITGTS / META_TGT_WHITELIST(一些特殊目标)
+  - 目标之间的顺序关系 .ORDER
+  - make 类型和版本 / 系统架构 / META模式
+
+libc 编译在 buildworld 过程中的提示信息:
+  building static c library 
+
+////////////// 20230110 //////////////
+  - qihai 和 freebsd 目录结构融合可能是要同时保留 Makefile 和 CMakeLists
+  - freebsd 包含 bootstrap libs，它们被用于编译其他的库
+  - buildworld 过程中对于 sys 目录的处理，目前来看主要集中在对于头文件的安装
+  - sys/Makefile 注释掉之后，buildworld 停留在了 >>> stage 4.1: building includes，说明前面几个步骤并不会涉及到 sys 目录下的内容
+  - 复原 sys/Makefile，把 Makefile.inc1 中的 _includes 目标注释掉，可跳过 4.1 步骤，进入 4.2 步骤，然后提示编译报错:
+
+      freebsd-src/contrib/llvm-project/libunwind/src/config.h:16:10: fatal error: 'assert.h' file not found
+        #include <assert.h>
+                ^~~~~~~~~~
+        --- UnwindLevel1-gcc-ext.o ---
+        *** [UnwindLevel1-gcc-ext.o] Error code 1
+
+  所以，将 cmake 与 makefile 融合可能的做法:
+    - 已经修改完毕的 libs 仍然采用 cmake 进行编译，不过要模仿 bmake / install 的行为，把生成的文件安装到指定路径
+    - buildworld >>> stage 4.1 用 cmake / shell 脚本进行功能替换，这样可以使 sys 完全使用 cmake 进行编译，
+      不需要融合原有的 makefile
+
+- stage 4.1 总共需要处理的头文件有 500 个左右，sys 目录下的有 100 个左右。可以尝试将 sys 下的 makefile 给删除掉，然后用 shell 脚本
+  将这些头文件存放到指定的位置，其他路径仍然按照 makefile 的方法进行处理，应该可以完成 buildworld
+- lib 如果也要用 cmake 进行编译，stage 4.1 中对应的头文件的处理，应该也是要利用 shell 脚本完成
+
+
+////////////// 20230111 //////////////
+有些 sys 目录下的头文件的安装命令不是统一样式，需要进一步检查漏掉的项目。例如:
+
+  install -U -l s -o root -g wheel -m 755 -T package=runtime,dev  $(printf '../../../../sys/dev/acpica/%s ' acpiio.h acpi_hpet.h)  /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/usr/include/dev/acpica;  install -U -l s -o root -g wheel -m 755 -T package=runtime,dev ../../../../sys/dev/agp/agpreg.h  /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/usr/include/dev/agp;  install -U -l s -o root -g wheel -m 755 -T package=runtime,dev  $(printf '../../../../sys/dev/evdev/%s ' input.h input-event-codes.h uinput.h)  /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/usr/include/dev/evdev;
+  install -U -l s -o root -g wheel -m 755 -T package=runtime,dev  $(printf '../../../../sys/dev/hid/%s ' hid.h hidraw.h)  /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/usr/include/dev/hid;  install -U -l s -o root -g wheel -m 755 -T package=runtime,dev ../../../../sys/dev/hyperv/include/hyperv.h  /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/usr/include/dev/hyperv;  install -U -l s -o root -g wheel -m 755 -T package=runtime,dev ../../../../sys/dev/hyperv/utilities/hv_snapshot.h  /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/usr/include/dev/hyperv;  install -U -l s -o root -g wheel -m 755 -T package=runtime,dev ../../../../sys/dev/pci/pcireg.h  /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/usr/include/dev/pci;  install -U -l s -o root -g wheel -m 755 -T package=runtime,dev ../../../../sys/dev/veriexec/veriexec_ioctl.h  /home/mercury/Documents/code/qihai/master/qihai/freebsd-src/obj/riscv/tmp/usr/include/dev/veriexec;
+  cd /home/mercury/Documents/code/qihai/master/qihai/freebsd-src;
+
+  有的项目目录等级也是不一样的，大部分是4级跳转，有的是5级跳转，也有部分3级跳转
+    ../../../../../%s
+
+
+////////////// 20230112 //////////////
+  - 不太确定 sys 下头文件的 install 会不会有顺序要求。如果有的话，可能就需要在循环中添加判断条件，在某一时刻额外执行一步安装操作
+  - 提前将编译过程中所需要目录都提前创建好

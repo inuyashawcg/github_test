@@ -298,3 +298,11 @@ linux vsyscall / vsdo / vvar
 
   简单来说，就是加快系统调用的相应速度。比如时间信息是由内核管理，用户想要快速得到当前时间，就可以利用 glibc 等封装好的接口，
 利用 vsdo 将时间信息映射到用户空间 vvar 地址处，只不过这段空间的访问属性会变成只读的。此时用户就可以非常便捷的进行数据读取
+
+多级页表设计:
+  https://cloud.tencent.com/developer/article/2139695?from=15425
+
+MMU / TLB / Cache:
+  https://zhuanlan.zhihu.com/p/108425561
+  https://blog.csdn.net/qq_41596356/article/details/122360914
+  https://blog.csdn.net/qq_41596356/article/details/122302652

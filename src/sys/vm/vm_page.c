@@ -578,8 +578,8 @@ vm_page_init_page(vm_page_t m, vm_paddr_t pa, int segind)
  *	bootstrapping UMA and some data structures that are used to manage
  *	physical pages.  Initializes these structures, and populates the free
  *	page queues.
- 		初始化驻留内存模块。为引导UMA和一些用于管理物理页的数据结构分配物理页面。初始化这些结构，
-		并填充空闲页队列
+ 		初始化驻留内存模块。为引导 UMA 和一些用于管理物理页的数据结构分配物理页面。初始化
+		这些结构，并填充空闲页队列
  */
 vm_offset_t
 vm_page_startup(vm_offset_t vaddr)
@@ -602,6 +602,10 @@ vm_page_startup(vm_offset_t vaddr)
 	/*
 		对系统的可用的物理地址进行处理，将它们设置成边界刚好是页大小的整数倍。猜测存储的应该是
 		start / end 对，比如0元素是start，1元素是end；2元素是start，3元素是end。以此类推
+
+		phys_avail 会在 pmap 处理阶段进行填充，推测是把一些已经被占用的物理地址剔除(加载的
+		内核各个区段)，然后把剩余可用的物理内存汇总填充到该数组中。可用物理地址空间可能是不连续
+		的，或者地址没有刚好达到页大小整数倍，所以要设计成这种方式
 	*/
 	for (i = 0; phys_avail[i + 1]; i += 2) {
 		phys_avail[i] = round_page(phys_avail[i]);
@@ -626,7 +630,7 @@ vm_page_startup(vm_offset_t vaddr)
 	for (i = 0; i < PA_LOCK_COUNT; i++)
 		mtx_init(&pa_lock[i], "vm page", NULL, MTX_DEF);
 	/*
-		初始化 domain
+		初始化 domain。应该是为了处理 NUMA 机制
 	*/
 	for (i = 0; i < vm_ndomains; i++)
 		vm_page_domain_init(i);
@@ -636,10 +640,15 @@ vm_page_startup(vm_offset_t vaddr)
 	 * allocator.  Tell UMA how many zones we are going to create
 	 * before going fully functional.  UMA will add its zones.
 	 * 分配内存，以便在引导内核内存分配器时使用。在全面投入使用之前，告诉 UMA 
-	 * 我们将创建多少区域。UMA将添加其分区。
+	 * 我们将创建多少区域。UMA 将添加其分区
 	 *
 	 * VM startup zones: vmem, vmem_btag, VM OBJECT, RADIX NODE, MAP,
 	 * KMAP ENTRY, MAP ENTRY, VMSPACE.
+	 * 内核引导阶段需要用的到 uma_zone 包含上述8种类型
+	 * 
+	 * 推测这里给 uma_startup_count()传入的 count 值是 8 就是上述原因。这些
+	 * uma zones 也是会占用内存空间的(uma zone 的定义)。这些定义存放的区域也是
+	 * 会占用一些物理页，所以在这个阶段要提前处理
 	 */
 	boot_pages = uma_startup_count(8);
 
@@ -653,21 +662,25 @@ vm_page_startup(vm_offset_t vaddr)
 	/*
 	 * Before going fully functional kmem_init() does allocation
 	 * from "KMAP ENTRY" and vmem_create() does allocation from "vmem".
+	 * 搭建虚拟内存使用环境的步骤
 	 */
 	boot_pages += 2;
 #endif
 	/*
 	 * CTFLAG_RDTUN doesn't work during the early boot process, so we must
 	 * manually fetch the value.
+	 * 
+	 * CTFLAG_RDTUN 在早期启动过程中不起作用，因此我们必须手动获取该值
 	 */
 	TUNABLE_INT_FETCH("vm.boot_pages", &boot_pages);
-	new_end = end - (boot_pages * UMA_SLAB_SIZE);
+	new_end = end - (boot_pages * UMA_SLAB_SIZE);	// 从物理内存高地址开始？
 	new_end = trunc_page(new_end);
+	/* 给被占用的物理地址空间建立 pmap 映射并清零 */
 	mapped = pmap_map(&vaddr, new_end, end,
 	    VM_PROT_READ | VM_PROT_WRITE);
 	bzero((void *)mapped, end - new_end);
 	/*
-		计算引导阶段所需要的所有的 page，然后借助 UMA 机制进行初始启动
+		计算引导阶段所需要的所有的 page，然后借助 UMA 机制进行初始启动(虚拟内存)
 	*/
 	uma_startup((void *)mapped, boot_pages);
 
@@ -720,12 +733,16 @@ vm_page_startup(vm_offset_t vaddr)
 	for (pa = new_end; pa < end; pa += PAGE_SIZE)
 		dump_add_page(pa);
 #endif
-	phys_avail[biggestone + 1] = new_end;
+	/* 更新 end address (相比于之前的地址是变小的，被占用了一部分高地址空间) */
+	phys_avail[biggestone + 1] = new_end; 
 #ifdef __amd64__
 	/*
 	 * Request that the physical pages underlying the message buffer be
 	 * included in a crash dump.  Since the message buffer is accessed
 	 * through the direct map, they are not automatically included.
+	 * 
+	 * direct map 其中一个重要的使用场景就是缓冲区映射，此时可能就只有 msgbuf 才会
+	 * 用到。直接映射猜测是在物理内存低地址，pa 就会像 heap 一样向上增长
 	 */
 	pa = DMAP_TO_PHYS((vm_offset_t)msgbufp->msg_ptr);
 	last_pa = pa + round_page(msgbufsize);
@@ -740,7 +757,7 @@ vm_page_startup(vm_offset_t vaddr)
 	 * In other words, solve
 	 *	"available physical memory" - round_page(page_range *
 	 *	    sizeof(struct vm_page)) = page_range * PAGE_SIZE 
-	 * for page_range.  
+	 * for page_range.
 	 */
 	low_avail = phys_avail[0];
 	high_avail = phys_avail[1];

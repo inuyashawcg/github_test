@@ -1,0 +1,6 @@
+////////////////// python 基础 //////////////////
+
+python 没有 C/C++ 中的结构体类型，都是要用类来实现。当我们想把类中的数据写入到文件中时，可以采用 struct 序列化的方式
+  https://cloud.tencent.com/developer/article/1564543
+
+python 中包含一个 ctype 库，跟 C/C++ 的实现是比较类似的

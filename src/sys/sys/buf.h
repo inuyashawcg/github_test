@@ -121,7 +121,7 @@ typedef uint32_t b_xflags_t;
 */
 struct buf {
 	struct bufobj	*b_bufobj;	
-	long		b_bcount;	/* 请求的 buffer 区域的大小 */
+	long		b_bcount;	/* 请求的 buffer 区域的大小，bytes count? */
 	void		*b_caller1;
 	caddr_t		b_data;
 	int		b_error;
@@ -278,7 +278,7 @@ struct buf {
 #define B_RAM		0x10000000	/* Read ahead mark (flag) 预读标记 */
 #define B_VMIO		0x20000000	/* VMIO flag */
 #define B_CLUSTER	0x40000000	/* pagein op, so swap() can count it */
-#define B_REMFREE	0x80000000	/* Delayed bremfree 延迟bremfree操作 */
+#define B_REMFREE	0x80000000	/* Delayed bremfree 延迟 bremfree 操作 */
 
 #define PRINT_BUF_FLAGS "\20\40remfree\37cluster\36vmio\35ram\34managed" \
 	"\33paging\32infreecnt\31nocopy\30b23\27relbuf\26b21\25b20" \
@@ -310,7 +310,7 @@ struct buf {
  * These flags are kept in b_vflags.
  */
 #define	BV_SCANNED	0x00000001	/* VOP_FSYNC funcs mark written bufs */
-#define	BV_BKGRDINPROG	0x00000002	/* Background write in progress */
+#define	BV_BKGRDINPROG	0x00000002	/* Background write in progress 正在进行后台写入 */
 #define	BV_BKGRDWAIT	0x00000004	/* Background write waiting */
 #define	BV_BKGRDERR	0x00000008	/* Error from background write */
 
@@ -522,7 +522,8 @@ buf_track(struct buf *bp, const char *location)
 #define	GB_NOWAIT_BD	0x0004		/* Do not wait for bufdaemon. */
 /*
 	当两个进程试图共享同一块内存区域的时候，可以调用 mmap 函数。实现方式就是设置 flags 为
-	shared 类型还是 private 类型指明该内存区域的属性
+	shared 类型还是 private 类型指明该内存区域的属性。mmap() 是创建一个进程间共享的内存，
+	该属性标志应该就是表示 buffer pages 是该进程私有的，不能被其他进程看到
 */
 #define	GB_UNMAPPED	0x0008		/* Do not mmap buffer pages. */
 #define	GB_KVAALLOC	0x0010		/* But allocate KVA. */

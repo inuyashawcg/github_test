@@ -1,0 +1,281 @@
+////////////// 20230130 //////////////
+  freebsd 设备驱动程序可能会提供一个 interrupt filter (中断过滤器)来处理中断。通过注释可以得知，
+驱动中断处理程序可以大致分成两个部分，第一个 regular，另外就是 filter。如果驱动没有提供 filter 例程，
+则所有处理均由 regular 处理；否则，一部分操作由 filter 来做，剩余部分再交给 regular 例程
+
+  The filter routine is run in primary interrupt context and may not block or use regular mutexes.
+  The regular interrupt handler executes in its own thread context and may use regular mutexes.
+
+regular 例程好像是在线程上下文中去做，filter 才是真正的在主中断进行处理。参考 freebsd 手册中关于软件中的解释:
+  "内核中的许多事件是以硬件中断的方式驱动的。对于网络控制器这样的高速设备来说，它们的中断享有高优先级。
+网络控制器接收到一个数据包之后，必须尽快向对端发回确认，然后让控制器接收更多的数据包，以此避免丢失间隔
+很近的数据包。但是，接下来将数据包传递给接收进程的工作，虽然费时却不需要尽快完成，因此可以给接下来的处理
+工作分配一个低优先级。这样一来，关键性的操作不会因为执行时间过长而被阻塞。
+  这种执行低优先级处理的机制叫做软件中断(software interrupt)。典型的情况是，一个高优先级的中断创建了
+一个工作队列，而队列内的任务将在低优先级状态下完成。与 freebsd 中的硬件设备情况类似，每个软件中断也有与之
+相关联的的进程上下文。给软件中断进程分配的优先级一般要比设备驱动程序进程的优先级低，但是又要比用户进程的
+优先级高。一旦出现硬件中断，设备驱动程序所关联的进程将会获得最高优先级，并且遵照调度开始运行。当没有要运行的
+设备驱动进程时，就安排优先级最高的软件中断进程运行。如果没有要运行的软件中断进程，那么就运行优先级最高的
+用户进程。如果软件中断进程或者用户进程正在运行的时候发生了硬件中断，则要开始运行硬件的设备驱动程序进程，
+那么调度器会让设备驱动程序进程抢占软件中断进程或者用户进程来运行。
+  把网络数据包发送给目标进程的工作由一个数据包处理函数来处理，这个处理函数的优先级要比网络控制器设备驱动程序
+的优先级低。数据包到达后，就被放入一个工作队列，并且立即重新启动网络控制器。在数据包到达的间隙，数据包处理程序
+就传送数据包。因此，控制器可以不必等待前一个数据包传送完毕，就开始接收新的数据包。除了网络处理之外，软件中断
+还用于处理与时间相关的事件和进程的重新调度。"
+
+
+////////////// 20230131 //////////////
+  关于驱动程序的注册，一种可能的方法是在 kobj 中增加一个类指针成员 (class Driver)，这个类与一个 kboj 绑定，
+只提供注册功能。然后在 driver_module_handler() 函数中增加注册逻辑。MOD_LOAD 情况下只进行驱动注册，但不会
+销毁。Driver 类对象的生命周期与 kobj 一致，可在 create/free 函数中进行实例化和释放
+
+
+////////////// 20230201 //////////////
+  有些模块会调用 kobj_create() 函数，但是并不是创建一个驱动程序，比如 geom 模块。所以上述方法可能并不太适合，
+最保险的还是在宏定义中添加类对象实例化的语句。然后我们可以把类指针注册到全局注册表中
+
+私有映射 (以文件访问为例):
+  - 在映射到文件的内存中所做的修改，不会反应到被映射的文件中
+  - 在映射到文件的内存中所做的修改，不会被其他映射该文件的其他进程看到
+
+  调试程序的过程就是一个使用私有映射的例子。调试器可能会对程序的代码段做一次私有映射，这样当它设置断点时，这一改动不会
+被回写到(保存在磁盘里的)可执行文件中。而执行该程序的进程(假设不是正在调试该程序)也不会被看见
+
+  内核会使用 "影子 vm_object" 来避免将进程所做的改动回写到对象当中。vm_object 会管理一个 vm_page 的链表，假如内存
+中的数据完全没有变，那么影子对象的页链表可能就是空的，它会直接到源对象页链表中拿数据。如果内存数据发生了改变，则执行 cow，
+申请一个新的页，将修改后的数据写入，然后插入到页链表当中，其他的数据页的处理如上。这样做的好处就是最大限度减少页分配操作
+
+
+(gdb) p/x *rvbp
+$8 = {
+  kern_l1pt = 0x110001000,
+  kern_phys = 0x81800000,
+  kern_stack = 0x10c0001f0,
+  dtbp_virt = 0xffffffcfffca0000,
+  dtbp_phys = 0x816a0000,
+  modulep = 0x0
+}
+(gdb) p early_heap_start 
+$11 = 4582506240
+
+(gdb) p/x early_heap_start 
+$12 = 0x111237f00
+
+  early_heap_start 是为了搭建 virtual memory system 运行环境增加的一些类似 heap 的操作，与传统 heap 是不一样的，
+这一点要注意
+
+(gdb) p/x kernel_vaddr_now
+No symbol "kernel_vaddr_now" in current context.
+(gdb) p/x kernel_vaddr_end
+No symbol "kernel_vaddr_end" in current context.
+(gdb) p/x early_heap_end
+$13 = 0x11124ff00
+
+intr_event_handle
+intr_prof_stack_use
+thread_alloc_stack
+
+(gdb) p frame
+$16 = (trapframe *) 0x114149a00
+
+(gdb) p/x ks
+$13 = 0x114146000
+
+
+////////////// 20230202 //////////////
+(gdb) p/x kernel_map_store
+$2 = {
+  header = {
+    left = 0xffffffd000809060,
+    right = 0xffffffd000809000,
+    start = 0xffffffcfffe00000,
+    end = 0x100000000,
+    next_read = 0x0,
+    max_free = 0x0,
+    object = {
+      vm_object = 0x0,
+      sub_map = 0x0
+    },
+    offset = 0x0,
+    eflags = 0x80000,
+    protection = 0x0,
+    max_protection = 0x0,
+    inheritance = 0x0,
+    read_ahead = 0x0,
+    wired_count = 0x0,
+    cred = 0x0,
+    wiring_thread = 0x0
+  },
+  lock = {
+    lock_object = {
+      lo_name = 0x10d0ca4c4,
+      lo_flags = 0x2330000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    sx_lock = 0x1
+  },
+  system_mtx = {
+    lock_object = {
+      lo_name = 0x10d0b5f92,
+      lo_flags = 0x1430000,
+      lo_data = 0x0,
+      lo_witness = 0x0
+    },
+    mtx_lock = 0x0
+  },
+  nentries = 0x7,
+  size = 0x14800000,
+  timestamp = 0x3,
+  needs_wakeup = 0x0,
+  system_map = 0x1,
+  flags = 0x0,
+  root = 0xffffffd000809240,
+  pmap = 0x110115f40,
+  anon_loc = 0x0,
+  busy = 0x0
+}
+
+
+(gdb) p/x *kmi
+$15 = {
+  buffer_sva = 0x115c00000,
+  buffer_eva = 0x149120000,
+  clean_sva = 0x115c00000,
+  clean_eva = 0x189120000
+}
+
+
+////////////// 20230209 //////////////
+一个设备可能对应多个驱动程序，一个驱动程序也可能会被多个设备来使用。如果对应到 C++ 类的话要如何处理？
+
+特别地，驱动程序必须在返回之前释放在探测期间分配的任何资源
+
+涉及到具体设备的代码可以用类进行替换，一些全局函数 (或者涉及到其他模块的)，可以保留现有格式
+
+C/C++ comment tags:
+  https://www.headerbrowser.org/doc/hb_comments.html
+
+
+////////////// 20230210 //////////////
+x86_64:
+root@freebsd-x86-3:/home # devinfo
+nexus0
+  smbios0
+  cryptosoft0
+  vtvga0
+  aesni0
+  kvmclock0
+  ram0
+  apic0
+  acpi0
+    pcib0
+      pci0
+        hostb0
+        isab0
+          isa0
+            orm0
+            vga0
+            attimer0
+        atapci0
+          ata0
+          ata1
+        uhci0
+          usbus0
+            uhub0
+              uhid0
+        intsmb0
+          smbus0
+        vgapci0
+        virtio_pci0
+          vtballoon0
+        virtio_pci1
+          vtcon0
+        em0
+        pcib1
+          pci1
+        pcib2
+          pci2
+    atrtc0
+    atkbdc0
+      atkbd0
+      psm0
+    psmcpnp0
+    acpi_syscontainer1
+    acpi_syscontainer2
+    acpi_syscontainer3
+    hpet0
+    pci_link0
+    pci_link1
+    pci_link2
+    pci_link3
+    pci_link4
+    acpi_syscontainer0
+    cpu0
+    cpu1
+    cpu2
+    cpu3
+    cpu4
+    cpu5
+    cpu6
+    cpu7
+    cpu8
+    cpu9
+    cpu10
+    cpu11
+    cpu12
+    cpu13
+    cpu14
+    cpu15
+    cpu16
+    cpu17
+    cpu18
+    cpu19
+    cpu20
+    cpu21
+    cpu22
+    cpu23
+    cpu24
+    cpu25
+    cpu26
+    cpu27
+    cpu28
+    cpu29
+    cpu30
+    cpu31
+    vmgenc0
+    acpi_timer0
+
+
+riscv:
+root@qemu:~ # devinfo
+nexus0
+  timer0
+  rcons0
+  ofwbus0
+    cpulist0
+      cpu0
+        riscv64_cpu0
+      cpu1
+        riscv64_cpu1
+    simplebus0
+      goldfish_rtc0
+      uart0
+      syscon_power0
+      syscon_power1
+      riscv_syscon0
+      pcib0
+        pci0
+          hostb0
+      virtio_mmio0
+        vtblk0
+      virtio_mmio1
+        vtblk1
+      virtio_mmio2
+        vtblk2
+      plic0
+  cryptosoft0
+
+
+  一些功能比较简单的工具，最好是使用跨平台兼容的语言，例如 python 或者 java，提供的包很多，使用起来很方便。
+shell 在这方面就差一些

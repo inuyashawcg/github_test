@@ -1166,7 +1166,7 @@ lim_max_proc(struct proc *p, int which)
 /*
  * Return the current (soft) limit for a particular system resource.
  * The which parameter which specifies the index into the rlimit array
- * 返回特定系统资源的当前（软）限制。指定rlimit数组索引的参数
+ * 返回特定系统资源的当前（软）限制。指定 rlimit 数组索引的参数
  */
 rlim_t
 lim_cur(struct thread *td, int which)

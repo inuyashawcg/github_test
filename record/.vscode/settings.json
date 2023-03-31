@@ -50,6 +50,15 @@
     "codecvt": "cpp",
     "ctime": "cpp",
     "ratio": "cpp",
-    "iomanip": "cpp"
+    "iomanip": "cpp",
+    "cstring": "cpp",
+    "forward_list": "cpp",
+    "list": "cpp",
+    "map": "cpp",
+    "set": "cpp",
+    "hash_map": "cpp",
+    "hash_set": "cpp",
+    "thread": "cpp",
+    "cinttypes": "cpp"
   }
 }

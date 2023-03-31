@@ -1,0 +1,197 @@
+Riscv 中断处理
+中断类型
+在riscv中一共定义了三种状态中断，对于hart层面，hart包含local中断源和global中断源。而local中断只有Timer(时钟中断不受 PLIC 的控制，而是由两个独立的寄存器 mtime 和 mtimecmp 控制)和Software中断(通过软件写入 mip CSR 触发的中断, 通常用于由一个 hart 中断另一个 hart (在其他架构中称为处理器间中断机制) ) 两种，而global中断则称为external interrupts。只有global中断源可以被PLIC 响应，通常为I/O device。
+
+也有把调试中断当成第四种中断类型.
+
+中断控制和状态寄存器
+CPU 中包含与中断相关的 CSR，以及相应中断控制器中的内存映射配置寄存器。 两者都用于配置中断并将其正确路由到 CPU。 这里我们将只讨论 CPU 的机器模式中断 CSR。Supervisor or User mode可能具有同样功能的中断 CSR 。
+
+mstatus — 包含所有特权模式中断使能、中断前特权模式保存和其他特权级别设置的状态寄存器。
+mcause — 指示是否发生异常或中断的状态寄存器，以及用于区分每种类型的详细信息的代码。
+mie — 使用 CLINT 操作模式时用于本地中断的中断启用寄存器。 在 CLIC 模式下，这被硬连线到 0，中断使能使用 clicintie[i] 内存映射寄存器处理。
+mip — 使用 CLINT 操作模式时用于本地中断的中断挂起寄存器。 在 CLIC 模式下，这被硬连线到 0，挂起的中断使用 clicintip[i] 内存映射寄存器处理。
+mtvec — 机器Trap向量寄存器，它保存中断向量表的基地址，以及 CLINT 和 CLIC 控制器的中断模式配置（直接或向量）。 所有同步异常也使用 mtvec 作为在 CLINT 和 CLIC 模式下异常处理的基址。
+mtvt — 仅用于 CLIC 操作模式。 包含 CLIC 直接模式下选择性向量中断和 CLIC 向量模式下所有向量中断的中断向量表的基地址。 该寄存器在具有 CLINT 的设计中不存在。
+中断处理器寄存器
+Clint and Clic 公用寄存器
+
+msip — 机器模式软件中断挂起寄存器，用于为CPU 断言软件中断。
+mtime — 以恒定频率运行的机器模式定时器寄存器。 CLINT 和 CLIC 设计的一部分。 在包含一个或多个 CPU 的设计中只有一个 mtime 寄存器。
+mtimecmp — 内存映射机器模式定时器比较寄存器，用于在mtimecmp 大于或等于mtime 时触发中断。 每个 CPU 都有一个专用的 mtimecmp。
+与实现 CLINT 的设计相比，CLIC 操作模式引入了新的寄存器。
+
+cliccfg - 内存映射 CLIC 配置寄存器
+确定由 clicintcfg[i] 设置的级别数和优先级。 还包含选择性硬件矢量配置，允许基于每个中断的直接模式或矢量模式
+clicintcfg[i] - 内存映射 CLIC 中断配置寄存器
+设置给定中断的抢占级别和优先级
+clicintie[i] - 内存映射 CLIC 中断使能寄存器
+clicintip[i] - 内存映射 CLIC 中断挂起寄存器
+mtvt - CSR，其中包含 CLIC 矢量中断的机器trap矢量表基地址
+Write Always, Read Legal (WARL) 寄存器允许可重定位向量表，其中 mtvt.base 需要至少 64 字节对齐，但可以根据实现的 CLIC 中断总数增加。 有关详细信息，请参阅 CLIC 规范。
+mnxti - 包含机器下一个中断处理程序地址和中断使能的 CSR
+在 CLIC 直接模式下由软件用于在返回到较低级别上下文之前服务下一个相同或更高级别的中断
+读取此 CSR 会返回向量表 (mtvt) 中条目的地址
+可以同时写入，这会影响 mstatus - 这用于在与读取相同的周期上禁用中断
+如果没有比保存的上下文更高级别的中断，或者如果 HART 不处于 CLIC 模式，或者如果下一个最高级别的中断是选择性硬件矢量中断，则返回 0
+mintstatus - 只读 CSR，其中包含活动机器模式中断级别
+包含相应特权模式的当前中断级别的只读寄存器
+标准的中断处理流程
+每当中断发生时，硬件会自动保存和恢复重要的寄存器。
+当进入中断处理程序时，需要先完成以下步骤
+• 将 pc 保存到 mepc
+• 将权限级别保存到 mstatus.mpp
+• 将 mstatus.mie 保存到 mstatus.mpie
+• 根据操作模式( Direct or Vector)将 pc 设置为中断处理程序地址
+• 通过设置 mstatus.mie=0 禁用中断
+此时控制被移交给中断处理开始的软件。 在中断处理程序结束时，mret 指令将执行以下操作。
+• 将 mepc 恢复到 pc
+• 将 mstatus.mpp 恢复到 Priv
+• 将 mstatus.mpie 恢复到 mstatus.mie
+
+特权模式中断优先级
+特权级别允许保护某些软件组件，这些组件只能被更高的特权级别运行或访问。
+在机器模式中断到达时，在Supervisor模式下运行的 CPU 将陷入机器模式，除非机器模式中断已通过 mideleg 寄存器委托给Supervisor模式。 相反，如果 CPU 处于机器模式，Supervisor 中断不会立即触发。 在Supervisor模式下运行时，CPU 无法配置机器模式中断。
+当增加新的特权模式时，需要增加额外的中断，如下所示
+
+Software Interrupt, Supervisor Mode, Interrupt ID: 1
+Software Interrupt, Machine Mode, Interrupt ID: 3
+Timer Interrupt, Supervisor Mode, Interrupt ID: 5
+Timer Interrupt, Machine Mode, Interrupt ID: 7
+External Interrupt, Supervisor Mode, Interrupt ID: 9
+External Interrupt, Machine Mode, Interrupt ID: 11
+上下文切换开销
+每个特权级别都有自己的中断配置寄存器，或相应机器模式专用寄存器中的位子集。 此外，还有保存/恢复开销以支持上下文切换到不同的特权级别。 上下文切换包括以下内容:
+
+31 User registers, x1 - x31 (x0 is hardwired to 0)
+Program Counter (pc)
+32 Floating point registers
+Floating point Control and Status Register (fcsr)
+在启动上下文切换之前，这些寄存器应该保存在堆栈中。 同样，在从不同的特权级别返回之前，需要从堆栈中恢复它们。
+上下文切换是通过 ECALL 指令启动的，这会产生environment-call-from-x-mode exception，其中 x 是 M、S 或 U，具体取决于当前的特权级别。 通过执行相应的 xRET 指令从 ECALL 指令返回，其中 x 再次为 M、S 或 U。xRET 指令可用于特权模式 x 或更高。 有关上下文切换的更多信息，请参阅 The RISC-V Instruction Set Manual Volume II: Privileged Architecture
+
+中断处理器
+一般来说，timer和software是通过CLINT(CORE LOCAL INTERRUPT)，而外部中断通过PLIC处理。
+
+riscv-spec为了解决中断处理延时的问题提出了 clic模式. 可以看做是clint和plic的融合和简化.同时处理三种中断
+
+eclic的设计是芯来科技设计的一种中断处理方式。 同时处理软件中断,定时器中断和外部中断.
+
+计时器单元（Timer Unit，CORE TIMER），在N级别内核中主要用于产生计时器中断（Timer Interrupt）和软件中断（Software Interrupt）
+
+CLINT
+CLINT : Core-Local Interrupt.
+CLINT 具有固定优先级方案，可实现软件、定时器中断。 软件抢占仅在使用 CLINT 的特权级别之间可用。例如，在Supervisor模式下，Machine模式中断将立即获得优先权，并且抢占Supervisor模式操作。 不支持特权级别内的抢占。 中断ID代表每个中断的固定优先级值，不可配置。有两种不同的 CLINT 操作模式，直接模式和矢量模式。
+要配置 CLINT 模式，请写入 mtvec.mode 字段. 直接模式是默认复位值，而 mtvec.base 保存两种模式下中断和异常的基地址。
+
+直接模式意味着所有中断和异常都会陷入同一个处理程序，并且没有实现向量表。 软件负责执行代码以确定发生了哪个中断。 直接模式下的软件处理程序应首先读取 mcause.interrupt 以确定是否发生了中断或异常，然后根据包含相应中断或异常代码的 mcause.code 值来决定做什么。
+总之，CLINT 直接模式需要软件来设置以下内容：
+1.中断和异常的主要入口点，如handler_table_entry所示，其基地址赋值给mtvec.base
+
+判断事件是中断还是异常的软件处理程序，其中还包含跳转到相应中断函数或异常处理程序的代码
+3.实际的中断或异常函数，其中每个函数的地址分别写入asynch_handler或sync_handler数组
+
+向量模式引入了一种创建向量表的方法，硬件使用该向量表来降低中断处理延迟。 当在向量模式下发生中断时，pc 将被硬件分配到与中断 ID 对应的向量表索引的地址。 从向量表索引开始，后续跳转将从那里发生以服务于中断。由硬件分配较少了软件执行的时间开销.在这种模式下，当中断发生时，程序执行直接跳转到相应中断的向量表偏移处
+
+CLIC
+CLIC : Core-Local Interrupt Controller.
+clic-spec
+
+CLIC 的开发重点一直是改善中断延迟和吞吐量，并提供主要针对嵌入式中断空间的单独中断配置灵活性。一些 CLIC 功能包括：
+
+当通过 mtvec 寄存器编程为使用传统 CLINT 模式时，与 CLINT 的软件、定时器和外部中断反向兼容。
+引入新的CLIC 直接和CLIC 矢量模式，提供可编程的中断级别和优先级，支持从更高特权模式和优先级的中断抢占。
+保留mtime 和mtimecmp 内存映射定时器寄存器，以及用于触发软件中断的msip 寄存器。
+将 mtvec 的模式字段扩展了六位 [5:0]，其中 [1:0] 被定义为支持两种附加模式：CLIC 直接模式和 CLIC 矢量模式。
+要配置 CLIC 直接模式，请写入 mtvec.mode=0x02，对于 CLIC 矢量模式，mtvec.mode=0x03.
+为不需要低延迟实时中断处理的应用程序灵活地实施无矢量模式的CLIC。
+CLIC 直接模式的运行方式与 CLINT 直接模式类似，但它引入了一种称为选择性矢量化的功能。 选择性向量化允许每个中断配置为 CLIC 硬件向量化操作，而所有其他中断使用 CLIC 直接模式。 clicintcfg[i].SHV 字段用于配置选择性矢量化。 CLIC 直接模式使用 mtvec 作为异常和中断处理的基地址，但引入 mtvt 作为为选择性硬件向量配置的中断的基地址。
+
+CLIC 向量模式具有与 CLINT 向量模式类似的概念，其中中断向量表用于特定中断。 然而，在 CLIC 向量模式下，处理程序表包含中断处理程序的地址，而不是包含跳转指令的操作码。 当在 CLIC 向量模式下发生中断时，向量表中的处理程序条目的地址被加载，然后跳转到硬件中。 CLIC 矢量模式专门使用 mtvec 进行异常处理，因为 mtvt 用于定义所有矢量中断的基地址。
+
+为了帮助提高保存和恢复上下文的效率，可以将中断属性应用于用于中断处理的函数。该属性将保存和恢复在处理程序中使用的附加寄存器，并在处理程序的末尾添加一条 mret 指令。例如: 在优先级的抢占模式， 可以保存和还原前一条中断的上下文.
+
+PLIC
+PLIC : Platform level interrupt controller.
+plic-spec
+
+PLIC 用于管理所有全局中断并将它们路由到系统中的一个或多个 CPU。 PLIC 可以将单个中断源路由到多个 CPU。 进入 PLIC 处理程序后，CPU 读取claim寄存器以获取中断 ID。 成功的claim将自动清除 PLIC 中断pending寄存器中的pending位，向系统发出中断正在处理的信号。 在 PLIC 中断处理过程中，如有必要，还应清除中断源处的挂起标志。 即使未设置挂起位，CPU 也可以尝试请求中断, 例如，可能会发生这种情况，当全局中断被路由到多个 CPU 时，一个 CPU 已经在另一个 CPU 尝试声明之前claimed了中断。 在使用 MRET 指令（或 SRET/URET）退出 PLIC 处理程序之前，claim/complete寄存器被写回处理程序入口时获得的非零claim/complete值。 与本地中断相比，通过 PLIC 路由的中断会导致额外的三个周期损失。 在这种情况下，周期是在 PLIC 频率下测量的，该频率通常是 CPU 和本地中断控制器频率的整数分频值。
+
+根据本地中断选择，通过 PLIC 路由的全局中断以略微不同的方式连接到 CPU。 如果 PLIC 与 CLINT 一起使用，则从 PLIC 路由的外部中断连接直接绑定到 CPU。 如果 PLIC 与 CLIC 一起使用，则不使用外部中断连接，从 PLIC 路由的中断通过 CLIC 接口到CPU。
+
+PLIC 不支持抢占单个 HART 的全局中断。 但是，由于 PLIC 中断是通过外部中断连接到达 CPU 的，因此可能会被配置为比外部中断具有更高优先级的其他 CLIC 本地中断抢占。
+
+AIA : ACLINT And APLIC (draft)
+AIA : Advanced interrupt architecture。
+AIA-spec
+AClint-spec
+
+现有的 RISC-V 平台仅支持硬件中的wired中断、机器级定时器中断和机器级软件中断，因此没有硬件支持消息信号中断 (MSI)、MSI 虚拟化和主管级软件中断。 高级中断架构 (AIA) 规范定义了新的中断控制器，以可扩展的方式支持wired中断、MSI 和 MSI 虚拟化，适用于大量 HART。 高级核心本地中断器 (ACLINT) 规范为机器级定时器中断、机器级软件中断和supervisor软件中断定义了单独的设备以向后兼容现有 RISC-V 平台的方式。 AIA 和 ACLINT 规范共同解决了不同类别的 RISC-V 平台的中断和计时器要求。
+
+External interrupts without IMSICs
+当RISC-V harts没有传入MSI控制器时，外部中断通过专用线路发送给harts。在这种情况下，高级平台级中断控制器（APLIC）为中断充当传统的中心hub，为每个hart路由和优先处理外部中断，中断可以选择性地路由到机器级或每个hart上的supervisor级。
+
+如果没有IMSIC，当前的高级中断体系结构不支持直接向虚拟机发送外部中断信号，即使RISC-V harts实现了特权体系结构的hypervisor扩展。相反，必须将中断发送到相关的hypervisor，然后hypervisor可以选择将虚拟中断注入虚拟机。
+
+External interrupts with IMSICs
+为了能够接收消息信号中断（MSI），每个RISC-V hart必须有一个传入MSI控制器（IMSIC）。从根本上讲，消息信号中断仅仅是对特定地址的内存写入，硬件接受写入表示中断。为此，每个IMSIC在机器的地址空间中被分配一个或多个不同的地址，并且当以期望的格式对这些地址之一进行写入时，接收IMSIC将该写入解释为相应hart的外部中断。
+
+因为所有IMSIC在机器的物理地址空间中都有唯一的地址，所以每个IMSIC都可以从任何具有写入权限的代理（hart或设备）接收MSI写入，部分原因是，通过控制不同地址的写入权限，可以分别授予或拒绝在每个权限级别发出中断信号的能力，部分原因是为了更好地支持虚拟化（假装一个权限级别是更高的级别）。用于特定特权级别的hart的MSI记录在IMSIC中的中断文件中，该文件主要由中断pending位数组和匹配的中断使能位数组组成，后者指示hart当前准备接收哪些单独的中断。
+
+当RISC-V系统中的harts具有IMSIC时，系统通常仍包含APLIC，但其角色发生了变化。APLIC将传入的有线中断转换为MSI写入，并通过其IMSIC单元发送给harts，而不是直接通过有线向harts发送中断信号。根据软件设置的APLIC配置，每个MSI被发送到单个目标hart。
+
+如果RISC-V harts实现了特权体系结构的hypervisor扩展，IMSIC可能会有额外的guest中断文件用于向虚拟机传递中断。如果系统还包含IOMMU来执行I/O设备进行的内存访问的地址转换，那么来自这些相同设备的MSI可能需要特殊处理。
+
+RISCV N extension User mode 中断
+TODO：
+
+Device Tree for Interrupt Controller
+Example:
+
+L7: cpu@0 {
+  ... 
+  L4: interrupt-controller {
+    #interrupt-cells = <1>;
+    compatible = "riscv,cpu-intc";
+    interrupt-controller;
+  };
+};
+
+// Clint  Mode
+L2: clint@2000000 {
+  compatible = "riscv,clint0";
+  interrupts-extended = <&L4 3 &L4 7>;   // 软件中断和定时器中断传递给L4 cpu中断控制器
+  reg = <0x2000000 0x10000>;
+  reg-names = "control";
+};
+
+L1: interrupt-controller@c000000 {
+ #interrupt-cells = <1>;   // 中断属性配置
+ compatible = "riscv,plic0";
+ interrupt-controller;
+ interrupts-extended = <&L4 11>;   // 外部中断传递给 L4 cpu中断控制器
+ reg = <0xc000000 0x4000000>;
+ reg-names = "control";
+ riscv,max-priority = <7>;
+ riscv,ndev = <127>;
+};
+
+L9: global-external-interrupts {
+  compatible = "sifive,global-external-interrupts0";
+  interrupt-parent = <&L1>;   // 字段中的interrupt 里的中断ID均转发给L1(PLIC)
+  interrupts = <1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 ...>;
+};
+
+
+CLIC Mode:
+L1: interrupt-controller@2000000 {
+  #interrupt-cells = <1>;
+  compatible = "sifive,clic0";
+  interrupt-controller;
+  interrupts-extended = <&L3 3 &L3 7 &L3 11>; // 软件中断,定时器中断和外部中断传递给L4 cpu中断控制器
+  reg = <0x2000000 0x1000000>;
+  reg-names = "control";
+  sifive,numintbits = <4>;
+  sifive,numints = <143>;
+  sifive,numlevels = <16>;
+};

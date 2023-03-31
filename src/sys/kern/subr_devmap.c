@@ -47,10 +47,13 @@ static boolean_t devmap_bootstrap_done = false;
  * devmap_add_entry() to add static device mappings to this table using
  * automatically allocated virtual addresses carved out of the top of kva space.
  * Allocation begins immediately below the ARM_VECTORS_HIGH address.
+ * 
+ * 设备映射是在 top of kva，这个感觉要跟 buf 映射区别开来，buf 好像是在直接映射区 
  */
 #define	AKVA_DEVMAP_MAX_ENTRIES	32
 static struct devmap_entry	akva_devmap_entries[AKVA_DEVMAP_MAX_ENTRIES];
 static u_int			akva_devmap_idx;
+// riscv: DEVMAP_MAX_VADDR = VM_MAX_KERNEL_ADDRESS
 static vm_offset_t		akva_devmap_vaddr = DEVMAP_MAX_VADDR;
 
 #if defined(__aarch64__) || defined(__riscv)
@@ -91,6 +94,7 @@ devmap_print_table()
  * Return the "last" kva address used by the registered devmap table.  It's
  * actually the lowest address used by the static mappings, i.e., the address of
  * the first unusable byte of KVA.
+ * 返回的是最低被使用到的 kva，机制类似于函数堆栈
  */
 vm_offset_t
 devmap_lastaddr()
@@ -256,8 +260,6 @@ devmap_vtop(void * vpva, vm_size_t size)
  * This routine is intended to be used for mapping device memory, NOT real
  * memory; the mapping type is inherently VM_MEMATTR_DEVICE in
  * pmap_kenter_device().
- * 
- * 把一块物理地址映射到内核虚拟地址空间
  */
 void *
 pmap_mapdev(vm_offset_t pa, vm_size_t size)
@@ -323,7 +325,7 @@ pmap_mapdev_attr(vm_offset_t pa, vm_size_t size, vm_memattr_t ma)
 
 /*
  * Unmap device memory and free the kva space.
- * 取消设备memory映射，释放掉 kernel virtual address space 
+ * 取消设备 memory 映射，释放掉 kernel virtual address space 
  */
 void
 pmap_unmapdev(vm_offset_t va, vm_size_t size)

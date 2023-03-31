@@ -592,6 +592,7 @@ startprofclock(struct proc *p)
 
 /*
  * Stop profiling on a process.
+ 	停止对进程进行分析
  */
 void
 stopprofclock(struct proc *p)

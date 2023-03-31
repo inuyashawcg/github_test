@@ -652,8 +652,8 @@ add_physmap_entry(uint64_t base, uint64_t length, vm_paddr_t *physmap,
 	 * Find insertion point while checking for overlap.  Start off by
 	 * assuming the new entry will be added to the end.
 	 * 
-	 * 在initriscv函数中，执行该函数的条件是从device tree解析出的memory起始地址小于 riscv_bootparams 参数中
-	 * 规定的device tree blob物理地址的起始值
+	 * 在 initriscv 函数中，执行该函数的条件是从 device tree 解析出的 memory 起始地址
+	 * 小于 riscv_bootparams 参数中规定的 device tree blob 物理地址的起始值
 	 */
 	insert_idx = _physmap_idx;
 	for (i = 0; i <= _physmap_idx; i += 2) {

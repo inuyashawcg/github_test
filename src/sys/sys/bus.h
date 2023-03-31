@@ -85,17 +85,17 @@ struct u_device {
 
 /* Flags exported via dv_flags. */
 #define	DF_ENABLED	0x01		/* device should be probed/attached */
-#define	DF_FIXEDCLASS	0x02		/* devclass specified at create time 创建的时候指定了devclass*/
-#define	DF_WILDCARD	0x04		/* unit was originally wildcard unit是原始的通配符*/
-#define	DF_DESCMALLOCED	0x08		/* description was malloced 已经分配空间的标识符*/
-#define	DF_QUIET	0x10		/* don't print verbose attach message 不要打印详细的附加信息*/
+#define	DF_FIXEDCLASS	0x02		/* devclass specified at create time 创建的时候指定了devclass */
+#define	DF_WILDCARD	0x04		/* unit was originally wildcard unit是原始的通配符 */
+#define	DF_DESCMALLOCED	0x08		/* description was malloced 已经分配空间的标识符 */
+#define	DF_QUIET	0x10		/* don't print verbose attach message 不要打印详细的附加信息 */
 #define	DF_DONENOMATCH	0x20		/* don't execute DEVICE_NOMATCH again */
 #define	DF_EXTERNALSOFTC 0x40		/* softc not allocated by us */
-#define	DF_REBID	0x80		/* Can rebid after attach attach之后可以重新呼叫*/
+#define	DF_REBID	0x80		/* Can rebid after attach attach之后可以重新呼叫 */
 #define	DF_SUSPENDED	0x100		/* Device is suspended. */
 #define	DF_QUIET_CHILDREN 0x200		/* Default to quiet for all my children */
 #define	DF_ATTACHED_ONCE 0x400		/* Has been attached at least once */
-#define	DF_NEEDNOMATCH	0x800		/* Has a pending NOMATCH event 有一个挂起的NOMATCH事件*/
+#define	DF_NEEDNOMATCH	0x800		/* Has a pending NOMATCH event 有一个挂起的 NOMATCH 事件 */
 
 /**
  * @brief Device request structure used for ioctl's.
@@ -115,8 +115,8 @@ struct devreq {
 		struct devreq_buffer dru_buffer;
 		void	*dru_data;
 	} dr_dru;
-#define	dr_buffer	dr_dru.dru_buffer	/* variable-sized buffer 可变大小的缓冲区*/
-#define	dr_data		dr_dru.dru_data		/* fixed-size buffer 固定大小的缓冲区*/
+#define	dr_buffer	dr_dru.dru_buffer	/* variable-sized buffer 可变大小的缓冲区 */
+#define	dr_data		dr_dru.dru_data		/* fixed-size buffer 固定大小的缓冲区 */
 };
 
 #define	DEV_ATTACH	_IOW('D', 1, struct devreq)
@@ -213,21 +213,24 @@ typedef struct devclass		*devclass_t;
  * flags:
  *
  *	FILTER_STRAY	- this device did not trigger the interrupt 
-					- 表示相应过滤器例程无法处理此中断，返回值等同于错误码
+		- 表示相应过滤器例程无法处理此中断，返回值等同于错误码
 
  *	FILTER_HANDLED	- the interrupt has been fully handled and can be EOId
-					- 表示相应的过滤器例程已经完整处理了中断，此返回值等同于成功码 
+		- 表示相应的过滤器例程已经完整处理了中断，此返回值等同于成功码 
 
  *	FILTER_SCHEDULE_THREAD - the threaded interrupt handler should be
  *			  scheduled to execute
-						- 表示相应的过滤器已经安排ithread例程来执行部分工作，相应的
-						过滤器例程只有当关联到某个ithread例程时才会返回此值
+		- 表示相应的过滤器已经安排 ithread 例程来执行部分工作，相应的过滤器例程只有当关联到
+			某个 ithread 例程时才会返回此值
 						
  * If the driver does not provide a filter, then the interrupt code will
  * act is if the filter had returned FILTER_SCHEDULE_THREAD.  Note that it
  * is illegal to specify any other flag with FILTER_STRAY and that it is
  * illegal to not specify either of FILTER_HANDLED or FILTER_SCHEDULE_THREAD
  * if FILTER_STRAY is not specified.
+ * 如果驱动程序没有提供过滤器，那么如果过滤器返回了 FILTER_SCHEDULE_THREAD，则中断代码
+ * 将起作用。请注意，使用 FILTER_STRAY 指定任何其他标志是非法的，如果未指定 FILTER_STARY，
+ * 则不指定 FILTER_HANDLED 或 FILTER_SCHEDULE_THREAD 是非法的
  */
 #define	FILTER_STRAY		0x01
 #define	FILTER_HANDLED		0x02
@@ -243,10 +246,15 @@ typedef struct devclass		*devclass_t;
  * expensive work to the regular interrupt handler.  If a filter
  * routine is not registered by the driver, then the regular interrupt
  * handler is always used to handle interrupts from this device.
+ * filter 程序是在中断上下文中执行，而不会被阻塞或者使用普通的互斥锁。它只会使用自旋锁
+ * 进行同步。过滤器可以完全处理中断，也可以执行一些工作，并将更耗时的工作推迟到常规中断
+ * 处理程序。如果驱动程序未注册过滤器例程，则始终使用常规中断处理程序处理来自该设备的中断
  *
  * The regular interrupt handler executes in its own thread context
  * and may use regular mutexes.  However, it is prohibited from
  * sleeping on a sleep queue.
+ * 常规中断处理程序在其自己的线程上下文中执行，并可以使用常规互斥锁。
+ * 但是，禁止在 sleep queue 中睡眠
  */
 typedef int driver_filter_t(void*);
 typedef void driver_intr_t(void*);
@@ -257,6 +265,7 @@ typedef void driver_intr_t(void*);
  * These flags are used both by newbus interrupt
  * registration (nexus.c) and also in struct intrec, which defines
  * interrupt properties.
+ * 这些标志用于 newbus 中断注册和 struct intrec (用于定义中断属性)
  *
  * XXX We should probably revisit this and remove the vestiges of the
  * spls implicit in names like INTR_TYPE_TTY. In the meantime, don't
@@ -264,6 +273,7 @@ typedef void driver_intr_t(void*);
  *
  * Buses which do interrupt remapping will want to change their type
  * to reflect what sort of devices are underneath.
+ * 进行中断重新映射的总线将希望更改其类型，以反映下面的设备类型
  */
 enum intr_type {
 	INTR_TYPE_TTY = 1,
@@ -273,15 +283,20 @@ enum intr_type {
 	INTR_TYPE_MISC = 16,
 	INTR_TYPE_CLK = 32,
 	INTR_TYPE_AV = 64,
-	INTR_EXCL = 256,		/* exclusive interrupt */
+	INTR_EXCL = 256,		/* exclusive(独占的) interrupt */
 	INTR_MPSAFE = 512,		/* this interrupt is SMP safe */
-	INTR_ENTROPY = 1024,		/* this interrupt provides entropy */
+	INTR_ENTROPY = 1024,		/* this interrupt provides entropy(熵，无序状态) */
 	INTR_MD1 = 4096,		/* flag reserved for MD use */
 	INTR_MD2 = 8192,		/* flag reserved for MD use */
 	INTR_MD3 = 16384,		/* flag reserved for MD use */
 	INTR_MD4 = 32768		/* flag reserved for MD use */
 };
 
+/*
+	trigger: 触发，引发
+	edge: 边缘，表示上升沿或者下降沿触发？
+	level: 高电平或者低电平触发？
+*/
 enum intr_trigger {
 	INTR_TRIGGER_INVALID = -1,
 	INTR_TRIGGER_CONFORM = 0,
@@ -289,6 +304,7 @@ enum intr_trigger {
 	INTR_TRIGGER_LEVEL = 2
 };
 
+// polarity: 极性，转换开关
 enum intr_polarity {
 	INTR_POLARITY_CONFORM = 0,
 	INTR_POLARITY_HIGH = 1,
@@ -299,6 +315,8 @@ enum intr_polarity {
  * CPU sets supported by bus_get_cpus().  Note that not all sets may be
  * supported for a given device.  If a request is not supported by a
  * device (or its parents), then bus_get_cpus() will fail with EINVAL.
+ * bus_get_cpus() 支持的 CPU 集。请注意，给定设备可能不支持所有集合。如果设备 (或其父设备)
+ * 不支持请求，则 bus_get_cpus() 将失败，并显示 EINVAL
  */
 enum cpu_sets {
 	LOCAL_CPUS = 0,
@@ -715,25 +733,44 @@ void	bus_data_generation_update(void);
 /**
  * Some convenience defines for probe routines to return.  These are just
  * suggested values, and there's nothing magical about them.
+ * 
  * BUS_PROBE_SPECIFIC is for devices that cannot be reprobed, and that no
  * possible other driver may exist (typically legacy drivers who don't follow
- * all the rules, or special needs drivers).  BUS_PROBE_VENDOR is the
- * suggested value that vendor supplied drivers use.  This is for source or
- * binary drivers that are not yet integrated into the FreeBSD tree.  Its use
- * in the base OS is prohibited.  BUS_PROBE_DEFAULT is the normal return value
- * for drivers to use.  It is intended that nearly all of the drivers in the
- * tree should return this value.  BUS_PROBE_LOW_PRIORITY are for drivers that
- * have special requirements like when there are two drivers that support
- * overlapping series of hardware devices.  In this case the one that supports
- * the older part of the line would return this value, while the one that
- * supports the newer ones would return BUS_PROBE_DEFAULT.  BUS_PROBE_GENERIC
- * is for drivers that wish to have a generic form and a specialized form,
- * like is done with the pci bus and the acpi pci bus.  BUS_PROBE_HOOVER is
- * for those buses that implement a generic device placeholder for devices on
- * the bus that have no more specific driver for them (aka ugen).
+ * all the rules, or special needs drivers).
+ * BUS_PROBE_SPECIFIC - 适用于无法重新设置且可能不存在其他驱动程序的设备 (通常是不遵守所有
+ * 规则的旧驱动程序，或特殊需要驱动程序)
+ * 
+ * BUS_PROBE_VENDOR is the suggested value that vendor supplied drivers use.
+ * This is for source or binary drivers that are not yet integrated into the
+ * FreeBSD tree.  Its use in the base OS is prohibited.
+ * BUS_PROBE_VENDOR - 是供应商提供的驱动程序使用的建议值。这适用于尚未集成到 FreeBSD树中的
+ * 源代码或二进制驱动程序。禁止在基本操作系统中使用它
+ * 
+ * BUS_PROBE_DEFAULT is the normal return value for drivers to use. It is
+ * intended that nearly all of the drivers in the tree should return this value.
+ * BUS_PROBE_DEFAULT - 是驱动程序要使用的正常返回值。树中几乎所有的驱动程序都应该返回该值
+ * 
+ * BUS_PROBE_LOW_PRIORITY are for drivers that have special requirements like
+ * when there are two drivers that support overlapping series of hardware devices.
+ * In this case the one that supports the older part of the line would return
+ * this value, while the one that supports the newer ones would return BUS_PROBE_DEFAULT.
+ * BUS_PROBE_LOW_PRIORITY - 适用于具有特殊要求的驱动程序，例如当有两个驱动程序支持重叠的硬件设备系列时。
+ * 在这种情况下，支持行中较旧部分的将返回此值，而支持较新部分的则返回 BUS_PROBE_DEFAULT
+ * 
+ * BUS_PROBE_GENERIC is for drivers that wish to have a generic form and a
+ * specialized form, like is done with the pci bus and the acpi pci bus.
+ * BUS_PROBE_GENERIC - 适用于希望具有通用形式和专用形式的驱动程序，如 pci 总线和 acpi pci 总线
+ * 
+ * BUS_PROBE_HOOVER is for those buses that implement a generic device placeholder
+ * for devices on the bus that have no more specific driver for them (aka ugen).
+ * BUS_PROBE_HOOVER - 适用于那些为总线上没有更具体驱动程序 (也称为ugen) 的设备实现通用
+ * 设备占位符的总线
+ * 
  * BUS_PROBE_NOWILDCARD or lower means that the device isn't really bidding
  * for a device node, but accepts only devices that its parent has told it
  * use this driver.
+ * BUS_PROBE_NOWILDCARD - 或更低意味着设备并没有真正竞标设备节点，而是只接受其父节点
+ * 告知其使用此驱动程序的设备
  */
 #define BUS_PROBE_SPECIFIC	0	/* Only I can use this device */
 #define BUS_PROBE_VENDOR	(-10)	/* Vendor supplied driver */
@@ -752,9 +789,14 @@ void	bus_data_generation_update(void);
  * current system-wide pass number.  The default pass is the last pass
  * and is used by most drivers.  Drivers needed by the scheduler are
  * probed in earlier passes.
+ * 在引导期间，将多次扫描设备树。每次扫描或通过驱动程序都可以连接到设备。为每个驱动附件分配
+ * 一个通行证编号。只有当设备的通行证号小于或等于当前系统通行证号时，驾驱动才能探测并连接到
+ * 设备。默认通行证是最后一次通行证，大多数驱动都使用该通行证。调度程序所需的驱动程序在前面
+ * 的过程中被探测
+ * 
+ * 个人理解，应该是不同的阶段加载不同的驱动程序。PASS_ROOT 应该就是在 root 阶段加载的驱动
+ * 程序，其他 pass 类型的不会在此阶段加载 (pass 等级较高)。后续等级提升之后再进行加载
  */
-
-/* 系统会设置一个pass number来限制驱动跟设备是否会匹配，防止它们多次匹配*/
 #define	BUS_PASS_ROOT		0	/* Used to attach root0. */
 #define	BUS_PASS_BUS		10	/* Buses and bridges. */
 #define	BUS_PASS_CPU		20	/* CPU devices. */

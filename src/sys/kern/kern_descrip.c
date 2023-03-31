@@ -2178,7 +2178,11 @@ fdunshare(struct thread *td)
 
 	if (p->p_fd->fd_refcnt == 1)
 		return;
-
+	/*
+		底层逻辑就是通过 uma 重新分配一块内存地址空间，将原有进程中的
+		文件描述符表拷贝一份到这里。新的进程使用原有的文件描述符表，
+		该进程则使用新创建的文件描述符表
+	*/
 	tmp = fdcopy(p->p_fd);
 	fdescfree(td);
 	p->p_fd = tmp;
@@ -3042,6 +3046,8 @@ fget_fcntl(struct thread *td, int fd, cap_rights_t *rightsp, int needfcntl,
  * Like fget() but loads the underlying vnode, or returns an error if the
  * descriptor does not represent a vnode.  Note that pipes use vnodes but
  * never have VM objects.  The returned vnode will be vref()'d.
+ * fget() 返回的应该是文件结构，该函数则返回更加底层的 vnode。如果描述符不代表一个 vnode，
+ * 则会返回错误。管道使用 vnode 但绝对不会拥有 vm object
  *
  * XXX: what about the unused flags ?
  */

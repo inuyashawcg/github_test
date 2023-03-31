@@ -1,0 +1,85 @@
+////////////// 20230116 //////////////
+  lib 目前可以分成两个部分，已经修改完毕的库，直接用 cmake 来进行编译；还没有修改过的库，仍然使用 makefile 进行编译；
+库文件会直接链接到内核当中，为了方便查找，尽量将它们放置到同一个地方。最好是 cmake 兼容 makefile 的安装路径
+
+  freebsd 编译库文件是分成了两个阶段，第一个是编译 bootstrap-boot 阶段的基础库文件(其他库文件的编译会依赖它们)；
+第二阶段再去编译剩余的模块。中间还会添加一个 .WAIT 目标，应该是起到控制编译顺序的作用，等待基础库模块编译完成之后，
+再去编译目标库文件
+
+  qihai 总体的编译顺序应该是 buildworld -> installworld -> buildqihai，个人理解应该使 bootstrap 库文件依旧
+使用 makefile 进行编译，这样后续依赖这些库的库才能正常编译。cmake 库编译应该首先包含被依赖程度较低的库文件，然后再
+一步步添加被依赖程度较高的库，直至所有的库都用采用 cmake 的编译方式
+
+  cmake add_dependencies() 会生成一个依赖树，可以控制不同模块的编译顺序
+
+
+////////////// 20230117 //////////////
+  调整 buildword 步骤，重点关注编译器相关的一些工具的生成。如果是本机就可以提供的部分工具，那我们就可以尝试从
+该过程中把一些步骤给删除掉。并且有些工具本机也有，就比如说 awk / sed / truncate 等等，如果 freebsd 与 linux
+是通用的话，也可以将它们从编译过程中删除，减少编译时间
+
+qihai freebsd-src 编译流程:
+worldtmp:
+  - >>> Rebuilding the temporary build tree
+  - >>> Deleting stale files in build tree...
+  - 删除原有目录树，并重建新的目录树(在 tmp 目录下)，其中包括对 bin 的符号链接
+
+  make.py 已经在 buildworld 之前完成了编译，该阶段可以直接拿来用
+
+  - host-symlinks: Linking host tools into ***/tmp/legacy/bin
+
+
+stage 1.1: legacy release compatibility shims (旧版兼容性垫片)
+  - 第一步会生成一个静态库 libegacy.a，为后续 bootstrap-tools / cross-tools 等工具的编译提供接口。
+      这些接口在主机中是不会被提供的，所以不能被省略
+  - 安装部分头文件
+  - 创建特定目录
+  - 给 bin 目录创建符号链接
+
+stage 1.2: bootstrap-tools
+  - 如果 BOOTSTRAP_ALL_TOOLS 这个宏定义了，则编译过程中会把所有涉及到的工具全部生成
+  - 在非 FreeBSD 系统上构建时，我们不能假设主机二进制文件接受兼容的标志或生成兼容的输出。因此，我们强制
+      BOOTSTRAP_ALL_TOOLS，只构建二进制文件的 FreeBSD 版本
+  - 部分工具之间还存在循环依赖的关系，例如 m4 和 lex。freebsd 给出的解决办法是给它们两个都首先编译出一个
+      prebuild 版本，打破循环依赖链。后面再继续生成最终版本
+
+bootstrap-tools 在 linux 下已经存在的一些命令: (参数不一致的用*标记)
+  dtc *
+  cat *
+  rpcgen *
+  yacc *
+  lex *
+  gencat *
+  cut *
+  join *
+  realpath *
+  mktemp *
+  rmdir *
+  sed *
+  truncate *
+  tsort *
+  uuencode *
+  uudecode *
+  xargs *
+  mkfifo *
+  zic *
+  test *
+  bmake 
+  grep *
+  sort *
+  m4 *
+  localedef *
+  awk *
+  expr *
+
+  这些正常来说应该不需要再次进行编译，用主机提供的工具就可以。但是对比之后发现，两种版本所支持的命令行参数不一样，
+所以还要看实际编译效果如何。这可能也是 freebsd 跨平台编译要引入编译 bootstrap-tools 的原因，已经考虑到不同
+平台之间的系统命令使用方法存在差异
+
+////////////// 20230118 //////////////
+- libc、libc++ 等库文件会在 buildworld 过程中安装到 ***/tmp/usr/lib 目录之下，采用 cmake 方式也应兼容
+- 编译器也会包含 libc 等相同的模块，独立处理还是合并？
+- 库源目录中的测试文件感觉要单独提取出来，用原有方式整合进入 atf
+- 应尽量保持目录整体结构不变，编译起始阶段 lib 目录下的头文件安装，可以用 shell 脚本替代
+
+freebsd libc 库编译时，依赖两个库 libcompiler_rt.a / libssp_nonshared.a，从编译过程来看，它们要早于 libc 进行编译

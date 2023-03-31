@@ -305,7 +305,7 @@ struct vm_map {
 	*/
 	struct sx lock;			/* Lock for map data 共享锁 */
 	/*
-		A mutex which is used if the	map is a system	map.
+		A mutex which is used if the map is a system map.
 	*/
 	struct mtx system_mtx;
 	int nentries;			/* Number of entries 应该是 map_entry 的数量 */
@@ -544,7 +544,7 @@ long vmspace_resident_count(struct vmspace *vmspace);
  */
 #define	VMFS_NO_SPACE		0	/* don't find; use the given range */
 #define	VMFS_ANY_SPACE		1	/* find a range with any alignment */
-#define	VMFS_OPTIMAL_SPACE	2	/* find a range with optimal alignment*/
+#define	VMFS_OPTIMAL_SPACE	2	/* find a range with optimal(最优的) alignment*/
 #define	VMFS_SUPER_SPACE	3	/* find a superpage-aligned range */
 #define	VMFS_ALIGNED_SPACE(x)	((x) << 8) /* find a range with fixed alignment */
 

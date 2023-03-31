@@ -1,0 +1,46 @@
+////////////// 20230320 //////////////
+    kyua wait_any() 函数应该就是类似 kernel 子进程回收操作。其中会存在一些回收异常，或者是产生僵尸进程
+
+linux 进程栈和线程栈的一下理解:
+    https://www.bilibili.com/read/cv16245019/
+    https://blog.51cto.com/u_12740336/6116054?u_atoken=756a68c2-0dc5-4a5c-88b0-d33cad12ab33&u_asession=011R9FsQMJ3IUx8SBPRjZJisrI84fPHlamLq7RkTAFsf0B0t0gOiHMbZYTFz6UjlrGX0KNBwm7Lovlpxjd_P_q4JsKWYrT3W_NKPr8w6oU7K8tNLvYFNhD83Qn-HjOw5sKQxqfdYLCUkaS6x16Sb07c2BkFo3NEHBv0PZUm6pbxQU&u_asig=05X6H9Mq2JiZ3QXBSPPCQzX-XJpUEpWLqa-NoXbWVaum9fWGLRSL6bpcA38m_nzjjNeKIa6l1RfDiP10HfbqZn61mrNvcF4mlFsUOm2mt6CvwA5kngefihYXB7nh12mthDoaZALj_taxfamQKYVPryxVPirVjn4a1l4X1vTsC9a2z9JS7q8ZD7Xtz2Ly-b0kmuyAKRFSVJkkdwVUnyHAIJzb6OlPW17hnKExBtU_tvpir7r6TwH28exdmoWd1BZp3MOH1rto2YUkVeNUqEiPLttu3h9VXwMyh6PgyDIVSG1W8hGMKAc9UbWntV795U-M9uQ_7odEwGFR4mIUoDYn9tF4OxHQ0cXwJ2KV-ZL0rfOHX6XOmBlsriZ4azCUmT1KSTmWspDxyAEEo4kbsryBKb9Q&u_aref=7c1tJa%2FxJBqMgO%2BhavBJuLc3QwI%3D
+
+- 线程堆栈是固定大小的，一旦线程创建完毕，就无法修改
+- 通过 glibc 中 allocstack() 函数实现可知，线程堆栈是利用 mmap() 来申请存储空间，进程堆区？
+
+
+////////////// 20230321 //////////////
+20230321-051434 W 21 kyua/engine/atf.cpp:136:
+    Test case list wrote to stderr:Failed to execute /usr/tests/sys/fs/tptfs/create_test: Operation not permitted
+Caught runtime_error: Failed to execute /usr/tests/sys/fs/tptfs/create_test: Operation not permitted
+
+/usr/tests/sys/fs/tptfs/create_test
+
+20230322-092229 I 21 kyua/cli/main.cpp:353: kyua 0.13
+20230322-092229 I 21 kyua/cli/main.cpp:358: Command line: kyua test -k /usr/tests/sys/fs/tptfs/Kyuafile
+20230322-092230 I 21 kyua/cli/main.cpp:137: run_subcommand --- 000
+20230322-092230 I 21 kyua/cli/main.cpp:138: run_subcommand: command is test
+20230322-092230 I 21 kyua/cli/main.cpp:142: args_vector entriy --- test
+20230322-092230 I 21 kyua/cli/main.cpp:142: args_vector entriy --- -k
+20230322-092230 I 21 kyua/cli/main.cpp:142: args_vector entriy --- /usr/tests/sys/fs/tptfs/Kyuafile
+20230322-092230 I 21 kyua/cli/main.cpp:147: run_subcommand --- 111 (表示可以正确获取 command line)
+
+20230322-094920 I 21 kyua/engine/kyuafile.cpp:691: test_programs: interface name --- atf
+20230322-094920 I 21 kyua/engine/kyuafile.cpp:692: test_programs: test suite name --- FreeBSD
+
+20230322-095653 I 21 kyua/model/test_program.cpp:222: test_program::find: test case name --- create (正常)
+
+
+////////////// 20230323 //////////////
+20230323-031215 I 25 kyua/drivers/run_tests.cpp:334: drivers::run_tests::drive >>> ddd
+20230323-031215 I 25 kyua/utils/process/executor.cpp:368: Cleaning up exit_handle for exec_handle 50
+20230323-031215 I 25 kyua/utils/cmdline/ui.cpp:103: stdout: broken: Premature exit; test case received signal 6 (core dumped)  [0.969s]
+20230323-031215 I 25 kyua/drivers/run_tests.cpp:336: drivers::run_tests::drive >>> 777
+
+执行三次测试，每次都是完全一样的 log 信息，感觉应该是确定性因素导致的，不太像是随机出现的错误
+
+root@qemu:/usr/tests/sys/fs/tmpfs # ls -li /usr/share/atf/libatf-sh.subr 
+8292 -r--r--r--  1 root  wheel  18227 Jan  4  2021 /usr/share/atf/libatf-sh.subr
+
+
+/home/mercury/Videos/qihai_riscv/qihai/contrib/

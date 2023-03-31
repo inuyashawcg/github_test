@@ -1,0 +1,372 @@
+共享服务器:
+root@freebsd-x86-3:/home # devinfo -rv
+nexus0
+  smbios0
+      I/O memory addresses:
+          0xf5a20-0xf5a3e
+  cryptosoft0
+  vtvga0
+      I/O memory addresses:
+          0xa0000-0xaffff
+  aesni0
+  kvmclock0
+  ram0
+      I/O memory addresses:
+          0x0-0x9fbff
+          0x100000-0xbffddfff
+          0x100000000-0x203fffffff
+  apic0
+      I/O memory addresses:
+          0xfec00000-0xfec0001f
+          0xfee00000-0xfee0053f
+  acpi0
+      Interrupt request lines:
+          0x9
+    pcib0 pnpinfo _HID=PNP0A03 _UID=1 _CID=none at handle=\_SB_.PCI0
+        I/O ports:
+            0xcf8-0xcff
+      pci0
+          PCI domain 0 bus numbers:
+              0
+        hostb0 pnpinfo vendor=0x8086 device=0x1237 subvendor=0x1af4 subdevice=0x1100 class=0x060000 at slot=0 function=0 dbsf=pci0:0:0:0 handle=\_SB_.PCI0.S00_
+        isab0 pnpinfo vendor=0x8086 device=0x7000 subvendor=0x1af4 subdevice=0x1100 class=0x060100 at slot=1 function=0 dbsf=pci0:0:1:0 handle=\_SB_.PCI0.ISA_
+          isa0
+            orm0 pnpinfo pnpid=ORM0000
+                I/O memory addresses:
+                    0xea800-0xeffff
+            sc0
+            vga0 pnpinfo pnpid=PNP0900
+                I/O ports:
+                    0x3c0-0x3df
+            attimer0
+                Interrupt request lines:
+                    0x0
+                I/O ports:
+                    0x40-0x43
+            fdc0
+            ppc0
+            uart0
+            uart1
+        atapci0 pnpinfo vendor=0x8086 device=0x7010 subvendor=0x1af4 subdevice=0x1100 class=0x010180 at slot=1 function=1 dbsf=pci0:0:1:1
+            I/O ports:
+                0x170-0x177
+                0x1f0-0x1f7
+                0x376
+                0x3f6
+                0xe0c0-0xe0cf
+          ata0 at channel=0
+              Interrupt request lines:
+                  0xe
+          ata1 at channel=1
+              Interrupt request lines:
+                  0xf
+        uhci0 pnpinfo vendor=0x8086 device=0x7020 subvendor=0x1af4 subdevice=0x1100 class=0x0c0300 at slot=1 function=2 dbsf=pci0:0:1:2
+            Interrupt request lines:
+                0xb
+            I/O ports:
+                0xe080-0xe09f
+          usbus0
+            uhub0
+              uhid0 pnpinfo vendor=0x0627 product=0x0001 devclass=0x00 devsubclass=0x00 devproto=0x00 sernum="28754-0000:00:01.2-1" release=0x0000 mode=host intclass=0x03 intsubclass=0x00 intprotocol=0x00 at bus=0 hubaddr=1 port=1 devaddr=2 interface=0 ugen=ugen0.2
+        intsmb0 pnpinfo vendor=0x8086 device=0x7113 subvendor=0x1af4 subdevice=0x1100 class=0x068000 at slot=1 function=3 dbsf=pci0:0:1:3 handle=\_SB_.PCI0.PX13
+            Interrupt request lines:
+                0x9
+            I/O ports:
+                0x1000-0x1003
+          smbus0
+        vgapci0 pnpinfo vendor=0x1234 device=0x1111 subvendor=0x1af4 subdevice=0x1100 class=0x030000 at slot=2 function=0 dbsf=pci0:0:2:0 handle=\_SB_.PCI0.S10_
+            I/O memory addresses:
+                0xfd000000-0xfdffffff
+                0xfea70000-0xfea70fff
+          drm0
+          drmn0
+        virtio_pci0 pnpinfo vendor=0x1af4 device=0x1002 subvendor=0x1af4 subdevice=0x0005 class=0x00ff00 at slot=3 function=0 dbsf=pci0:0:3:0 handle=\_SB_.PCI0.S18_
+            Interrupt request lines:
+                0xb
+            I/O ports:
+                0xe0a0-0xe0bf
+            I/O memory addresses:
+                0xfe400000-0xfe403fff
+          vtballoon0 pnpinfo vendor=0x00001af4 device=0x1002 subvendor=0x1af4 device_type=0x00000005
+        virtio_pci1 pnpinfo vendor=0x1af4 device=0x1003 subvendor=0x1af4 subdevice=0x0003 class=0x078000 at slot=8 function=0 dbsf=pci0:0:8:0 handle=\_SB_.PCI0.S40_
+            Interrupt request lines:
+                0x18
+                0x19
+            I/O ports:
+                0xe000-0xe03f
+            I/O memory addresses:
+                0xfe404000-0xfe407fff
+                0xfea71000-0xfea71fff
+          vtcon0 pnpinfo vendor=0x00001af4 device=0x1003 subvendor=0x1af4 device_type=0x00000003
+        em0 pnpinfo vendor=0x8086 device=0x100e subvendor=0x1af4 subdevice=0x1100 class=0x020000 at slot=18 function=0 dbsf=pci0:0:18:0 handle=\_SB_.PCI0.S90_
+            Interrupt request lines:
+                0xa
+            I/O ports:
+                0xe040-0xe07f
+            I/O memory addresses:
+                0xfea40000-0xfea5ffff
+        pcib1 pnpinfo vendor=0x1b36 device=0x0001 subvendor=0x0000 subdevice=0x0000 class=0x060400 at slot=30 function=0 dbsf=pci0:0:30:0 handle=\_SB_.PCI0.SF0_
+            I/O ports:
+                0xd000-0xdfff
+            I/O memory addresses:
+                0xfe200000-0xfe3fffff
+                0xfe800000-0xfe9fffff
+                0xfea72000-0xfea720ff
+            PCI domain 0 bus numbers:
+                1
+          pci1
+              pcib1 bus numbers:
+                  1
+        pcib2 pnpinfo vendor=0x1b36 device=0x0001 subvendor=0x0000 subdevice=0x0000 class=0x060400 at slot=31 function=0 dbsf=pci0:0:31:0 handle=\_SB_.PCI0.SF8_
+            I/O ports:
+                0xc000-0xcfff
+            I/O memory addresses:
+                0xfe000000-0xfe1fffff
+                0xfe600000-0xfe7fffff
+                0xfea73000-0xfea730ff
+            PCI domain 0 bus numbers:
+                2
+          pci2
+              pcib2 bus numbers:
+                  2
+    atrtc0 pnpinfo _HID=PNP0B00 _UID=0 _CID=none at handle=\_SB_.PCI0.ISA_.RTC_
+        Interrupt request lines:
+            0x8
+        I/O ports:
+            0x70-0x71
+            0x72-0x77
+    atkbdc0 pnpinfo _HID=PNP0303 _UID=0 _CID=none at handle=\_SB_.PCI0.ISA_.KBD_
+        Interrupt request lines:
+            0x1
+        I/O ports:
+            0x60
+            0x64
+      atkbd0
+      psm0
+          Interrupt request lines:
+              0xc
+    psmcpnp0 pnpinfo _HID=PNP0F13 _UID=0 _CID=none at handle=\_SB_.PCI0.ISA_.MOU_
+    unknown pnpinfo _HID=PNP0700 _UID=0 _CID=none at handle=\_SB_.PCI0.ISA_.FDC0
+        DMA request lines:
+            2
+        I/O ports:
+            0x3f2-0x3f5
+            0x3f7
+    unknown pnpinfo _HID=PNP0400 _UID=0 _CID=none at handle=\_SB_.PCI0.ISA_.LPT_ (disabled)
+    unknown pnpinfo _HID=PNP0501 _UID=1 _CID=none at handle=\_SB_.PCI0.ISA_.COM1 (disabled)
+    unknown pnpinfo _HID=PNP0501 _UID=2 _CID=none at handle=\_SB_.PCI0.ISA_.COM2 (disabled)
+    acpi_syscontainer1 pnpinfo _HID=PNP0A06 _UID=0 _CID=none at handle=\_SB_.PCI0.PRES
+        I/O ports:
+            0xaf00-0xaf0b
+    acpi_syscontainer2 pnpinfo _HID=PNP0A06 _UID=0 _CID=none at handle=\_SB_.PCI0.GPE0
+        I/O ports:
+            0xafe0-0xafe3
+    acpi_syscontainer3 pnpinfo _HID=PNP0A06 _UID=0 _CID=none at handle=\_SB_.PCI0.PHPR
+        I/O ports:
+            0xae00-0xae13
+    unknown pnpinfo _HID=QEMU0002 _UID=0 _CID=none at handle=\_SB_.PCI0.FWCF
+        I/O ports:
+            0x510-0x51b
+    hpet0 pnpinfo _HID=PNP0103 _UID=0 _CID=none at handle=\_SB_.HPET
+        I/O memory addresses:
+            0xfed00000-0xfed003ff
+    pci_link0 pnpinfo _HID=PNP0C0F _UID=0 _CID=none at handle=\_SB_.LNKA
+    pci_link1 pnpinfo _HID=PNP0C0F _UID=1 _CID=none at handle=\_SB_.LNKB
+    pci_link2 pnpinfo _HID=PNP0C0F _UID=2 _CID=none at handle=\_SB_.LNKC
+    pci_link3 pnpinfo _HID=PNP0C0F _UID=3 _CID=none at handle=\_SB_.LNKD
+    pci_link4 pnpinfo _HID=PNP0C0F _UID=4 _CID=none at handle=\_SB_.LNKS
+    acpi_syscontainer0 pnpinfo _HID=ACPI0010 _UID=0 _CID=PNP0A05 at handle=\_SB_.CPUS
+    cpu0 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C000 _PXM=0
+    cpu1 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C001 _PXM=0
+    cpu2 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C002 _PXM=0
+    cpu3 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C003 _PXM=0
+    cpu4 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C004 _PXM=0
+    cpu5 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C005 _PXM=0
+    cpu6 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C006 _PXM=0
+    cpu7 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C007 _PXM=0
+    cpu8 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C008 _PXM=1
+    cpu9 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C009 _PXM=1
+    cpu10 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C00A _PXM=1
+    cpu11 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C00B _PXM=1
+    cpu12 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C00C _PXM=1
+    cpu13 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C00D _PXM=1
+    cpu14 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C00E _PXM=1
+    cpu15 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C00F _PXM=1
+    cpu16 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C010 _PXM=2
+    cpu17 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C011 _PXM=2
+    cpu18 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C012 _PXM=2
+    cpu19 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C013 _PXM=2
+    cpu20 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C014 _PXM=2
+    cpu21 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C015 _PXM=2
+    cpu22 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C016 _PXM=2
+    cpu23 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C017 _PXM=2
+    cpu24 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C018 _PXM=3
+    cpu25 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C019 _PXM=3
+    cpu26 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C01A _PXM=3
+    cpu27 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C01B _PXM=3
+    cpu28 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C01C _PXM=3
+    cpu29 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C01D _PXM=3
+    cpu30 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C01E _PXM=3
+    cpu31 pnpinfo _HID=none _UID=0 _CID=none at handle=\_SB_.CPUS.C01F _PXM=3
+    vmgenc0 pnpinfo _HID=QEMUVGID _UID=0 _CID=VM_GEN_COUNTER at handle=\_SB_.VGEN
+    acpi_timer0 pnpinfo unknown
+        I/O ports:
+            0x608-0x60b
+
+
+本地 freebsd 虚拟机:
+root@:~ # devinfo -rv
+nexus0
+  cryptosoft0
+  aesni0
+  vtvga0
+      I/O memory addresses:
+          0xa0000-0xaffff
+  ram0
+      I/O memory addresses:
+          0x0-0x9fbff
+          0x100000-0xdffeffff
+          0x100000000-0x21fffffff
+  apic0
+      I/O memory addresses:
+          0xfec00000-0xfec0001f
+          0xfee00000-0xfee0053f
+  acpi0
+      Interrupt request lines:
+          0x9
+    cpu0 pnpinfo _HID=none _UID=0 _CID=none at handle=\_PR_.CPU0
+    cpu1 pnpinfo _HID=none _UID=0 _CID=none at handle=\_PR_.CPU1
+    cpu2 pnpinfo _HID=none _UID=0 _CID=none at handle=\_PR_.CPU2
+    cpu3 pnpinfo _HID=none _UID=0 _CID=none at handle=\_PR_.CPU3
+    cpu4 pnpinfo _HID=none _UID=0 _CID=none at handle=\_PR_.CPU4
+    cpu5 pnpinfo _HID=none _UID=0 _CID=none at handle=\_PR_.CPU5
+    cpu6 pnpinfo _HID=none _UID=0 _CID=none at handle=\_PR_.CPU6
+    cpu7 pnpinfo _HID=none _UID=0 _CID=none at handle=\_PR_.CPU7
+    pcib0 pnpinfo _HID=PNP0A03 _UID=0 _CID=none at handle=\_SB_.PCI0
+        I/O ports:
+            0xcf8-0xcff
+      pci0
+          PCI domain 0 bus numbers:
+              0
+        hostb0 pnpinfo vendor=0x8086 device=0x1237 subvendor=0x0000 subdevice=0x0000 class=0x060000 at slot=0 function=0 dbsf=pci0:0:0:0 handle=\_SB_.PCI0.SSD0
+        isab0 pnpinfo vendor=0x8086 device=0x7000 subvendor=0x0000 subdevice=0x0000 class=0x060100 at slot=1 function=0 dbsf=pci0:0:1:0 handle=\_SB_.PCI0.SBRG
+          isa0
+            orm0 pnpinfo pnpid=ORM0000
+                I/O memory addresses:
+                    0xc0000-0xc7fff
+                    0xe2000-0xef7ff
+            sc0
+            vga0 pnpinfo pnpid=PNP0900
+                I/O ports:
+                    0x3c0-0x3df
+            atrtc0
+                Interrupt request lines:
+                    0x8
+                I/O ports:
+                    0x70-0x71
+            fdc0
+            ppc0
+            uart0
+            uart1
+        atapci0 pnpinfo vendor=0x8086 device=0x7111 subvendor=0x0000 subdevice=0x0000 class=0x01018a at slot=1 function=1 dbsf=pci0:0:1:1
+            I/O ports:
+                0x170-0x177
+                0x1f0-0x1f7
+                0x376
+                0x3f6
+                0xd000-0xd00f
+          ata0 at channel=0
+              Interrupt request lines:
+                  0xe
+          ata1 at channel=1
+              Interrupt request lines:
+                  0xf
+        vgapci0 pnpinfo vendor=0x15ad device=0x0405 subvendor=0x15ad subdevice=0x0405 class=0x030000 at slot=2 function=0 dbsf=pci0:0:2:0 handle=\_SB_.PCI0.GFX0
+            I/O ports:
+                0xd010-0xd01f
+            I/O memory addresses:
+                0xe0000000-0xe0ffffff
+                0xf0000000-0xf01fffff
+          drm0
+          drmn0
+        em0 pnpinfo vendor=0x8086 device=0x100e subvendor=0x8086 subdevice=0x001e class=0x020000 at slot=3 function=0 dbsf=pci0:0:3:0
+            Interrupt request lines:
+                0x13
+            I/O ports:
+                0xd020-0xd027
+            I/O memory addresses:
+                0xf0200000-0xf021ffff
+        unknown pnpinfo vendor=0x80ee device=0xcafe subvendor=0x0000 subdevice=0x0000 class=0x088000 at slot=4 function=0 dbsf=pci0:0:4:0
+            I/O ports:
+                0xd040-0xd05f
+            I/O memory addresses:
+                0xf0400000-0xf07fffff
+                0xf0800000-0xf0803fff
+        pcm0 pnpinfo vendor=0x8086 device=0x2415 subvendor=0x8086 subdevice=0x0000 class=0x040100 at slot=5 function=0 dbsf=pci0:0:5:0
+            Interrupt request lines:
+                0x15
+            I/O ports:
+                0xd100-0xd1ff
+                0xd200-0xd23f
+        ohci0 pnpinfo vendor=0x106b device=0x003f subvendor=0x0000 subdevice=0x0000 class=0x0c0310 at slot=6 function=0 dbsf=pci0:0:6:0
+            Interrupt request lines:
+                0x16
+            I/O memory addresses:
+                0xf0804000-0xf0804fff
+          usbus0
+            uhub0
+        intsmb0 pnpinfo vendor=0x8086 device=0x7113 subvendor=0x0000 subdevice=0x0000 class=0x068000 at slot=7 function=0 dbsf=pci0:0:7:0
+            Interrupt request lines:
+                0x9
+            I/O ports:
+                0x1000-0x1003
+          smbus0
+    atkbdc0 pnpinfo _HID=PNP0303 _UID=0 _CID=none at handle=\_SB_.PCI0.SBRG.PS2K
+        Interrupt request lines:
+            0x1
+        I/O ports:
+            0x60
+            0x64
+      atkbd0
+      psm0
+          Interrupt request lines:
+              0xc
+    atdma0 pnpinfo _HID=PNP0200 _UID=0 _CID=none at handle=\_SB_.PCI0.SBRG.DMAC
+        DMA request lines:
+            4
+        I/O ports:
+            0x0-0xf
+            0x80-0x8f
+            0xc0-0xdf
+    unknown pnpinfo _HID=PNP0700 _UID=0 _CID=none at handle=\_SB_.PCI0.SBRG.FDC0 (disabled)
+    psmcpnp0 pnpinfo _HID=PNP0F03 _UID=0 _CID=none at handle=\_SB_.PCI0.SBRG.PS2M
+    attimer0 pnpinfo _HID=PNP0100 _UID=0 _CID=none at handle=\_SB_.PCI0.SBRG.TIMR
+        Interrupt request lines:
+            0x0
+        I/O ports:
+            0x40-0x43
+            0x50-0x53
+    unknown pnpinfo _HID=PNP0000 _UID=0 _CID=none at handle=\_SB_.PCI0.SBRG.PIC_
+        I/O ports:
+            0x20-0x21
+            0xa0-0xa1
+    unknown pnpinfo _HID=PNP0B00 _UID=0 _CID=none at handle=\_SB_.PCI0.SBRG.RTC_ (disabled)
+    unknown pnpinfo _HID=PNP0103 _UID=0 _CID=PNP0C01 at handle=\_SB_.PCI0.SBRG.HPET (disabled)
+    unknown pnpinfo _HID=APP0001 _UID=0 _CID=SMC-NAPA at handle=\_SB_.PCI0.SBRG.SMC_ (disabled)
+    unknown pnpinfo _HID=PNP0C02 _UID=17 _CID=none at handle=\_SB_.PCI0.PCIE (disabled)
+    unknown pnpinfo _HID=PNP0400 _UID=1 _CID=none at handle=\_SB_.PCI0.LPT0 (disabled)
+    unknown pnpinfo _HID=PNP0400 _UID=2 _CID=none at handle=\_SB_.PCI0.LPT1 (disabled)
+    unknown pnpinfo _HID=PNP0501 _UID=1 _CID=none at handle=\_SB_.PCI0.SRL0 (disabled)
+    unknown pnpinfo _HID=PNP0501 _UID=2 _CID=none at handle=\_SB_.PCI0.SRL1 (disabled)
+    unknown pnpinfo _HID=PNP0501 _UID=3 _CID=none at handle=\_SB_.PCI0.SRL2 (disabled)
+    unknown pnpinfo _HID=PNP0501 _UID=4 _CID=none at handle=\_SB_.PCI0.SRL3 (disabled)
+    unknown pnpinfo _HID=PNP8390 _UID=0 _CID=none at handle=\_SB_.PCI0.GIGE (disabled)
+    unknown pnpinfo _HID=PNP0C0A _UID=0 _CID=none at handle=\_SB_.PCI0.BAT0 (disabled)
+    acpi_acad0 pnpinfo _HID=ACPI0003 _UID=0 _CID=none at handle=\_SB_.PCI0.AC__
+    pci_link0 pnpinfo _HID=PNP0C0F _UID=1 _CID=none at handle=\_SB_.LNKA
+    pci_link1 pnpinfo _HID=PNP0C0F _UID=2 _CID=none at handle=\_SB_.LNKB
+    pci_link2 pnpinfo _HID=PNP0C0F _UID=3 _CID=none at handle=\_SB_.LNKC
+    pci_link3 pnpinfo _HID=PNP0C0F _UID=4 _CID=none at handle=\_SB_.LNKD
+    acpi_timer0 pnpinfo unknown
+        I/O ports:
+            0x4008-0x400b

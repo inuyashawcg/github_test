@@ -121,6 +121,7 @@ NOASM=
 .if ${LIBC_ARCH} == "i386" || ${LIBC_ARCH} == "amd64"
 .include "${LIBC_SRCTOP}/x86/sys/Makefile.inc"
 .endif
+# gcc -D 用于定义一个宏，含义应该是 define；-U 用于取消一个宏定义，含义应该是 undefine.
 .if ${MK_NIS} != "no"
 CFLAGS+= -DYP
 .include "${LIBC_SRCTOP}/yp/Makefile.inc"

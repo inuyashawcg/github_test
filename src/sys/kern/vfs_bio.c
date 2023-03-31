@@ -126,7 +126,8 @@ struct bufqueue {
 	类似的
 */
 struct bufdomain {
-	struct bufqueue	bd_subq[MAXCPU + 1]; /* Per-cpu sub queues + global 每个CPU都对应一个子队列 */
+	/* Per-cpu sub queues + global 每个 CPU 都对应一个子队列 */
+	struct bufqueue	bd_subq[MAXCPU + 1];
 	struct bufqueue bd_dirtyq;	/* 脏缓冲区队列 */
 	struct bufqueue	*bd_cleanq;	/* 净缓冲区队列 */
 	struct mtx_padalign bd_run_lock;	/* 具有对齐属性的mutex */
@@ -356,7 +357,7 @@ static struct mtx_padalign __exclusive_cache_line bdirtylock;
  * active.  Set to 1 when the bufdaemon is already "on" the queue, 0 when it
  * is idling.
  * 
- * bufdaemon的唤醒点，以及它是否已激活的指示器。当bufdaemon已经“在”队列上时，将其设置为1，
+ * bufdaemon 的唤醒点，以及它是否已激活的指示器。当bufdaemon已经“在”队列上时，将其设置为1，
  * 当其处于空闲状态时，将其设置为0
  */
 static int bd_request;
@@ -395,7 +396,7 @@ static int bdirtywait;
 #define QUEUE_DIRTY	2	/* B_DELWRI buffers */
 #define QUEUE_CLEAN	3	/* non-B_DELWRI buffers */
 #define QUEUE_SENTINEL	4	/* not an queue index, but mark for sentinel 
-															不是队列索引，而是sentinel的标记 */
+															不是队列索引，而是 sentinel 的标记 */
 
 /* Maximum number of buffer domains. */
 #define	BUF_DOMAINS	8
@@ -410,7 +411,7 @@ static int __read_mostly buf_domains;
 
 BITSET_DEFINE(bufdomainset, BUF_DOMAINS);		// 感觉应该是构造一个位图
 struct bufdomain __exclusive_cache_line bdomain[BUF_DOMAINS];
-struct bufqueue __exclusive_cache_line bqempty;	// 貌似仅用于初始化
+struct bufqueue __exclusive_cache_line bqempty;
 
 /*
  * per-cpu empty buffer cache.
@@ -714,6 +715,7 @@ bufspace_adjust(struct buf *bp, int bufsize)
  *
  *	Reserve bufspace before calling allocbuf().  metadata has a
  *	different space limit than data.
+ 		在调用 allocbuf() 之前保留 bufspace。元数据具有与数据不同的空间限制
  */
 static int
 bufspace_reserve(struct bufdomain *bd, int size, bool metadata)
@@ -725,6 +727,10 @@ bufspace_reserve(struct bufdomain *bd, int size, bool metadata)
 		limit = bd->bd_maxbufspace;
 	else
 		limit = bd->bd_hibufspace;
+	/*
+		bd_bufspace 字段要求数据对齐，所以要先加 size 调整数据大小。
+		new 就表示加上需要新申请区域后总占用空间的大小
+	*/
 	space = atomic_fetchadd_long(&bd->bd_bufspace, size);
 	new = space + size;
 	if (new > limit) {
@@ -743,6 +749,7 @@ bufspace_reserve(struct bufdomain *bd, int size, bool metadata)
  *	bufspace_release:
  *
  *	Release reserved bufspace after bufspace_adjust() has consumed it.
+ 		在 bufspace_adjust() 用完后释放保留的 bufspace
  */
 static void
 bufspace_release(struct bufdomain *bd, int size)
@@ -1017,6 +1024,8 @@ maxbcachebuf_adjust(void)
 
 	/*
 	 * maxbcachebuf must be a power of 2 >= MAXBSIZE.
+	 		MAXBSIZE 表示的是 max block size 的大小，所以这个函数调整的每一个 buf 的大小，
+			而不是整个 cache buffer region 的大小
 	 */
 	i = 2;
 	while (i * 2 <= maxbcachebuf)
@@ -1070,6 +1079,7 @@ bd_speedup(void)
 caddr_t
 kern_vfs_bio_buffer_alloc(caddr_t v, long physmem_est)
 {
+	// physmem_est = 2075541
 	int tuned_nbuf;
 	long maxbuf, maxbuf_sz, buf_sz,	biotmap_sz;
 
@@ -1078,6 +1088,7 @@ kern_vfs_bio_buffer_alloc(caddr_t v, long physmem_est)
 	 * PAGE_SIZE is >= 1K)
 	 */
 	physmem_est = physmem_est * (PAGE_SIZE / 1024);
+	// physmem_est = 8302164
 
 	maxbcachebuf_adjust();
 	/*
@@ -1087,20 +1098,26 @@ kern_vfs_bio_buffer_alloc(caddr_t v, long physmem_est)
 	 * buffers to cover 1/10 of our ram over 64MB.  When auto-sizing
 	 * the buffer cache we limit the eventual kva reservation to
 	 * maxbcache bytes.
+	 * 
+	 * 默认大小和最小 KVA 分配大小是 BKVASIZE。对于前 64MB 的 ram，名义上分配足够的
+	 * 缓冲区来覆盖 1/4 的 ram。除了第一个 64MB 之外，分配额外的缓冲区，以覆盖 64MB
+	 * 以上的 1/10 内存。当自动调整缓冲区缓存大小时，我们将最终的 kva 保留限制为
+	 * maxbcache bytes
 	 *
 	 * factor represents the 1/4 x ram conversion.
 	 */
 	if (nbuf == 0) {
-		int factor = 4 * BKVASIZE / 1024;
+		int factor = 4 * BKVASIZE / 1024;  // factor = 64
 
 		nbuf = 50;
 		if (physmem_est > 4096)
 			nbuf += min((physmem_est - 4096) / factor,
 			    65536 / factor);
+		// nbuf = 1074 = 50 + 65535/64
 		if (physmem_est > 65536)
 			nbuf += min((physmem_est - 65536) * 2 / (factor * 5),
 			    32 * 1024 * 1024 / (factor * 5));
-
+		// nbuf = 52552
 		if (maxbcache && nbuf > maxbcache / BKVASIZE)
 			nbuf = maxbcache / BKVASIZE;
 		tuned_nbuf = 1;
@@ -1131,7 +1148,9 @@ kern_vfs_bio_buffer_alloc(caddr_t v, long physmem_est)
 	 */
 	if (bio_transient_maxcnt == 0 && unmapped_buf_allowed) {
 		maxbuf_sz = maxbcache != 0 ? maxbcache : maxbuf * BKVASIZE;
-		buf_sz = (long)nbuf * BKVASIZE;
+		// maxbuf = 187649984473770
+		// maxbuf_sz = 3074457345618247680
+		buf_sz = (long)nbuf * BKVASIZE; // buf_sz = 861011968
 		if (buf_sz < maxbuf_sz / TRANSIENT_DENOM *
 		    (TRANSIENT_DENOM - 1)) {
 			/*
@@ -1139,7 +1158,7 @@ kern_vfs_bio_buffer_alloc(caddr_t v, long physmem_est)
 			 * adjust buffer map size, and assign the rest
 			 * of maxbuf to transient map.
 			 */
-			biotmap_sz = maxbuf_sz - buf_sz;
+			biotmap_sz = maxbuf_sz - buf_sz; // biotmap_sz = 3074457344757235712
 		} else {
 			/*
 			 * Buffer map spans all KVA we could afford on
@@ -1150,7 +1169,8 @@ kern_vfs_bio_buffer_alloc(caddr_t v, long physmem_est)
 			buf_sz -= biotmap_sz;
 		}
 		if (biotmap_sz / INT_MAX > MAXPHYS)
-			bio_transient_maxcnt = INT_MAX;
+			bio_transient_maxcnt = INT_MAX;  // bio_transient_maxcnt = 2147483647
+
 		else
 			bio_transient_maxcnt = biotmap_sz / MAXPHYS;
 		/*
@@ -1159,15 +1179,15 @@ kern_vfs_bio_buffer_alloc(caddr_t v, long physmem_est)
 		 */
 		if (bio_transient_maxcnt > 1024)
 			bio_transient_maxcnt = 1024;
-		if (tuned_nbuf)
-			nbuf = buf_sz / BKVASIZE;
+		if (tuned_nbuf)							// tuned_nbuf = 1
+			nbuf = buf_sz / BKVASIZE;	// nbuf = 52552
 	}
 
 	/*
 	 * swbufs are used as temporary holders for I/O, such as paging I/O.
 	 * We have no less then 16 and no more then 256.
 	 */
-	nswbuf = min(nbuf / 4, 256);
+	nswbuf = min(nbuf / 4, 256); 	// nswbuf = 256
 	TUNABLE_INT_FETCH("kern.nswbuf", &nswbuf);
 	if (nswbuf < NSWBUF_MIN)
 		nswbuf = NSWBUF_MIN;
@@ -1190,6 +1210,7 @@ bufinit(void)
 	struct buf *bp;
 	int i;
 
+	// maxbcachebuf = 65536
 	KASSERT(maxbcachebuf >= MAXBSIZE,
 	    ("maxbcachebuf (%d) must be >= MAXBSIZE (%d)\n", maxbcachebuf,
 	    MAXBSIZE));
@@ -1197,17 +1218,21 @@ bufinit(void)
 	mtx_init(&rbreqlock, "runningbufspace lock", NULL, MTX_DEF);
 	mtx_init(&bdlock, "buffer daemon lock", NULL, MTX_DEF);
 	mtx_init(&bdirtylock, "dirty buf lock", NULL, MTX_DEF);
-
+	/*
+		kva_alloc() 传入的参数是 size，而不是 address。该函数就是单纯分配一块
+		内核虚拟地址空间，而不会指定 backing vm_object。分配区域的大小是 128*1024，
+		返回 unmapped buf 起始虚拟地址
+	*/
 	unmapped_buf = (caddr_t)kva_alloc(MAXPHYS);
 
 	/* finally, initialize each buffer header and stick on empty q */
-	for (i = 0; i < nbuf; i++) {
+	for (i = 0; i < nbuf; i++) {	// nbuf = 52552
 		bp = &buf[i];
 		bzero(bp, sizeof *bp);
 		bp->b_flags = B_INVAL;
 		bp->b_rcred = NOCRED;
 		bp->b_wcred = NOCRED;
-		bp->b_qindex = QUEUE_NONE;
+		bp->b_qindex = QUEUE_NONE;	// buf[] 数组的索引值？
 		bp->b_domain = -1;
 		bp->b_subqueue = mp_maxid + 1;
 		bp->b_xflags = 0;
@@ -1229,10 +1254,13 @@ bufinit(void)
 	 * by the system. XXX This is less true with vmem.  We could use
 	 * PAGE_SIZE.
 	 */
-	maxbufspace = (long)nbuf * BKVASIZE;
+	maxbufspace = (long)nbuf * BKVASIZE; 	// maxbufspace = 861011968
 	hibufspace = lmax(3 * maxbufspace / 4, maxbufspace - maxbcachebuf * 10);
+	// hibufspace = 860356608
 	lobufspace = (hibufspace / 20) * 19; /* 95% */
+	// lobufspace = 817338770
 	bufspacethresh = lobufspace + (hibufspace - lobufspace) / 2;
+	// bufspacethresh = 838847689
 
 	/*
 	 * Note: The 16 MiB upper limit for hirunningspace was chosen
@@ -1243,8 +1271,9 @@ bufinit(void)
 	 * hirunningspace.
 	 */
 	hirunningspace = lmax(lmin(roundup(hibufspace / 64, maxbcachebuf),
-	    16 * 1024 * 1024), 1024 * 1024);
+	    16 * 1024 * 1024), 1024 * 1024); // hirunningspace = 13500416
 	lorunningspace = roundup((hirunningspace * 2) / 3, maxbcachebuf);
+	// lorunningspace = 9043968
 
 	/*
 	 * Limit the amount of malloc memory since it is wired permanently into
@@ -1253,7 +1282,7 @@ bufinit(void)
 	 * The malloc scheme improves memory utilization significantly on
 	 * average (small) directories.
 	 */
-	maxbufmallocspace = hibufspace / 20;
+	maxbufmallocspace = hibufspace / 20;	// maxbufmallocspace = 43017830
 
 	/*
 	 * Reduce the chance of a deadlock occurring by limiting the number
@@ -1267,10 +1296,11 @@ bufinit(void)
 	 * minimum cannot be met.  We try to size hidirtybuffers to 3/4 our
 	 * buffer space assuming BKVASIZE'd buffers.
 	 */
+	// hidirtybuffers = 13158
 	while ((long)hidirtybuffers * BKVASIZE > 3 * hibufspace / 4) {
 		hidirtybuffers >>= 1;
 	}
-	lodirtybuffers = hidirtybuffers / 2;
+	lodirtybuffers = hidirtybuffers / 2;	// lodirtybuffers = 6579
 
 	/*
 	 * lofreebuffers should be sufficient to avoid stalling waiting on
@@ -1284,6 +1314,9 @@ bufinit(void)
 	lofreebuffers = MIN((nbuf / 25) + (20 * mp_ncpus), 128 * mp_ncpus);
 	hifreebuffers = (3 * lofreebuffers) / 2;
 	numfreebuffers = nbuf;
+	// lofreebuffers = 1024
+  // hifreebuffers = 1536
+	// numfreebuffers = 52552
 
 	/* Setup the kva and free list allocators. */
 	vmem_set_reclaim(buffer_arena, bufkva_reclaim);
@@ -1296,6 +1329,7 @@ bufinit(void)
 	 * concurrency but less accurate LRU.
 	 */
 	buf_domains = MIN(howmany(maxbufspace, 256*1024*1024), BUF_DOMAINS);
+	// buf_domains = 4
 	for (i = 0 ; i < buf_domains; i++) {
 		struct bufdomain *bd;
 
@@ -1315,6 +1349,23 @@ bufinit(void)
 		bd->bd_dirtybufthresh = dirtybufthresh / buf_domains;
 		/* Don't allow more than 2% of bufs in the per-cpu caches. */
 		bd->bd_lim = nbuf / buf_domains / 50 / mp_ncpus;
+		/*
+			bd_maxbufspace = 215252992,
+			bd_hibufspace = 215089152,
+			bd_lobufspace = 204334692,
+			bd_bufspacethresh = 209711922,
+			bd_hifreebuffers = 384,
+			bd_lofreebuffers = 256,
+			bd_hidirtybuffers = 3289,
+			bd_lodirtybuffers = 1644,
+			bd_dirtybufthresh = 2960,
+			bd_lim = 32,
+			bd_wanted = 0,
+			bd_numdirtybuffers = 0,
+			bd_running = 0,
+			bd_bufspace = 0,
+			bd_freebuffers = 13138
+		*/
 	}
 	getnewbufcalls = counter_u64_alloc(M_WAITOK);
 	getnewbufrestarts = counter_u64_alloc(M_WAITOK);
@@ -1324,6 +1375,16 @@ bufinit(void)
 	buffreekvacnt = counter_u64_alloc(M_WAITOK);
 	bufdefragcnt = counter_u64_alloc(M_WAITOK);
 	bufkvaspace = counter_u64_alloc(M_WAITOK);
+	/*
+		bufkvaspace = 0x114010c40,
+		buffreekvacnt = 0x114010c50,
+		bufdefragcnt = 0x114010c48,
+		getnewbufcalls = 0x114010c78,
+		getnewbufrestarts = 0x114010c70,
+		mappingrestarts = 0x114010c68,
+		numbufallocfails = 0x114010c60,
+		notbufdflushes = 0x114010c58,
+	*/
 }
 
 #ifdef INVARIANTS
@@ -1488,11 +1549,15 @@ bpmap_qenter(struct buf *bp)
 	 * bp->b_offset may be offset into the first page.
 	 */
 	bp->b_data = (caddr_t)trunc_page((vm_offset_t)bp->b_data);
+	/*
+		bp->b_data 作为起始地址，申请 bp->b_npages 物理页并填充到 bp->b_pages
+	*/
 	pmap_qenter((vm_offset_t)bp->b_data, bp->b_pages, bp->b_npages);
 	bp->b_data = (caddr_t)((vm_offset_t)bp->b_data |
 	    (vm_offset_t)(bp->b_offset & PAGE_MASK));
 }
 
+// 获取 buf 所在的 domain
 static inline struct bufdomain *
 bufdomain(struct buf *bp)
 {
@@ -1500,6 +1565,7 @@ bufdomain(struct buf *bp)
 	return (&bdomain[bp->b_domain]);
 }
 
+// 获取 buf 在 domain 中的某个 buf queue
 static struct bufqueue *
 bufqueue(struct buf *bp)
 {
@@ -1533,6 +1599,8 @@ bufqueue_acquire(struct buf *bp)
 	 * bp can be pushed from a per-cpu queue to the
 	 * cleanq while we're waiting on the lock.  Retry
 	 * if the queues don't match.
+	 * 当我们等待锁时，bp 可以从每 cpu 队列推送到 cleanq。
+	 * 如果队列不匹配，请重试
 	 */
 	bq = bufqueue(bp);
 	BQ_LOCK(bq);
@@ -1552,6 +1620,7 @@ bufqueue_acquire(struct buf *bp)
  *
  *	Insert the buffer into the appropriate free list.  Requires a
  *	locked buffer on entry and buffer is unlocked before return.
+ 		将缓冲区插入相应的空闲列表。输入时需要锁定缓冲区，返回前缓冲区已解锁
  */
 static void
 binsfree(struct buf *bp, int qindex)
@@ -1596,7 +1665,9 @@ binsfree(struct buf *bp, int qindex)
 static void
 buf_free(struct buf *bp)
 {
-
+	/*
+		从这里可以猜想一下 B_REMFREE 标志的作用，
+	*/
 	if (bp->b_flags & B_REMFREE)
 		bremfreef(bp);
 	if (bp->b_vflags & BV_BKGRDINPROG)
@@ -1633,6 +1704,7 @@ buf_import(void *arg, void **store, int cnt, int domain, int flags)
 
 	BQ_LOCK(&bqempty);
 	for (i = 0; i < cnt; i++) {
+		// 从 empty queue 当中取出第一元素
 		bp = TAILQ_FIRST(&bqempty.bq_queue);
 		if (bp == NULL)
 			break;
@@ -1658,6 +1730,7 @@ buf_release(void *arg, void **store, int cnt)
 
 	bq = &bqempty;
 	BQ_LOCK(bq);
+	/* 从 uma 域直接释放一组 buffer，循环插入到 bq_queue */
         for (i = 0; i < cnt; i++) {
 		bp = store[i];
 		/* Inline bq_insert() to batch locking. */
@@ -1696,7 +1769,8 @@ buf_alloc(struct bufdomain *bd)
 		return (NULL);
 	}
 	/*
-	 * Wake-up the bufspace daemon on transition below threshold.
+	 * Wake-up the bufspace daemon on transition below threshold(门口，门槛，阈值).
+	 		在低于阈值的转换时唤醒 bufspace 守护程序
 	 */
 	if (freebufs == bd->bd_lofreebuffers)
 		bufspace_daemon_wakeup(bd);
@@ -2037,7 +2111,9 @@ bufkva_free(struct buf *bp)
 #endif
 	if (bp->b_kvasize == 0)
 		return;
-
+	/*
+		虚拟地址释放，更新全局属性参数，初始化 bp 成员变量
+	*/
 	vmem_free(buffer_arena, (vm_offset_t)bp->b_kvabase, bp->b_kvasize);
 	counter_u64_add(bufkvaspace, -bp->b_kvasize);
 	counter_u64_add(buffreekvacnt, 1);
@@ -2064,7 +2140,7 @@ bufkva_alloc(struct buf *bp, int maxsize, int gbflags)
 
 	addr = 0;
 	/*
-		利用uma机制从内核虚拟地址空间中申请一块连续的空间，大小应该是 maxsize。buffer_arena
+		利用 uma 机制从内核虚拟地址空间中申请一块连续的空间，大小应该是 maxsize。buffer_arena
 		参数指明我们从哪块区域申请，可以看出是从 buffer 空间申请，并且将虚拟内存起始地址指定给 addr
 	*/
 	error = vmem_alloc(buffer_arena, maxsize, M_BESTFIT | M_NOWAIT, &addr);
@@ -2125,6 +2201,7 @@ bufkva_reclaim(vmem_t *vmem, int flags)
  * Attempt to initiate asynchronous I/O on read-ahead blocks.  We must
  * clear BIO_ERROR and B_INVAL prior to initiating I/O . If B_CACHE is set,
  * the buffer is valid and we do not have to do anything.
+ * 尝试在预读块上启动异步I/O
  */
 static void
 breada(struct vnode * vp, daddr_t * rablkno, int * rabsize, int cnt,
@@ -3338,6 +3415,9 @@ getnewbuf_kva(struct buf *bp, int gbflags, int maxsize)
 		/*
 		 * In order to keep fragmentation sane we only allocate kva
 		 * in BKVASIZE chunks.  XXX with vmem we can do page size.
+		 * 
+		 * 为了保持碎片正常，我们只在 BKVASIZE 块中分配 KVA。从代码逻辑
+		 * 可以看出，buffer 空间的大小要设置为 BKVASIZE 的整数倍
 		 */
 		maxsize = (maxsize + BKVAMASK) & ~BKVAMASK;
 
@@ -3358,8 +3438,8 @@ getnewbuf_kva(struct buf *bp, int gbflags, int maxsize)
  *	We block if:
  *		We have insufficient(不足的，不够的) buffer headers
  *		We have insufficient buffer space
- *		buffer_arena is too fragmented ( space reservation(预订，预订) fails )
- *		If we have to flush dirty buffers ( but we try to avoid this )
+ *		buffer_arena is too fragmented(碎片化的) (space reservation(预订，预订) fails)
+ *		If we have to flush dirty buffers (but we try to avoid this)
  *
  *	The caller is responsible for releasing the reserved bufspace after
  *	allocbuf() is called.
@@ -3371,6 +3451,7 @@ getnewbuf(struct vnode *vp, int slpflag, int slptimeo, int maxsize, int gbflags)
 	struct buf *bp;
 	bool metadata, reserved;
 
+	/* gbflags: get buffer flags */
 	bp = NULL;
 	KASSERT((gbflags & (GB_UNMAPPED | GB_KVAALLOC)) != GB_KVAALLOC,
 	    ("GB_KVAALLOC only makes sense with GB_UNMAPPED"));
@@ -3867,7 +3948,7 @@ vfs_setdirty_locked_object(struct buf *bp)
  * If an unmapped buffer is provided but a mapped buffer is requested, take
  * also care to properly setup mappings between pages and KVA.
  * 
- * 为现有缓冲区分配KVA映射。如果提供了一个未映射的缓冲区，但请求了一个映射的缓冲区，那么还要
+ * 为现有缓冲区分配 KVA 映射。如果提供了一个未映射的缓冲区，但请求了一个映射的缓冲区，那么还要
  * 注意正确设置页面和页面之间的映射
  */
 static void
@@ -3991,6 +4072,8 @@ getblk(struct vnode *vp, daddr_t blkno, int size, int slpflag, int slptimeo,
 		用者在没有发出 I/O 的情况下执行此操作，则调用者应设置 B_CACHE（作为优化），否则调用者应发出
 		I/O，并且如果I/O是写入尝试或成功读取，则biodone（）将设置B_CACHE。如果调用者打算发送 READ，
 		那调用者必须在 READ 之前清除 B_INVAL 和 BIO_ERROR。biodone 函数将不会清除 B_INVAL
+
+		从注释以及函数调用上下文可知，参数 blkno 表示的是文件或者设备中的逻辑块号
  */
 int
 getblkx(struct vnode *vp, daddr_t blkno, int size, int slpflag, int slptimeo,
@@ -3998,7 +4081,7 @@ getblkx(struct vnode *vp, daddr_t blkno, int size, int slpflag, int slptimeo,
 {
 	struct buf *bp;
 	struct bufobj *bo;
-	daddr_t d_blkno；
+	daddr_t d_blkno;
 	int bsize, error, maxsize, vmio;
 	off_t offset;
 
@@ -4006,11 +4089,13 @@ getblkx(struct vnode *vp, daddr_t blkno, int size, int slpflag, int slptimeo,
 	KASSERT((flags & (GB_UNMAPPED | GB_KVAALLOC)) != GB_KVAALLOC,
 	    ("GB_KVAALLOC only makes sense with GB_UNMAPPED"));
 	ASSERT_VOP_LOCKED(vp, "getblk");
-	/* maxbcachebuf = 16k，所以说我们的 size 不能超过16k */
+	/* 
+		maxbcachebuf = 64k，所以说我们的 size 不能超过 64k。文件系统中常见的使用
+		场景就是每次读取 4k 数据
+	*/
 	if (size > maxbcachebuf)
 		panic("getblk: size(%d) > maxbcachebuf(%d)\n", size,
 		    maxbcachebuf);
-	/* 检查是否支持未映射缓存机制 */
 	if (!unmapped_buf_allowed)
 		flags &= ~(GB_UNMAPPED | GB_KVAALLOC);
 
@@ -4028,7 +4113,7 @@ loop:
 		从 gbincore 函数定义可以看出，blkno 表示的是 logical block number
 		gbincore: get block in core
 	*/
-	bp = gbincore(bo, blkno);	/* 获取与 blkno 关联的一个 buf 缓冲区 */
+	bp = gbincore(bo, blkno);	/* 判断与 blkno 关联的 buf 是否已经存在 */
 	if (bp != NULL) {	/* 说明 buffer 已经包含在了缓存区当中 */
 		int lockflags;
 		/*
@@ -4040,9 +4125,8 @@ loop:
 
 		if ((flags & GB_LOCK_NOWAIT) != 0)
 			lockflags |= LK_NOWAIT;	// 数据获取不允许等待，直接执行
-
 		/*
-			给 buffer 加锁，并且要指定 timeout
+			给 buffer 加锁，并且要指定 sleep timeout
 		*/
 		error = BUF_TIMELOCK(bp, lockflags,
 		    BO_LOCKPTR(bo), "getblk", slpflag, slptimeo);
@@ -4087,13 +4171,19 @@ loop:
 		if (bp->b_flags & B_MANAGED)
 			MPASS(bp->b_qindex == QUEUE_NONE);	
 		else
-			bremfree(bp);	// 从空闲链表中获取一块缓冲区，并标记为busy
+			bremfree(bp);	// 从空闲链表中获取一块缓冲区，并标记为 busy
 
 		/*
 		 * check for size inconsistencies for non-VMIO case.
 		 * 这个 size 其实就是从上层函数中传递进来的 SBSIZE = 1024
 		 */
 		if (bp->b_bcount != size) {
+			/*
+				当获取到的 buf->b_bocunt != size 时，说明当前这个 buf 中存放的数据与
+				期望得到的数据量大小不符。此时的处理方式就是根据其本身的属性设置，把 buf 
+				中的现有的数据写回或者直接清零。最后是返回 loop，说明要重新对这块 buf 进行
+				处理，很可能要走 else 分支
+			*/
 			if ((bp->b_flags & B_VMIO) == 0 ||
 			    (size > bp->b_kvasize)) {
 				if (bp->b_flags & B_DELWRI) {
@@ -4111,12 +4201,13 @@ loop:
 				goto loop;
 			}
 		}
-
 		/*
 		 * Handle the case of unmapped buffer which should
 		 * become mapped, or the buffer for which KVA
 		 * reservation is requested.
-		 * 处理应该映射的未映射缓冲区或请求保留的缓冲区的情况
+		 * 处理应该映射的未映射缓冲区或请求保留的缓冲区的情况。
+		 * 猜测是这个 buf 是在申请的时候并没有分配 kernel virtual address，
+		 * 这里要给该对象分配(应该是会同步分配物理页)
 		 */
 		bp_unmapped_get_kva(bp, blkno, size, flags);
 
@@ -4125,8 +4216,9 @@ loop:
 		 * the buffer.  This might lead to B_CACHE getting set or
 		 * cleared.  If the size has not changed, B_CACHE remains
 		 * unchanged from its previous state.
-		 * 如果 size 跟 VMIO 情形下不能保持一致，我们可以重置 buffer 的大小。这可能会导致 B_CACHE 
-		 * 被设置或者被清除。如果大小没有发生变化，那么 B_CACHE 将维持原有的状态
+		 * 如果 size 跟 VMIO 情形下不能保持一致，我们可以重置 buffer 的大小。
+		 * 这可能会导致 B_CACHE 被设置或者被清除。如果大小没有发生变化，那么 B_CACHE 
+		 * 将维持原有的状态
 		 */
 		allocbuf(bp, size);		// 调整缓冲区到所需大小 (size)
 
@@ -4220,8 +4312,10 @@ loop:
 		if ((flags & GB_NOSPARSE) != 0 && vmio &&
 		    !vn_isdisk(vp, NULL)) {
 			/*
-				该函数对应的应该是 ext2_bmap 函数，该函数的作用就是将文件的逻辑块号转换成它在磁盘上
-				的物理块号
+				该函数对应的应该是 ext2_bmap 函数，该函数的作用就是将文件的逻辑块号
+				转换成它在磁盘上的物理块号。这里要保证，vnode 不代表一个磁盘设备，
+				而是表示文件系统中的一个文件。如果是磁盘设备，应该就是直接走磁盘驱动
+				去读取设备，而不会利用文件系统接口去读取文件块数据。要注意两者的区别
 			*/
 			error = VOP_BMAP(vp, blkno, NULL, &d_blkno, 0, 0);
 			KASSERT(error != EOPNOTSUPP,

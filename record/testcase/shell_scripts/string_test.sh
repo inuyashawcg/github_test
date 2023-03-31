@@ -32,3 +32,7 @@
 #     echo "end"
 #     ;;
 # esac
+
+source_file="\$(printf '../../../%s '"
+
+echo ${source_file}

@@ -64,6 +64,7 @@ static int make_dev_credv(int flags, struct cdev **dres, struct cdevsw *devsw,
 
 static struct cdev_priv_list cdevp_free_list =
 		TAILQ_HEAD_INITIALIZER(cdevp_free_list);
+
 static SLIST_HEAD(free_cdevsw, cdevsw) cdevsw_gt_post_list =
 		SLIST_HEAD_INITIALIZER(cdevsw_gt_post_list);
 
@@ -78,6 +79,8 @@ void dev_lock(void)
  * locked. Since devmtx is after the system map mutex, free() cannot
  * be called immediately and is postponed until cdev mutex can be
  * dropped.
+ * 释放 cdev 互斥锁锁定时收集的所有内存。由于 devmtx 在系统映射互斥锁之后，因此
+ * 不能立即调用 free() ，并将其推迟到可以删除 cdev 互斥锁为止
  */
 static void
 dev_unlock_and_free(void)

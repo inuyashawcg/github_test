@@ -1,0 +1,286 @@
+////////////// 20230213 //////////////
+关于 tptfs 文件数据块管理的新方法(灵光一现，没有进行任何验证，仅供参考):
+  - tptfs 是内存文件系统，所以对于数据块的管理，可以使用更为复杂的数据结构
+  - 对于大型文件，最耗时的应该是在中间某个位置删除数据后，需要对剩余数据进行拷贝。这样做的目的是为了保证
+    每个数据块都是完整的，有利于后续文件指针的快速定位
+  - 新的管理方法一定要做到尽可能较少数据拷贝
+  - 一种可能的方法，是在文件类或者 inode 中增加管理元数据，把对数据的拷贝变成对元数据的处理
+  - 由于不再进行大量的数据拷贝，所以每个数据块很可能是残缺不全的，这就要求元数据能够知道每个数据块中当前
+    包含有多少可用数据，以及在文件中的偏移量是多少
+  - 相邻的残缺数据块可以合并到一个完整数据块中
+
+// 对应一个虚拟页
+struct block_node {
+  uint64_t offset_in_file;  // 相对于文件起始位置的偏移量
+  uint64_t used_bytes;  // 这个页包含的字节数，最大 4096 bytes
+  uint64_t virtual_page_number; / vm_offset_t start_address;
+
+  // 类似二叉平衡搜索树的结构
+  struct block_node* parent;
+  struct block_node* left;
+  struct block_node* right;
+  // ...
+}
+
+class TptFile {
+  // ...
+  struct block_node* root;
+};
+
+- block_node 做成类似平衡二叉树的结构，实现文件指针的快速定位
+- 每个页中的数据都是从起始位置连续存放，遇到在中间位置删除内容的情况，把剩余字节向前移动
+- 页中数据不清零，或者无法与相邻页面进行合并时，树节点一直保留
+...
+
+tptuser@linux-1:~/mc/riscv-qihai$
+ssh tptuser@192.168.2.221
+
+root 好像是不能登录的
+
++--------------------------------------------------+
+192.168.2.221 qihai qemu 环境搭建
++--------------------------------------------------+
+
+1. 确保当前目录下存在 qihai.disk 文件, 不小于 PHASE_SIZE * 3, 推荐 30G
+    dd if=/dev/zero of=qihai.disk bs=1G count=32
+2. 进入 qihai, 编译 kernel.elf
+3. 进入 buildrootfs, 生成 rootfs.img
+    cd buildrootfs; ./build_rootfs.sh
+4. 使用脚本, 生成 qihai.img
+    python3 ./build-image.py -p qihai_tptfs/build/riscv.riscv64/qihai.elf -f buildrootfs/rootfs.img
+5. 创建虚拟网卡给 qemu 使用, u-boot 在直连模式下无法识别网络
+    sudo ./tuntap.sh up
+6. 在本地创建 tftp 服务器, 或者使用远程的 tftp 服务器
+   将 qihai.img 和 virt.dtb 拷贝到 tftp 服务器中
+
+7. 运行 qemu 并进入 u-boot
+   7.1 如果不是第一次, 则什么也不用做
+   7.2 第一次, 需要重新烧写磁盘
+        set serverip ${tftp_ip}; run update_qihai;
+        run distro_bootcmd;
+8. 本机搭建 tftp 服务器
+
+2023-02-13
++--------------------------------------------------+
+192.168.2.221 qihai qemu 环境使用
++--------------------------------------------------+
+1. qihai 代码屏蔽了 PersistentMemory.cpp 中对 disk magic num 的校验
+2. 在此基础上继续开发, 开发结束后, 重新编译 qihai.elf.
+3. 使用上面4 继续重新生成 qihai.img.
+4. 将 qihai.img 拷贝到 tftp root 目录, 方便 u-boot 进行下载.
+5. 运行 ./run.sh 进入 u-boot, 停止自动加载, 进入命令行模式.
+6. 运行 run update_qihai; 对镜像进行更新并写磁盘.
+7. 运行 run distro_bootcmd; 进行加载操作系统.
+以上
+
+./build_rootfs.sh /work/tptuser/mc/riscv-qihai/buildrootfs/rootfs /work/tptuser/mc/riscv-qihai/buildrootfs/formatting_disk /work/tptuser/mc/riscv-qihai/buildrootfs 16M
+clang++ *.cpp -o format --std=c++17 -lstdc++fs
+
+$4 = (superblock *) 0x104000000
+(gdb) p *SuperBlock
+$5 = {
+  start_virtual_page = 0,
+  start_virtual_address = 0,
+  page_bitmap_vaddr = 0,
+  page_bitmap_offset = 0,
+  page_bitmap_size = 0,
+  inode_bitmap_vaddr = 0,
+  inode_bitmap_offset = 0,
+  inode_bitmap_size = 0,
+  inode_table_vaddr = 0,
+  inode_table_offset = 0,
+  inode_table_size = 0,
+  data_region_vaddr = 0,
+  data_region_offset = 0,
+  data_region_size = 0,
+  page_size = 0,
+  superblock_size = 0,
+  inode_size = 0,
+  inodes_count = 0,
+  inodes_free = 0,
+  pages_count = 0,
+  pages_free = 0,
+  dir_count = 0,
+  inodes_per_page = 0,
+  magic_number = 0,
+  max_file_size = 0,
+  qbmask = 0,
+  page_shift = 0,
+  features_incompat = 0,
+  features_compat = 0,
+  format_inodes_used = 0,
+  format_pages_used = 0,
+  mount_point = "/", '\000' <repeats 510 times>,
+  read_only = 0 '\000',
+  is_format = 0 '\000',
+  modified_flag = 0 '\000'
+}
+
+可以使用 xxd 命令读取输出16进制数据，linux 和 freebsd 都包含此工具
+
+uboot启动时的打印信息:
+  ...
+  Bytes transferred = 92794880 (587f000 hex)
+    check qihai image header magic success.
+    flush qihai disk phase 0 with 0 success.
+    Write qihai disk header to disk success.
+    Write qihai lib to disk phase 0 success, addr=0x100001000, blk=0x50, cnt=0x3bc8.
+    Write qihai code to disk phase 0 success, addr=0x10077a000, blk=0x460050, cnt=0x20828.
+    Write qihai fs to disk phase 0 success, addr=0x10487f000, blk=0x420050, cnt=0x8000.
+    Write qihai lib to disk phase 1 success, addr=0x100001000, blk=0x1002050, cnt=0x3bc8.
+    Write qihai code to disk phase 1 success, addr=0x10077a000, blk=0x1462050, cnt=0x20828.
+    Write qihai fs to disk phase 1 success, addr=0x10487f000, blk=0x1422050, cnt=0x8000.
+  ...
+addr = 虚拟地址， blk = 磁盘块
+可以利用 blk 算出数据在 qihai.img 中的偏移量，然后使用 xxd 命令打印数据
+
+
+mercury@mercury:/share/rd/backup/wcg/tptfs_code_review_offline/qihai$ git diff sys/pm/Snapshot.h
+diff --git a/sys/pm/Snapshot.h b/sys/pm/Snapshot.h
+index 0b838e163..30a592062 100644
+--- a/sys/pm/Snapshot.h
++++ b/sys/pm/Snapshot.h
+@@ -23,7 +23,8 @@ class Snapshot : public KernelObject {
+ public:
+     Snapshot(PhaseHeader *header) : header(header) {}
+     ~Snapshot() {}
+-    page_no_t getLBN(uint64_t pageno) { return header->globalRegisterArea.startLoc - SYSTEM_PARTITION_START + pageno; }
++    //page_no_t getLBN(uint64_t pageno) { return header->globalRegisterArea.startLoc - SYSTEM_PARTITION_START + pageno; }
++    page_no_t getLBN(uint64_t pageno) { return header->globalRegisterArea.startLoc + pageno; }
+ 
+ private:
+     const PhaseHeader* header;
+@@ -31,4 +32,4 @@ private:
+ 
+ } // end of namespace Kernel
+ 
+-#endif //_KERNEL_SNAPSHOT_H_
+
+上面的问题是磁盘分区划分导致的问题 (现阶段还不支持)
+
+
+////////////// 20230216 //////////////
+/share/rd/backup/wcg/tptfs_code_review_offline
+
+ssh tptuser@192.168.2.221
+
+/home/mercury/Videos/qihai_riscv
+
+TFTP from server 192.168.2.221; our IP address is 192.168.3.2; sending through gateway 192.168.3.1
+
+# kyua test -k Kyuafile 
+*** Fatal signal 6 received
+*** Log file is /.kyua/logs/kyua.20230216-093810.log
+*** Please report this problem to kyua-discuss@gpid 33 (/sbin/kyua), jid 0, uid 0: exited on signal 6
+ooglegroups.com detailing what you were doing before the crash happened; if possible, include the log file mentioned above
+Abort
+# cat /.kyua/logs/kyua.20230216-093810.log
+20230216-093810 I 33 /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:343: kyua 0.13
+20230216-093810 I 33 /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:348: Command line: kyua test -k Kyuafile
+20230216-093810 W 33 /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/signals/interrupts.cpp:206: Destroying still-programmed signals::interrupts_handler object
+# 
+
+
+////////////// 20230216 //////////////
+Thread 2 hit Breakpoint 2, utils::signals::interrupts_handler::unprogram (this=0x4020c048)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/signals/interrupts.cpp:222
+222	    PRE(_programmed);
+(gdb) bt
+#0  utils::signals::interrupts_handler::unprogram (this=0x4020c048)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/signals/interrupts.cpp:222
+#1  0x000000010cf78110 in utils::signals::interrupts_handler::~interrupts_handler (this=0x4020c048)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/signals/interrupts.cpp:208
+#2  0x000000010cf6fe6a in std::__1::auto_ptr<utils::signals::interrupts_handler>::~auto_ptr (
+    this=0x4021ba10)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/llvm-project/libcxx/include/__memory/auto_ptr.h:49
+#3  0x000000010cf6d040 in utils::process::executor::executor_handle::impl::impl (this=0x4021ba00)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/process/executor.cpp:563
+#4  0x000000010cf6ce66 in utils::process::executor::executor_handle::executor_handle (
+    this=0x4021f368)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/process/executor.cpp:678
+#5  0x000000010cf6d978 in utils::process::executor::setup ()
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/process/executor.cpp:724
+#6  0x000000010cfd685a in engine::scheduler::scheduler_handle::impl::impl (this=0x4021f360)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/engine/scheduler.cpp:813
+#7  0x000000010cfd67ee in engine::scheduler::scheduler_handle::scheduler_handle (this=0xffffce10)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/engine/scheduler.cpp:933
+#8  0x000000010cfd709c in engine::scheduler::setup ()
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/engine/scheduler.cpp:1018
+#9  0x000000010cffae1c in drivers::run_tests::drive (kyuafile_path=..., build_root=..., 
+    store_path=..., filters=..., user_config=..., hooks=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/drivers/run_tests.cpp:261
+#10 0x000000010d001d96 in cli::cmd_test::run (this=0x40243880, ui=0xffffe800, cmdline=..., 
+    user_config=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/cmd_test.cpp:158
+#11 0x000000010d026dd4 in utils::cmdline::base_command<utils::config::tree>::main (this=0x40243880, 
+    ui=0xffffe800, args=..., data=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/cmdline/base_command.ipp:96
+#12 0x000000010d0225bc in (anonymous namespace)::run_subcommand (ui=0xffffe800, command=0x40243880, 
+    args=..., user_config=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:139
+#13 0x000000010d021680 in (anonymous namespace)::safe_main (ui=0xffffe800, argc=4, argv=0xffffebe0, 
+    mock_command=...) at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:228
+#14 0x000000010d01fb08 in cli::main (ui=0xffffe800, argc=4, argv=0xffffebe0, mock_command=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:280
+#15 0x000000010d021b8c in cli::main (argc=4, argv=0xffffebe0)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:353
+#16 0x000000010cf2c478 in kyua_main (argc=4, argv=0xffffebe0)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/main.cpp:49
+#17 0x000000010cb53ec6 in main (argc=4, argv=0xffffebe0, env=0xffffec08)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/lib/csu/riscv/crt1_c.c:83
+
+
+通过阅读 kyua 源码发现，上述代码调用过程中，有创建临时目录的逻辑，而且是在一个构造函数中。推测，kyua 执行必须在根目录下
+包含一个 tmp 目录(不太清除为什么不能临时创建，权限的关系？)。手动创建之后发现提示新的错误信息:
+
+  kyua: E: Cannot read database schema '/usr/share/kyua/store/schema_v3.sql'.
+
+推测 kyua 执行需要有必要的数据库支持才可以。在 installworld 中发现根文件系统中确实存在相关文件:
+  root@:/usr/home/wcg/workspace/riscv-world/usr/share/kyua # ls -alh store/
+  total 44
+  drwxr-xr-x  2 root  wcg   512B Dec 29 19:13 .
+  drwxr-xr-x  4 root  wcg   512B Dec 28 21:51 ..
+  -r--r--r--  1 root  wcg    14K Dec 29 19:13 migrate_v1_v2.sql
+  -r--r--r--  1 root  wcg   4.8K Dec 29 19:13 migrate_v2_v3.sql
+  -r--r--r--  1 root  wcg   9.1K Dec 29 19:13 schema_v3.sql
+
+把上述文件添加到根文件系统继续测试
+
+./build_rootfs.sh /home/mercury/Videos/qihai_riscv/buildrootfs/rootfs /home/mercury/Videos/qihai_riscv/buildrootfs/formatting_disk /home/mercury/Videos/qihai_riscv/buildrootfs 16M
+
+
+#0  sqlite3VdbeExec (p=0x4022e008)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/sqlite3/sqlite3.c:87491
+#1  0x000000010cbeeb22 in sqlite3Step (p=0x4022e008)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/sqlite3/sqlite3.c:85154
+#2  0x000000010cbe9b98 in sqlite3_step (pStmt=0x4022e008)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/sqlite3/sqlite3.c:85211
+#3  0x000000010cbf35b0 in sqlite3_exec (db=0x4026e008, 
+    zSql=0x402ec004 "-- ", '-' <repeats 73 times>, "\n-- Verbatim files.\n-- ", '-' <repeats 73 times>, "\n\n\n-- Copies of files or log"..., xCallback=0x0, pArg=0x0, pzErrMsg=0x0)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/sqlite3/sqlite3.c:127217
+#4  0x000000010cf82ff6 in utils::sqlite::database::exec (this=0xffffc868, sql=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/sqlite/database.cpp:284
+#5  0x000000010cff445c in store::detail::initialize (db=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/store/write_backend.cpp:113
+#6  0x000000010cff4e6c in store::write_backend::open_rw (file=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/store/write_backend.cpp:178
+#7  0x000000010cffae74 in drivers::run_tests::drive (kyuafile_path=..., build_root=..., store_path=..., 
+    filters=..., user_config=..., hooks=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/drivers/run_tests.cpp:265
+#8  0x000000010d001d96 in cli::cmd_test::run (this=0x40243880, ui=0xffffe800, cmdline=..., user_config=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/cmd_test.cpp:158
+#9  0x000000010d026dd4 in utils::cmdline::base_command<utils::config::tree>::main (this=0x40243880, 
+    ui=0xffffe800, args=..., data=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/cmdline/base_command.ipp:96
+#10 0x000000010d0225bc in (anonymous namespace)::run_subcommand (ui=0xffffe800, command=0x40243880, args=..., 
+    user_config=...) at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:139
+#11 0x000000010d021680 in (anonymous namespace)::safe_main (ui=0xffffe800, argc=4, argv=0xffffebe0, 
+    mock_command=...) at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:228
+#12 0x000000010d01fb08 in cli::main (ui=0xffffe800, argc=4, argv=0xffffebe0, mock_command=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:280
+#13 0x000000010d021b8c in cli::main (argc=4, argv=0xffffebe0)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:353
+#14 0x000000010cf2c478 in kyua_main (argc=4, argv=0xffffebe0)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/main.cpp:49
+#15 0x000000010cb53ec6 in main (argc=4, argv=0xffffebe0, env=0xffffec08)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/lib/csu/riscv/crt1_c.c:83

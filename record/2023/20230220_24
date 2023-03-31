@@ -1,0 +1,461 @@
+////////////// 20230220 //////////////
+  Thread 2 hit Breakpoint 7, sqlite3_exec (db=0x4026e008, 
+    zSql=0x4029a1a8 "SELECT*FROM\"main\".sqlite_master WHERE tbl_name='files' AND type!='trigger' ORDER BY rowid", 
+    xCallback=0x10cce8184 <sqlite3InitCallback>, pArg=0xffffb830, pzErrMsg=0x0)
+
+当出现 tbl_name='files' AND type!='trigger' 这个语句的时候，会出错
+
+Thread 2 hit Breakpoint 6, utils::sqlite::database::exec (this=0xffffc868, sql=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/sqlite/database.cpp:284
+284	    const int error = ::sqlite3_exec(_pimpl->db, sql.c_str(), NULL, NULL, NULL);
+(gdb) n
+285	    if (error != SQLITE_OK)
+(gdb) p error
+$2 = 10
+
+#0  utils::sqlite::database::exec (this=0xffffc868, sql=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/sqlite/database.cpp:285
+#1  0x000000010cfe13a2 in store::detail::initialize (db=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/store/write_backend.cpp:113
+#2  0x000000010cfe1db2 in store::write_backend::open_rw (file=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/store/write_backend.cpp:178
+#3  0x000000010cfe7dba in drivers::run_tests::drive (kyuafile_path=..., build_root=..., store_path=..., 
+    filters=..., user_config=..., hooks=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/drivers/run_tests.cpp:265
+#4  0x000000010cfeecdc in cli::cmd_test::run (this=0x40243880, ui=0xffffe800, cmdline=..., 
+    user_config=...) at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/cmd_test.cpp:158
+#5  0x000000010d013d1a in utils::cmdline::base_command<utils::config::tree>::main (this=0x40243880, 
+    ui=0xffffe800, args=..., data=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/utils/cmdline/base_command.ipp:96
+#6  0x000000010d00f502 in (anonymous namespace)::run_subcommand (ui=0xffffe800, command=0x40243880, 
+    args=..., user_config=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:139
+#7  0x000000010d00e5c6 in (anonymous namespace)::safe_main (ui=0xffffe800, argc=4, argv=0xffffebe0, 
+    mock_command=...) at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:228
+#8  0x000000010d00ca4e in cli::main (ui=0xffffe800, argc=4, argv=0xffffebe0, mock_command=...)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:280
+#9  0x000000010d00ead2 in cli::main (argc=4, argv=0xffffebe0)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/cli/main.cpp:353
+#10 0x000000010cf1920c in kyua_main (argc=4, argv=0xffffebe0)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/contrib/kyua/main.cpp:49
+#11 0x000000010cc0e568 in main (argc=4, argv=0xffffebe0, env=0xffffec08)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/lib/csu/riscv/crt1_c.c:83
+(gdb) n
+286	        throw api_error::from_database(*this, "sqlite3_exec");
+
+
+127221	    while( 1 ){
+(gdb) 
+127223	      rc = sqlite3_step(pStmt);
+(gdb) 
+127224	      rc1 = rc;
+(gdb) p rc
+$27 = 10
+
+当执行到第 5 次的时候，会报错
+sqlite3_step
+
+85148	  if( p->explain ){
+(gdb) 
+85153	    db->nVdbeExec++;
+(gdb) 
+85154	    rc = sqlite3VdbeExec(p);
+(gdb) 
+
+Thread 1 received signal SIGTRAP, Trace/breakpoint trap.
+0x000000010c03932c in cpu_idle (busy=1)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/riscv/riscv/machdep.cpp:209
+warning: Source file is more recent than executable.
+209	        __asm __volatile("fence \n"
+
+
+
+90303	      db->autoCommit = (u8)desiredAutoCommit;
+(gdb) 
+90305	    if( sqlite3VdbeHalt(p)==SQLITE_BUSY ){
+(gdb) 
+
+Thread 1 received signal SIGTRAP, Trace/breakpoint trap.
+0x000000010c03932c in cpu_idle (busy=0)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/riscv/riscv/machdep.cpp:209
+209	        __asm __volatile("fence \n"
+
+
+82303	          rc = vdbeCommit(db, p);
+(gdb) n
+
+Thread 1 received signal SIGTRAP, Trace/breakpoint trap.
+0x000000010c03932c in cpu_idle (busy=1)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/riscv/riscv/machdep.cpp:209
+209	        __asm __volatile("fence \n"
+
+
+kyua: E: Failed to initialize database: disk I/O error (sqlite op: sqlite3_exec) (sqlite db: /.kyua/store/results.tests_sys_vm.20230221-023813-698950.db).
+# kyua test -k Kyuafile
+mlock_test:mlock__copy_on_write_anon  ->  passed  [0.157s]
+mlock_test:mlock__copy_on_write_vnode  ->  failed: /home/mercury/Videos/qihai_riscv/qihai_tptfs/tests/sys/vm/mlock_test.c:66: child exited with status 1  [0.173s]
+mlock_test:mlock__truncate_and_resize  ->  passed  [0.212s]
+mlock_test:mlock__truncate_and_unlock  ->  passed  [0.137s]
+mmap_test:mmap__bad_arguments  ->  passed  [0.189s]
+mmap_test:mmap__dev_zero_private  ->  passed  [0.104s]
+mmap_test:mmap__dev_zero_shared  ->  passed  [0.110s]
+mmap_test:mmap__map_at_zero  ->  >>>>>> ERROR: FindSysctlObjectByPath fail, name=security.bsd.map_at_zero.
+broken: Test result contains multiple lines: skipped: sysctl for security.bsd.map_at_zero failed: No such file or directory<<NEWLINE>>  [0.125s]
+mmap_test:mmap__write_only  ->  passed  [0.097s]
+page_fault_signal:page_fault_signal__bus_objerr_1  ->  passed  [0.151s]
+page_fault_signal:page_fault_signal__bus_objerr_2  ->  
+QEMU: Terminated
+
+直接执行会报数据库初始化错误；单步调试过程中有时候可以执行测试例程，但是会阻塞
+
+
+
+////////////// 20230221 //////////////
+Thread 1 hit Breakpoint 3, TptLookup::lookupDirect (this=0xffffffd1c0d7e7a0, 
+    NameiData=0x115e8f960)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/fs/tptfs/TptLookup.cpp:37
+37	    fs_type_t fs_type = TPTFS;
+(gdb) p *NameiData 
+$19 = {
+  ni_dirp = 0x40203400 "/tmp/kyua.GoIJq4",
+  ni_segflg = UIO_USERSPACE,
+  ni_rightsneeded = 0x110088908 <cap_mkdirat_rights>,
+  ni_startdir = 0xffffffd1c0cd5d58,
+  ni_rootdir = 0xffffffd1c0cd5d58,
+  ni_topdir = 0x0,
+  ni_dirfd = -100,
+  ni_lcf = 0,
+  ni_filecaps = {
+    fc_rights = {
+      cr_rights = {0, 0}
+    },
+    fc_ioctls = 0x0,
+    fc_nioctls = -1,
+    fc_fcntls = 0
+  },
+  ni_vp = 0x0,
+  ni_dvp = 0x163735000,
+  ni_resflags = 1,
+  ni_debugflags = 0,
+  ni_loopcnt = 0,
+  ni_pathlen = 16,
+  ni_next = 0x0,
+  ni_cnd = {
+    cn_origflags = 137708457632,
+    cn_flags = 279595,
+    cn_thread = 0x163735000,
+    cn_cred = 0xffffffd1c0e63300,
+    cn_nameiop = CREATE,
+    cn_lkflags = 0,
+    cn_pnbuf = 0xffffffd1c0ccdc00 "/tmp/kyua.GoIJq4",
+    cn_nameptr = 0xffffffd1c0ccdc01 "tmp/kyua.GoIJq4",
+    cn_namelen = 4662557776
+  },
+  ni_cap_tracker = {
+    tqh_first = 0x0,
+    tqh_last = 0x115e8fa20
+  }
+}
+(gdb) bt
+#0  TptLookup::lookupDirect (this=0xffffffd1c0d7e7a0, NameiData=0x115e8f960)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/fs/tptfs/TptLookup.cpp:37
+#1  0x000000010c3889b8 in tpt_lookup (ndp=0x115e8f960)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/fs/tptfs/TptFileSystem.cpp:817
+#2  0x000000010c083a62 in VfsLookup::namei (this=0x110104f78 <vfsLookup>, ndp=0x115e8f960)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/kernel/VfsLookup.cpp:504
+#3  0x000000010c086384 in namei (ndp=0x115e8f960)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/kernel/VfsLookupWrapper.cpp:15
+#4  0x000000010c26a222 in kern_mkdirat (td=0x163735000, fd=-100, 
+    path=0x40203400 "/tmp/kyua.GoIJq4", segflg=UIO_USERSPACE, mode=448)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/kernel/vfs_syscalls.cpp:3765
+#5  0x000000010c26a114 in sys_mkdir (td=0x163735000, uap=0x1637353e8)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/kernel/vfs_syscalls.cpp:3732
+#6  0x000000010c03fa34 in syscallenter (td=0x163735000)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/riscv/riscv/../../kernel/subr_syscall:189
+#7  0x000000010c03f332 in ecall_handler ()
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/riscv/riscv/trap.cpp:174
+#8  0x000000010c0165d0 in system_call ()
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/riscv/riscv/swtch.S:601
+
+创建一个随机生成字符串命名的目录 = /tmp/kyua.GoIJq4
+
+
+# kyua test -k Kyuafile
+random: unblocking device.
+kyua: E: Failed to initialize database: near "20230221": syntax error (sqlite op: sqlite3_exec) (sqlite db: /.kyua/store/results.usr_tests_sys_fs_tptfs.20230221-073339-661728.db).
+# kyua report --results-file=/.kyua/store/results.usr_tests_sys_fs_tptfs.2023022
+1-073339-661728.db
+kyua: E: Invalid metadata schema: no such table: metadata (sqlite op: sqlite3_prepare_v2) (sqlite db: /.kyua/store/results.usr_tests_sys_fs_tptfs.20230221-073339-661728.db).
+# 
+
+tftp 无法启动问题:
+https://blog.csdn.net/akaiziyou/article/details/107812739
+
+该链接经常打不开，这里直接把内容拷贝过来：
+    1 现象
+    $ sudo /etc/init.d/tftpd-hpa start
+    [....] Starting tftpd-hpa (via systemctl): tftpd-hpa.serviceJob for tftpd-hpa.service failed because the control process exited with error code.
+    See "systemctl status tftpd-hpa.service" and "journalctl -xe" for details.
+    failed!
+
+    2 定位问题
+    2.1 发现是由于tftp使用的69端口被占用
+    $ systemctl status tftpd-hpa.service
+    ● tftpd-hpa.service - LSB: HPA's tftp server
+    Loaded: loaded (/etc/init.d/tftpd-hpa; generated)
+    Active: failed (Result: exit-code) since Wed 2020-08-05 11:22:06 CST; 7s ago
+        Docs: man:systemd-sysv-generator(8)
+    Process: 28487 ExecStart=/etc/init.d/tftpd-hpa start (code=exited, status=71)
+
+    $ sudo journalctl -xe
+    ......
+    Aug 05 11:22:06 pek-vx-nwk1 sudo[28471]: svc-cmnet : TTY=pts/32 ; PWD=/ ; USER=root ; COMMAND=/etc/init.d/tftpd-hpa start
+    Aug 05 11:22:06 pek-vx-nwk1 sudo[28471]: pam_unix(sudo:session): session opened for user root by svc-cmnet(uid=0)
+    Aug 05 11:22:06 pek-vx-nwk1 systemd[1]: Starting LSB: HPA's tftp server...
+    -- Subject: Unit tftpd-hpa.service has begun start-up
+    -- Defined-By: systemd
+    -- Support: http://www.ubuntu.com/support
+    --
+    -- Unit tftpd-hpa.service has begun starting up.
+    Aug 05 11:22:06 pek-vx-nwk1 tftpd-hpa[28487]:  * Starting HPA's tftpd in.tftpd
+    Aug 05 11:22:06 pek-vx-nwk1 in.tftpd[28509]: cannot bind to local IPv4 socket: Address already in use
+    Aug 05 11:22:06 pek-vx-nwk1 systemd[1]: tftpd-hpa.service: Control process exited, code=exited status=71
+    Aug 05 11:22:06 pek-vx-nwk1 systemd[1]: tftpd-hpa.service: Failed with result 'exit-code'.
+    Aug 05 11:22:06 pek-vx-nwk1 systemd[1]: Failed to start LSB: HPA's tftp server.
+    -- Subject: Unit tftpd-hpa.service has failed
+    -- Defined-By: systemd
+    -- Support: http://www.ubuntu.com/support
+    --
+    -- Unit tftpd-hpa.service has failed.
+    --
+    -- The result is RESULT.
+    Aug 05 11:22:06 pek-vx-nwk1 sudo[28471]: pam_unix(sudo:session): session closed for user root
+    Aug 05 11:22:41 pek-vx-nwk1 sudo[28550]: svc-cmnet : TTY=pts/32 ; PWD=/ ; USER=root ; COMMAND=/bin/journalctl -xe
+    Aug 05 11:22:41 pek-vx-nwk1 sudo[28550]: pam_unix(sudo:session): session opened for user root by svc-cmnet(uid=0)
+
+    2.2 查找占用69端口的进程，发现是xinetd
+    $ sudo netstat -lnp | grep 69
+    tcp        0      0 127.0.0.1:6942          0.0.0.0:*               LISTEN      35952/java
+    udp        0      0 0.0.0.0:69              0.0.0.0:*                           3192/xinetd
+
+    3 解决问题
+    3.1 关闭xinetd占用的69端口
+    3.1.1 查找为何xinetd占用69端口
+    /etc/xinetd.d下是xinet的自动启动的服务，发现包含tftp
+
+    $ cd /etc/xinetd.d/
+
+    $ ls -l
+
+    -rw-r--r-- 1 root root 640 Feb  6  2018 chargen
+    -rw-r--r-- 1 root root 313 Feb  6  2018 chargen-udp
+    -rw-r--r-- 1 root root 502 Feb  6  2018 daytime
+    -rw-r--r-- 1 root root 313 Feb  6  2018 daytime-udp
+    -rw-r--r-- 1 root root 391 Feb  6  2018 discard
+    -rw-r--r-- 1 root root 312 Feb  6  2018 discard-udp
+    -rw-r--r-- 1 root root 422 Feb  6  2018 echo
+    -rw-r--r-- 1 root root 304 Feb  6  2018 echo-udp
+    -rw-r--r-- 1 root root 312 Feb  6  2018 servers
+    -rw-r--r-- 1 root root 314 Feb  6  2018 services
+    -rwxrwxrwx 1 root root 464 Aug  5 11:12 tftp*
+    -rw-r--r-- 1 root root 569 Feb  6  2018 time
+    -rw-r--r-- 1 root root 313 Feb  6  2018 time-udp
+
+    3.1.2 编辑文件 /etc/xinetd.d/tftp，禁止xinetd启动时自动启动
+    将disable设为yes，保存退出
+
+    service tftp
+    {
+            socket_type             = dgram
+            protocol                = udp
+            wait                    = yes
+            user                    = root
+            server                  = /usr/sbin/in.tftpd
+            server_args             = -s /tftpboot
+    #       server_args             = -s /
+            disable                 = yes
+            per_source              = 11
+            cps                     = 100 2
+            flags                   = IPv4
+    }
+
+    3.1.3 重新启动xinet服务，再次查看netstat，发现69端口不再被占用，成功关闭69端口
+    $ sudo service xinetd restart
+
+    $ sudo netstat -lnp | grep 69
+    tcp        0      0 127.0.0.1:6942          0.0.0.0:*               LISTEN      35952/java
+    
+
+    3.2 再次启动tftp-hpa，成功
+    $ sudo /etc/init.d/tftpd-hpa start
+    [ ok ] Starting tftpd-hpa (via systemctl): tftpd-hpa.service.
+
+    4 改进配置
+    4.1 根因分析
+    发现这个问题是由于tftp download文件失败，从tftpd-hpa 服务配置的tftp根目录位置download文件失败。
+
+    $ cat /etc/default/tftpd-hpa
+    # /etc/default/tftpd-hpa
+
+    TFTP_USERNAME="tftp"
+    TFTP_DIRECTORY="/"
+    TFTP_ADDRESS=":69"
+    TFTP_OPTIONS="--secure"
+
+    而xinetd服务自启动的tftp服务中的tftp根目录的位置与tftpd-hpa的配置不一致，导致启动tftpd-hpa服务失败。
+
+    问题解决前的xinetd.d/tftp的配置如下：
+
+    $ cat /etc/xinetd.d/tftp
+    service tftp
+    {
+            socket_type             = dgram
+            protocol                = udp
+            wait                    = yes
+            user                    = root
+            server                  = /usr/sbin/in.tftpd
+            server_args             = -s /tftpboot
+    #      server_args             = -s /
+            disable                 = no
+            per_source              = 11
+            cps                     = 100 2
+            flags                   = IPv4
+    }
+
+    4.2 改正xinetd自启动tftp服务的配置，使其与tftpd-hpa的配置一致，使能自启动tftp
+    $ cat /etc/xinetd.d/tftp
+    service tftp
+    {
+            socket_type             = dgram
+            protocol                = udp
+            wait                    = yes
+            user                    = root
+            server                  = /usr/sbin/in.tftpd
+    #      server_args             = -s /tftpboot
+            server_args             = -s /
+            disable                 = no
+            per_source              = 11
+            cps                     = 100 2
+            flags                   = IPv4
+    }
+
+    4.3 重启xinetd服务，查看xinetd占用69端口
+    $ sudo service xinetd start
+
+    $ sudo netstat -lnp | grep 69
+    tcp        0      0 127.0.0.1:6942          0.0.0.0:*               LISTEN      35952/java
+    udp        0      0 0.0.0.0:69              0.0.0.0:*                           19497/xinetd
+
+    4.4 测试tftp download文件，成功
+
+
+////////////// 20230223 //////////////
+  对比 freebsd 和 qihai 系统 kyua vm 模块的结果来看，tptfs 下 schema_v3.db 数据库中的数据被异常改写 (freebsd 下没有这种情况发生)。
+通过 gdb 调试结果来看，推测测试流程是: kyua 例程首相创建并初始化一些 .db 文件，然后从 schema_v3.db 中读取预设的 sql 语句，然后对这些
+语句进行编译、解析和执行，直到完成所有的测试项；
+  写操作应该只发生在一些 log 文件或者新生成的 .db 文件中，类似 schema_v3.db 等已经存在的文件，应该只有读操作。产生上述异常的原因，可能是:
+    - inode / block bitmap 管理异常，多个文件共享一个 inode / block number，导致文件读写操作混乱
+    - 多进程同步异常？
+
+/usr/share/kyua/store/schema_v3.sql 对应的 inode:
+    (gdb) p *inode
+    $2 = {
+        number = 25,
+        modify_revision = 71612584315,
+        next_alloc_page = 0,
+        next_alloc_goal = 0,
+        links_count = 1,
+        filemode = 33204,
+        uid = 0,
+        gid = 0,
+        inode_flags = 0,
+        status_flags = 0,
+        generation = 0,
+        pages_count = 3,
+        size = 9280,
+        access_time = 1676963553,
+        change_time = 1676967015,
+        modify_time = 1676602305,
+        birth_time = 1676602305,
+        acl_page = 0,
+        extend_attribute = 0,
+        {
+            {
+                direct_index = {259, 260, 261, 0 <repeats 12 times>},
+                indirect_index = {0, 0, 0}
+            },
+            page_index = {259, 260, 261, 0 <repeats 15 times>}
+        }
+    }
+
+
+/.kyua/store/results.usr_tests_sys_vm.20230223-034957-263971.db-journal 对应 inode:
+(gdb) p inode
+$25 = (tpt_inode *) 0x104009000
+(gdb) p *inode
+$26 = {
+  number = 96,
+  modify_revision = 274923520356,
+  next_alloc_page = 0,
+  next_alloc_goal = 259,
+  links_count = 1,
+  filemode = 33188,
+  uid = 0,
+  gid = 0,
+  inode_flags = 6,
+  status_flags = 0,
+  generation = 2877258729,
+  pages_count = 1,
+  size = 0,
+  access_time = 1677124204,
+  change_time = 1677124204,
+  modify_time = 1677124204,
+  birth_time = 1677124204,
+  acl_page = 0,
+  extend_attribute = 0,
+  {
+    {
+      direct_index = {259, 0 <repeats 14 times>},
+      indirect_index = {0, 0, 0}
+    },
+    page_index = {259, 0 <repeats 17 times>}
+  }
+}
+
+上下对比可以发现，日志文件申请的数据块，覆盖了 schema_v3.sql，所以导致该文件的数据被改写。实际测试:
+qihai.disk
+    mercury@mercury:~/Videos/qihai_riscv$ xxd -s 0x8400b000 -l 16 qihai.disk 
+    8400b000: ffff ffff ffff ffff ffff 0100 0000 0000  ................
+    mercury@mercury:~/Videos/qihai_riscv$ xxd -s 0x8400c000 -l 16 qihai.disk 
+    8400c000: ffff ffff ffff ffff ffff ff03 0000 0000  ................
+
+qihai.img
+    mercury@mercury:~/Videos/qihai_riscv$ xxd -s 76021760 -l 16 qihai.img 
+    04880000: ffff ffff ffff ffff ffff 0100 0000 0000  ................
+    mercury@mercury:~/Videos/qihai_riscv$ xxd -s 76025856 -l 16 qihai.img 
+    04881000: ffff ffff ffff ffff ffff 0300 0000 0000  ................
+
+rootfs.img
+    mercury@mercury:~/Videos/qihai_riscv/buildrootfs$ xxd -s 4096 -l 16 rootfs.img 
+    00001000: ffff ffff ffff ffff ffff 0100 0000 0000  ................
+    mercury@mercury:~/Videos/qihai_riscv/buildrootfs$ xxd -s 8192 -l 16 rootfs.img 
+    00002000: ffff ffff ffff ffff ffff 0300 0000 0000  ................
+
+...
+/usr/tests/sys/fs/tptfs/vnd_test
+/Direct entries: 
+322	
+
+/usr/tests/sys/vm
+/Direct entries: 
+0	
+
+/usr/tests/sys/vm/Kyuafile
+/Direct entries: 
+323	
+
+/ecord
+/Direct entries: 
+324	
+
+最大占用的块号为 324，新申请的块号应该是从 325 开始

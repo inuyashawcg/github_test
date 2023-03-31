@@ -1,0 +1,36 @@
+set(CMAKE_C_FLAGS  "-fuse-ld=lld \
+                -nostdinc \
+                -nostdlib \
+                -target riscv64-unknown-freebsd13.0 \
+                -O0 \
+                -g \
+                -pipe \
+                -fno-common \
+                -march=rv64imafdc \
+                -mabi=lp64d \
+                -mcmodel=medany \
+                -fvisibility=hidden \
+                -mno-relax \
+                -std=gnu99 \
+                -Wno-format-zero-length \
+                -Wsystem-headers \
+                -w \
+                -Wno-format-y2k \
+                -Wno-uninitialized \
+                -Wno-pointer-sign \
+                -Wno-empty-body \
+                -Wno-string-plus-int \
+                -Wno-unused-const-variable \
+                -Wno-tautological-compare \
+                -Wno-unused-value \
+                -Wno-parentheses-equality \
+                -Wno-unused-function \
+                -Wno-enum-conversion \
+                -Wno-unused-local-typedef \
+                -Wno-address-of-packed-member \
+                -Wno-switch \
+                -Wno-switch-enum \
+                -Wno-knr-promoted-parameter \
+                -Qunused-arguments \
+                -Wno-deprecated-declarations")
+

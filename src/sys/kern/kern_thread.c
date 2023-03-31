@@ -407,6 +407,7 @@ thread_alloc(int pages)
 
 	td = (struct thread *)uma_zalloc(thread_zone, M_WAITOK);
 	KASSERT(td->td_kstack == 0, ("thread_alloc got thread with kstack"));
+	/* 为新的线程申请 kernel stack */
 	if (!vm_thread_new(td, pages)) {
 		uma_zfree(thread_zone, td);
 		return (NULL);
@@ -766,6 +767,8 @@ weed_inhib(int mode, struct thread *td2, struct proc *p)
  *
  * Returns 1 if the caller must abort (another thread is waiting to
  * exit the process or similar). Process is locked!
+ * 如果调用方必须中止（另一个线程正在等待退出进程或类似情况），则返回1。进程已锁定！
+ * 
  * Returns 0 when you are successfully the only thread running.
  * A process has successfully single threaded in the suspend mode when
  * There are no threads in user mode. Threads in the kernel must be
@@ -773,6 +776,10 @@ weed_inhib(int mode, struct thread *td2, struct proc *p)
  * copy out their return values and data before suspending. They may however be
  * accelerated in reaching the user boundary as we will wake up
  * any sleeping threads that are interruptable. (PCATCH).
+ * 当您成功地成为唯一一个正在运行的线程时，返回0。当用户模式下没有线程时，进程已成功地在
+ * 挂起模式下单线程。必须允许内核中的线程继续运行，直到它们到达用户边界。它们甚至可能在
+ * 挂起之前复制出返回值和数据。然而，它们可能会加速到达用户边界，因为我们会唤醒任何可中断的
+ * 睡眠线程 (PCATCH)
  */
 int
 thread_single(struct proc *p, int mode)

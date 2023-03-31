@@ -48,7 +48,7 @@ struct image_args {
 	char *begin_argv;	/* beginning of argv in buf */
 	char *begin_envv;	/* beginning of envv in buf */
 	char *endp;		/* current `end' pointer of arg & env strings */
-	char *fname;            /* pointer to filename of executable (system space) */
+	char *fname;            /* pointer to filename of executable (system space) 可执行文件名 */
 	char *fname_buf;	/* pointer to optional malloc(M_TEMP) buffer */
 	int stringspace;	/* space left in arg & env buffer */
 	int argc;		/* count of argument strings */
@@ -60,10 +60,10 @@ struct image_args {
 struct image_params {
 	struct proc *proc;	/* our process struct */
 	struct label *execlabel;	/* optional exec label */
-	struct vnode *vp;	/* pointer to vnode of file to exec */
+	struct vnode *vp;	/* pointer to vnode of file to exec - 指向所要执行的文件 */
 	struct vm_object *object;	/* The vm object for this vp */
 	struct vattr *attr;	/* attributes of file */
-	const char *image_header; /* head of file to exec */
+	const char *image_header; /* head of file to exec - 对应文件内容的起始位置 */
 	unsigned long entry_addr; /* entry address of target executable */
 	unsigned long reloc_base; /* load address of image */
 	char vmspace_destroyed;	/* flag - we've blown away original vm space */

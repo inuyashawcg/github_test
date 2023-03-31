@@ -7,10 +7,27 @@ riscv 包含4种核心指令:
 
 - 除了 CSR 指令中使用的 5 位立即数外，立即数始终是符号扩展的(对应零扩展)。riscv 一个基本指令设计思想是，立即数通常向指令中
   最左边的可用位进行打包，用于降低硬件设计复杂度
+
 - 实际上，大多数的立即数要么很小，要么需要所有 XLEN 位，riscv 采用非对称立即拆分
     regular instruction: 12 bits + special load upper immediate instruction: 20 bit
   这样设计的好处是，可增加常规指令可用的操作码空间
 
+- riscv 的寄存器在汇编语言中有与之对应 ABI name，例如:
+    x0 -> zero
+    x1 -> ra
+    x10-11 -> a0-1
+
+
+////////////////// 参考文档 //////////////////
+caller saved register & callee saved register:
+  https://blog.csdn.net/qq_29328443/article/details/107232025
+
+riscv gp 寄存器:
+  https://www.cnblogs.com/wahahahehehe/p/15140813.html
+  https://gnu-mcu-eclipse.github.io/arch/riscv/programmer/#the-gp-global-pointer-register
+
+riscv MCU 堆栈机制:
+  https://www.cnblogs.com/wahahahehehe/p/15164437.html
 
 ////////////////// 指令汇总 //////////////////
 addi rd, rs1, imm
@@ -18,22 +35,22 @@ addi rd, rs1, imm
   - 伪指令 mv rd, rs1 = addi rd, rs1, 0
 
 slti rd, rs1, imm
-  - set less than immediate
+  - set less than immediate - 比较源寄存器值与立即数的大小，并将结果写入目标寄存器中
   - if rs1 < imm, rd = 1; else rd = 0
 
 sltiu rd, rs1, imm
-  - set less than immediate unsigned
+  - set less than immediate unsigned (比较操作的unsigned 版本)
   - sltiu rd, rs1, 1 ==> if rs1 == 0, rd = 1; else rd = 0 ==> 伪指令 seqz rd, rs
 
 andi / ori / xori rd, rs1, imm
   - bitwise 与或非操作
 
 slli rd, rs1, imm
-  - shift left logical immediate (lower 5 bits)
+  - shift left logical immediate(lower 5 bits) - 左移立即数第五位
   - zeros are shifted into the lower bits
 
 srli rd, rs1, imm
-  - shift right logical immediate (lower 5 bits)
+  - shift right logical immediate(lower 5 bits)
   - zeros are shifted into the upper bits
 
 srai rd, rs1, imm

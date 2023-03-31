@@ -1362,6 +1362,7 @@ vm_object_shadow(
 
 	/*
 	 * Allocate a new object with the given length.
+	 		参数 length 表示的是地址空间的大小，并不是数据结构的大小
 	 */
 	result = vm_object_allocate(OBJT_DEFAULT, atop(length));
 

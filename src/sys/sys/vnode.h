@@ -181,6 +181,7 @@ struct vnode {
 
 	/*
 	 * The machinery of being a vnode
+	 		从这里可以看出，bufobj 类似于 vm_object， buf 类似于 vm_page
 	 */
 	TAILQ_ENTRY(vnode) v_actfreelist;	/* l vnode active/free lists */
 	struct bufobj	v_bufobj;		/* * Buffer cache object 干净缓存和脏缓存 */
@@ -292,7 +293,11 @@ struct xvnode {
 #define	VV_NOSYNC	0x0004	/* unlinked, stop syncing */
 #define	VV_ETERNALDEV	0x0008	/* device that is never destroyed */
 #define	VV_CACHEDLABEL	0x0010	/* Vnode has valid cached MAC label Vnode具有有效的缓存MAC标签 */
-#define	VV_TEXT		0x0020	/* vnode is a pure text prototype vnode是一个纯文本类型 */
+/*
+  当我们打算运行一个可执行文件时，需要对该文件对应的 vnode 进行属性设置 VV_TEXT。
+  这样做可以保证其他进程不会对该文件进行任何写相关操作
+*/
+#define	VV_TEXT		0x0020	/* vnode is a pure text prototype vnode 是一个纯文本类型 */
 #define	VV_COPYONWRITE	0x0040	/* vnode is doing copy-on-write */
 #define	VV_SYSTEM	0x0080	/* vnode being used by kernel */
 #define	VV_PROCDEP	0x0100	/* vnode is process dependent vnode依赖于进程 */
@@ -308,8 +313,8 @@ struct xvnode {
  * Vnode attributes.  A field value of VNOVAL represents a field whose value
  * is unavailable (getattr) or which is not to be changed (setattr).
  * 
- * Vnode attributes 表示vnode属性，字段值VNOVAL表示值不可用（getattr）或不可更改的字段（setattr）
- * vnode属性设计成class的时候可以直接作为成员变量，考虑访问控制
+ * Vnode attributes 表示vnode属性，字段值 VNOVAL 表示值不可用 (getattr)或不可更改的字段 (setattr)
+ * vnode 属性设计成 class 的时候可以直接作为成员变量，考虑访问控制
  */
 struct vattr {
 	enum vtype	va_type;	/* vnode type (for create) vnode 的类型 */

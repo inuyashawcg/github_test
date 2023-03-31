@@ -244,6 +244,7 @@ sigqueue_start(void)
 	ksiginfo_zone = uma_zcreate("ksiginfo", sizeof(ksiginfo_t),
 		NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
 	uma_prealloc(ksiginfo_zone, preallocate_siginfo);
+	// POSIX 标准中的信号相关变量的设置
 	p31b_setcfg(CTL_P1003_1B_REALTIME_SIGNALS, _POSIX_REALTIME_SIGNALS);
 	p31b_setcfg(CTL_P1003_1B_RTSIG_MAX, SIGRTMAX - SIGRTMIN + 1);
 	p31b_setcfg(CTL_P1003_1B_SIGQUEUE_MAX, max_pending_per_proc);
@@ -281,6 +282,7 @@ ksiginfo_tryfree(ksiginfo_t *ksi)
 void
 sigqueue_init(sigqueue_t *list, struct proc *p)
 {
+	// signal empty set.
 	SIGEMPTYSET(list->sq_signals);
 	SIGEMPTYSET(list->sq_kill);
 	SIGEMPTYSET(list->sq_ptrace);
@@ -304,6 +306,8 @@ sigqueue_get(sigqueue_t *sq, int signo, ksiginfo_t *si)
 
 	KASSERT(sq->sq_flags & SQ_INIT, ("sigqueue not inited"));
 
+	// sq_signals 作用类似与文件系统位图，通过 signal number 判断
+	// 某个位是否是高位，得到 queue 中是否存在该信号量未被处理。下同
 	if (!SIGISMEMBER(sq->sq_signals, signo))
 		return (0);
 
@@ -367,6 +371,10 @@ sigqueue_take(ksiginfo_t *ksi)
 static int
 sigqueue_add(sigqueue_t *sq, int signo, ksiginfo_t *si)
 {
+	/*
+		signal queue 对应到具体的某个进程。进程结果中也包含有一个
+		成员 p_sigqueue 来指定该进程对应的 signal queue
+	*/
 	struct proc *p = sq->sq_proc;
 	struct ksiginfo *ksi;
 	int ret = 0;
@@ -376,13 +384,18 @@ sigqueue_add(sigqueue_t *sq, int signo, ksiginfo_t *si)
 	/*
 	 * SIGKILL/SIGSTOP cannot be caught or masked, so take the fast path
 	 * for these signals.
+	 * SIGKILL/SIGSTOP 无法被捕获或屏蔽，因此请使用这些信号的快速路径
 	 */
 	if (signo == SIGKILL || signo == SIGSTOP || si == NULL) {
 		SIGADDSET(sq->sq_kill, signo);
 		goto out_set_bit;
 	}
 
-	/* directly insert the ksi, don't copy it */
+	/* directly insert the ksi, don't copy it
+		signal 相关函数代码实现中，操作的对象貌似都是 ksiginfo，所以感觉有点
+		类似驱动架构中的 driver_link 结构。应该就是对信号的进一步包装，目的是
+		为了更好的处理信号请求
+	*/
 	if (si->ksi_flags & KSI_INS) {
 		if (si->ksi_flags & KSI_HEAD)
 			TAILQ_INSERT_HEAD(&sq->sq_list, si, ksi_link);
@@ -396,16 +409,20 @@ sigqueue_add(sigqueue_t *sq, int signo, ksiginfo_t *si)
 		SIGADDSET(sq->sq_kill, signo);
 		goto out_set_bit;
 	}
-
+	/* 每个进程待处理的信号数量是有限的，一旦超出的话就会提示 overflow */
 	if (p != NULL && p->p_pendingcnt >= max_pending_per_proc) {
 		signal_overflow++;
 		ret = EAGAIN;
 	} else if ((ksi = ksiginfo_alloc(0)) == NULL) {
-		signal_alloc_fail++;
+		signal_alloc_fail++; // ksiginfo 申请失败
 		ret = EAGAIN;
 	} else {
 		if (p != NULL)
 			p->p_pendingcnt++;
+		/*
+			ksiginfo 插入需要分成两种情况，第一种直接插入的情况；
+			否则就要先进行拷贝，然后将新的对象插入到队列当中
+		*/
 		ksiginfo_copy(si, ksi);
 		ksi->ksi_signo = signo;
 		if (si->ksi_flags & KSI_HEAD)
@@ -416,6 +433,7 @@ sigqueue_add(sigqueue_t *sq, int signo, ksiginfo_t *si)
 	}
 
 	if (ret != 0) {
+		/* 判断将该信号插入到哪个 bitmap 当中 */
 		if ((si->ksi_flags & KSI_PTRACE) != 0) {
 			SIGADDSET(sq->sq_ptrace, signo);
 			ret = 0;
@@ -434,6 +452,7 @@ out_set_bit:
 	return (ret);
 }
 
+/* 清空进程的 sigqueue*/
 void
 sigqueue_flush(sigqueue_t *sq)
 {
@@ -457,6 +476,7 @@ sigqueue_flush(sigqueue_t *sq)
 	SIGEMPTYSET(sq->sq_ptrace);
 }
 
+/* 迁移 signal queue 到新的对象 */
 static void
 sigqueue_move_set(sigqueue_t *src, sigqueue_t *dst, const sigset_t *set)
 {
@@ -536,7 +556,11 @@ void
 sigqueue_delete(sigqueue_t *sq, int signo)
 {
 	sigset_t set;
-
+	/*
+		delete 操作就是先申请一块 set，置空，并且将需要设置的
+		signal 首先写入到临时 set。然后在用整块 set 去跟目标
+		位图的目标区域做与或者非操作即可
+	*/
 	SIGEMPTYSET(set);
 	SIGADDSET(set, signo);
 	sigqueue_delete_set(sq, &set);
@@ -558,6 +582,11 @@ sigqueue_delete_set_proc(struct proc *p, const sigset_t *set)
 		sigqueue_move_set(&td0->td_sigqueue, &worklist, set);
 
 	sigqueue_flush(&worklist);
+	/*
+		创建一个新的 worklist 并初始化。然后将进程和所有子线程对应的
+		signal 全部转移到该链表当中。最后刷新这个链表
+		为什么不直接在原链表上进行操作？ 可能是出于一致性考虑
+	*/
 }
 
 void
@@ -587,6 +616,8 @@ sigqueue_delete_stopmask_proc(struct proc *p)
  * Determine signal that should be delivered to thread td, the current
  * thread, 0 if none.  If there is a pending stop signal with default
  * action, the process stops in issignal().
+ * 确定应该传递到线程 td (当前线程） 的信号，如果没有，则为 0。如果有一个带有默认
+ * 操作的挂起停止信号，则进程将在 issignal()中停止
  */
 int
 cursig(struct thread *td)

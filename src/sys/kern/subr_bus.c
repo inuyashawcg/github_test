@@ -923,7 +923,6 @@ DEFINE_CLASS(null, null_methods, 0);
 /*
  * Bus pass implementation
  */
-// driver_list_t 是driverlink的一个双端队列，管理所有driver的pass等级
 static driver_list_t passes = TAILQ_HEAD_INITIALIZER(passes);
 int bus_current_pass = BUS_PASS_ROOT;
 
@@ -1021,7 +1020,7 @@ bus_set_pass(int pass)
  */
 
 /*
-	devclasses里边的每一元素都是一个双端链表，而他自己也是一个双端链表
+	devclasses 里边的每一元素都是一个双端链表，而他自己也是一个双端链表
 */
 static devclass_list_t devclasses = TAILQ_HEAD_INITIALIZER(devclasses);
 
@@ -1040,11 +1039,6 @@ static devclass_list_t devclasses = TAILQ_HEAD_INITIALIZER(devclasses);
  * @param parentname	the parent devclass name or @c NULL
  * @param create	non-zero to create a devclass
  */
-
-/* 
-	该函数为一个static类型函数，说明其他的文件或者模块是不能访问它的，
-	也就是说它只能被这个文件中的函数访问
-*/
 static devclass_t
 devclass_find_internal(const char *classname, const char *parentname,
 		       int create)
@@ -1128,13 +1122,18 @@ devclass_find(const char *classname)
  * notification of all the children classes of dc, as well as dc.
  * Each layer will have BUS_DRIVER_ADDED() called for all instances of
  * the devclass.
+ * 注册设备驱动程序已添加到 devclass。这由 devclass_add_driver() 调用，以完成
+ * dc 以及 dc 的所有子类的递归通知。每个层都将为 devclass 的所有实例调用
+ * BUS_DRIVER_ADDED()
  *
  * We do a full search here of the devclass list at each iteration
  * level to save storing children-lists in the devclass structure.  If
  * we ever move beyond a few dozen devices doing this, we may need to
  * reevaluate...
+ * 我们在这里对每个迭代级别的 devclass 列表进行完整搜索，以将存储的子列表保存在
+ * devclass 结构中。如果我们超越了几十台设备，我们可能需要重新评估...
  *
- * @param dc		the devclass to edit 暂时将其理解为总线的devclass
+ * @param dc		the devclass to edit
  * @param driver	the driver that was just added
  */
 static void
@@ -1161,8 +1160,13 @@ devclass_driver_added(devclass_t dc, driver_t *driver)
 	 * DC_HAS_CHILDREN flag when a child devclass is created on
 	 * the parent, so we only walk the list for those devclasses
 	 * that have children.
-	 * 如果devclass没有children，那么就直接return；如果哟children的话，
-	 * 那就从devclasses中去查找，每个子child也add driver
+	 * 编译子类。由于我们只保留一个父级指针，所以我们遍历了整个 devclass 列表，
+	 * 寻找子级。当在父级上创建子级 devclass 时，我们设置了 DC_HAS_CHILDREN，
+	 * 因此我们只遍历具有子级的 devclass 的列表。
+	 * 
+	 * 从注释推测，假设我们在父级 devclass 总添加了一个驱动程序，如果该对象刚好
+	 * 包含有子级 devclass，那么 child devclass 中的所有子设备，一个新的驱动
+	 * 已经添加，没有匹配的子设备都可以来试试能不能匹配上
 	 */
 	if (!(dc->flags & DC_HAS_CHILDREN))
 		return;
@@ -1256,7 +1260,7 @@ devclass_add_driver(devclass_t dc, driver_t *driver, int pass, devclass_t *dcp)
 	driver->refs++;		/* XXX: kobj_mtx */
 	dl->pass = pass;
 
-	/* 注册pass level */
+	/* 注册 pass level */
 	driver_register_pass(dl);
 
 	if (device_frozen) {
@@ -1277,11 +1281,16 @@ devclass_add_driver(devclass_t dc, driver_t *driver, int pass, devclass_t *dcp)
  * well as busclass.  Each layer will attempt to detach the driver
  * from any devices that are children of the bus's devclass.  The function
  * will return an error if a device fails to detach.
+ * 注册设备驱动程序已从 devclass 中删除。这是由 devclass_delete_driver 调用的，以完成
+ * busclass 的所有子类以及其本身的递归通知。每一层都将尝试将驱动程序与总线 devclass 的子级
+ * 设备分离。如果设备无法分离，该函数将返回错误
  *
  * We do a full search here of the devclass list at each iteration
  * level to save storing children-lists in the devclass structure.  If
  * we ever move beyond a few dozen devices doing this, we may need to
  * reevaluate...
+ * 我们在这里对每个迭代级别的 devclass 列表进行完整搜索，以将存储的子列表保存在 devclass 
+ * 结构中。如果我们超越了几十台设备，我们可能需要重新评估。总体机制与 driver_added 一致
  *
  * @param busclass	the devclass of the parent bus
  * @param dc		the devclass of the driver being deleted
@@ -1299,13 +1308,18 @@ devclass_driver_deleted(devclass_t busclass, devclass_t dc, driver_t *driver)
 	 * devices in the devclass of the driver and detach any which are
 	 * using the driver and which have a parent in the devclass which
 	 * we are deleting from.
+	 * 解除与任何设备的关联。我们遍历驱动程序的 devclass 中的所有设备，并分离任何
+	 * 正在使用驱动程序的设备，这些设备在devclass中有一个父级，我们将从中删除
 	 *
 	 * Note that since a driver can be in multiple devclasses, we
 	 * should not detach devices which are not children of devices in
 	 * the affected devclass.
+	 * 注意，由于驱动程序可以在多个 devclass 中，因此我们不应该分离不受影响的 devclass 中
+	 * 设备的子设备
 	 *
 	 * If we're frozen, we don't generate NOMATCH events. Mark to
 	 * generate later.
+	 * 如果我们被冻结，我们不会生成 NOMATCH 事件。标记稍后生成
 	 */
 	for (i = 0; i < dc->maxunit; i++) {
 		if (dc->devices[i]) {
@@ -1357,6 +1371,9 @@ devclass_driver_deleted(devclass_t busclass, devclass_t dc, driver_t *driver)
  * devclass_delete_driver() will first attempt to detach from each
  * device. If one of the detach calls fails, the driver will not be
  * deleted.
+ * 如果一个驱动当前正在与任意一个设备匹配，devclass_delete_driver() 首先会
+ * 尝试与每一个设备进行 detach。其中任何一个 detach 操作出现错误，这个驱动
+ * 就不能被删除掉
  *
  * @param dc		the devclass to edit
  * @param driver	the driver to unregister
@@ -1404,7 +1421,7 @@ devclass_delete_driver(devclass_t busclass, driver_t *driver)
 }
 
 /**
- * @brief Quiesces a set of device drivers from a device class
+ * @brief Quiesces(静止，静默) a set of device drivers from a device class
  *
  * Quiesce a device driver from a devclass. This is normally called
  * automatically by DRIVER_MODULE().
@@ -1412,6 +1429,7 @@ devclass_delete_driver(devclass_t busclass, driver_t *driver)
  * If the driver is currently attached to any devices,
  * devclass_quiesece_driver() will first attempt to quiesce each
  * device.
+ * 如果驱动程序当前已连接到任何设备，devclass_quisece_driver() 将首先尝试停止每个设备
  *
  * @param dc		the devclass to edit
  * @param driver	the driver to unregister
@@ -1453,6 +1471,8 @@ devclass_quiesce_driver(devclass_t busclass, driver_t *driver)
 	 * Note that since a driver can be in multiple devclasses, we
 	 * should not quiesce devices which are not children of
 	 * devices in the affected devclass.
+	 * 注意，由于一个驱动程序可以在多个 devclass 中，所以我们不应该停止不受影响的
+	 * devclass 中设备的子级的设备
 	 */
 	for (i = 0; i < dc->maxunit; i++) {
 		if (dc->devices[i]) {
@@ -1479,10 +1499,6 @@ devclass_find_driver_internal(devclass_t dc, const char *classname)
 	PDEBUG(("%s in devclass %s", classname, DEVCLANAME(dc)));
 
 	TAILQ_FOREACH(dl, &dc->drivers, link) {
-		/* 
-			比较driver与父设备的devclass name,那就可以推断，总线上的可能还会有不同类型的驱动，
-			也就是driver name跟devclass name是不一样的？？ 
-		*/
 		if (!strcmp(dl->driver->name, classname))
 			return (dl);
 	}
@@ -1508,7 +1524,7 @@ devclass_get_name(devclass_t dc)
  *
  * @returns		the device with the given unit number or @c
  *			NULL if there is no such device
-	从这里我们可以推测，总线查找设备的时候可以通过unit来进行
+		从这里我们可以推测，总线查找设备的时候可以通过 unit 来进行
  */
 device_t
 devclass_get_device(devclass_t dc, int unit)
@@ -1880,6 +1896,8 @@ devclass_add_device(devclass_t dc, device_t dev)
  * @param dev		the device to delete
  *
  * @retval 0		success
+ * 
+ * detach 函数中会调用该函数
  */
 static int
 devclass_delete_device(devclass_t dc, device_t dev)
@@ -2035,8 +2053,6 @@ device_print_child(device_t dev, device_t child)
  *
  * @returns		the new device
  * 
- * 	注释中说明了要将一个新设备添加到已经存在的一个parent device，如何来判断一个
- * 	父设备是否存在？
  * 	实例中基本上所有的情况都是把unit number设置为-1，很可能就是在后边进行一步判断
  * 	parent bus是否希望添加这个设备
  */
@@ -2136,7 +2152,7 @@ device_delete_child(device_t dev, device_t child)
 	/* detach parent before deleting children, if any */
 	if ((error = device_detach(child)) != 0)
 		return (error);
-	
+
 	/* remove children second */
 	while ((grandchild = TAILQ_FIRST(&child->children)) != NULL) {
 		error = device_delete_child(child, grandchild);
@@ -2211,7 +2227,10 @@ device_find_child(device_t dev, const char *classname, int unit)
 {
 	devclass_t dc;
 	device_t child;
-
+	/*
+		这里没有遍历 dev->children 链表，而是直接利用 devclass + unit 查找
+		child device。struct device 也包含有 unit 字段，感觉有点奇怪。。
+	*/
 	dc = devclass_find(classname);
 	if (!dc)
 		return (NULL);
@@ -2259,6 +2278,8 @@ next_matching_driver(devclass_t dc, device_t dev, driverlink_t last)
 
 /**
  * @internal
+ * @param dev	 	parent device
+ * @param child		child device
  */
 int
 device_probe_child(device_t dev, device_t child)
@@ -2271,7 +2292,6 @@ device_probe_child(device_t dev, device_t child)
 
 	GIANT_REQUIRED;
 
-	/* 设备是从parent的devclass中查找相应的driver，所以这里dc定义成父设备的devclass*/
 	dc = dev->devclass;
 	if (!dc)
 		panic("device_probe_child: parent device has no devclass");
@@ -4296,8 +4316,9 @@ bus_generic_driver_added(device_t dev, driver_t *driver)
  * attached, then it calls BUS_NEW_PASS() on that device.  If the
  * device is not already attached, it attempts to attach a driver to
  * it.
- * 
- * 这里可以看出，device跟driver已经挂载到root_bus上了
+ * BUS_NEW_PASS() 的实现首先调用在当前通道探测的任何驱动程序的标识例程，然后遍历
+ * 该总线的设备列表。如果某个设备已经连接，那么它将调用该设备上的 BUS_NEW_PASS()。
+ * 如果设备尚未连接，则会尝试将驱动程序连接到设备
  */
 void
 bus_generic_new_pass(device_t dev)

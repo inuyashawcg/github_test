@@ -114,6 +114,7 @@ struct pgrp {
 
 /*
  * pargs, used to hold a copy of the command line, if it had a sane length.
+   pargs(process args?) 用于保存命令行的副本，如果它有合理的长度
  */
 struct pargs {
 	u_int	ar_ref;		/* Reference count. */
@@ -285,7 +286,7 @@ struct thread {
 	int		td_intrval;	/* (t) Return value for sleepq. */
 	sigset_t	td_oldsigmask;	/* (k) Saved mask from pre sigpause. */
 	volatile u_int	td_generation;	/* (k) For detection of preemption */
-	stack_t		td_sigstk;	/* (k) Stack ptr and on-stack flag. */
+	stack_t		td_sigstk;	/* (k) Stack ptr and on-stack flag. 堆栈指针和堆栈上的标志 */
 	int		td_xsig;	/* (c) Signal for ptrace */
 	u_long		td_profil_addr;	/* (k) Temporary addr until AST. */
 	u_int		td_profil_ticks; /* (k) Temporary ticks until AST. */
@@ -642,7 +643,7 @@ struct proc {
 #define	p_endzero	p_magic
 
 /* The following fields are all copied upon creation in fork. 
-	在fork中创建时，将复制以下字段
+	在 fork() 中创建进程时，将复制以下字段
 */
 #define	p_startcopy	p_endzero
 	u_int		p_magic;	/* (b) Magic number. */

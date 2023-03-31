@@ -95,6 +95,9 @@
         "slist": "c",
         "fs.h": "c",
         "buf.h": "c",
-        "ufs_inode.h": "c"
+        "ufs_inode.h": "c",
+        "softfloat-specialize": "c",
+        "endian.h": "c",
+        "csignal": "c"
     }
 }

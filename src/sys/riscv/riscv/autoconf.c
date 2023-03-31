@@ -82,10 +82,8 @@ configure(void *dummy)
 static void
 configure_final(void *dummy)
 {
-	/*
-		等上述配置过程完成之后，使能初始化，为了分配中断资源？？
-	*/
-	intr_enable();
+
+	intr_enable();	// 使能设备中断？
 
 	cninit_finish();
 

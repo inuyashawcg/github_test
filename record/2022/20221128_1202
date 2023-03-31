@@ -66,7 +66,7 @@ python3 ./build-image.py -p /home/mercury/Documents/code/qihai/warm_boot/qihai/b
     7.1 如果不是第一次, 则什么也不用做
     7.2 第一次, 需要重新烧写磁盘
           setenv serverip ${tftp_ip}
-          setenv gatewayip 255.255.255.0 (可选项，要根据实际打印结果判断是否需要执行)
+          setenv gatewayip 192.168.3.1 (可选项，要根据实际打印结果判断是否需要执行)
           run update_qihai
           run distro_bootcmd
       
@@ -76,7 +76,7 @@ python3 ./build-image.py -p /home/mercury/Documents/code/qihai/warm_boot/qihai/b
               tftp 0x1a0000000 virt.dtb
 
 setenv serverip 192.168.2.84
-setenv gatewayip 255.255.255.0
+setenv gatewayip 192.168.3.1
 cp /home/mercury/Documents/code/qihai/work/warm_boot/qihai.img
 cp /home/mercury/Documents/code/qihai/work/warm_boot/virt.dtb
 
@@ -190,4 +190,3 @@ bmake[1]: "/home/mercury/Documents/code/qihai/master/qihai/share/mk/atf.test.mk"
 
 ////////////// 20221202 //////////////
   CC="clang -target riscv64-unknown-freebsd13.0 --sysroot=/home/saturn/workspace/qemu-env/riscv/riscv-qihai/qihai/build/riscv.riscv64/tmp -I/home/saturn/workspace/qemu-env/riscv/riscv-qihai/qihai/build/riscv.riscv64/tmp/usr/include/c++/v1  -Wno-typedef-redefinition -Wno-macro-redefined  -mno-relax -mcmodel=medium " MAKESYSPATH=/home/saturn/workspace/qemu-env/riscv/riscv-qihai/qihai/share/mk bmake Test
-  

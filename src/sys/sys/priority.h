@@ -77,6 +77,7 @@
  *
  * XXX If/When the specific interrupt thread and top half thread ranges
  * disappear, a larger range can be used for user processes.
+ * 如果/当特定的中断线程和上半线程范围消失时，用户进程可以使用更大的范围
  */
 
 #define	PRI_MIN			(0)		/* Highest priority. */

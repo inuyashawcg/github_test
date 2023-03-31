@@ -75,6 +75,10 @@ struct pv_addr {
 	vm_paddr_t	pv_pa;	// 物理地址
 };
 
+/*
+	pmap 感觉与 vm_map 的设计思路是一致的，它也算是一个顶层的数据结构，下面会有
+	很多 entry 组成的链表，管理具体的物理地址与虚拟地址之间的映射关系？
+*/
 struct pmap {
 	struct mtx		pm_mtx;
 	struct pmap_statistics	pm_stats;	/* pmap statictics */
@@ -83,6 +87,7 @@ struct pmap {
 	LIST_ENTRY(pmap)	pm_list;	/* List of all pmaps */
 };
 
+// physics address -virtual address entry.
 typedef struct pv_entry {
 	vm_offset_t		pv_va;	/* virtual address for mapping */
 	TAILQ_ENTRY(pv_entry)	pv_next;
@@ -96,7 +101,7 @@ typedef struct pv_entry {
 #define	_NPCM	3
 #define	_NPCPV	168
 struct pv_chunk {
-	struct pmap *		pc_pmap;
+	struct pmap *		pc_pmap;	// 该 chunk 属于哪个 pmap 模块
 	TAILQ_ENTRY(pv_chunk)	pc_list;
 	uint64_t		pc_map[_NPCM];  /* bitmap; 1 = free */
 	TAILQ_ENTRY(pv_chunk)	pc_lru;

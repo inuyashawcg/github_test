@@ -171,6 +171,8 @@ BITGTS=	files includes
 # 
 # := 表示变量的值决定于它在 makefile 中的位置，而不是整个 makefile 展开后的最终值
 # 将上面的 y= 变成 y:= 之后，y = 111 222
+# BITGTS = buildfiles buildincludes installfiles installincludes ??
+# META_TGT_WHITELIST 目标中包含有 buildfiles / buildincludes
 BITGTS:=${BITGTS} ${BITGTS:S/^/build/} ${BITGTS:S/^/install/}
 TGTS+=	${BITGTS}
 
@@ -183,8 +185,8 @@ TGTS+=	${BITGTS}
 # the ones that benefit from it.
 # 
 # 仅允许某些目标使用元模式。其他人将其禁用。在某些情况下，例如“安装”，元模式可能很危险，
-# 因为cookie可能用于防止冗余安装（例如WORLDTMP登台）。对于DESTDIR=/，我们总是希望安装
-# 对于其他情况，例如删除旧库，元模式可能会中断交互式tty提示符。最安全的方法是将从中受益的人
+# 因为 cookie 可能用于防止冗余安装（例如 WORLDTMP 登台）。对于 DESTDIR=/，我们总是希望安装
+# 对于其他情况，例如删除旧库，元模式可能会中断交互式 tty 提示符。最安全的方法是将从中受益的人
 # 列入白名单
 META_TGT_WHITELIST+= \
 	_* build32 buildfiles buildincludes buildkernel buildsoft \
@@ -250,6 +252,8 @@ WANT_MAKE_VERSION= 20160604
 # 20160220 - support .dinclude for FAST_DEPEND.
 WANT_MAKE_VERSION= 20160220
 .endif
+# 实际编译过程中，bmake 的存储路径:
+# 	/usr/obj/usr/src/make.amd64/obj/usr.bin/bmake
 MYMAKE=		${OBJROOT}make.${MACHINE}/${WANT_MAKE}
 .if defined(.PARSEDIR)
 HAVE_MAKE=	bmake
@@ -269,9 +273,12 @@ SUB_MAKE:= ${MYMAKE} -m ${.CURDIR}/share/mk
 SUB_MAKE= `test -x ${MYMAKE} && echo ${MYMAKE} || echo ${MAKE}` \
 	-m ${.CURDIR}/share/mk
 .else
+# -m directory, Specify a directory in which to search for sys.mk and makefiles
+#  							included via the <file>-style include statement.
 SUB_MAKE= ${MAKE} -m ${.CURDIR}/share/mk
 .endif
 
+# _MAKE 感觉才是完整的 make 执行命令
 _MAKE=	PATH=${PATH} MAKE_CMD="${MAKE}" ${SUB_MAKE} -f Makefile.inc1 \
 	TARGET=${_TARGET} TARGET_ARCH=${_TARGET_ARCH} ${_MAKEARGS}
 
@@ -351,11 +358,16 @@ _MAKE+=			NXB_TARGET=${NXB_TARGET} \
 .SILENT:
 .endif
 
+# MAKE: The name that make	was executed with (argv[0]).
+# For compatibility	make also sets .MAKE with the same value.
+# 更推荐的做法是用环境变量 MAKE，因为它与 make 的其他版本更兼容，
+# 并且不能与同名的特殊目标混淆
 _assert_target: .PHONY .MAKE
 .for _tgt in ${XTGTS}
 .if make(${_tgt})
 	@echo "*** Error: Both TARGET and TARGET_ARCH must be defined for \"${_tgt}\" target"
 	@false
+# 从打印信息可以看出，XTGTS 是依赖架构类型(X86_64 / RISCV / ARM 等)的目标
 .endif
 .endfor
 
@@ -364,6 +376,8 @@ _assert_target: .PHONY .MAKE
 # should do this as those are the initial targets used for upgrades.
 # The user can define ALWAYS_CHECK_MAKE to have this check performed
 # for all targets.
+# 确保我们有最新版本的 make。只有 world 和 buildworld 应该这样做，因为它们是用于
+# 升级的初始目标。用户可以定义 ALWAYS_CHECK_MAKE 以对所有目标执行此检查
 #
 .if defined(ALWAYS_CHECK_MAKE) || !defined(.PARSEDIR)
 ${TGTS}: upgrade_checks
@@ -374,7 +388,6 @@ buildworld: upgrade_checks
 #
 # Handle the user-driven targets, using the source relative mk files.
 #
-
 tinderbox toolchains kernel-toolchains: .MAKE
 ${TGTS}: .PHONY .MAKE
 	${_+_}@cd ${.CURDIR}; ${_MAKE} ${.TARGET}
@@ -454,6 +467,8 @@ kernel: buildkernel installkernel .PHONY
 #
 # Perform a few tests to determine if the installed tools are adequate
 # for building the world.
+# 执行一些测试，以确定安装的工具是否足以构建世界。只有变量 NEED_MAKE_UPGRADE 已经
+# 被定义的情况下，才会重新编译目标 make 版本
 #
 upgrade_checks: .PHONY
 .if defined(NEED_MAKE_UPGRADE)
@@ -464,6 +479,10 @@ upgrade_checks: .PHONY
 # Upgrade make(1) to the current version using the installed
 # headers, libraries and tools.  Also, allow the location of
 # the system bsdmake-like utility to be overridden.
+# 
+# :H - Replaces each word in the variable with everything but
+# 		 the last component.
+# :T - Replaces each word in the variable with its last path component.
 #
 MMAKEENV=	\
 		DESTDIR= \

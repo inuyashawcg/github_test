@@ -49,6 +49,8 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/imgact_shell.c 330842 2018-03-13 13:09:
  * At the time of this writing, MAXSHELLCMDLEN == PAGE_SIZE.  This is
  * significant because the caller has only mapped in one page of the
  * file we're reading.
+ * 在撰写本文时，MAXSHELLCMDLEN == PAGE_SIZE。这一点很重要，因为调用者只映射了
+ * 我们正在读取的文件的一页
  */
 #if MAXSHELLCMDLEN > PAGE_SIZE
 #error "MAXSHELLCMDLEN is larger than a single page!"
@@ -57,12 +59,14 @@ __FBSDID("$FreeBSD: releng/12.0/sys/kern/imgact_shell.c 330842 2018-03-13 13:09:
 /*
  * MAXSHELLCMDLEN must be at least MAXINTERP plus the size of the `#!'
  * prefix and terminating newline.
+ * max shell command length = prefix(#! ) + interpreter name + ***
  */
 CTASSERT(MAXSHELLCMDLEN >= MAXINTERP + 3);
 
 /**
  * Shell interpreter image activator. An interpreter name beginning at
  * imgp->args->begin_argv is the minimal successful exit requirement.
+ * 以 imgp->args->begin_argv 开头的解释器名称是成功退出的最低要求
  *
  * If the given file is a shell-script, then the first line will start
  * with the two characters `#!' (aka SHELLMAGIC), followed by the name
@@ -72,16 +76,23 @@ CTASSERT(MAXSHELLCMDLEN >= MAXINTERP + 3);
  *    arg[0] -> The name of interpreter as specified after `#!' in the
  *		first line of the script.  The interpreter name must
  *		not be longer than MAXSHELLCMDLEN bytes.
+	arg[0] 保存的是 #! + interpreter name，解析器名称长度要满足系统设置要求
+ *
  *    arg[1] -> *If* there are any additional tokens on the first line,
  *		then we add a new arg[1], which is a copy of the rest of
  *		that line.  The copy starts at the first token after the
  *		interpreter name.  We leave it to the interpreter to
  *		parse the tokens in that value.
+	解析器后面的 tokens 则全部拷贝至 arg[1]
+ *
  *    arg[x] -> the full pathname of the script.  This will either be
  *		arg[2] or arg[1], depending on whether or not tokens
  *		were found after the interpreter name.
+	上述参数处理完成之后，开始处理 shell 脚本路径信息
+ *
  *  arg[x+1] -> all the arguments that were specified on the original
  *		command line.
+	在原始命令行上指定的所有参数
  *
  * This processing is described in the execve(2) man page.
  */
@@ -108,7 +119,10 @@ exec_shell_imgact(struct image_params *imgp)
 	struct vattr vattr;
 	struct sbuf *sname;
 
-	/* a shell script? */
+	/* a shell script?
+		do_execve() 中存在一段逻辑，专门检查 imgact 函数的返回值。如果结果是 -1，
+		说明该方法表并不是当前所要寻找的，跳转到下一个继续执行
+	*/
 	if (((const short *)image_header)[0] != SHELLMAGIC)
 		return (-1);
 
@@ -126,6 +140,8 @@ exec_shell_imgact(struct image_params *imgp)
 	 * However, we don't know how far into the page the contents are
 	 * valid -- the actual file might be much shorter than the page.
 	 * So find out the file size.
+	 * 此时我们已经拿到了文件映射的第一个页，但是一个文件的大小可能不到一个页。所以
+	 * 我们还是需要通过 vop_getattr() 获取文件的真实大小
 	 */
 	error = VOP_GETATTR(imgp->vp, &vattr, imgp->proc->p_ucred);
 	if (error)

@@ -236,14 +236,14 @@ typedef	struct __siginfo {
 	 * FreeBSD signal handler.
 	 */
 	int	si_code;		/* signal code */
-	__pid_t	si_pid;			/* sending process */
-	__uid_t	si_uid;			/* sender's ruid */
+	__pid_t	si_pid;			/* sending process 要发送的目标进程，还是发件人？ */
+	__uid_t	si_uid;			/* sender's ruid 发件人的 ruid */
 	int	si_status;		/* exit value */
-	void	*si_addr;		/* faulting instruction */
+	void	*si_addr;		/* faulting instruction 错误指令 */
 	union sigval si_value;		/* signal value */
 	union	{
 		struct {
-			int	_trapno;/* machine specific trap code */
+			int	_trapno;/* machine specific trap code 机器特定陷阱代码 */
 		} _fault;
 		struct {
 			int	_timerid;
@@ -364,11 +364,20 @@ struct __siginfo;
  * Signal vector "template" used in sigaction call.
  */
 struct sigaction {
+	//回调函数句柄 sa_handler、sa_sigaction 只能任选其一
 	union {
+		//信号处理程序，不接受额外数据，SIG_IGN 为忽略，SIG_DFL 为默认动作
 		void    (*__sa_handler)(int);
+
+		//信号处理程序，能够接受额外数据和 sigqueue 配合使用
 		void    (*__sa_sigaction)(int, struct __siginfo *, void *);
 	} __sigaction_u;		/* signal handler */
+
+	// 阻塞关键字的信号集，可以再调用捕捉函数之前，把信号添加到信号阻塞字，
+	// 信号捕捉函数返回之前恢复为原先的值
 	int	sa_flags;		/* see signal options below */
+
+	//影响信号的行为 SA_SIGINFO 表示能够接受数据
 	sigset_t sa_mask;		/* signal mask to apply */
 };
 

@@ -187,13 +187,19 @@ extern struct kobjop_desc bus_driver_added_desc;
 typedef void bus_driver_added_t(device_t _dev, driver_t *_driver);
 /**
  * @brief Notify a bus that a new driver was added
+ * 通知总线一个新的驱动已经被添加
  * 
  * Called when a new driver is added to the devclass which owns this
  * bus. The generic implementation of this method attempts to probe and
  * attach any un-matched children of the bus.
+ * 当新驱动程序添加到拥有此总线的 devclass 时调用。此方法的一般实现尝试探测并附加
+ * 总线的任何未匹配的子级；
+ * 从注释推测，这个驱动已经添加到了某个 devclass 当中，那下一步要做什么？ 正常逻辑
+ * 应该就是看看新添加的这个驱动程序，是不是可以能够匹配总线上还未完成匹配的子设备。
+ * 作用的话，应该就类似于广播。所以，后面就应该调用 device_probe_and_attach()
  * 
  * @param _dev		the device whose devclass had a new driver
- *			added to it
+ *			added to it - 该参数表示的应该是总线本身
  * @param _driver	the new driver which was added
  */
 

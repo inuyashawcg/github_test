@@ -1,0 +1,437 @@
+////////////// 20230313 //////////////
+# cd /usr/tests/sys/fs/tptfs/
+# kyua test -k Kyuafile
+random: unblocking device.
+create_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.072s]
+
+Results file id is usr_tests_sys_fs_tptfs.20230313-020858-071910
+Results saved to /.kyua/store/results.usr_tests_sys_fs_tptfs.20230313-020858-071910.db
+
+0/1 passed (1 failed)
+
+  对代码进行修改之后，再次执行 do_execve() 函数，提示如下错误信息。对比之前可以发现，现在 shell 脚本可以
+正常执行完毕，而不会被 abort()。这个错误在 freebsd 中进行测试的时候也遇到过，可能的原因是测试环境有问题。
+构建系统的时候，如果我们不指定 test，可能会有些模块不会被安装。qihai 中应该也要考虑相关可能性，因为很多东西
+都还没有添加
+
+atf-sh.cpp 文件中包含 construct_script() 函数，看函数实现逻辑应该是利用 atf-check 命令拼接测试命令行。
+编译选项 ATF_PKGDATADIR 会指定执行测试命令所依赖的一些文本文件(libatf-sh.subr)。该文件存在根文件系统当中，
+所以编写 atf-sh CMakeLists 文件的时候要指定该选项
+
+freebsd 在 atf-sh 执行的过程中，do_execve() 会调用的一些可执行程序:
+  /usr/bin/dirname
+  /usr/bin/tr
+  /bin/expr
+  /usr/bin/nice
+  /sbin/fsck
+  /sbin/fsck_ufs
+  /sbin/kldstat
+  /usr/libexec/atf-check
+  /sbin/mkdir
+  /sbin/mount
+  /sbin/test
+  /sbin/touch
+  /sbin/umount
+  /bin/rmdir
+
+In file included from /home/mercury/Videos/qihai_riscv/qihai/bin/dirname/dirname.c:44:
+/home/mercury/Videos/qihai_riscv/qihai/lib/libcapsicum/capsicum_helpers.h:42:10: fatal error: 'libcasper.h' file not found
+#include <libcasper.h>
+         ^~~~~~~~~~~~~
+
+////////////// 20230314 //////////////
+reboot 中包含有 dirname 命令的实现逻辑，所以可以直接使用，不需要移植原有 dirname 应用程序代码(各种依赖，坑很多，，)
+
+在 freebsd 中，将 tcsh 重命名为 sh，执行 atf-sh 测试程序，发现也会报错:
+
+  root@:/usr/tests/sys/fs/tmpfs # kyua test -k Kyuafile 
+  create_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.002s]
+  dots_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.003s]
+  exec_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.002s]
+  link_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.001s]
+  mkdir_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.003s]
+  mknod_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.003s]
+  mount_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.002s]
+  read_write_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.002s]
+  readdir_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.002s]
+  remove_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.001s]
+  rename_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.001s]
+  rmdir_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.001s]
+  setattr_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.000s]
+  sizes_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.001s]
+  sockets_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.000s]
+  statvfs_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.001s]
+  symlink_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.002s]
+  times_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.002s]
+  trail_slash_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.001s]
+  truncate_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.003s]
+  vnd_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.006s]
+  vnode_leak_test:__test_cases_list__  ->  broken: Test program did not exit cleanly  [0.002s]
+
+  Results file id is usr_tests_sys_fs_tmpfs.20230314-105342-563993
+  Results saved to /root/.kyua/store/results.usr_tests_sys_fs_tmpfs.20230314-105342-563993.db
+
+logs 中的一个测试用例输出的信息:
+  20230314-105343 W 1016 /usr/src/contrib/kyua/utils/process/executor.cpp:350: Implicitly cleaning up exit_handle for exec_handle 1077; ignoring errors!
+  20230314-105343 I 1016 /usr/src/contrib/kyua/utils/process/executor.cpp:368: Cleaning up exit_handle for exec_handle 1077
+  20230314-105343 W 1016 /usr/src/contrib/kyua/engine/scheduler.cpp:1065: Failed to load test cases list: Test program did not exit cleanly
+  20230314-105343 I 1016 /usr/src/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: vnd_test:__test_cases_list__  ->  
+  20230314-105343 I 1016 /usr/src/contrib/kyua/engine/scheduler.cpp:1100: Spawning /usr/tests/sys/fs/tmpfs/vnd_test:__test_cases_list__
+  20230314-105343 I 1016 /usr/src/contrib/kyua/utils/process/executor.cpp:782: Spawned subprocess with exec_handle 1079
+  20230314-105343 I 1016 /usr/src/contrib/kyua/utils/process/executor.cpp:634: Waited for subprocess with exec_handle 1079
+  20230314-105343 I 1016 /usr/src/contrib/kyua/utils/process/executor.cpp:368: Cleaning up exit_handle for exec_handle 1079
+  20230314-105343 I 1016 /usr/src/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: broken: Test program did not exit cleanly  [0.006s]
+  20230314-105343 I 1016 /usr/src/contrib/kyua/utils/process/executor.cpp:782: Spawned subprocess with exec_handle 1080
+  20230314-105343 I 1016 /usr/src/contrib/kyua/utils/process/executor.cpp:634: Waited for subprocess with exec_handle 1080
+  20230314-105343 W 1016 /usr/src/contrib/kyua/engine/atf.cpp:133: Test case list wrote to stderr: Illegal variable name.
+
+  可以发现，打印出的信息与 qihai 中测试 logs 信息是一样。由此推测，造成上述错误的原因和可能是 sh 与 tcsh 兼容性上的差异造成的
+
+  修改了 atf.cpp 代码逻辑，将相对路径全部变成了绝对路径，此时 atf-sh 可以正常执行测试，但是 C/C++ 测试脚本的执行又出现了问题。
+因为 C/C++ 都是将测试脚本编译成了内核中的函数，只要保证不发生命名冲突，可以直接调用对应的函数进行测试。atf 好像没有识别测试用例
+是 sh 或者 C/C++ 的逻辑，结果就是测试用例内核函数前面多了路径前缀，执行的时候找不到这些函数
+
+
+////////////// 20230315 //////////////
+vm 测试，当 exec_list() / exec_test() 这两个函数采用相对路径查找时，测试可正常执行
+  # cd /usr/tests/sys/vm
+  # kyua test -k Kyuafile
+  random: unblocking device.
+  mlock_test:mlock__copy_on_write_anon  ->  passed  [0.193s]
+  mlock_test:mlock__copy_on_write_vnode  ->  failed: /home/mercury/Videos/qihai_riscv/qihai/tests/sys/vm/mlock_test.c:66: child exited with status 1  [0.103s]
+  mlock_test:mlock__truncate_and_resize  ->  passed  [0.131s]
+  mlock_test:mlock__truncate_and_unlock  ->  passed  [0.133s]
+
+  Results file id is usr_tests_sys_vm.20230315-020943-850956
+  Results saved to /.kyua/store/results.usr_tests_sys_vm.20230315-020943-850956.db
+
+  3/4 passed (1 failed)
+
+但是切换到绝对路径时，就会发生如下错误:
+  # cd /usr/tests/sys/vm
+  # kyua test -k Kyuafile
+  random: unblocking device.
+  pid 22 (/sbin/kyua), jid 0, uid 0: exited on signal 6 (core dumped)
+  mlock_test:__test_cases_list__  ->  broken: Test program received signal  [0.077s]
+
+  Results file id is usr_tests_sys_vm.20230315-021127-334707
+  Results saved to /.kyua/store/results.usr_tests_sys_vm.20230315-021127-334707.db
+
+  0/1 passed (1 failed)
+  # QEMU: Terminated
+
+原因就是 image_args->fname 保存的路径信息造成的。kyua 后续执行测试用例的时候，貌似是不会去区分这次测试是 C/C++ 或者 sh，
+这个在 freebsd 中是没什么问题的，因为所有的测试用例都是以文件的形式存放在，只是处理的时候对于 sh 需要调用 atf-sh 解析器。
+qihai 相当于是把 C/C++ 的测试用例都编译成了内核函数，所以后续执行的时候不能添加测试用例名称前的路径信息，否则将无法找到对应
+函数名符号。然后产生上述错误
+
+__data_ = 0x40236000 "Atf_Check='/bin/atf_check' ; Atf_Shell='/bin/bsh' ; . /usr/share/atf/libatf-sh.subr ; . /usr/tests/sys/fs/tptfs/create_test ; main \"${@}\""
+
+对于 builtin 命令的执行，按照 qihai 现有的机制，可能会出现重名问题:
+  正常用户执行系统命令或者 shell 脚本是分开的，命令就去 /bin /sbin 等默认路径或者指定路径查找，qihai 则是将命令编译成内核函数。
+  假设用户在 /bin 下刚好有一个 shell 脚本刚好与其中某个命令同名，传递给 do_execve() 的执行参数与执行该命令将会是一致的。那么
+  奇海将无法区分，我们到底是要执行那个命令，还是要执行这个 shell 脚本
+
+
+////////////// 20230316 //////////////
+Thread 1 hit Breakpoint 2, do_execve (td=0x129e15580, args=0x129e49ab0, mac_p=0x0, oldvmspace=0x12b5d2960)
+  at /home/mercury/Videos/qihai_riscv/qihai/sys/kernel/kern_exec.cpp:329
+329		struct sysentvec *sv = &elf64_freebsd_sysvec;
+(gdb) p td2->td_name 
+No symbol "td2" in current context.
+(gdb) p td->td_name  
+$17 = "/bin/bsh_sh\000\000\000\000\000\000\000\000"
+
+感觉进程名有点问题，应该是 /bin/bsh
+
+libatf-sh.subr 文件中包含有一个 main() 函数，考虑会不会造成命名冲突？
+
+
+Thread 2 hit Breakpoint 2, atf_sh::main (this=0xffffea38)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/atf/atf-sh/atf-sh.cpp:162
+162	    if (m_argc < 1)
+(gdb) bt
+#0  atf_sh::main (this=0xffffea38) at /home/mercury/Videos/qihai_riscv/qihai/contrib/atf/atf-sh/atf-sh.cpp:162
+#1  0x000000010c0068ce in atf::application::app::run (this=0xffffea38, argc=<optimized out>, 
+    argv=<optimized out>)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/atf/atf-c++/detail/application.cpp:231
+#2  0x000000010d09ae7e in atf_sh_main (argc=3, argv=0xffffeb40)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/atf/atf-sh/atf-sh.cpp:185
+#3  0x000000010cc0bab2 in main (argc=3, argv=0xffffeb40, env=0xffffeb60)
+    at /home/mercury/Videos/qihai_riscv/qihai/lib/csu/riscv/crt1_c.c:83
+(gdb) n
+165	    const atf::fs::path script(m_argv[0]);
+(gdb) 
+166	    if (!atf::fs::exists(script))
+(gdb) p m_argv[0]
+$10 = 0xffffee14 "/usr/tests/sys/fs/tptfs/create_test"
+(gdb) p m_argv[1]
+$11 = 0xffffee38 "create:cleanup"
+(gdb) p m_argv[2]
+$12 = 0x0
+(gdb) c
+Continuing.
+
+第二次执行 atf_sh::main() 函数的时候，argv[1] = create:cleanup，它应该就是对应测试用例中的清理步骤。atf_sh::main() 会再次
+调用 execv() 函数(libc 中提供的接口，应该是会通过 syscall 调用到内核的 sys_exec() 函数)
+
+kyua abort() 发生在该函数第二次执行之前，所以可以缩小一下异常范围: 应该是测试执行过程中某个步骤引发了 abort()
+
+后续的现象是执行 create:cleanup 的时候，程序阻塞。通过添加打印信息可以看出，还是在 alloc_exec_args() 函数处阻塞，所以参数空间不足
+的文件在 atf-sh 同样会遇到。不过至少可以说明，测试程序可以正常执行，参数空间如果可以拿到，应该也会执行完 cleanup
+
+感觉问题应该是出在 atf_sh 和 atf_check 执行的过程中，也可能是 /bin/bsh (atf_sh 可能性小一些，毕竟测试脚本中的测试用例已经被解析出来了)
+
+
+精简 create_test 测试流程 (删除掉了 cleanup 步骤)，
+  # cd /usr/tests/sys/fs/tptfs/
+  # kyua test -k Kyuafile
+  random: unblocking device.
+  create_test:create  ->  pid 50 (/sbin/kyua), jid 0, uid 0: exited on signal 6 (core dumped)
+  broken: Premature exit; test case received signal 6 (core dumped)  [0.928s]
+
+  Results file id is usr_tests_sys_fs_tptfs.20230316-061548-121125
+  Results saved to /.kyua/store/results.usr_tests_sys_fs_tptfs.20230316-061548-121125.db
+
+  0/1 passed (1 failed)
+
+执行失败 log 信息:
+  # cat /.kyua/logs/kyua.20230316-070010.log 
+  20230316-070010 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/cli/main.cpp:343: kyua 0.13
+  20230316-070010 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/cli/main.cpp:348: Command line: kyua test -k Kyuafile
+  20230316-070010 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/store/write_backend.cpp:111: Populating new database with schema from /usr/share/kyua/store/schema_v3.sql
+  20230316-070011 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/store/write_backend.cpp:116: New metadata entry 1678950011
+  20230316-070011 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/process/executor.cpp:782: Spawned subprocess with exec_handle 22
+  20230316-070012 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/process/executor.cpp:634: Waited for subprocess with exec_handle 22
+  20230316-070012 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/process/executor.cpp:368: Cleaning up exit_handle for exec_handle 22
+  20230316-070012 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: create_test:create  ->  
+  20230316-070012 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/engine/scheduler.cpp:1100: Spawning /usr/tests/sys/fs/tptfs/create_test:create
+  20230316-070012 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/process/executor.cpp:782: Spawned subprocess with exec_handle 46
+  20230316-070013 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/process/executor.cpp:634: Waited for subprocess with exec_handle 46
+  20230316-070013 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/process/executor.cpp:368: Cleaning up exit_handle for exec_handle 46
+  20230316-070013 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: broken: Premature exit; test case received signal 6 (core dumped)  [0.822s]
+  20230316-070013 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: 
+  20230316-070013 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: Results file id is usr_tests_sys_fs_tptfs.20230316-070010-589089
+  20230316-070013 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: Results saved to /.kyua/store/results.usr_tests_sys_fs_tptfs.20230316-070010-589089.db
+  20230316-070013 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: 
+  20230316-070013 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: 0/1 passed (1 failed)
+  20230316-070013 I 21 /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/cli/main.cpp:354: Clean exit with code 1
+
+freebsd 下成功执行时的 log 信息:
+  root@:~/.kyua/logs # cat kyua.20230316-151312.log 
+  20230316-151312 I 954 /usr/src/contrib/kyua/cli/main.cpp:343: kyua 0.13
+  20230316-151312 I 954 /usr/src/contrib/kyua/cli/main.cpp:348: Command line: kyua test -k Kyuafile
+  20230316-151312 I 954 /usr/src/contrib/kyua/store/write_backend.cpp:111: Populating new database with schema from /usr/share/kyua/store/schema_v3.sql
+  20230316-151312 I 954 /usr/src/contrib/kyua/store/write_backend.cpp:116: New metadata entry 1678979592
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/process/executor.cpp:782: Spawned subprocess with exec_handle 955
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/process/executor.cpp:634: Waited for subprocess with exec_handle 955
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/process/executor.cpp:368: Cleaning up exit_handle for exec_handle 955
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: create_test:create  ->  
+  20230316-151312 I 954 /usr/src/contrib/kyua/engine/scheduler.cpp:1100: Spawning /usr/tests/sys/fs/tptfs/create_test:create
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/process/executor.cpp:782: Spawned subprocess with exec_handle 982
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/process/executor.cpp:634: Waited for subprocess with exec_handle 982
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/process/executor.cpp:368: Cleaning up exit_handle for exec_handle 982
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: passed  [0.031s]
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: 
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: Results file id is usr_tests_sys_fs_tptfs.20230316-151312-415951
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: Results saved to /root/.kyua/store/results.usr_tests_sys_fs_tptfs.20230316-151312-415951.db
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: 
+  20230316-151312 I 954 /usr/src/contrib/kyua/utils/cmdline/ui.cpp:103: stdout: 1/1 passed (0 failed)
+  20230316-151312 I 954 /usr/src/contrib/kyua/cli/main.cpp:354: Clean exit with code 0
+
+
+freebsd 下 do_execve() 的打印信息，可以看到 atf-sh 执行测试用例的过程:
+1. csh 运行 kyua
+
+    Thread 1 hit Breakpoint 2, do_execve (td=0xffffffc09d239600, args=0xffffffc09d1dab08, mac_p=0x0, 
+      oldvmspace=0xffffffd001e2bc80) at /usr/src/sys/kern/kern_exec.c:364
+    364		}
+    (gdb) p td->td_name 
+    $48 = "csh", '\000' <repeats 16 times>
+    (gdb) p *args
+    $49 = {
+      buf = 0xffffffc04fa8d000 "/usr/bin/kyua",
+      bufkva = 0xffffffd001ae6d40,
+      begin_argv = 0xffffffc04fa8d00e "kyua",
+      begin_envv = 0xffffffc04fa8d024 "USER=root",
+      endp = 0xffffffc04fa8d15b "",
+      fname = 0xffffffc04fa8d000 "/usr/bin/kyua",
+      fname_buf = 0x0,
+      stringspace = 523955,
+      argc = 4,
+      envc = 18,
+      fd = 0,
+      fdp = 0x0
+    }
+
+2. kyua 执行测试脚本 create_test
+
+    Thread 1 hit Breakpoint 2, do_execve (td=0xffffffc09d238580, args=0xffffffc09d1cbb08, mac_p=0x0, 
+      oldvmspace=0xffffffd001e88af0) at /usr/src/sys/kern/kern_exec.c:364
+    364		}
+    (gdb) p td->td_name 
+    $50 = "kyua", '\000' <repeats 15 times>
+    (gdb) p *args
+    $51 = {
+      buf = 0xffffffc04fa8d000 "/usr/tests/sys/fs/tmpfs/create_test",
+      bufkva = 0xffffffd001ae6d40,
+      begin_argv = 0xffffffc04fa8d024 "/usr/tests/sys/fs/tmpfs/create_test",
+      begin_envv = 0xffffffc04fa8d065 "__RUNNING_INSIDE_ATF_RUN=internal-yes-value",
+      endp = 0xffffffc04fa8d200 "D",
+      fname = 0xffffffc04fa8d000 "/usr/tests/sys/fs/tmpfs/create_test",
+      fname_buf = 0x0,
+      stringspace = 523812,
+      argc = 3,
+      envc = 21,
+      fd = 0,
+      fdp = 0x0
+    }
+
+3. atf-sh 通过 /bin/sh 执行测试命令
+
+    Thread 1 hit Breakpoint 2, do_execve (td=0xffffffc09d238580, args=0xffffffc09d1cbb08, mac_p=0x0, 
+      oldvmspace=0xffffffd001e88af0) at /usr/src/sys/kern/kern_exec.c:364
+    364		}
+    (gdb) p td->td_name 
+    $52 = "atf-sh", '\000' <repeats 13 times>
+    (gdb) p *args
+    $53 = {
+      buf = 0xffffffc04fa8d000 "/bin/sh",
+      bufkva = 0xffffffd001ae6d40,
+      begin_argv = 0xffffffc04fa8d008 "/bin/sh",
+      begin_envv = 0xffffffc04fa8d0e5 "__RUNNING_INSIDE_ATF_RUN=internal-yes-value",
+      endp = 0xffffffc04fa8d280 "",
+      fname = 0xffffffc04fa8d000 "/bin/sh",
+      fname_buf = 0x0,
+      stringspace = 523656,
+      argc = 6,
+      envc = 21,
+      fd = 0,
+      fdp = 0x0
+    }
+
+
+4. 通过 /bin/sh 去执行测试准备程序 (dirname / tr / expr)
+
+    Thread 2 hit Breakpoint 2, do_execve (td=0xffffffc09d230600, args=0xffffffc09d162b08, mac_p=0x0, 
+      oldvmspace=0xffffffd001e88af0) at /usr/src/sys/kern/kern_exec.c:364
+    364		}
+    (gdb) p td->td_name 
+    $54 = "sh", '\000' <repeats 17 times>
+    (gdb) p *args
+    $55 = {
+      buf = 0xffffffc04fb0e000 "/usr/bin/dirname",
+      bufkva = 0xffffffd001ae6d20,
+      begin_argv = 0xffffffc04fb0e011 "dirname",
+      begin_envv = 0xffffffc04fb0e03d "VENDOR=unknown",
+      endp = 0xffffffc04fb0e1d8 "ue",
+      fname = 0xffffffc04fb0e000 "/usr/bin/dirname",
+      fname_buf = 0x0,
+      stringspace = 523833,
+      argc = 2,
+      envc = 21,
+      fd = 0,
+      fdp = 0x0
+    }
+
+.... 省略中间多个步骤 ....
+
+5. 通过 /bin/sh 启动 atf-chek 程序，执行具体的测试步骤
+
+    Thread 1 hit Breakpoint 2, do_execve (td=0xffffffc09d225600, args=0xffffffc09d18ab08, mac_p=0x0, 
+      oldvmspace=0xffffffd001e88af0) at /usr/src/sys/kern/kern_exec.c:364
+    364		}
+    (gdb) p td->td_name 
+    $90 = "sh", '\000' <repeats 17 times>
+    (gdb) p *args
+    $91 = {
+      buf = 0xffffffc04fa8d000 "/usr/libexec/atf-check",
+      bufkva = 0xffffffd001ae6d40,
+      begin_argv = 0xffffffc04fa8d017 "/usr/libexec/atf-check",
+      begin_envv = 0xffffffc04fa8d06c "VENDOR=unknown",
+      endp = 0xffffffc04fa8d207 "tmpfs",
+      fname = 0xffffffc04fa8d000 "/usr/libexec/atf-check",
+      fname_buf = 0x0,
+      stringspace = 523792,
+      argc = 9,
+      envc = 21,
+      fd = 0,
+      fdp = 0x0
+    }
+
+6. atf-check 去验证各个子步骤的执行结果是否正常
+    Thread 2 hit Breakpoint 2, do_execve (td=0xffffffc09d224580, args=0xffffffc09d17bb08, mac_p=0x0, 
+        oldvmspace=0xffffffd001e2b190) at /usr/src/sys/kern/kern_exec.c:364
+    364		}
+    (gdb) p td->td_name 
+    $92 = "atf-check\000\000\000\000\000\000\000\000\000\000"
+    (gdb) p *args
+    $93 = {
+      buf = 0xffffffc04fb0e000 "/sbin/mkdir",
+      bufkva = 0xffffffd001ae6d20,
+      begin_argv = 0xffffffc04fb0e00c "mkdir",
+      begin_envv = 0xffffffc04fb0e030 "VENDOR=unknown",
+      endp = 0xffffffc04fb0e1cb "in:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:/root/bin",
+      fname = 0xffffffc04fb0e000 "/sbin/mkdir",
+      fname_buf = 0x0,
+      stringspace = 523841,
+      argc = 2,
+      envc = 21,
+      fd = 0,
+      fdp = 0x0
+    }
+    (gdb) c
+    Continuing.
+
+7. 所有测试用例执行完成之后，应该还会做一些清理工作，生成此次测试的 log 文件 和 store data 文件 (.db)
+
+
+# kyua test -k Kyuafile
+pid 48 (/bin/atf_sh), jid 0, uid 0: exited on signal 11
+create_test:__test_cases_list__  ->  broken: Test program received signal  [0.107s]
+
+Results file id is usr_tests_sys_fs_tptfs.20230316-084138-926024
+Results saved to /.kyua/store/results.usr_tests_sys_fs_tptfs.20230316-084138-926024.db
+
+0/1 passed (1 failed)
+
+
+通过调试发现，好像 libatf-sh.subr 也是需要加载到内存当中的。但是，貌似解析到某个位置的时候，突然就断掉了。
+猜测，是不是因为我们加载测试脚本目前只有 4k，但是这个文件大于 4k，导致它完全加载到内存中
+
+
+Thread 1 hit Breakpoint 3, engine::calculate_atf_result (body_status=..., results_file=...)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/engine/atf_result.cpp:624
+624	    atf_result result(atf_result::broken, "Unknown result");
+(gdb) bt
+#0  engine::calculate_atf_result (body_status=..., results_file=...)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/engine/atf_result.cpp:624
+#1  0x000000010cfa40c4 in engine::atf_interface::compute_result (this=0x4020c010, status=..., 
+    control_directory=...)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/engine/atf.cpp:248
+#2  0x000000010cfc5614 in engine::scheduler::scheduler_handle::wait_any (this=0xffffce00)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/engine/scheduler.cpp:1191
+#3  0x000000010cfe72d8 in drivers::run_tests::drive (kyuafile_path=..., build_root=..., 
+    store_path=..., filters=..., user_config=..., hooks=...)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/drivers/run_tests.cpp:315
+#4  0x000000010cfedc26 in cli::cmd_test::run (this=0x40243980, ui=0xffffe7f0, cmdline=..., 
+    user_config=...) at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/cli/cmd_test.cpp:158
+#5  0x000000010d012c64 in utils::cmdline::base_command<utils::config::tree>::main (
+    this=0x40243980, ui=0xffffe7f0, args=..., data=...)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/utils/cmdline/base_command.ipp:96
+#6  0x000000010d00e44c in (anonymous namespace)::run_subcommand (ui=0xffffe7f0, 
+    command=0x40243980, args=..., user_config=...)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/cli/main.cpp:139
+#7  0x000000010d00d510 in (anonymous namespace)::safe_main (ui=0xffffe7f0, argc=4, 
+    argv=0xffffebd0, mock_command=...)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/cli/main.cpp:228
+#8  0x000000010d00b998 in cli::main (ui=0xffffe7f0, argc=4, argv=0xffffebd0, mock_command=...)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/cli/main.cpp:280
+#9  0x000000010d00da1c in cli::main (argc=4, argv=0xffffebd0)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/cli/main.cpp:353
+#10 0x000000010cf18074 in kyua_main (argc=4, argv=0xffffebd0)
+    at /home/mercury/Videos/qihai_riscv/qihai/contrib/kyua/main.cpp:49
+#11 0x000000010cc0bb74 in main (argc=4, argv=0xffffebd0, env=0xffffebf8)
+    at /home/mercury/Videos/qihai_riscv/qihai/lib/csu/riscv/crt1_c.c:83
+
+fork() 出的子进程都没有正常退出？

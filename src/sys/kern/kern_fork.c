@@ -232,6 +232,7 @@ sysctl_kern_randompid(SYSCTL_HANDLER_ARGS)
 SYSCTL_PROC(_kern, OID_AUTO, randompid, CTLTYPE_INT|CTLFLAG_RW,
     0, 0, sysctl_kern_randompid, "I", "Random PID modulus. Special values: 0: disable, 1: choose random value");
 
+/* 应该是通过某种策略获取到一个可用的 pid */
 static int
 fork_findpid(int flags)
 {
@@ -408,33 +409,38 @@ do_fork(struct thread *td, struct fork_req *fr, struct proc *p2, struct thread *
 	p2->p_state = PRS_NEW;		/* protect against others */
 	p2->p_pid = trypid;
 	AUDIT_ARG_PID(p2->p_pid);
-	LIST_INSERT_HEAD(&allproc, p2, p_list);
-	allproc_gen++;
-	LIST_INSERT_HEAD(PIDHASH(p2->p_pid), p2, p_hash);
+	LIST_INSERT_HEAD(&allproc, p2, p_list);	/* 进程要注册到全局链表 */
+	allproc_gen++;	/* 记录系统中的进程总数 */
+	LIST_INSERT_HEAD(PIDHASH(p2->p_pid), p2, p_hash);	/* 利用 hash table 管理所有的 pid */
 	PROC_LOCK(p2);
 	PROC_LOCK(p1);
 
 	sx_xunlock(&allproc_lock);
 	sx_xunlock(&proctree_lock);
-
+	/*
+		fork() 执行的过程中，进程结构体中的一部分成员可直接进行复制。
+		通过 p_startcopy 和 p_endcopy 进行控制
+	*/
 	bcopy(&p1->p_startcopy, &p2->p_startcopy,
 	    __rangeof(struct proc, p_startcopy, p_endcopy));
-	pargs_hold(p2->p_args);
+	pargs_hold(p2->p_args); /* 增加 process args 引用计数，与原进程共享？ */
 
-	PROC_UNLOCK(p1);
+	PROC_UNLOCK(p1); /* 拷贝操作需要对 p1 加锁 */
 
+	/* 新进程结构体中的部分成员需要提前置零 */
 	bzero(&p2->p_startzero,
 	    __rangeof(struct proc, p_startzero, p_endzero));
 
 	/* Tell the prison that we exist. */
 	prison_proc_hold(p2->p_ucred->cr_prison);
 
-	PROC_UNLOCK(p2);
+	PROC_UNLOCK(p2); /* 注意 p2 加锁和解锁操作逻辑 */
 
-	tidhash_add(td2);
+	tidhash_add(td2); /* 将 td2->td_tid 添加到全局 hash table */
 
 	/*
 	 * Malloc things while we don't hold any locks.
+	 	判断 signal handler 是否共享
 	 */
 	if (fr->fr_flags & RFSIGSHARE)
 		newsigacts = NULL;
@@ -443,9 +449,14 @@ do_fork(struct thread *td, struct fork_req *fr, struct proc *p2, struct thread *
 
 	/*
 	 * Copy filedesc.
-	 		RFCFDG：关闭所有的文件描述符，清空文件描述符表
-			RFFDG：复制文件描述符，所有的文件描述符应该还是指向同一个文件
+	 		RFCFDG: 关闭所有的文件描述符，清空文件描述符表
+			RFFDG: 复制文件描述符，所有的文件描述符应该还是指向同一个文件
 			或者是父进程和子进程共享同一个文件描述符表，不进行数据拷贝
+
+		也就是说，新进程的文件描述符共有三种创建方式:
+			- 重新申
+			- 拷贝原有进程的文件描述符
+			- 与原有进程共享同一个文件描述符
 	 */
 	if (fr->fr_flags & RFCFDG) {
 		fd = fdinit(p1->p_fd, false);
@@ -484,17 +495,17 @@ do_fork(struct thread *td, struct fork_req *fr, struct proc *p2, struct thread *
 
 	PROC_LOCK(p2);
 	PROC_LOCK(p1);
-
+	/* 与进程类似，需要新线程部分成员需要拷贝或者置零 */
 	bzero(&td2->td_startzero,
 	    __rangeof(struct thread, td_startzero, td_endzero));
 
 	bcopy(&td->td_startcopy, &td2->td_startcopy,
 	    __rangeof(struct thread, td_startcopy, td_endcopy));
 
-	bcopy(&p2->p_comm, &td2->td_name, sizeof(td2->td_name));
+	bcopy(&p2->p_comm, &td2->td_name, sizeof(td2->td_name)); /* 进程名称初始化 */
 	td2->td_sigstk = td->td_sigstk;
-	td2->td_flags = TDF_INMEM;
-	td2->td_lend_user_pri = PRI_MAX;
+	td2->td_flags = TDF_INMEM; /* 表明线程堆栈在进程当中 */
+	td2->td_lend_user_pri = PRI_MAX; /* 表示调度优先级？ */
 
 #ifdef VIMAGE
 	td2->td_vnet = NULL;
@@ -502,14 +513,14 @@ do_fork(struct thread *td, struct fork_req *fr, struct proc *p2, struct thread *
 #endif
 
 	/*
-	 * Allow the scheduler to initialize the child.
+	 * Allow the scheduler(调度程序) to initialize the child.
 	 */
 	thread_lock(td);
 	sched_fork(td, td2);
 	thread_unlock(td);
 
 	/*
-	 * Duplicate sub-structures as needed.
+	 * Duplicate(复制) sub-structures as needed.
 	 * Increase reference counts on shared objects.
 	 */
 	p2->p_flag = P_INMEM;
@@ -543,6 +554,7 @@ do_fork(struct thread *td, struct fork_req *fr, struct proc *p2, struct thread *
 
 	/*
 	 * p_limit is copy-on-write.  Bump its refcount.
+	 	进程所能申请的资源限制
 	 */
 	lim_fork(p1, p2);
 
@@ -864,7 +876,9 @@ fork1(struct thread *td, struct fork_req *fr)
 	/*
 	 * Here we don't create a new process, but we divorce
 	 * certain parts of a process from itself.
-	 * 这里我们不创建新的进程，但是会将进程的某些部分与进程本身分离
+	 * 这里我们不创建新的进程，但是会将进程的某些部分与进程本身分离。
+	 * 该标志如果设置，说明我们是要创建新的进程。如果不是，则对当前
+	 * 进程进行操作
 	 */
 	if ((flags & RFPROC) == 0) {
 		if (fr->fr_procp != NULL)
@@ -885,13 +899,15 @@ fork1(struct thread *td, struct fork_req *fr)
 	 * create. There are hard-limits as to the number of processes
 	 * that can run, established by the KVA and memory usage for
 	 * the process data.
-	 * 在分配之前增加nprocs资源。尽管流程条目是动态创建的，但我们仍然对将创建的
+	 * 在分配之前增加 nprocs 资源。尽管流程条目是动态创建的，但我们仍然对将创建的
 	 * 最大数量保持全局限制。对于可以运行的进程数量，有硬限制，由KVA和进程数据的
 	 * 内存使用情况确定
 	 *
 	 * Don't allow a nonprivileged user to use the last ten
 	 * processes; don't let root exceed the limit.
-	 * 不允许非特权用户使用最后十个进程；不要让 root 超过限制。
+	 * 不允许非特权用户使用最后十个进程；不要让 root 超过限制
+	 * 
+	 * nprocs 是一个全局变量，应该表示的是系统拥有的进程总数量
 	 */
 	nprocs_new = atomic_fetchadd_int(&nprocs, 1) + 1;
 	if ((nprocs_new >= maxproc - 10 && priv_check_cred(td->td_ucred,
@@ -911,8 +927,7 @@ fork1(struct thread *td, struct fork_req *fr)
 	 * If required, create a process descriptor in the parent first; we
 	 * will abandon it if something goes wrong. We don't finit() until
 	 * later.
-	 * 如果需要，首先在父进程中创建一个进程描述符；如果出了问题，我们将放弃它。这个文件描述符
-	 * 应该是对应一个可执行文件
+	 * 如果需要，首先在父进程中创建一个进程描述符；如果出了问题，我们将放弃它
 	 */
 	if (flags & RFPROCDESC) {
 		error = procdesc_falloc(td, &fp_procdesc, fr->fr_pd_fd,
@@ -923,19 +938,24 @@ fork1(struct thread *td, struct fork_req *fr)
 
 	mem_charged = 0;
 	if (pages == 0)
-		pages = kstack_pages;
+		pages = kstack_pages; // vm_thread_new(@pages) 内核栈 = 8k
 	/* Allocate new proc. */
 	newproc = uma_zalloc(proc_zone, M_WAITOK);
-	td2 = FIRST_THREAD_IN_PROC(newproc);
+	td2 = FIRST_THREAD_IN_PROC(newproc);	// 新进程中的第一个线程
 	if (td2 == NULL) {
+		/* 创建新的线程并设置 kernel stack，cpu 相关属性 */
 		td2 = thread_alloc(pages);
 		if (td2 == NULL) {
 			error = ENOMEM;
 			goto fail2;
 		}
-		proc_linkup(newproc, td2);
+		proc_linkup(newproc, td2); // 将新的线程插入到新进程当中
 	} else {
 		if (td2->td_kstack == 0 || td2->td_kstack_pages != pages) {
+			/*
+				如果新进程中已经存在线程，则首先将线程堆栈释放，
+				然后再为其申请新的堆栈空间
+			*/
 			if (td2->td_kstack != 0)
 				vm_thread_dispose(td2);
 			if (!thread_alloc_stack(td2, pages)) {
@@ -945,6 +965,7 @@ fork1(struct thread *td, struct fork_req *fr)
 		}
 	}
 
+	/* 判断新的进程与旧进程是否是共享地址空间 */
 	if ((flags & RFMEM) == 0) {
 		vm2 = vmspace_fork(p1->p_vmspace, &mem_charged);
 		if (vm2 == NULL) {
@@ -968,6 +989,7 @@ fork1(struct thread *td, struct fork_req *fr)
 	/*
 	 * XXX: This is ugly; when we copy resource usage, we need to bump
 	 *      per-cred resource counters.
+	 * 这很难看；当我们复制资源使用情况时，我们需要提升每个 cred 资源计数器
 	 */
 	proc_set_cred_init(newproc, crhold(td->td_ucred));
 

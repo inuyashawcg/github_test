@@ -46,7 +46,7 @@
  * environment and argv strings.  Normally ps_argvstr points to the
  * argv vector, and ps_nargvstr is the same as the program's argc. The
  * fields ps_envstr and ps_nenvstr are the equivalent for the environment.
- *
+ * 
  * Programs should now use setproctitle(3) to change ps output.
  * setproctitle() always informs the kernel with sysctl and sets the
  * pointers in ps_strings.  The kern.proc.args sysctl first tries p_args.

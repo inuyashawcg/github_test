@@ -169,14 +169,34 @@
  */
 #define	RFNAMEG		(1<<0)	/* UNIMPL new plan9 `name space' */
 #define	RFENVG		(1<<1)	/* UNIMPL copy plan9 `env space' */
+/*
+  If set, the invoker's	file descriptor	table is copied;
+  otherwise the two processes share a single table. 
+*/
 #define	RFFDG		(1<<2)	/* copy fd table */
 #define	RFNOTEG		(1<<3)	/* UNIMPL create new plan9 `note group' */
+/*
+  If set a new process is created; otherwise changes affect the
+  current process.
+*/
 #define	RFPROC		(1<<4)	/* change child (else changes curproc) */
 #define	RFMEM		(1<<5)	/* share `address space' */
+/*
+  If set, the child process will be dissociated	from the parent. Upon exit
+  the child will not leave a status for the parent to collect.
+*/
 #define	RFNOWAIT	(1<<6)	/* give child to init */
 #define	RFCNAMEG	(1<<10)	/* UNIMPL zero plan9 `name space' */
 #define	RFCENVG		(1<<11)	/* UNIMPL zero plan9 `env space' */
+/*
+  If set, the new process starts with a	clean file descriptor table.
+  Is mutually exclusive	with RFFDG. 与 RFFDG 标志互斥
+*/
 #define	RFCFDG		(1<<12)	/* close all fds, zero fd table */
+/*
+  If set, the new process shares file descriptor to process leaders table
+  with its parent. Only applies when neither RFFDG nor RFCFDG are set.
+*/
 #define	RFTHREAD	(1<<13)	/* enable kernel thread support */
 #define	RFSIGSHARE	(1<<14)	/* share signal handlers */
 #define	RFLINUXTHPN	(1<<16)	/* do linux clone exit parent notification */

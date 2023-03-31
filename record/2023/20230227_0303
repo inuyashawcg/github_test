@@ -1,0 +1,98 @@
+////////////// 20230228 //////////////
+run update_qihai + run distro_bootcmd 命令执行完成之后，数据如下:
+    mercury@mercury:~/Videos/qihai_riscv$ xxd -s 0x8400b000 -l 16 qihai.disk
+    8400b000: ffff ffff ffff ffff ffff 0100 0000 0000  ................
+    mercury@mercury:~/Videos/qihai_riscv$ xxd -s 0x8400c000 -l 16 qihai.disk
+    8400c000: ffff ffff ffff ffff ffff 0300 0000 0000  ................
+
+说明在未开始操作之前，这些数据还都是完好的，说明应该是在测试执行的过程中，bitmap 操作异常导致数据被损坏
+
+condition 3 vaddr==0x104001000
+
+vm_fault_trap (map=0x1101427b8 <harvest_context+784>, vaddr=4362080256, fault_type=1 '\001', 
+    fault_flags=0, signo=0x115e99160, ucode=0x115e9915c)
+    at /home/mercury/Videos/qihai_riscv/qihai_tptfs/sys/vm/vm_fault.cpp:597
+597	    KASSERT(result == KERN_SUCCESS || result == KERN_FAILURE ||
+(gdb) 
+604	    if (map != kernel_map && KTRPOINT(curthread, KTR_FAULTEND))
+(gdb) 
+607	    if (result != KERN_SUCCESS && signo != NULL) {
+(gdb) 
+652	    return (result);
+(gdb) p result 
+$6 = 0
+(gdb) p/x *(char*)0x104001000
+$7 = 0xb
+(gdb) p/x *(char*)0x104001001
+$8 = 0x35
+......
+
+每次错误都是一致的，说明这是一个确定性的异常导致的。qihai 系统 va=pa 的机制下，每一个页面应该都只会触发一次
+page fault 异常，后续应该不会再次触发
+
+./build_rootfs.sh /work/tptuser/mc/riscv-qihai/buildrootfs/rootfs /work/tptuser/mc/riscv-qihai/buildrootfs/formatting_disk /work/tptuser/mc/riscv-qihai/buildrootfs 16M
+
+
+////////////// 20230301 //////////////
+panic: Fatal page fault at 0x10c1b7914: 0x0000000000000c
+cpuid = 1
+time = 1677635581
+KDB: stack backtrace:
+#0 0x10c19f746 at kdb_backtrace+0x7c
+#1 0x10c13a5e2 at vpanic+0x202
+#2 0x10c13a3dc at panic+0x32
+#3 0x10c040804 at do_trap_supervisor+0x7fc
+#4 0x10c0400de at do_trap_supervisor+0xd6
+#5 0x10c015b18 at cpu_exception_handler_supervisor+0x68
+#6 0x10c1b4e5a at turnstile_adjust+0x5ae
+#7 0x10c1b66f8 at turnstile_wait+0x678
+#8 0x10c104512 at __mtx_lock_sleep+0x41a
+#9 0x10c387c52 at _ZN9TptFsLock12lockMetaLockEv+0x86
+#10 0x10c388a80 at _ZN13TptInodeAlloc14inodeAllocatorEli+0x9c
+#11 0x10c3887a0 at _ZN13TptInodeAlloc10allocInodeEiP5ucredPP5vnodePP9tpt_inode+0xcc
+#12 0x10c390e5c at _ZN12TptVopVector9makeInodeEiP5vnodePS1_PP9tpt_inodeP13componentname+0x8c
+#13 0x10c390cc0 at _ZN12TptVopVector6createEP15vop_create_args+0x50
+#14 0x10c385222 at _Z12tptfs_createP15vop_create_args+0x24
+#15 0x10c72dd40 at VOP_CREATE_APV+0x4c
+#16 0x10c26ebf4 at vn_start_write+0x142
+#17 0x10c26e782 at vn_open_cred+0x254
+
+  通过打印信息可以看出，中间有个某个阶段 lockMetaLock() 函数被执行了两次。这个是在 kyua test 第一次执行的时候
+发生的现象，但第二次执行的时候，才会出现上述 panic 错误，还有时间限制？
+...
+lockMetaLock
+unlockMetaLock
+lockMetaLock
+unlockMetaLock
+lockMetaLock
+lockMetaLock
+unlockMetaLock
+lockMetaLock
+unlockMetaLock
+...
+
+  vop_vector 通过 VFS_VOP_VECTOR_REGISTER 宏定义将这些方法放到 kernel.elf 中的某一个 section 中，并且会
+提供一个 default_vops，这个就相当于是基类的成员函数，其实就类似于 class vnode，这些 vnode 从成员函数类型上进行
+区分，可能是 tptfs vnode，也可能是 devfs vnode 等等；
+  现在采用的方法就是在利用 vnode->v_op 指针指向 section 中的唯一方法表，可以到后续 vnode 重构的时候进行处理
+
+C++ 注释中不同的代码有不同的含义，不能一概而论:
+TODO + 说明：
+    如果代码中有该标识，说明在标识处有功能代码待编写，待实现的功能在说明中会简略说明
+FIXME + 说明：
+    如果代码中有该标识，说明标识处代码需要修正，甚至代码是错误的，不能工作，需要修复，如何修正会在说明中简略说明
+XXX + 说明：
+    如果代码中有该标识，说明标识处代码虽然实现了功能，但是实现的方法有待商榷，希望将来能改进，要改进的地方会在说明中简略说明
+
+
+////////////// 20230302 //////////////
+error: cannot lock ref 'refs/remotes/origin/dev/link-pkg': 'refs/remotes/origin/dev' exists; cannot create 'refs/remotes/origin/dev/link-pkg'
+From git.tpt.com:/git/qihai
+ ! [new branch]            dev/link-pkg -> origin/dev/link-pkg  (unable to update local ref)
+
+mmap_test:mmap__map_at_zero  ->  >>>>>> ERROR: FindSysctlObjectByPath fail, name=security.bsd.map_at_zero.
+broken: Test result contains multiple lines: skipped: sysctl for security.bsd.map_at_zero failed: No such file or directory<<NEWLINE>>  [0.126s]
+
+
+////////////// 20230303 //////////////
+  

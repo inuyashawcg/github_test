@@ -52,22 +52,24 @@
 #define	MAXDSIZ		(1*1024*1024*1024)	/* max data size */
 #endif
 #ifndef DFLSSIZ
-#define	DFLSSIZ		(128*1024*1024)		/* initial stack size limit */
+#define	DFLSSIZ		(128*1024*1024)		/* initial stack size limit - 初始堆栈大小限制 */
 #endif
 #ifndef MAXSSIZ
 #define	MAXSSIZ		(1*1024*1024*1024)	/* max stack size */
 #endif
 #ifndef SGROWSIZ
-#define	SGROWSIZ	(128*1024)		/* amount to grow stack */
+#define	SGROWSIZ	(128*1024)		/* amount to grow stack - 堆栈增长量 */
 #endif
 
 /*
  * The physical address space is sparsely populated.
+		表示系统物理地址空间区域比较稀缺？
  */
 #define	VM_PHYSSEG_SPARSE
 
 /*
  * The number of PHYSSEG entries.
+		物理内存段数量的最大值
  */
 #define	VM_PHYSSEG_MAX		64
 
@@ -76,6 +78,11 @@
  * from which physical pages are allocated and VM_FREEPOOL_DIRECT is
  * the pool from which physical pages for small UMA objects are
  * allocated.
+ * 创建两个空闲页面池：VM_FREEPOOL_DEFAULT 是分配物理页面的默认池；
+ * VM_FREEPOOL_DIRECT 是分配小 UMA 对象的物理页面的池。
+ * 
+ * 推测，物理内存空间会被划分为不同的功能分区，有的用于分配物理页，有的用于给 UMA
+ * 这类等大小的对象分配地址空间
  */
 #define	VM_NFREEPOOL		2
 #define	VM_FREEPOOL_DEFAULT	0
@@ -95,11 +102,16 @@
  * By reducing the number of distinct 16MB "pages" that are used by UMA,
  * the physical memory allocator reduces the likelihood of both 4MB
  * page TLB misses and cache misses caused by 4MB page TLB misses.
+ * 
+ * 支持 16MB 的分配大小，以优化 UMA 对直接映射的使用。具体来说，一个缓存行最多包含四个 TTE，
+ * 共同映射 16MB 的物理内存。通过减少 UMA 使用的不同 16MB "页面" 的数量，物理内存分配器
+ * 降低了 4MB 页面 TLB 未命中和 4MB 页面 TLB 未命中导致的缓存未命中的可能性
  */
 #define	VM_NFREEORDER		12
 
 /*
- * Disable superpage reservations.
+ * Disable superpage reservations. 
+ 		禁用超级页面保留功能
  */
 #ifndef	VM_NRESERVLEVEL
 #define	VM_NRESERVLEVEL		0
@@ -154,6 +166,7 @@
 #define	DMAP_MIN_ADDRESS	(0xffffffd000000000UL)
 #define	DMAP_MAX_ADDRESS	(0xfffffff000000000UL)
 
+/* 直接映射区对应的物理地址空间范围 */
 #define	DMAP_MIN_PHYSADDR	(dmap_phys_base)
 #define	DMAP_MAX_PHYSADDR	(dmap_phys_max)
 
@@ -195,6 +208,7 @@
 
 /*
  * How many physical pages per kmem arena virtual page.
+ 		scale: 比例，规模
  */
 #ifndef VM_KMEM_SIZE_SCALE
 #define	VM_KMEM_SIZE_SCALE	(3)
@@ -210,6 +224,7 @@
 /*
  * Optional ceiling (in bytes) on the size of the kmem arena: 60% of the
  * kernel map.
+ * kernel map 最大 60% 的地址空间都要划分给 kmem arena?
  */
 #ifndef VM_KMEM_SIZE_MAX
 #define	VM_KMEM_SIZE_MAX	((VM_MAX_KERNEL_ADDRESS - \

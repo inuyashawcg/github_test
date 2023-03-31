@@ -156,6 +156,7 @@ __FBSDID("$FreeBSD: releng/12.0/sys/riscv/riscv/pmap.c 339423 2018-10-18 15:25:0
 #include <machine/pcb.h>
 #include <machine/sbi.h>
 
+// number pd_entry per page.
 #define	NPDEPG		(PAGE_SIZE/(sizeof (pd_entry_t)))
 #define	NUPDE			(NPDEPG * NPDEPG)
 #define	NUSERPGTBLS		(NUPDE + NPDEPG)
@@ -213,16 +214,18 @@ __FBSDID("$FreeBSD: releng/12.0/sys/riscv/riscv/pmap.c 339423 2018-10-18 15:25:0
 
 /* The list of all the user pmaps */
 LIST_HEAD(pmaplist, pmap);
-static struct pmaplist allpmaps;
+static struct pmaplist allpmaps;	// all user space pmap
 
 static MALLOC_DEFINE(M_VMPMAP, "pmap", "PMAP L1");
 
 struct pmap kernel_pmap_store;
 
+// AS: address space?
 vm_offset_t virtual_avail;	/* VA of first avail page (after kernel bss) */
 vm_offset_t virtual_end;	/* VA of last avail page (end of kernel AS) */
 vm_offset_t kernel_vm_end = 0;
 
+// dmap: direct map. 物理地址直接映射到虚拟地址空间，所以是 vm_paddr_t
 vm_paddr_t dmap_phys_base;	/* The start of the dmap region */
 vm_paddr_t dmap_phys_max;	/* The limit of the dmap region */
 vm_offset_t dmap_max_addr;	/* The virtual address limit of the dmap */
@@ -237,8 +240,8 @@ static struct rwlock_padalign pvh_global_lock;
  * Data for the pv entry allocation mechanism
  */
 static TAILQ_HEAD(pch, pv_chunk) pv_chunks = TAILQ_HEAD_INITIALIZER(pv_chunks);
-static struct mtx pv_chunks_mutex;
-static struct rwlock pv_list_locks[NPV_LIST_LOCKS];
+static struct mtx pv_chunks_mutex;	// 用户保护 pv_chunks 的互斥锁
+static struct rwlock pv_list_locks[NPV_LIST_LOCKS];	// rwlock pool?
 
 static void	free_pv_chunk(struct pv_chunk *pc);
 static void	free_pv_entry(pmap_t pmap, pv_entry_t pv);
@@ -298,7 +301,7 @@ pagezero(void *p)
 static __inline pd_entry_t *
 pmap_l1(pmap_t pmap, vm_offset_t va)
 {
-
+	// pmap 中貌似只存放 l1 entry
 	return (&pmap->pm_l1[pmap_l1_index(va)]);
 }
 
@@ -357,7 +360,10 @@ pmap_l3(pmap_t pmap, vm_offset_t va)
 
 	return (pmap_l2_to_l3(l2, va));
 }
-
+/*
+	从上述三个函数实现逻辑可以看出，根据虚拟地址获取页表项时，首先是要利用 pmap->l1 得到 l2 指针。
+	感觉就是直接得到物理地址，然后再利用 direct map 得到虚拟地址
+*/
 
 static __inline int
 pmap_is_write(pt_entry_t entry)
@@ -388,6 +394,7 @@ pmap_page_dirty(pt_entry_t pte)
 	return (pte & PTE_D);
 }
 
+// pmap resident page count increase.
 static __inline void
 pmap_resident_count_inc(pmap_t pmap, int count)
 {
@@ -396,6 +403,7 @@ pmap_resident_count_inc(pmap_t pmap, int count)
 	pmap->pm_stats.resident_count += count;
 }
 
+// pmap resident page count decrease.
 static __inline void
 pmap_resident_count_dec(pmap_t pmap, int count)
 {
@@ -427,6 +435,9 @@ pmap_distribute_l1(struct pmap *pmap, vm_pindex_t l1index,
 	}
 }
 
+/*
+	该函数只在操作系统启动初期才会被调用
+*/
 static pt_entry_t *
 pmap_early_page_idx(vm_offset_t l1pt, vm_offset_t va, u_int *l1_slot,
     u_int *l2_slot)
@@ -550,6 +561,10 @@ pmap_bootstrap(vm_offset_t l1pt, vm_paddr_t kernstart, vm_size_t kernlen)
 	vm_paddr_t pa, min_pa, max_pa;
 	int i;
 
+	/*
+		KERNBASE 表示的是虚拟地址，kernstart 表示的应该是物理地址。kern_delta 表示的是
+		虚拟地址与物理地址之间的偏移量。direct map 应该是 物理地址+偏移量 = 虚拟地址
+	*/
 	kern_delta = KERNBASE - kernstart;
 	physmem = 0;
 
@@ -843,7 +858,7 @@ pmap_invalidate_all(pmap_t pmap)
 /*
  *	Routine:	pmap_extract
  *	Function:
- *		Extract the physical page address associated
+ *		Extract(提取) the physical page address associated
  *		with the given map/virtual_address pair.
  */
 vm_paddr_t 
@@ -913,6 +928,7 @@ retry:
 	return (m);
 }
 
+// 上面两个函数处理的应该是用户地址空间 pmap，加 k 则用于处理内核地址空间
 vm_paddr_t
 pmap_kextract(vm_offset_t va)
 {
@@ -945,7 +961,7 @@ pmap_kextract(vm_offset_t va)
 /***************************************************
  * Low level mapping routines.....
  ***************************************************/
-
+// 该函数会在 devmap_bootstrap() 函数中被调用，用于设备地址映射
 void
 pmap_kenter_device(vm_offset_t sva, vm_size_t size, vm_paddr_t pa)
 {
@@ -1058,7 +1074,7 @@ pmap_qenter(vm_offset_t sva, vm_page_t *ma, int count)
 	pn_t pn;
 	int i;
 
-	va = sva;
+	va = sva;	// start virtual address?
 	for (i = 0; i < count; i++) {
 		m = ma[i];
 		pa = VM_PAGE_TO_PHYS(m);
@@ -1075,9 +1091,12 @@ pmap_qenter(vm_offset_t sva, vm_page_t *ma, int count)
 }
 
 /*
- * This routine tears out page mappings from the
+ * This routine tears out(撕掉) page mappings from the
  * kernel -- it is meant only for temporary mappings.
  * Note: SMP coherent.  Uses a ranged shootdown IPI.
+ * 
+ * 对照上面 enter 函数，两者处理的都是一些临时的地址映射，比较适合用在 buffer。
+ * 一旦数据传送完毕，就可以解除相关映射关系
  */
 void
 pmap_qremove(vm_offset_t sva, int count)

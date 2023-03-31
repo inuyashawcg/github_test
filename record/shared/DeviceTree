@@ -12,3 +12,7 @@ https://devicetree-specification.readthedocs.io/en/latest/index.html
 
 - 同一个层级的设备节点命名应该是唯一的。如果到节点的完整路径是明确的，则可以省略单元地址；
   如果客户端程序遇到不明确的路径，则其行为未定义。
+
+
+////////////// Standard Properties //////////////
+  

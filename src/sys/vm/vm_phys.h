@@ -43,6 +43,8 @@
 #ifdef _KERNEL
 
 /* Domains must be dense (non-sparse) and zero-based. */
+// affinity: 类同，喜好，密切关系
+// locality: 地区，位置，产地
 struct mem_affinity {
 	vm_paddr_t start;
 	vm_paddr_t end;

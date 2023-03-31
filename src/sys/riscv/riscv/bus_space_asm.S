@@ -36,30 +36,35 @@
 
 __FBSDID("$FreeBSD: releng/12.0/sys/riscv/riscv/bus_space_asm.S 298635 2016-04-26 12:45:01Z br $");
 
+# lb: load byte，从某个地址处读取1个字节的数据
 ENTRY(generic_bs_r_1)
 	add	a3, a1, a2
 	lb	a0, 0(a3)
 	ret
 END(generic_bs_r_1)
 
+# lh: load halfword，从某个地址处读取半字，即两个字节的数据
 ENTRY(generic_bs_r_2)
 	add	a3, a1, a2
 	lh	a0, 0(a3)
 	ret
 END(generic_bs_r_2)
 
+# lw: load word，从某个地址读取1个字，即4字节数据
 ENTRY(generic_bs_r_4)
 	add	a3, a1, a2
 	lw	a0, 0(a3)
 	ret
 END(generic_bs_r_4)
 
+# ld: load doubleword，双字加载，即从某个地址读取 8 字节的数据
 ENTRY(generic_bs_r_8)
 	add	a3, a1, a2
 	ld	a0, 0(a3)
 	ret
 END(generic_bs_r_8)
 
+# sb: store byte，向某个地址写入1个字节数据，下面同上
 ENTRY(generic_bs_w_1)
 	add	a4, a1, a2
 	sb	a3, 0(a4)

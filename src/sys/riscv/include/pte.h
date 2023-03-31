@@ -45,24 +45,24 @@ typedef	uint64_t	pn_t;			/* page number */
 #endif
 
 /* Level 0 table, 512GiB per entry */
-#define	L0_SHIFT	39
+#define	L0_SHIFT	39  // 2 ^ (39 - 30) = 512
 
 /* Level 1 table, 1GiB per entry */
-#define	L1_SHIFT	30
+#define	L1_SHIFT	30 // 2 ^ (30 - 12) = 512
 #define	L1_SIZE 	(1 << L1_SHIFT)
 #define	L1_OFFSET 	(L1_SIZE - 1)
 
 /* Level 2 table, 2MiB per entry */
-#define	L2_SHIFT	21
+#define	L2_SHIFT	21  // 2 ^ (21 - 12) = 512
 #define	L2_SIZE 	(1 << L2_SHIFT)
 #define	L2_OFFSET 	(L2_SIZE - 1)
 
-/* Level 3 table, 4KiB per entry */
-#define	L3_SHIFT	12
+/* Level 3 table, 4KiB per entry*/
+#define	L3_SHIFT	12  // 2 ^ 12 = 4096
 #define	L3_SIZE 	(1 << L3_SHIFT)
 #define	L3_OFFSET 	(L3_SIZE - 1)
 
-#define	Ln_ENTRIES	(1 << 9)
+#define	Ln_ENTRIES	(1 << 9)  // 512
 #define	Ln_ADDR_MASK	(Ln_ENTRIES - 1)
 
 /* Bits 9:8 are reserved for software */

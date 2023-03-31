@@ -137,10 +137,12 @@ SYSCTL_ULONG(_vm, OID_AUTO, max_kernel_address, CTLFLAG_RD,
  *	range to physical memory must be explicitly created prior to
  *	its use, typically with pmap_qenter().  Any attempt to create
  *	a mapping on demand through vm_fault() will result in a panic.
- 
  		分配一个虚拟地址范围，该范围没有底层对象，也没有到物理内存的初始映射。从这个
 		范围到物理内存的任何映射必须在使用之前显式创建，通常使用 pmap_qenter。任何
 		通过 vm_fault 按需创建映射的尝试都会导致 panic
+
+		这个跟 kva_import 不太一样，首先就是凭空分配一块虚拟内存区域，没有其他底层
+		数据结构对象与之关联。使用之前必须要提前分配好物理地址，而不能经过 vm_fault
  */
 vm_offset_t
 kva_alloc(vm_size_t size)
@@ -178,6 +180,8 @@ kva_free(vm_offset_t addr, vm_size_t size)
  *	region's starting virtual address.  The allocated pages are not
  *	necessarily physically contiguous.  If M_ZERO is specified through the
  *	given flags, then the pages are zeroed before they are mapped.
+		
+		既要分配虚拟地址空间，又要分配物理页进行填充，这些物理页并不要求一定是连续的
  */
 static vm_offset_t
 kmem_alloc_attr_domain(int domain, vm_size_t size, int flags, vm_paddr_t low,
@@ -720,6 +724,14 @@ kva_import(void *unused, vmem_size_t size, int flags, vmem_addr_t *addrp)
 	KASSERT((size % KVA_QUANTUM) == 0,
 	    ("kva_import: Size %jd is not a multiple of %d",
 	    (intmax_t)size, (int)KVA_QUANTUM));
+	/*
+		推测: 当我们使用 malloc() 在内核空间申请一块内存时，vmem 会接收到该请求并处理。
+		vmem 首先要知道地址空间的使用情况，再来确定给我们分配哪块区域；
+		此时 vmem 会交给其对应的 vm_map 模块(这里是 kernel_map) 来处理。kernel_map
+		会在已经建立映射的被管理区域找到一个块满足要求大小的地址空间。如果找到了，就把该
+		区域的起始地址返回；
+		vmem 并不会凭空创建一块内存给我们使用，而是要经过 vm_map 模块找到一块合适的区域
+	*/
 	addr = vm_map_min(kernel_map);
 	result = vm_map_find(kernel_map, NULL, 0, &addr, size, 0,
 	    VMFS_SUPER_SPACE, VM_PROT_ALL, VM_PROT_ALL, MAP_NOFAULT);
@@ -754,6 +766,10 @@ kva_import_domain(void *arena, vmem_size_t size, int flags, vmem_addr_t *addrp)
  *	new map will thus map the range between VM_MIN_KERNEL_ADDRESS and 
  *	`start' as allocated, and the range between `start' and `end' as free.
  *	Create the kernel vmem arena and its per-domain children.
+
+	创建内核映射；插入覆盖内核 text、data、bss 和迄今为止分配的所有空间(boostrap 数据)的映射。
+	新 map 的映射范围 VM_MIN_KERNEL_ADDRESS -> start 被标记为已经被分配的状态，start -> end
+	之间表示的是空闲状态。创建 kernel vmem arena 及其每个域的子级。
  */
 void
 kmem_init(vm_offset_t start, vm_offset_t end)

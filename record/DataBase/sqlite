@@ -1,0 +1,11 @@
+////////////// sqlite3 //////////////
+    https://www.kancloud.cn/kangdandan/sqlite/64326
+    https://huili.github.io/sqlite/sqliteintro.html
+    https://www.cnblogs.com/cchust/p/5121559.html
+    https://www.sqlite.org/index.html
+
+- sqlite3_exec() 实际上是将编译，执行进行了封装，与之等价的一组函数是 sqlite3_prepare_v2(), sqlite3_step() 和 sqlite3_finalize()
+- sqlite3_prepare_v2() 编译 SQL 语句生成 VDBE 执行码，sqlite3_step() 执行，sqlite3_finalize() 关闭语句句柄，释放资源
+- 两种方式，都可以通过调用 sqlite3_changes(pdb)，得到语句影响的行数
+
+  从 sqlite3 数据库的设计上来看，sqlite3_prepare_v2() 应该还是在内存中对 sql 进行编码，应该不会涉及到与操作系统的交互

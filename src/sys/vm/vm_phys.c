@@ -74,6 +74,10 @@ _Static_assert(sizeof(long) * NBBY >= VM_PHYSSEG_MAX,
     "Too many physsegs.");
 
 #ifdef NUMA
+/*
+	affinity 有亲密的，亲近的意思，NUMA 表示非一致性内存访问，也就是说
+	cpu 核优先访问离自己比较近的内存单元，所以说才会创建这么一个变量
+*/
 struct mem_affinity __read_mostly *mem_affinity;
 int __read_mostly *mem_locality;
 #endif
@@ -81,13 +85,15 @@ int __read_mostly *mem_locality;
 int __read_mostly vm_ndomains = 1;
 domainset_t __read_mostly all_domains = DOMAINSET_T_INITIALIZER(0x1);
 
+// riscv: VM_PHYSSEG_MAX = 64
 struct vm_phys_seg __read_mostly vm_phys_segs[VM_PHYSSEG_MAX];
-int __read_mostly vm_phys_nsegs;
+int __read_mostly vm_phys_nsegs;	// physical segment count.
 
 struct vm_phys_fictitious_seg;
 static int vm_phys_fictitious_cmp(struct vm_phys_fictitious_seg *,
     struct vm_phys_fictitious_seg *);
 
+// fictitious: 虚构的，虚拟的
 RB_HEAD(fict_tree, vm_phys_fictitious_seg) vm_phys_fictitious_tree =
     RB_INITIALIZER(_vm_phys_fictitious_tree);
 
@@ -105,6 +111,12 @@ RB_GENERATE_STATIC(fict_tree, vm_phys_fictitious_seg, node,
 static struct rwlock_padalign vm_phys_fictitious_reg_lock;
 MALLOC_DEFINE(M_FICT_PAGES, "vm_fictitious", "Fictitious VM pages");
 
+/*
+	MAXMEMDOM: max memory domain? 猜测第一个参数用于区分 NUMA node；
+	VM_NFREELIST: free page list number? 创建空闲页的管理链表，riscv 下只有一个
+	VM_NFREEPOOL: free page pool，表示空闲页所在的物理内存池
+	VM_NFREEORDER: free page order，貌似是为了对 uma 直接映射进行优化而设计
+*/
 static struct vm_freelist __aligned(CACHE_LINE_SIZE)
     vm_phys_free_queues[MAXMEMDOM][VM_NFREELIST][VM_NFREEPOOL][VM_NFREEORDER];
 
@@ -112,6 +124,7 @@ static int __read_mostly vm_nfreelists;
 
 /*
  * Provides the mapping from VM_FREELIST_* to free list indices (flind).
+		flind: free list indices (index 的复数形式)，空闲链表索引
  */
 static int __read_mostly vm_freelist_to_flind[VM_NFREELIST];
 
@@ -156,6 +169,7 @@ static void vm_phys_split_pages(vm_page_t m, int oind, struct vm_freelist *fl,
 
 /*
  * Red-black tree helpers for vm fictitious range management.
+		下面两个函数的主要功能是对比两个 segment 的地址空间范围
  */
 static inline int
 vm_phys_fictitious_in_range(struct vm_phys_fictitious_seg *p,
@@ -344,6 +358,10 @@ sysctl_vm_phys_locality(SYSCTL_HANDLER_ARGS)
 }
 #endif
 
+/*
+	将 vm_page 插入到 freelist order 数组元素中。vm_page 管理的是物理页，
+	猜测这个函数可能是应用于当一个物理页与虚拟地址解绑并释放时的情景
+*/
 static void
 vm_freelist_add(struct vm_freelist *fl, vm_page_t m, int order, int tail)
 {
@@ -356,6 +374,7 @@ vm_freelist_add(struct vm_freelist *fl, vm_page_t m, int order, int tail)
 	fl[order].lcnt++;
 }
 
+// 从 order freelist 中删除 vm_page，用于申请物理页？
 static void
 vm_freelist_rem(struct vm_freelist *fl, vm_page_t m, int order)
 {
@@ -379,6 +398,10 @@ _vm_phys_create_seg(vm_paddr_t start, vm_paddr_t end, int domain)
 	    ("vm_phys_create_seg: invalid domain provided"));
 	seg = &vm_phys_segs[vm_phys_nsegs++];
 	while (seg > vm_phys_segs && (seg - 1)->start >= end) {
+		/*
+			数组元素右移操作，segment 地址空间递增，最后的效果可以看做是
+			在原有的数组中的某个位置插入一个元素
+		*/
 		*seg = *(seg - 1);
 		seg--;
 	}
@@ -436,6 +459,7 @@ vm_phys_add_seg(vm_paddr_t start, vm_paddr_t end)
 	/*
 	 * Split the physical memory segment if it spans two or more free
 	 * list boundaries.
+	 * 如果物理内存段跨越两个或多个空闲列表边界，请拆分该物理内存段
 	 */
 	paddr = start;
 #ifdef	VM_FREELIST_LOWMEM
@@ -457,6 +481,10 @@ vm_phys_add_seg(vm_paddr_t start, vm_paddr_t end)
  * Initialize the physical memory allocator.
  *
  * Requires that vm_page_array is initialized!
+ * 
+ * 该函数是在 vm_page_startup() 函数中被调用的。并且在此之前，该函数会首先
+ * 调用 vm_phys_add_seg() 函数，对 vm_phys_nsegs 数组进行填充，然后再进行
+ * 初始化操作。不是所有的元素都是空。
  */
 void
 vm_phys_init(void)
@@ -468,10 +496,12 @@ vm_phys_init(void)
 
 	/*
 	 * Compute the number of free lists, and generate the mapping from the
-	 * manifest constants VM_FREELIST_* to the free list indices.
+	 * manifest constants VM_FREELIST_* to the free list indices (指数，索引，标志).
+	 * 计算空闲列表的数量，并生成从清单常量 VM_FREELIST_* 到空闲列表索引的映射
 	 *
 	 * Initially, the entries of vm_freelist_to_flind[] are set to either
 	 * 0 or 1 to indicate which free lists should be created.
+	 * 初始阶段 vm_freelist_to_fland[] 的条目设置为 0 或 1，以指示应创建哪些空闲列表
 	 */
 	npages = 0;
 	for (segind = vm_phys_nsegs - 1; segind >= 0; segind--) {
@@ -500,14 +530,19 @@ vm_phys_init(void)
 			vm_freelist_to_flind[VM_FREELIST_DEFAULT] = 1;
 		}
 	}
-	/* Change each entry into a running total of the free lists. */
+	/* Change each entry into a running total of the free lists. 
+			将每个条目更改为自由列表的连续总数
+	*/
 	for (freelist = 1; freelist < VM_NFREELIST; freelist++) {
 		vm_freelist_to_flind[freelist] +=
 		    vm_freelist_to_flind[freelist - 1];
 	}
+	/* 计算一共有多少 free page list */
 	vm_nfreelists = vm_freelist_to_flind[VM_NFREELIST - 1];
 	KASSERT(vm_nfreelists > 0, ("vm_phys_init: no free lists"));
-	/* Change each entry into a free list index. */
+	/* Change each entry into a free list index.
+		vm_freelist_to_flind[] 中的每一个元素都是 page free list 的索引值
+	*/
 	for (freelist = 0; freelist < VM_NFREELIST; freelist++)
 		vm_freelist_to_flind[freelist]--;
 
@@ -551,6 +586,7 @@ vm_phys_init(void)
 	/*
 	 * Coalesce physical memory segments that are contiguous and share the
 	 * same per-domain free queues.
+	 * 合并连续的物理内存段并共享相同的 per-domain(NUMA?) 空闲队列
 	 */
 	prev_seg = vm_phys_segs;
 	seg = &vm_phys_segs[1];
@@ -624,7 +660,7 @@ vm_phys_register_domains(int ndomains, struct mem_affinity *affinity,
 }
 
 /*
- * Split a contiguous, power of two-sized set of physical pages.
+ * Split(分割，分开) a contiguous, power of two-sized set of physical pages.
  *
  * When this function is called by a page allocation function, the caller
  * should request insertion at the head unless the order [order, oind) queues

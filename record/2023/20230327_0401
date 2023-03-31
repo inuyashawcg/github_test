@@ -1,0 +1,111 @@
+////////////// 20230327 //////////////
+libc 中处理进程 signal 的函数有哪些?
+
+    1. signal()：用于设置信号处理函数
+    2. sigaction()：用于设置信号处理函数和信号处理的行为
+    3. sigprocmask()：用于设置和修改进程的信号屏蔽字
+    4. sigpending()：用于获取当前进程未决的信号集
+    5. sigsuspend()：用于挂起进程，直到收到指定的信号
+    6. kill()：用于向指定进程发送信号
+    7. raise()：用于向当前进程发送信号
+    8. sigsetjmp() 和 siglongjmp()：用于实现非局部跳转，通常用于处理信号中断的情况
+
+
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    sh: The terminal database could not be opened.
+    sh: using dumb terminal settings.
+    # 
+    # 
+    # kyua test -k /usr/tests/sys/fs/tptfs/Kyuafile
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    random: unblocking device.
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    create_test:create  ->  exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 444
+    exec_alloc_args_kva --- 555
+    exec_alloc_args_kva --- 000
+    exec_alloc_args_kva --- 111
+    exec_alloc_args_kva --- 222
+    ...
+
+    将 atf_check_main 修改为 atfcheck_main 之后，之前 Premature exit 的错误消失，然后系统阻塞在 alloc_exec_args()
+函数这里。说明很可能是重命名的问题
+
+
+////////////// 20230329 //////////////
+linux execve 系统调用:
+    https://zhuanlan.zhihu.com/p/363510745
+
+
+////////////// 20230330 //////////////
+在 freebsd execve() 文档中包含这么一段话:
+    As the execve() system call overlays the current process image with a new
+    process image the successful call has no process to return to. If execve()
+    does return to the calling process an error has occurred; the return value
+    will be -1 and the global variable errno is set to indicate the error.
+
+也就是说，当 execve() 函数执行完成之后，calling process 会被 new process 完全取代，该函数将不存在可以返回的进程，除非出错。
+假设用户通过 shell 执行某个命令，shell 进程则会通过 execve() 创建一个新的进程。freebsd 下会将可执行文件加载到内存当中(其中
+要借助 loader)，所以程序首先会加载 loader，然后跳转到 loader 所在内存并执行加载流程。如果成功，则 shell 进程就会被命令进程取代，
+也就可以认为是 shell 进程没了，变成了另外一个进程。此时按照手册中的说法，execve() 不会返回，因为 calling process 已经消失了，
+所以也就不存在可以返回的对象
+
+但是上述应该只是针对单独调用 execve()，而没有事先 fork() 的情形。如果用户首先 fork() 一个新的进程的话，应该是可以返回的

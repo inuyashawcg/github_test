@@ -215,12 +215,15 @@ sys_execve(struct thread *td, struct execve_args *uap)
 	struct image_args args;
 	struct vmspace *oldvmspace;
 	int error;
-
+	/*
+		该函数会根据原有进程进行属性判断，并进行相应的操作。
+		最后是获取旧进程的 vmspace 结构体
+	*/
 	error = pre_execve(td, &oldvmspace);
 	if (error != 0)
 		return (error);
 	error = exec_copyin_args(&args, uap->fname, UIO_USERSPACE,
-	    uap->argv, uap->envv);
+	    uap->argv, uap->envv); 
 	if (error == 0)
 		error = kern_execve(td, &args, NULL);
 	post_execve(td, error, oldvmspace);
@@ -339,11 +342,14 @@ post_execve(struct thread *td, int error, struct vmspace *oldvmspace)
  * do_execve(), it can end up calling exit1(); as a result, callers must
  * avoid doing anything which they might need to undo (e.g., allocating
  * memory).
+ * kern_execve() 具有不总是返回调用者的惊人特性。如果在调用 do_execute() 的过程中
+ * 发生了足够糟糕的事情，那么它可能会调用 exit1()；因此，调用者必须避免做任何他们可能
+ * 需要撤消的事情 (例如，分配内存)
  */
 int
 kern_execve(struct thread *td, struct image_args *args, struct mac *mac_p)
 {
-
+	// audit： 审计
 	AUDIT_ARG_ARGV(args->begin_argv, args->argc,
 	    args->begin_envv - args->begin_argv);
 	AUDIT_ARG_ENVV(args->begin_envv, args->envc,
@@ -394,8 +400,8 @@ do_execve(struct thread *td, struct image_args *args, struct mac *mac_p)
 	 * necessary to avoid race conditions - e.g. in ptrace() -
 	 * that might allow a local user to illicitly obtain elevated
 	 * privileges.
-	 * 锁定进程并设置P_inceec标志，以指示在我们完成此操作之前，应将其置于一旁。
-	 * 这对于避免可能允许本地用户非法获得提升权限的竞争条件，例如在ptrace中是必要的。
+	 * 锁定进程并设置 P_INEXEC 标志，以指示在我们完成此操作之前，应将其置于一旁。
+	 * 这对于避免可能允许本地用户非法获得提升权限的竞争条件，例如在 ptrace 中是必要的
 	 */
 	PROC_LOCK(p);
 	KASSERT((p->p_flag & P_INEXEC) == 0,
@@ -424,6 +430,7 @@ do_execve(struct thread *td, struct image_args *args, struct mac *mac_p)
 	 *
 	 * XXXAUDIT: It would be desirable to also audit the name of the
 	 * interpreter if this is an interpreted binary.
+	 * 如果这是一个已解释的二进制文件，那么还需要审计解释器的名称
 	 */
 	if (args->fname != NULL) {
 		NDINIT(&nd, LOOKUP, ISOPEN | LOCKLEAF | FOLLOW | SAVENAME
@@ -440,6 +447,8 @@ interpret:
 		 * path arguments to execve(), we also don't allow
 		 * interpreters to be used in capability mode (for now).
 		 * Catch indirect lookups and return a permissions error.
+		 * 虽然功能模式不能通过 execve() 的直接路径参数达到这一点，但我们也
+		 * 不允许在功能模式中使用解释器 (目前)。捕获间接查找并返回权限错误
 		 */
 		if (IN_CAPABILITY_MODE(td)) {
 			error = ECAPMODE;
@@ -450,15 +459,15 @@ interpret:
 		if (error)
 			goto exec_fail;
 
-		/*
-			获取所要执行的文件对应的 vnode
-		*/
-		newtextvp = nd.ni_vp;
-		imgp->vp = newtextvp;
+		newtextvp = nd.ni_vp; // new text vnode.
+		imgp->vp = newtextvp; // imgp->vp 表示的应该是目标可执行文件
 	} else {
 		AUDIT_ARG_FD(args->fd);
 		/*
 		 * Descriptors opened only with O_EXEC or O_RDONLY are allowed.
+		 	对于操作的可执行文件，open() 只能是以 O_EXEC 或者 O_RDONLY 模式执行。
+			其实就是对可执行文件的两种查找方式，上面代码分支处理通过文件名查找的情况，
+			这里采用通过 fd 进行查找的情况。newtextvp = 目标文件 vnode
 		 */
 		error = fgetvp_exec(td, args->fd, &cap_fexecve_rights, &newtextvp);
 		if (error)
@@ -475,21 +484,23 @@ interpret:
 	if (error)
 		goto exec_fail_dealloc;
 
-	imgp->object = imgp->vp->v_object;
+	imgp->object = imgp->vp->v_object;	// 关联 vnode vm_object
 	if (imgp->object != NULL)
-		vm_object_reference(imgp->object);
+		vm_object_reference(imgp->object);	// 增加 vm_object 引用计数
 
 	/*
 	 * Set VV_TEXT now so no one can write to the executable while we're
 	 * activating it.
-	 *
+	 * 现在设置VV_TEXT，以便在激活可执行文件时，没有人可以写入该文件
+	 * 
 	 * Remember if this was set before and unset it in case this is not
 	 * actually an executable image.
+	 * 请记住，如果这是之前设置的，并在这实际上不是可执行映像的情况下取消设置
 	 */
-	textset = VOP_IS_TEXT(imgp->vp);
+	textset = VOP_IS_TEXT(imgp->vp); // 判断该文件是不是一个可执行的 image
 	VOP_SET_TEXT(imgp->vp);
 
-	error = exec_map_first_page(imgp);
+	error = exec_map_first_page(imgp);	// 应该是给可执行 image 分配内存，并返回第一个 page
 	if (error)
 		goto exec_fail_dealloc;
 
@@ -501,9 +512,12 @@ interpret:
 	 * Determine new credentials before attempting image activators
 	 * so that it can be used by process_exec handlers to determine
 	 * credential/setid changes.
+	 * 在尝试映像激活器之前确定新凭据，以便 process_exec 处理程序可以使用它来
+	 * 确定 credential/setid 更改
 	 *
 	 * Don't honor setuid/setgid if the filesystem prohibits it or if
 	 * the process is being traced.
+	 * 如果文件系统禁止 setuid/setgid 或正在跟踪进程，请不要使用它
 	 *
 	 * We disable setuid/setgid/etc in capability mode on the basis
 	 * that most setugid applications are not written with that
@@ -511,6 +525,9 @@ interpret:
 	 * incorrectly. In principle there's no reason that setugid
 	 * applications might not be useful in capability mode, so we may want
 	 * to reconsider this conservative design choice in the future.
+	 * 我们在功能模式下禁用 setuid/setgid/etc，因为大多数 setugid 应用程序都不是
+	 * 在考虑环境的情况下编写的，因此几乎肯定会运行错误。原则上，setugid 应用程序在
+	 * 功能模式下可能不会有用，因此我们可能希望在未来重新考虑这种保守的设计选择
 	 *
 	 * XXXMAC: For the time being, use NOSUID to also prohibit
 	 * transitions on the file system.
@@ -581,6 +598,7 @@ interpret:
 
 	/*
 	 * Do the best to calculate the full path to the image file.
+	 	建议是将文件路径从相对路径转换成绝对路径
 	 */
 	if (args->fname != NULL && args->fname[0] == '/')
 		imgp->execpath = args->fname;
@@ -596,6 +614,8 @@ interpret:
 	 *	If the current process has a special image activator it
 	 *	wants to try first, call it.   For example, emulating shell
 	 *	scripts differently.
+	 	如果当前进程有一个特殊的图像激活器，它想首先尝试，调用它。
+		例如，以不同的方式模拟 shell 脚本
 	 */
 	error = -1;
 	if ((img_first = imgp->proc->p_sysent->sv_imgact_try) != NULL)
@@ -605,6 +625,10 @@ interpret:
 	 *	Loop through the list of image activators, calling each one.
 	 *	An activator returns -1 if there is no match, 0 on success,
 	 *	and an error otherwise.
+	 	循环浏览图像激活器列表，调用每个激活器。如果不匹配，激活器返回 -1，
+		如果成功，则返回 0，否则返回错误；
+		可执行文件貌似也包含很多不同的子类型，通过 EXEC_SET 宏注册的一些
+		方法表到 execsw 当中，应该是通过 ex_name 字段判断调用哪个函数
 	 */
 	for (i = 0; error == -1 && execsw[i]; ++i) {
 		if (execsw[i]->ex_imgact == NULL ||
@@ -626,14 +650,21 @@ interpret:
 	/*
 	 * Special interpreter operation, cleanup and loop up to try to
 	 * activate the interpreter.
+	 * 特殊的解释器操作、清理和循环以尝试激活解释器 (执行脚本时的逻辑？)
 	 */
 	if (imgp->interpreted) {
+		/*
+			在 imgact_shell 中，已经文件中所有的内容拷贝到了 args 各个成员当中，
+			所以之前映射的 page 应该不再需要，可以接触绑定
+		*/
 		exec_unmap_first_page(imgp);
 		/*
 		 * VV_TEXT needs to be unset for scripts.  There is a short
 		 * period before we determine that something is a script where
 		 * VV_TEXT will be set. The vnode lock is held over this
 		 * entire period so nothing should illegitimately be blocked.
+		 * 脚本需要取消设置 VV_TEXT。在我们确定某个脚本将设置 VV_TEXT 之前，还有
+		 * 一段时间。vnode 锁在整个时间段内保持，因此不应非法阻止任何内容
 		 */
 		VOP_UNSET_TEXT(imgp->vp);
 		/* free name buffer and old vnode */
@@ -669,7 +700,7 @@ interpret:
 	 * of the sv_copyout_strings/sv_fixup operations require the vnode.
 	 */
 	VOP_UNLOCK(imgp->vp, 0);
-
+	/* 高于 world 版本的可执行程序无法被执行 */
 	if (disallow_high_osrel &&
 	    P_OSREL_MAJOR(p->p_osrel) > P_OSREL_MAJOR(__FreeBSD_version)) {
 		error = ENOEXEC;
@@ -685,6 +716,7 @@ interpret:
 
 	/*
 	 * Copy out strings (args and env) and initialize stack base
+	 	拷贝的 args 和 env 字符串，并且初始化栈基地址
 	 */
 	if (p->p_sysent->sv_copyout_strings)
 		stack_base = (*p->p_sysent->sv_copyout_strings)(imgp);
@@ -695,6 +727,7 @@ interpret:
 	 * If custom stack fixup routine present for this process
 	 * let it do the stack setup.
 	 * Else stuff argument count as first item on stack
+	 * 如果此进程存在自定义堆栈修复例程，则让它执行堆栈设置。Else 填充参数计数为堆栈上的第一项
 	 */
 	if (p->p_sysent->sv_fixup != NULL)
 		error = (*p->p_sysent->sv_fixup)(&stack_base, imgp);
@@ -705,7 +738,9 @@ interpret:
 		goto exec_fail_dealloc;
 
 	if (args->fdp != NULL) {
-		/* Install a brand new file descriptor table. */
+		/* Install a brand new file descriptor table. 
+			给进程指定一个崭新的文件描述符表
+		*/
 		fdinstall_remapped(td, args->fdp);
 		args->fdp = NULL;
 	} else {
@@ -715,12 +750,17 @@ interpret:
 		 * cannot be shared after an exec.
 		 */
 		fdunshare(td);
-		/* close files on exec */
+		/* close files on exec
+			起初是两个进程共享文件描述符表，fdunshare() 执行完成之后，
+			相当于是多了一个副本，新老进程文件描述符表独立存在，但是内容
+			应该是相同的，即文件描述符最终指向的文件 vnode 是一致的
+		*/
 		fdcloseexec(td);
 	}
 
 	/*
 	 * Malloc things before we need locks.
+		应该是要把进程执行所需要的各种 args 保存起来
 	 */
 	i = imgp->args->begin_envv - imgp->args->begin_argv;
 	/* Cache arguments if they fit inside our allowance */
@@ -767,6 +807,7 @@ interpret:
 	/*
 	 * mark as execed, wakeup the process that vforked (if any) and tell
 	 * it that it now has its own resources back
+	 * 标记为 execed，唤醒 vforked 的进程 (如果有的话)，并告诉它它现在有了自己的资源
 	 */
 	p->p_flag |= P_EXEC;
 	if ((p->p_flag2 & P2_NOTRACE_EXEC) == 0)
@@ -882,7 +923,9 @@ interpret:
 	}
 #endif
 
-	/* Set values passed into the program in registers. */
+	/* Set values passed into the program in registers. 
+		在寄存器中设置传递到程序中的值
+	*/
 	if (p->p_sysent->sv_setregs)
 		(*p->p_sysent->sv_setregs)(td, imgp, 
 		    (u_long)(uintptr_t)stack_base);
@@ -1073,6 +1116,7 @@ exec_unmap_first_page(struct image_params *imgp)
  * Destroy old address space, and allocate a new stack.
  *	The new stack is only sgrowsiz large because it is grown
  *	automatically on a page fault.
+	破坏旧的 vmspace，并且申请新的 stack
  */
 int
 exec_new_vmspace(struct image_params *imgp, struct sysentvec *sv)
@@ -1095,7 +1139,9 @@ exec_new_vmspace(struct image_params *imgp, struct sysentvec *sv)
 	/*
 	 * Blow away entire process VM, if address space not shared,
 	 * otherwise, create a new VM space so that other threads are
-	 * not disrupted
+	 * not disrupted.
+	 * 如果地址空间不共享，就吹走整个进程的 VM，否则，创建一个新的 VM 空间，
+	 * 这样其他线程就不会中断
 	 */
 	map = &vmspace->vm_map;
 	if (map_at_zero)
@@ -1171,6 +1217,8 @@ exec_new_vmspace(struct image_params *imgp, struct sysentvec *sv)
 /*
  * Copy out argument and environment strings from the old process address
  * space into the temporary string buffer.
+ * 从代码逻辑可以看出，进程执行参数拷贝主要包含两个部分，一部分是参数变量，另外一部分是
+ * 环境变量
  */
 int
 exec_copyin_args(struct image_args *args, char *fname,
@@ -1186,25 +1234,25 @@ exec_copyin_args(struct image_args *args, char *fname,
 
 	/*
 	 * Allocate demand-paged memory for the file name, argument, and
-	 * environment strings.
+	 * environment strings. 从内核空间申请一块也用内存空间，应该是用于临时存放
+	 * 需要进行拷贝操作的参数。完成之后会把这些空间(kva)释放掉
 	 */
 	error = exec_alloc_args(args);
 	if (error != 0)
 		return (error);
-
 	/*
 	 * Copy the file name.
 	 */
 	if (fname != NULL) {
-		args->fname = args->buf;
+		args->fname = args->buf; // 第一个参数是文件名？
 		error = (segflg == UIO_SYSSPACE) ?
 		    copystr(fname, args->fname, PATH_MAX, &length) :
 		    copyinstr(fname, args->fname, PATH_MAX, &length);
 		if (error != 0)
 			goto err_exit;
 	} else
-		length = 0;
-
+		length = 0;	// 推测表示的是文件名的长度
+	/* 文件名后，紧跟着的是参数变量 */
 	args->begin_argv = args->buf + length;
 	args->endp = args->begin_argv;
 	args->stringspace = ARG_MAX;
@@ -1235,7 +1283,7 @@ exec_copyin_args(struct image_args *args, char *fname,
 	args->begin_envv = args->endp;
 
 	/*
-	 * extract environment strings
+	 * extract(摘录，提取) environment strings
 	 */
 	if (envv) {
 		for (;;) {
@@ -1246,6 +1294,7 @@ exec_copyin_args(struct image_args *args, char *fname,
 			}
 			if (envp == 0)
 				break;
+			// 从用户空间拷贝参数到内核空间
 			error = copyinstr((void *)(uintptr_t)envp,
 			    args->endp, args->stringspace, &length);
 			if (error != 0) {
@@ -1471,6 +1520,21 @@ exec_free_args(struct image_args *args)
  * Copy strings out to the new process address space, constructing new arg
  * and env vector tables. Return a pointer to the base so that it can be used
  * as the initial stack pointer.
+ * 将字符串复制到新的进程地址空间，构建新的 arg 和 env 向量表。返回一个指向基的指针，以便
+ * 将其用作初始堆栈指针
+ * 通过代码逻辑可以大致确定进程用户空间参数栈数据 layout：
+ * 		signal code
+ * 		image path
+ * 		canary for SSP
+ * 		pagesizes array
+ * 		ELF auxargs
+ * 		arguments and environment
+ * 		struct ps_strings
+ * 		argument portion of vector table
+ * 		a null vector table pointer separates the argp's from the envp's
+ * 		environment portion of vector table
+ * 		end of vector table is a null pointer
+ * 	-> 	stack base	
  */
 register_t *
 exec_copyout_strings(struct image_params *imgp)
@@ -1489,7 +1553,8 @@ exec_copyout_strings(struct image_params *imgp)
 	szps = sizeof(pagesizes[0]) * MAXPAGESIZES;
 	/*
 	 * Calculate string base and vector table pointers.
-	 * Also deal with signal trampoline code for this exec type.
+	 * Also deal with signal trampoline(蹦床) code for this exec type.
+	 * 第一步计算可执行路径长度
 	 */
 	if (imgp->execpath != NULL && imgp->auxargs != NULL)
 		execpath_len = strlen(imgp->execpath) + 1;
@@ -1506,6 +1571,7 @@ exec_copyout_strings(struct image_params *imgp)
 
 	/*
 	 * install sigcode
+	 	获取 sigtramp 的大小
 	 */
 	if (szsigcode != 0) {
 		destp -= szsigcode;
@@ -1544,6 +1610,10 @@ exec_copyout_strings(struct image_params *imgp)
 	destp -= ARG_MAX - imgp->args->stringspace;
 	destp = rounddown2(destp, sizeof(void *));
 
+	/*
+		上面对于 destp 的操作都是减法。有点类似进程函数栈指针的变化过程。
+		到这里就开始设置 vector，然后就开始处理 auxargs 
+	*/
 	vectp = (char **)destp;
 	if (imgp->auxargs) {
 		/*
